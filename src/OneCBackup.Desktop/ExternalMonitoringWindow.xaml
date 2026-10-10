@@ -5,7 +5,10 @@
  <DockPanel Margin="20">
   <TextBlock DockPanel.Dock="Top" Text="Мониторинг внешних резервных копий" FontSize="22" Margin="0,0,0,12" />
   <TextBlock x:Name="Status" DockPanel.Dock="Bottom" TextWrapping="Wrap" Margin="0,12,0,0" />
-  <Button DockPanel.Dock="Top" Content="Обновить историю" Click="Refresh_Click" HorizontalAlignment="Left" Margin="0,0,0,10" />
+  <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+   <Button Content="Обновить историю" Click="Refresh_Click" />
+   <Button x:Name="CancelCollectButton" Content="Отменить проверку" Click="CancelCollect_Click" IsEnabled="False" Margin="8,0,0,0" />
+  </WrapPanel>
   <Expander DockPanel.Dock="Top" Header="Источники и настройки опроса" IsExpanded="True" Margin="0,0,0,10">
   <ScrollViewer MaxHeight="400" VerticalScrollBarVisibility="Auto">
   <StackPanel x:Name="Editor" Margin="0,8,8,0">
@@ -25,16 +28,20 @@
     </WrapPanel>
    </StackPanel>
    <StackPanel x:Name="PostgresPanel" Visibility="Collapsed">
-    <TextBlock Text="Каталог JSON-отчётов скрипта PostgreSQL" /><TextBox x:Name="ReportDirectory" Margin="0,4,0,10" />
+    <TextBlock Text="Каталог JSON-отчётов скрипта PostgreSQL" /><DockPanel Margin="0,4,0,10">
+     <Button DockPanel.Dock="Right" Content="…" Click="BrowseReports_Click" ToolTip="Выбрать каталог отчётов" Margin="8,0,0,0" Padding="10,6" />
+     <TextBox x:Name="ReportDirectory" />
+    </DockPanel>
    </StackPanel>
    <WrapPanel Margin="0,0,0,12">
     <CheckBox x:Name="MonitorEnabled" Content="Автоматический опрос" IsChecked="True" VerticalAlignment="Center" Margin="0,0,16,0" />
     <TextBlock Text="Интервал, секунд" VerticalAlignment="Center" /><TextBox x:Name="PollInterval" Text="60" Width="90" Margin="8,0,0,0" />
    </WrapPanel>
    <WrapPanel Margin="0,0,0,12">
-    <Button Content="Сохранить источник" Padding="12,6" Click="Save_Click" />
+    <Button x:Name="SaveMonitorButton" Content="Сохранить источник" Padding="12,6" Click="Save_Click" />
     <Button Content="Новый источник" Padding="12,6" Margin="8,0,0,0" Click="New_Click" />
-    <Button Content="Проверить сохранённый источник" Padding="12,6" Margin="8,0,0,0" Click="Collect_Click" />
+    <Button x:Name="CollectMonitorButton" Content="Проверить сохранённый источник" Padding="12,6" Margin="8,0,0,0" Click="Collect_Click" />
+    <Button x:Name="DeleteMonitorButton" Content="Удалить источник" Padding="12,6" Margin="8,0,0,0" Click="Delete_Click" IsEnabled="False" />
    </WrapPanel>
    <TextBlock Text="История SQL подтверждает завершение команды, а не наличие файла или возможность восстановления. Внешние копии агент не изменяет и не удаляет. Отчёты сохраняются локально; отправка из интерфейса будет подключена вместе со службой и сервером."
     TextWrapping="Wrap" Margin="0,0,0,12" />
@@ -52,7 +59,10 @@
     </DataGrid.Columns>
    </DataGrid>
   </Expander>
-  <DataGrid x:Name="Reports" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+  <Expander DockPanel.Dock="Bottom" Header="Подробности выбранного наблюдения" Margin="0,8,0,0" IsExpanded="False">
+   <TextBox x:Name="ReportDetails" IsReadOnly="True" TextWrapping="Wrap" Height="120" VerticalScrollBarVisibility="Auto" Text="Выберите наблюдение в таблице." />
+  </Expander>
+  <DataGrid x:Name="Reports" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="Report_Changed">
    <DataGrid.Columns>
     <DataGridTextColumn Header="База" Binding="{Binding Observation.DatabaseName}" Width="120" />
     <DataGridTextColumn Header="Тип" Binding="{Binding Observation.BackupType}" Width="80" />

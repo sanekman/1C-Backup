@@ -76,6 +76,21 @@ public sealed class ExternalPollingTests : IDisposable
         Assert.Single(await Outbox.ReadAsync());
     }
 
+    [Fact]
+    public async Task RemovingLastSourceClearsCurrentPollStatusButKeepsObservedHistory()
+    {
+        await Store.SaveAsync([Monitor]);
+        var source = new Source();
+        var poller = new ExternalBackupPoller(Store, Outbox, settings, Status, _ => source);
+        Assert.Single(await poller.PollAsync(now));
+        Assert.Single(await Status.ReadAsync());
+        await Store.SaveAsync([]);
+        Assert.Empty(await poller.PollAsync(now.AddSeconds(1)));
+        Assert.Empty(await Status.ReadAsync());
+        Assert.Single(await Outbox.ReadAsync());
+        Assert.Equal(1, source.Calls);
+    }
+
     private sealed class Source : IExternalBackupSource
     {
         public bool Fail { get; init; }

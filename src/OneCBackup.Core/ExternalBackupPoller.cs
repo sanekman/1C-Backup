@@ -51,10 +51,10 @@ public sealed class ExternalBackupPoller(ExternalBackupMonitorStore store, Exter
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                 catch (Exception ex) { results.Add(new ExternalBackupPollResult(monitor.Id, monitor.Name, now.ToUniversalTime(), 0, 0, ex.Message)); }
             }
-            if (results.Count != 0)
+            var old = await status.ReadAsync(cancellationToken);
+            var currentIds = monitors.Select(m => m.Id).ToHashSet();
+            if (results.Count != 0 || old.Any(value => !currentIds.Contains(value.MonitorId)))
             {
-                var old = await status.ReadAsync(cancellationToken);
-                var currentIds = monitors.Select(m => m.Id).ToHashSet();
                 await status.WriteAsync(old.Where(value => currentIds.Contains(value.MonitorId) && !results.Any(r => r.MonitorId == value.MonitorId))
                     .Concat(results).ToList(), cancellationToken);
             }

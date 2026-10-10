@@ -56,7 +56,8 @@ internal static class DesktopSmoke
                 throw new InvalidOperationException("Несколько времён запуска не сохранены через интерфейс.");
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Manual;
             Click("SaveButton");
-            await WaitUntil(() => Control<DataGrid>("Jobs").Items.Count == 1 && Control<Button>("RunButton").IsEnabled, "Задание не сохранено.");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Jobs").SelectedItem is BackupJob { ScheduleKind: ScheduleKind.Manual }
+                && Control<Button>("RunButton").IsEnabled, "Задание не сохранено.");
             Click("RunButton");
             await WaitUntil(() => Control<DataGrid>("RunHistory").Items.OfType<BackupRun>().Any(run => run.Status == BackupRunStatus.Succeeded)
                 && window.SmokeReady, "Копия не создана через интерфейс.");
@@ -111,8 +112,47 @@ internal static class DesktopSmoke
             Control<DataGrid>("Copies").SelectedIndex = 0;
             Click("VerifyCopyButton");
             await WaitUntil(() => Control<TextBlock>("CopyVerificationStatus").Text.StartsWith("Размер и SHA256 совпадают"), "Проверка копии не завершилась.");
-            Finish(output, true, "Создание задания, ZIP, ошибка занятой базы, фильтры и экспорт истории, каталог, SHA256 и навигация проверены на Windows.");
+            await VerifyPostgreSqlMonitoringAsync(window);
+            Finish(output, true, "Несколько времён, ZIP, ошибка занятой базы, фильтры и экспорт истории, каталог, SHA256, навигация и импорт SQL-отчёта проверены на Windows.");
         }
         catch (Exception ex) { Finish(output, false, ex.ToString()); }
+    }
+
+    private static async Task VerifyPostgreSqlMonitoringAsync(MainWindow owner)
+    {
+        var directory = Path.Combine(DesktopPaths.DataDirectory, "sql-reports");
+        Directory.CreateDirectory(directory);
+        var observation = new ExternalBackupObservation("ci-pg-backup", "ci-cluster", "ci-database", "LogicalFull",
+            DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow, "UTC", ExternalBackupOutcome.Completed,
+            128, ["D:\\Backups\\fixture.dump"], "PgRestoreCatalogChecked");
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        await File.WriteAllTextAsync(Path.Combine(directory, "fixture.json"), JsonSerializer.Serialize(observation, options));
+        var settings = await new AgentSettingsStore(Path.Combine(DesktopPaths.DataDirectory, "agent.json")).LoadAsync();
+        var monitorWindow = new ExternalMonitoringWindow(settings) { Owner = owner };
+        monitorWindow.Show();
+        try
+        {
+            await WaitUntil(() => monitorWindow.SmokeReady, "Мониторинг не загрузился.");
+            T Control<T>(string name) where T : FrameworkElement => (T)monitorWindow.FindName(name);
+            void Click(string name) => Control<Button>(name).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Control<ComboBox>("SourceKind").SelectedValue = ExternalBackupSourceKind.PostgreSqlReports;
+            Control<TextBox>("MonitorName").Text = "Тестовый монитор PostgreSQL";
+            Control<TextBox>("ReportDirectory").Text = directory;
+            Click("SaveMonitorButton");
+            await WaitUntil(() => monitorWindow.SmokeReady && Control<ComboBox>("Sources").Items.Count == 1,
+                "Источник мониторинга не сохранён.");
+            Click("CollectMonitorButton");
+            await WaitUntil(() => monitorWindow.SmokeReady && Control<DataGrid>("Reports").Items.Count == 1,
+                "Отчёт PostgreSQL не импортирован.");
+            Control<DataGrid>("Reports").SelectedIndex = 0;
+            if (!Control<TextBox>("ReportDetails").Text.Contains("ci-cluster"))
+                throw new InvalidOperationException("Подробности наблюдения SQL не отображаются.");
+            Click("CollectMonitorButton");
+            await WaitUntil(() => monitorWindow.SmokeReady, "Повторная проверка SQL не завершилась.");
+            if (Control<DataGrid>("Reports").Items.Count != 1)
+                throw new InvalidOperationException("Мониторинг дублирует внешний отчёт.");
+        }
+        finally { monitorWindow.Close(); }
     }
 }

@@ -13,7 +13,7 @@ namespace OneCBackup.Desktop;
 
 public partial class MainWindow : Window
 {
-    internal bool SmokeReady => ready && activeRun is null && !manualPending && copyVerification is null;
+    internal bool SmokeReady => ready && !persisting && activeRun is null && !manualPending && copyVerification is null;
     private readonly JobStore store = new(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"));
     private List<BackupJob> jobs = [];
     private readonly AgentSettingsStore agentSettingsStore = new(Path.Combine(DesktopPaths.DataDirectory, "agent.json"));
@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private AgentSettings? agentSettings;
     private Guid? editingId;
     private bool canSave;
+    private bool persisting;
     private readonly BackupRunHistory history = new(Path.Combine(DesktopPaths.DataDirectory, "runs.json"));
     private readonly LocalBackupRunner runner;
     private readonly BackupCatalog catalog;
@@ -61,9 +62,9 @@ public partial class MainWindow : Window
             Dispatcher.InvokeAsync(() => ExecuteJobAsync(job, token)).Task.Unwrap());
         Closing += (_, e) =>
         {
-            if (activeRun is null && schedulingTask is null && !manualPending && copyVerification is null) return;
+            if (!persisting && activeRun is null && schedulingTask is null && !manualPending && copyVerification is null) return;
             e.Cancel = true;
-            Status.Text = "Остановите планировщик и дождитесь завершения операции перед закрытием программы.";
+            Status.Text = "Остановите планировщик и дождитесь завершения операции или сохранения настроек перед закрытием программы.";
         };
         AgentModePicker.ItemsSource = new Dictionary<AgentMode, string>
         {
@@ -191,9 +192,9 @@ public partial class MainWindow : Window
 
     private async Task<bool> PersistAsync(List<BackupJob> updated)
     {
+        persisting = true;
         canSave = false;
-        SaveButton.IsEnabled = DeleteButton.IsEnabled = false;
-        SaveAgentSettingsButton.IsEnabled = false;
+        UpdateRunControls();
         try
         {
             await store.SaveAsync(updated);
@@ -206,6 +207,7 @@ public partial class MainWindow : Window
         catch (Exception ex) { Status.Text = "Не удалось сохранить: " + ex.Message; return false; }
         finally
         {
+            persisting = false;
             canSave = agentSettings?.Mode == AgentMode.Standalone;
             SaveButton.IsEnabled = DeleteButton.IsEnabled = JobEditor.IsEnabled = canSave;
             SaveAgentSettingsButton.IsEnabled = true;
@@ -335,7 +337,7 @@ public partial class MainWindow : Window
 
     private void UpdateRunControls()
     {
-        var idle = activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
+        var idle = !persisting && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
         var engineAvailable = !backgroundBusy && !backgroundStarting;
         NewJobButton.IsEnabled = ready && canSave && idle;
         JobsSummary.Text = $"Всего: {jobs.Count} · Включено: {jobs.Count(job => job.Enabled)}";

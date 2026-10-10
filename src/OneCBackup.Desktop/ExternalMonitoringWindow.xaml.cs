@@ -2,12 +2,14 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using OneCBackup.Core;
 
 namespace OneCBackup.Desktop;
 
 public partial class ExternalMonitoringWindow : Window
 {
+    internal bool SmokeReady => ready && !busy;
     private readonly ExternalBackupMonitorStore store;
     private readonly ExternalBackupOutbox outbox;
     private readonly ExternalBackupPollingStatusStore pollingStatus;
@@ -20,6 +22,7 @@ public partial class ExternalMonitoringWindow : Window
     private bool ready;
     private readonly CancellationTokenSource lifetime = new();
     private bool busy;
+    private CancellationTokenSource? collectionCancellation;
 
     public ExternalMonitoringWindow(AgentSettings settings)
     {
@@ -89,6 +92,7 @@ public partial class ExternalMonitoringWindow : Window
 
     private void Source_Changed(object sender, SelectionChangedEventArgs e)
     {
+        DeleteMonitorButton.IsEnabled = Sources.SelectedItem is ExternalBackupMonitor;
         if (Sources.SelectedItem is not ExternalBackupMonitor monitor) return;
         editingId = monitor.Id; MonitorName.Text = monitor.Name; SourceKind.SelectedValue = monitor.Kind;
         SqlServer.Text = monitor.SqlServer; Database.Text = monitor.DatabaseName; Zone.Text = monitor.TimeZoneId;
@@ -131,18 +135,68 @@ public partial class ExternalMonitoringWindow : Window
     {
         if (!ready || busy || Sources.SelectedItem is not ExternalBackupMonitor monitor) return;
         busy = true; Editor.IsEnabled = false; Status.Text = "Чтение сведений о внешних копиях…";
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        collectionCancellation = cancellation; CancelCollectButton.IsEnabled = true;
         try
         {
             using var lease = engine.Acquire();
             IExternalBackupSource source = monitor.Kind == ExternalBackupSourceKind.SqlServerHistory
                 ? new SqlServerBackupHistorySource() : new PostgreSqlBackupReportSource();
-            var observations = await Task.Run(() => source.ReadAsync(monitor, lifetime.Token));
-            var added = await outbox.ObserveAsync(settings, monitor, observations, lifetime.Token);
+            var observations = await Task.Run(() => source.ReadAsync(monitor, cancellation.Token));
+            var added = await outbox.ObserveAsync(settings, monitor, observations, cancellation.Token);
             await RefreshAsync();
             Status.Text = $"Проверка завершена. Получено: {observations.Count}, новых: {added}. Это результат чтения истории, а не проверка восстановления.";
         }
-        catch (OperationCanceledException) { Status.Text = "Проверка остановлена. Окно можно закрыть."; }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { Status.Text = "Проверка отменена. Полученные ранее наблюдения сохранены."; }
         catch (Exception ex) { Status.Text = "Ошибка проверки. Прежняя история сохранена: " + ex.Message; }
+        finally
+        {
+            collectionCancellation = null; CancelCollectButton.IsEnabled = false;
+            busy = false; Editor.IsEnabled = !lifetime.IsCancellationRequested;
+        }
+    }
+
+    private void CancelCollect_Click(object sender, RoutedEventArgs e)
+    {
+        collectionCancellation?.Cancel(); CancelCollectButton.IsEnabled = false;
+        Status.Text = "Отменяется ручная проверка…";
+    }
+
+    private void BrowseReports_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Каталог отчётов PostgreSQL" };
+        if (Directory.Exists(ReportDirectory.Text)) dialog.InitialDirectory = ReportDirectory.Text;
+        if (dialog.ShowDialog(this) == true) ReportDirectory.Text = dialog.FolderName;
+    }
+
+    private async void Delete_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ready || busy || Sources.SelectedItem is not ExternalBackupMonitor monitor) return;
+        if (MessageBox.Show(this, $"Удалить источник «{monitor.Name}»? Сохранённые наблюдения и внешние файлы резервных копий останутся.",
+            "Удаление источника", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        busy = true; Editor.IsEnabled = false;
+        try
+        {
+            var updated = monitors.Where(source => source.Id != monitor.Id).ToList();
+            await store.SaveAsync(updated, lifetime.Token);
+            monitors = updated; Sources.ItemsSource = monitors;
+            New_Click(sender, e);
+            Status.Text = "Источник удалён. Уже начавшийся фоновый опрос может завершиться; новые опросы этого источника прекращаются.";
+        }
+        catch (Exception ex) { Status.Text = "Не удалось удалить источник: " + ex.Message; }
         finally { busy = false; Editor.IsEnabled = !lifetime.IsCancellationRequested; }
+    }
+
+    private void Report_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (Reports.SelectedItem is not ExternalBackupReport report)
+        { ReportDetails.Text = "Выберите наблюдение в таблице."; return; }
+        var observation = report.Observation;
+        ReportDetails.Text = $"База: {observation.DatabaseName}\nЭкземпляр: {observation.Instance}\nРезультат: {observation.OutcomeDescription}\n"
+            + $"Тип копии: {observation.BackupType}\nНачало: {observation.StartedAt:dd.MM.yyyy HH:mm:ss}\n"
+            + $"Окончание: {observation.FinishedAt:dd.MM.yyyy HH:mm:ss}\nЧасовой пояс источника: {observation.TimeZoneId}\n"
+            + $"Размер: {observation.SizeBytes?.ToString() ?? "не указан"} байт\nПути: {observation.LocationDescription}\n"
+            + $"Основание результата: {observation.EvidenceDescription}\nОтправка: {report.DeliveryDescription}\n"
+            + $"ID наблюдения: {report.ReportId}\n" + (observation.Error is null ? "" : "Ошибка: " + observation.Error);
     }
 }
