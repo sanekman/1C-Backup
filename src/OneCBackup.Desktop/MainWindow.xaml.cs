@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Threading;
+using System.Text.Json;
 using Microsoft.Win32;
 using OneCBackup.Core;
 
@@ -41,6 +42,8 @@ public partial class MainWindow : Window
     private bool schedulerStopping;
     private bool manualPending;
     private bool ready;
+    private bool historyRefreshing;
+    private List<BackupRun> historyRuns = [];
     private readonly WindowsFtpCredentialStore ftpCredentials = new();
 
     public MainWindow()
@@ -349,6 +352,9 @@ public partial class MainWindow : Window
         StartBackgroundButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         StopBackgroundButton.IsEnabled = ready && backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running;
         SaveStartupButton.IsEnabled = ready;
+        RefreshHistoryButton.IsEnabled = ready && !historyRefreshing;
+        ExportHistoryButton.IsEnabled = ready && !historyRefreshing && RunHistory.Items.Count != 0;
+        OpenRunDirectoryButton.IsEnabled = ready && RunHistory.SelectedItem is BackupRun;
     }
 
     private IDisposable? AcquireEngineOrReport()
@@ -426,6 +432,8 @@ public partial class MainWindow : Window
         if (!ready) return;
         try
         {
+            if (AgentStartup.IsChecked == true && agentSettings?.Mode != AgentMode.Standalone)
+                throw new InvalidOperationException("Автозапуск фонового агента доступен в автономном режиме. Сначала сохраните этот режим в настройках агента.");
             CurrentUserAgentStartup.Save(AgentStartup.IsChecked == true);
             StartupStatus.Text = AgentStartup.IsChecked == true ? "Агент будет запускаться при входе текущего пользователя в Windows. После переноса папки программы сохраните настройку заново."
                 : "Автозапуск выключен. Уже работающий агент можно остановить кнопкой «Остановить агент».";
@@ -517,7 +525,104 @@ public partial class MainWindow : Window
 
     private async Task RefreshHistoryAsync()
     {
-        RunHistory.ItemsSource = (await history.ReadAsync()).OrderByDescending(r => r.StartedUtc).ToList();
+        if (historyRefreshing) return;
+        historyRefreshing = true;
+        UpdateRunControls();
+        var selectedId = (RunHistory.SelectedItem as BackupRun)?.RunId;
+        try
+        {
+            historyRuns = (await history.ReadAsync()).OrderByDescending(r => r.StartedUtc).ToList();
+            RunHistory.ItemsSource = historyRuns;
+            ApplyHistoryFilter();
+            RunHistory.SelectedItem = RunHistory.Items.OfType<BackupRun>().FirstOrDefault(run => run.RunId == selectedId);
+        }
+        finally { historyRefreshing = false; UpdateRunControls(); }
+    }
+
+    private void HistorySearch_Changed(object sender, TextChangedEventArgs e) => ApplyHistoryFilter();
+    private void HistoryFilter_Changed(object sender, SelectionChangedEventArgs e) => ApplyHistoryFilter();
+
+    private void ApplyHistoryFilter()
+    {
+        if (RunHistory is null || HistorySummary is null || HistorySearch is null) return;
+        var query = HistorySearch.Text.Trim();
+        var filter = (HistoryStatusFilter.SelectedItem as ComboBoxItem)?.Tag as string;
+        var view = CollectionViewSource.GetDefaultView(RunHistory.ItemsSource);
+        if (view is not null)
+        {
+            view.Filter = item => item is BackupRun run && (filter switch
+            {
+                "problems" => run.Status is BackupRunStatus.Failed or BackupRunStatus.Cancelled or BackupRunStatus.Interrupted,
+                "succeeded" => run.Status == BackupRunStatus.Succeeded,
+                "running" => run.Status == BackupRunStatus.Running,
+                _ => true
+            }) && (query.Length == 0 || run.JobName.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                || run.Details.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                || run.WorkDirectory.Contains(query, StringComparison.CurrentCultureIgnoreCase));
+            view.Refresh();
+        }
+        HistorySummary.Text = $"Показано: {RunHistory.Items.Count} из {historyRuns.Count}. Время указано в UTC. Экспорт включает выбранные фильтром записи.";
+        if (ExportHistoryButton is not null) ExportHistoryButton.IsEnabled = ready && !historyRefreshing && RunHistory.Items.Count != 0;
+    }
+
+    private async void RefreshHistory_Click(object sender, RoutedEventArgs e)
+    {
+        try { if (ready) await RefreshHistoryAsync(); }
+        catch (Exception ex) { Status.Text = "Не удалось обновить историю: " + ex.Message; }
+    }
+
+    private void RunHistory_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RunDetails.Text = RunHistory.SelectedItem is BackupRun run ?
+            $"Задание: {run.JobName}\nРезультат: {run.StatusDescription}\nНачало (UTC): {run.StartedUtc:dd.MM.yyyy HH:mm:ss}\n"
+            + $"Окончание (UTC): {run.FinishedUtc?.ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}\n"
+            + $"ID запуска: {run.RunId}\nРабочая папка: {run.WorkDirectory}\n"
+            + (run.Backup is null ? "" : $"Копия: {run.Backup.Location}\nРазмер: {run.Backup.Length} байт\nSHA256: {run.Backup.Sha256}\n")
+            + (run.Error is null ? "" : "Ошибка: " + run.Error + "\n")
+            + (run.Warnings?.Count > 0 ? "Предупреждения:\n" + string.Join("\n", run.Warnings) : "")
+            : "Выберите запуск в таблице.";
+        UpdateRunControls();
+    }
+
+    internal async Task ExportHistoryAsync(string path)
+    {
+        var profile = Path.GetFullPath(DesktopPaths.DataDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var target = Path.GetFullPath(path);
+        if (target.StartsWith(profile, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Выберите папку вне рабочего профиля приложения, чтобы не перезаписать его настройки или журналы.");
+        var snapshot = RunHistory.Items.OfType<BackupRun>().ToArray();
+        var document = new { Application = "1C-Backup", FormatVersion = 1, ExportedUtc = DateTimeOffset.UtcNow,
+            TimeZone = "UTC", Runs = snapshot };
+        var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temporary, target, true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    private async void ExportHistory_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog { Title = "Экспорт истории запусков", Filter = "Журнал JSON (*.json)|*.json",
+            FileName = $"1C-Backup-history-{DateTime.Now:yyyyMMdd-HHmmss}.json", DefaultExt = ".json", AddExtension = true };
+        if (dialog.ShowDialog(this) != true) return;
+        try { await ExportHistoryAsync(dialog.FileName); Status.Text = "История экспортирована: " + dialog.FileName; }
+        catch (Exception ex) { Status.Text = "Не удалось экспортировать историю: " + ex.Message; }
+    }
+
+    private async void OpenRunDirectory_Click(object sender, RoutedEventArgs e)
+    {
+        if (RunHistory.SelectedItem is not BackupRun run) return;
+        try
+        {
+            if (!await Task.Run(() => Directory.Exists(run.WorkDirectory)))
+            { Status.Text = "Рабочая папка недоступна. После успешного копирования временные файлы удаляются: " + run.WorkDirectory; return; }
+            var start = new ProcessStartInfo("explorer.exe") { UseShellExecute = false };
+            start.ArgumentList.Add(run.WorkDirectory);
+            Process.Start(start)?.Dispose();
+        }
+        catch (Exception ex) { Status.Text = "Не удалось открыть рабочую папку: " + ex.Message; }
     }
 
     private async Task RefreshCopiesAsync()
@@ -555,7 +660,13 @@ public partial class MainWindow : Window
         if (ready && !copiesRefreshing) await RefreshCopiesAsync();
     }
 
-    private void Copies_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateRunControls();
+    private void Copies_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        CopyDetails.Visibility = Copies.SelectedItem is BackupCopyRow ? Visibility.Visible : Visibility.Collapsed;
+        CopyDetails.Text = Copies.SelectedItem is BackupCopyRow row
+            ? $"{row.JobName}\n{row.Location}\nРазмер: {row.Record.Backup.Length} байт\nSHA256: {row.Sha256}" : "";
+        UpdateRunControls();
+    }
 
     private async void VerifyCopy_Click(object sender, RoutedEventArgs e)
     {

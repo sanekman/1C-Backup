@@ -54,6 +54,40 @@ internal static class DesktopSmoke
             Click("RunButton");
             await WaitUntil(() => Control<DataGrid>("RunHistory").Items.OfType<BackupRun>().Any(run => run.Status == BackupRunStatus.Succeeded)
                 && window.SmokeReady, "Копия не создана через интерфейс.");
+            // A locked source must produce a visible failure without creating another copy.
+            using (var lockedSource = new FileStream(Path.Combine(source, "1Cv8.1CD"), FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                Click("RunButton");
+                await WaitUntil(() => Control<DataGrid>("RunHistory").Items.OfType<BackupRun>().Any(run => run.Status == BackupRunStatus.Failed)
+                    && window.SmokeReady, "Ошибка занятого файла не появилась в истории.");
+            }
+            Click("HistoryNavigation");
+            Control<ComboBox>("HistoryStatusFilter").SelectedIndex = 1;
+            var filtered = Control<DataGrid>("RunHistory");
+            if (filtered.Items.Count != 1 || filtered.Items[0] is not BackupRun { Status: BackupRunStatus.Failed })
+                throw new InvalidOperationException("Фильтр ошибок показывает неверные записи.");
+            filtered.SelectedIndex = 0;
+            if (!Control<TextBox>("RunDetails").Text.Contains("Ошибка:"))
+                throw new InvalidOperationException("Подробности ошибки недоступны.");
+            var exportedPath = Path.Combine(output, "history-export.json");
+            await window.ExportHistoryAsync(exportedPath);
+            using (var exported = JsonDocument.Parse(File.ReadAllText(exportedPath)))
+            {
+                var runs = exported.RootElement.GetProperty("Runs");
+                if (runs.GetArrayLength() != 1 || runs[0].GetProperty("Error").GetString() is not { Length: > 0 })
+                    throw new InvalidOperationException("Экспорт не соответствует фильтру истории.");
+            }
+            try
+            {
+                await window.ExportHistoryAsync(Path.Combine(DesktopPaths.DataDirectory, "runs.json"));
+                throw new InvalidOperationException("Экспорт разрешил перезаписать рабочий журнал.");
+            }
+            catch (InvalidOperationException ex) when (ex.Message.StartsWith("Выберите папку вне")) { }
+            Control<TextBox>("HistorySearch").Text = "no-such-job-or-error-203a8b";
+            if (filtered.Items.Count != 0 || Control<Button>("ExportHistoryButton").IsEnabled)
+                throw new InvalidOperationException("Поиск в истории не скрывает неподходящие записи.");
+            Control<TextBox>("HistorySearch").Text = "";
+            Control<ComboBox>("HistoryStatusFilter").SelectedIndex = 0;
             foreach (var (navigation, name) in new[] { ("JobsNavigation", "jobs"), ("CopiesNavigation", "copies"),
                 ("HistoryNavigation", "history"), ("AgentNavigation", "agent") })
             {
@@ -71,7 +105,7 @@ internal static class DesktopSmoke
             Control<DataGrid>("Copies").SelectedIndex = 0;
             Click("VerifyCopyButton");
             await WaitUntil(() => Control<TextBlock>("CopyVerificationStatus").Text.StartsWith("Размер и SHA256 совпадают"), "Проверка копии не завершилась.");
-            Finish(output, true, "Создание задания, ручной ZIP, история, каталог, SHA256 и навигация проверены на Windows.");
+            Finish(output, true, "Создание задания, ZIP, ошибка занятой базы, фильтры и экспорт истории, каталог, SHA256 и навигация проверены на Windows.");
         }
         catch (Exception ex) { Finish(output, false, ex.ToString()); }
     }

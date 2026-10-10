@@ -103,7 +103,7 @@
   <DataGrid Grid.Row="1" x:Name="Jobs" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
    SelectionChanged="Jobs_SelectionChanged" CanUserAddRows="False">
    <DataGrid.Columns>
-    <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" />
+    <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" MinWidth="180" />
     <DataGridTemplateColumn Header="Тип" Width="115">
      <DataGridTemplateColumn.CellTemplate><DataTemplate>
       <ContentControl Content="{Binding Kind}" ContentTemplate="{StaticResource DatabaseKindLabel}" />
@@ -222,16 +222,42 @@
     </Border>
    </Grid>
    <Border x:Name="HistoryView" Grid.Row="2" Style="{StaticResource Card}" Visibility="Collapsed">
-   <DataGrid x:Name="RunHistory" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+   <DockPanel>
+    <Border DockPanel.Dock="Top" Padding="16" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+     <StackPanel>
+      <DockPanel>
+       <Button x:Name="ExportHistoryButton" DockPanel.Dock="Right" Content="Экспорт JSON" Click="ExportHistory_Click" IsEnabled="False" Margin="8,0,0,0" />
+       <Button x:Name="RefreshHistoryButton" DockPanel.Dock="Right" Content="Обновить" Click="RefreshHistory_Click" IsEnabled="False" Margin="8,0,0,0" />
+       <ComboBox x:Name="HistoryStatusFilter" DockPanel.Dock="Right" Width="160" SelectionChanged="HistoryFilter_Changed" Margin="8,0,0,0" SelectedIndex="0">
+        <ComboBoxItem Content="Все результаты" Tag="all" />
+        <ComboBoxItem Content="Ошибки / прерывания" Tag="problems" />
+        <ComboBoxItem Content="Успешные" Tag="succeeded" />
+        <ComboBoxItem Content="Выполняются" Tag="running" />
+       </ComboBox>
+       <TextBox x:Name="HistorySearch" TextChanged="HistorySearch_Changed" ToolTip="Поиск по заданию, пути или тексту ошибки" AutomationProperties.Name="Поиск в истории" />
+      </DockPanel>
+      <TextBlock x:Name="HistorySummary" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" />
+     </StackPanel>
+    </Border>
+    <Border DockPanel.Dock="Bottom" Padding="16" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
+     <StackPanel>
+      <DockPanel Margin="0,0,0,8">
+       <Button x:Name="OpenRunDirectoryButton" DockPanel.Dock="Right" Content="Рабочая папка" Click="OpenRunDirectory_Click" IsEnabled="False" Padding="10,5" />
+       <TextBlock Text="Подробности выбранного запуска" FontWeight="SemiBold" VerticalAlignment="Center" />
+      </DockPanel>
+      <TextBox x:Name="RunDetails" Text="Выберите запуск в таблице." IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" Height="120" VerticalScrollBarVisibility="Auto" />
+     </StackPanel>
+    </Border>
+   <DataGrid x:Name="RunHistory" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="RunHistory_SelectionChanged">
     <DataGrid.Columns>
      <DataGridTextColumn Header="Начало (UTC)" Binding="{Binding StartedUtc, StringFormat=dd.MM.yyyy HH:mm:ss}" Width="150" />
      <DataGridTextColumn Header="Задание" Binding="{Binding JobName}" Width="170" />
      <DataGridTextColumn Header="Результат" Binding="{Binding StatusDescription}" Width="115" />
-     <DataGridTextColumn Header="Копия / ошибка" Binding="{Binding Details}" Width="*" />
+     <DataGridTextColumn Header="Копия / ошибка" Binding="{Binding Details}" Width="*" MinWidth="160" />
      <DataGridTextColumn Header="Рабочий каталог" Binding="{Binding WorkDirectory}" Width="180" />
     </DataGrid.Columns>
    </DataGrid>
-
+   </DockPanel>
    </Border>
    <Border x:Name="CopiesView" Grid.Row="2" Style="{StaticResource Card}" Visibility="Collapsed">
     <DockPanel>
@@ -250,6 +276,7 @@
        </WrapPanel>
        <TextBlock Text="Список из журнала успешных копий. Наличие файлов проверяется кнопкой «Проверить целостность». Для проверки остановите планировщик. FTP-копия скачивается полностью; нужны свободное место и доступ к серверу." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" />
        <TextBlock x:Name="CopyVerificationStatus" TextWrapping="Wrap" Margin="0,8,0,0" />
+       <TextBox x:Name="CopyDetails" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="100" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0" />
       </StackPanel>
      </Border>
      <DataGrid x:Name="Copies" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="Copies_SelectionChanged">

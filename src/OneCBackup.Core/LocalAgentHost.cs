@@ -75,12 +75,18 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                 catch (Exception ex) { Volatile.Write(ref monitorError, "Мониторинг SQL: " + ex.Message); }
             } while (await timer.WaitForNextTickAsync(lifetime.Token));
         }
-        var monitoringTask = manual is null ? MonitorLoop() : Task.CompletedTask;
         var executionTask = manual is null
             ? dispatcher.RunScheduleAsync(_ => Task.CompletedTask, lifetime.Token, pollInterval)
             : dispatcher.ExecuteAsync(manual, lifetime.Token);
+        var monitoringTask = manual is null ? MonitorLoop() : Task.CompletedTask;
         Exception? failure = null;
-        try { var completed = await Task.WhenAny(executionTask, controlTask); await completed; }
+        try
+        {
+            var completed = manual is null
+                ? await Task.WhenAny(executionTask, controlTask, monitoringTask)
+                : await Task.WhenAny(executionTask, controlTask);
+            await completed;
+        }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         catch (Exception ex) { failure = ex; }
         finally
