@@ -1,0 +1,300 @@
+<Window x:Class="OneCBackup.Desktop.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:core="clr-namespace:OneCBackup.Core;assembly=OneCBackup.Core"
+ Title="1C-Backup" Width="1360" Height="850" MinWidth="1100" MinHeight="650"
+ WindowStartupLocation="CenterScreen" Background="{StaticResource CanvasBrush}">
+ <Window.Resources>
+  <DataTemplate x:Key="DatabaseKindLabel">
+   <TextBlock>
+    <TextBlock.Style><Style TargetType="TextBlock">
+     <Setter Property="Text" Value="{Binding}" />
+     <Style.Triggers>
+      <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.OneCFile}"><Setter Property="Text" Value="Файловая 1С" /></DataTrigger>
+      <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.SqlServer}"><Setter Property="Text" Value="SQL Server" /></DataTrigger>
+      <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.PostgreSql}"><Setter Property="Text" Value="PostgreSQL" /></DataTrigger>
+     </Style.Triggers>
+    </Style></TextBlock.Style>
+   </TextBlock>
+  </DataTemplate>
+  <Style x:Key="NavigationButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+   <Setter Property="Background" Value="Transparent" />
+   <Setter Property="Foreground" Value="#CBD5E1" />
+   <Setter Property="BorderThickness" Value="0" />
+   <Setter Property="HorizontalContentAlignment" Value="Left" />
+   <Setter Property="Padding" Value="16,12" />
+   <Setter Property="Margin" Value="0,0,0,6" />
+   <Style.Triggers><Trigger Property="Tag" Value="Active">
+    <Setter Property="Background" Value="#334155" /><Setter Property="Foreground" Value="White" />
+   </Trigger></Style.Triggers>
+  </Style>
+ </Window.Resources>
+ <Grid>
+  <Grid.ColumnDefinitions><ColumnDefinition Width="210" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+  <Border Background="#0F172A" Padding="16,28,16,20">
+   <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Margin="12,0,0,32">
+     <TextBlock Text="1C-Backup" Foreground="White" FontSize="25" FontWeight="Bold" />
+     <TextBlock Text="Резервное копирование" Foreground="#94A3B8" FontSize="12" Margin="0,6,0,0" />
+    </StackPanel>
+    <StackPanel DockPanel.Dock="Bottom" Margin="12,20,8,0">
+     <TextBlock Text="Локальное приложение" Foreground="#CBD5E1" FontWeight="SemiBold" />
+     <TextBlock Text="Фоновый агент может выполнять задания после закрытия окна." Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="12" />
+    </StackPanel>
+    <StackPanel>
+     <Button x:Name="JobsNavigation" Content="Задания" Tag="Active" Style="{StaticResource NavigationButton}" Click="JobsNavigation_Click" />
+     <Button x:Name="CopiesNavigation" Content="Резервные копии" Style="{StaticResource NavigationButton}" Click="CopiesNavigation_Click" />
+     <Button x:Name="HistoryNavigation" Content="История запусков" Style="{StaticResource NavigationButton}" Click="HistoryNavigation_Click" />
+     <Button x:Name="ExternalMonitoringButton" Content="Мониторинг SQL ↗" Style="{StaticResource NavigationButton}" Click="ExternalMonitoring_Click" IsEnabled="False" ToolTip="Настройка источников и проверка внешних резервных копий SQL" />
+     <Button x:Name="AgentNavigation" Content="Настройки агента" Style="{StaticResource NavigationButton}" Click="AgentNavigation_Click" />
+    </StackPanel>
+   </DockPanel>
+  </Border>
+  <Grid Grid.Column="1" Margin="28,24,28,20">
+   <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+   <StackPanel Margin="0,0,0,22">
+    <TextBlock x:Name="PageTitle" Text="Задания резервного копирования" FontSize="27" FontWeight="SemiBold" />
+    <TextBlock x:Name="PageDescription" Text="Файловая 1С · Microsoft SQL Server · PostgreSQL" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,0" />
+   </StackPanel>
+   <Border Grid.Row="1" Style="{StaticResource Card}" Padding="16" Margin="0,0,0,20">
+    <StackPanel>
+    <DockPanel>
+     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+      <Button x:Name="StartScheduleButton" Content="Запустить" Click="StartSchedule_Click" IsEnabled="False" ToolTip="Включить выполнение заданий по расписанию" />
+      <Button x:Name="StopScheduleButton" Content="Остановить" Margin="8,0,0,0" Click="StopSchedule_Click" IsEnabled="False" />
+     </StackPanel>
+     <StackPanel VerticalAlignment="Center">
+      <TextBlock Text="Планировщик заданий" FontWeight="SemiBold" />
+      <TextBlock x:Name="SchedulerStatus" Text="Выключен. Для работы по расписанию нажмите «Запустить»." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,0" />
+     </StackPanel>
+    </DockPanel>
+    <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Margin="0,12,0,0" Padding="0,12,0,0">
+     <DockPanel>
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="16,0,0,0">
+       <Button x:Name="StartBackgroundButton" Content="Включить фон" Click="StartBackground_Click" IsEnabled="False" />
+       <Button x:Name="StopBackgroundButton" Content="Остановить агент" Click="StopBackground_Click" IsEnabled="False" Margin="8,0,0,0" />
+      </StackPanel>
+      <StackPanel><TextBlock Text="Фоновый агент" FontWeight="SemiBold" /><TextBlock x:Name="BackgroundStatus" Text="Проверка состояния…" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,0" /></StackPanel>
+     </DockPanel>
+    </Border>
+    </StackPanel>
+   </Border>
+   <Grid x:Name="JobsView" Grid.Row="2">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="18" /><ColumnDefinition Width="360" /></Grid.ColumnDefinitions>
+    <Border Style="{StaticResource Card}">
+     <DockPanel>
+      <Border DockPanel.Dock="Top" Padding="18" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+       <DockPanel>
+        <Button x:Name="NewJobButton" Content="+ Новое задание" Style="{StaticResource PrimaryButton}" DockPanel.Dock="Right" Click="New_Click" IsEnabled="False" />
+        <StackPanel VerticalAlignment="Center"><TextBlock Text="Мои задания" FontSize="17" FontWeight="SemiBold" /><TextBlock x:Name="JobsSummary" Text="Загрузка…" Foreground="{StaticResource MutedBrush}" Margin="0,4,12,0" /></StackPanel>
+       </DockPanel>
+      </Border>
+      <Border DockPanel.Dock="Bottom" Padding="16" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
+       <WrapPanel>
+        <Button x:Name="RunButton" Content="Создать копию" Style="{StaticResource PrimaryButton}" IsEnabled="False" Click="Run_Click" />
+        <Button x:Name="CancelRunButton" Content="Отменить" Margin="8,0,0,0" IsEnabled="False" Click="CancelRun_Click" />
+       </WrapPanel>
+      </Border>
+      <Grid>
+       <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+       <StackPanel Margin="16,12"><TextBlock Text="Поиск по названию или источнику" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+        <TextBox x:Name="JobSearch" TextChanged="JobSearch_TextChanged" ToolTip="Поиск по названию задания или источнику" AutomationProperties.Name="Поиск заданий" />
+       </StackPanel>
+  <DataGrid Grid.Row="1" x:Name="Jobs" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+   SelectionChanged="Jobs_SelectionChanged" CanUserAddRows="False">
+   <DataGrid.Columns>
+    <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" />
+    <DataGridTemplateColumn Header="Тип" Width="115">
+     <DataGridTemplateColumn.CellTemplate><DataTemplate>
+      <ContentControl Content="{Binding Kind}" ContentTemplate="{StaticResource DatabaseKindLabel}" />
+     </DataTemplate></DataGridTemplateColumn.CellTemplate>
+    </DataGridTemplateColumn>
+    <DataGridTextColumn Header="Расписание" Binding="{Binding ScheduleDescription}" Width="170" />
+    <DataGridTextColumn Header="Копий" Binding="{Binding KeepLast}" Width="55" />
+    <DataGridCheckBoxColumn Header="Включено" Binding="{Binding Enabled}" Width="75" />
+   </DataGrid.Columns>
+  </DataGrid>
+
+       <Border Grid.Row="1" Background="White" Margin="0,44,0,0">
+        <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers>
+         <DataTrigger Binding="{Binding Items.Count, ElementName=Jobs}" Value="0"><Setter Property="Visibility" Value="Visible" /></DataTrigger>
+        </Style.Triggers></Style></Border.Style>
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24">
+         <TextBlock x:Name="JobsEmptyTitle" Text="Добавьте первое задание" FontSize="20" FontWeight="SemiBold" TextAlignment="Center" />
+         <TextBlock x:Name="JobsEmptyHint" Text="Укажите базу, хранилище и расписание.&#10;Сохранённое задание появится здесь." Foreground="{StaticResource MutedBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,10,0,0" />
+        </StackPanel>
+       </Border>
+      </Grid>
+     </DockPanel>
+    </Border>
+    <Border Grid.Column="2" Style="{StaticResource Card}">
+     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+  <StackPanel x:Name="JobEditor" Margin="20">
+   <TextBlock Text="Настройки задания" FontWeight="SemiBold" FontSize="18" Margin="0,0,0,12" />
+   <TextBlock Text="Название" /><TextBox x:Name="JobName" Margin="0,4,0,10" />
+   <TextBlock Text="Тип базы" /><ComboBox x:Name="Kind" Margin="0,4,0,10" ItemTemplate="{StaticResource DatabaseKindLabel}" SelectionChanged="Kind_Changed" />
+   <TextBlock Text="Источник (каталог 1С, файл 1Cv8.1CD для архива или имя базы SQL)" TextWrapping="Wrap" /><DockPanel Margin="0,4,0,10">
+    <Button x:Name="SourceBrowseButton" DockPanel.Dock="Right" Content="…" Tag="Source" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
+    <TextBox x:Name="Source" />
+   </DockPanel>
+   <StackPanel x:Name="OneCMethodPanel">
+    <TextBlock Text="Способ резервного копирования 1С" />
+    <ComboBox x:Name="OneCMethodPicker" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="OneCMethod_Changed" Margin="0,4,0,10" />
+    <TextBlock x:Name="FileArchiveHint" Visibility="Collapsed" Text="ZIP содержит 1Cv8.1CD. Платформа не требуется. Все сеансы базы должны быть закрыты; при занятом файле копирование не выполняется."
+     TextWrapping="Wrap" Margin="0,0,0,10" />
+   </StackPanel>
+   <StackPanel x:Name="OneCPanel">
+    <TextBlock Text="Полный путь к платформе 1С (1cv8.exe)" /><DockPanel Margin="0,4,0,10">
+    <Button DockPanel.Dock="Right" Content="…" Tag="OneCExecutable" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
+    <TextBox x:Name="OneCExecutable" />
+   </DockPanel>
+    <TextBlock Text="Ограничение времени выгрузки, минут" /><TextBox x:Name="OneCTimeout" Text="120" Margin="0,4,0,10" />
+    <TextBlock Text="Выгрузка .dt требует эксклюзивного доступа. В этой версии поддерживаются базы без пароля пользователя 1С."
+     TextWrapping="Wrap" Margin="0,0,0,10" />
+   </StackPanel>
+   <StackPanel x:Name="SqlBackupPanel" Visibility="Collapsed">
+    <TextBlock Text="SQL Server (Windows-аутентификация)" /><TextBox x:Name="SqlBackupServer" Margin="0,4,0,10" />
+    <TextBlock Text="Каталог для BACKUP на стороне SQL Server" TextWrapping="Wrap" /><TextBox x:Name="SqlServerDirectory" Margin="0,4,0,10" />
+    <TextBlock Text="Тот же каталог для чтения приложением (локальный или UNC-путь)" TextWrapping="Wrap" /><DockPanel Margin="0,4,0,10">
+    <Button DockPanel.Dock="Right" Content="…" Tag="SqlAgentDirectory" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
+    <TextBox x:Name="SqlAgentDirectory" />
+   </DockPanel>
+    <TextBlock Text="Ограничение времени, минут" /><TextBox x:Name="SqlBackupTimeout" Text="120" Margin="0,4,0,10" />
+    <TextBlock Text="Копия COPY_ONLY с CHECKSUM и RESTORE VERIFYONLY. При переносе или ZIP исходные .bak на стороне SQL сохраняются; лимит N относится к конечному хранилищу."
+     TextWrapping="Wrap" Margin="0,0,0,10" />
+   </StackPanel>
+   <StackPanel x:Name="PostgresBackupPanel" Visibility="Collapsed">
+    <TextBlock Text="Сервер PostgreSQL" /><TextBox x:Name="PgHost" Text="localhost" Margin="0,4,0,10" />
+    <TextBlock Text="Порт" /><TextBox x:Name="PgPort" Text="5432" Margin="0,4,0,10" />
+    <TextBlock Text="Пользователь" /><TextBox x:Name="PgUsername" Text="postgres" Margin="0,4,0,10" />
+    <TextBlock Text="Полный путь к pg_dump" /><DockPanel Margin="0,4,0,10">
+    <Button DockPanel.Dock="Right" Content="…" Tag="PgDumpPath" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
+    <TextBox x:Name="PgDumpPath" />
+   </DockPanel>
+    <TextBlock Text="Полный путь к pg_restore" /><DockPanel Margin="0,4,0,10">
+    <Button DockPanel.Dock="Right" Content="…" Tag="PgRestorePath" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
+    <TextBox x:Name="PgRestorePath" />
+   </DockPanel>
+    <TextBlock Text="Ограничение времени, минут" /><TextBox x:Name="PgTimeout" Text="120" Margin="0,4,0,10" />
+    <TextBlock Text="Пароль задаётся через файл паролей PostgreSQL текущего пользователя. Запрос пароля отключён. Создаётся custom-дамп с проверкой каталога через pg_restore."
+     TextWrapping="Wrap" Margin="0,0,0,10" />
+   </StackPanel>
+   <TextBlock Text="Хранилище" /><ComboBox x:Name="Storage" Margin="0,4,0,10" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="Storage_SelectionChanged" />
+   <TextBlock Text="Каталог копий" /><DockPanel Margin="0,4,0,10">
+    <Button x:Name="DestinationBrowseButton" DockPanel.Dock="Right" Content="…" Tag="Destination" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
+    <TextBox x:Name="Destination" />
+   </DockPanel>
+   <TextBlock Text="Локально: D:\Backups · Сеть: \\server\share · FTP: /backups" TextWrapping="Wrap" Margin="0,0,0,10" />
+   <StackPanel x:Name="FtpPanel" Visibility="Collapsed">
+    <TextBlock Text="FTP-сервер (без ftp://)" /><TextBox x:Name="FtpHost" Margin="0,4,0,10" />
+    <TextBlock Text="Порт" /><TextBox x:Name="FtpPort" Text="21" Margin="0,4,0,10" />
+    <CheckBox x:Name="FtpTls" Content="Защищённое соединение FTPS" IsChecked="True" Margin="0,0,0,10" />
+    <TextBlock Text="Идентификатор учётных данных" /><TextBox x:Name="FtpCredentialKey" Margin="0,4,0,10" />
+    <Button x:Name="FtpCredentialsButton" Content="Настроить логин и пароль" HorizontalAlignment="Left" Padding="12,6" Click="FtpCredentials_Click" IsEnabled="False" Margin="0,0,0,10" />
+    <TextBlock Text="Логин и пароль сохраняются в диспетчере учётных данных Windows. Для их изменения остановите планировщик. FTPS проверяет сертификат сервера."
+     TextWrapping="Wrap" Margin="0,0,0,10" />
+   </StackPanel>
+   <TextBlock Text="Расписание" /><ComboBox x:Name="Schedule" Margin="0,4,0,10" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="Schedule_Changed" />
+   <WrapPanel x:Name="DaysPanel" Visibility="Collapsed" Margin="0,0,0,10">
+    <CheckBox x:Name="Mon" Content="Пн" Margin="0,0,10,4" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
+    <CheckBox x:Name="Tue" Content="Вт" Margin="0,0,10,4" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
+    <CheckBox x:Name="Wed" Content="Ср" Margin="0,0,10,4" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
+    <CheckBox x:Name="Thu" Content="Чт" Margin="0,0,10,4" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
+    <CheckBox x:Name="Fri" Content="Пт" Margin="0,0,10,4" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
+    <CheckBox x:Name="Sat" Content="Сб" Margin="0,0,10,4" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
+    <CheckBox x:Name="Sun" Content="Вс" Margin="0,0,10,4" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
+   </WrapPanel>
+   <StackPanel x:Name="TimePanel">
+    <TextBlock Text="Время запуска (чч:мм)" /><TextBox x:Name="DailyAt" Text="23:00" Margin="0,4,0,10" TextChanged="Schedule_Changed" />
+   </StackPanel>
+   <TextBlock Text="Часовой пояс (идентификатор Windows)" /><TextBox x:Name="Zone" Margin="0,4,0,10" TextChanged="Schedule_Changed" />
+   <TextBlock x:Name="NextRun" TextWrapping="Wrap" Margin="0,0,0,10" />
+   <TextBlock Text="Сколько успешных копий сохранять" /><TextBox x:Name="KeepLast" Text="7" Margin="0,4,0,10" />
+   <CheckBox x:Name="Enabled" Content="Задание включено" IsChecked="True" Margin="0,0,0,12" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
+   <CheckBox x:Name="ArchiveCopies" Content="Архивировать копии в ZIP" Margin="0,0,0,12" />
+   <WrapPanel>
+    <Button Style="{StaticResource PrimaryButton}" x:Name="SaveButton" Content="Сохранить" Padding="12,6" Click="Save_Click" />
+    <Button x:Name="DeleteButton" Content="Удалить" Padding="12,6" Margin="8,0,0,0" Click="Delete_Click" />
+   </WrapPanel>
+  </StackPanel>
+
+     </ScrollViewer>
+    </Border>
+   </Grid>
+   <Border x:Name="HistoryView" Grid.Row="2" Style="{StaticResource Card}" Visibility="Collapsed">
+   <DataGrid x:Name="RunHistory" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+    <DataGrid.Columns>
+     <DataGridTextColumn Header="Начало (UTC)" Binding="{Binding StartedUtc, StringFormat=dd.MM.yyyy HH:mm:ss}" Width="150" />
+     <DataGridTextColumn Header="Задание" Binding="{Binding JobName}" Width="170" />
+     <DataGridTextColumn Header="Результат" Binding="{Binding StatusDescription}" Width="115" />
+     <DataGridTextColumn Header="Копия / ошибка" Binding="{Binding Details}" Width="*" />
+     <DataGridTextColumn Header="Рабочий каталог" Binding="{Binding WorkDirectory}" Width="180" />
+    </DataGrid.Columns>
+   </DataGrid>
+
+   </Border>
+   <Border x:Name="CopiesView" Grid.Row="2" Style="{StaticResource Card}" Visibility="Collapsed">
+    <DockPanel>
+     <Border DockPanel.Dock="Top" Padding="16" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+      <DockPanel>
+       <Button x:Name="RefreshCopiesButton" Content="Обновить" DockPanel.Dock="Right" Click="RefreshCopies_Click" IsEnabled="False" />
+       <TextBlock x:Name="CopiesSummary" Text="Загрузка списка…" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,12,0" />
+      </DockPanel>
+     </Border>
+     <Border DockPanel.Dock="Bottom" Padding="16" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
+      <StackPanel>
+       <WrapPanel>
+        <Button x:Name="VerifyCopyButton" Content="Проверить целостность" Style="{StaticResource PrimaryButton}" Click="VerifyCopy_Click" IsEnabled="False" Margin="0,0,8,8" />
+        <Button x:Name="CancelCopyVerificationButton" Content="Отменить проверку" Click="CancelCopyVerification_Click" IsEnabled="False" Margin="0,0,8,8" />
+        <Button x:Name="OpenCopyDirectoryButton" Content="Открыть папку" Click="OpenCopyDirectory_Click" IsEnabled="False" Margin="0,0,0,8" />
+       </WrapPanel>
+       <TextBlock Text="Список из журнала успешных копий. Наличие файлов проверяется кнопкой «Проверить целостность». Для проверки остановите планировщик. FTP-копия скачивается полностью; нужны свободное место и доступ к серверу." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" />
+       <TextBlock x:Name="CopyVerificationStatus" TextWrapping="Wrap" Margin="0,8,0,0" />
+      </StackPanel>
+     </Border>
+     <DataGrid x:Name="Copies" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="Copies_SelectionChanged">
+      <DataGrid.Columns>
+       <DataGridTextColumn Header="Создана (UTC)" Binding="{Binding CompletedUtc, StringFormat=dd.MM.yyyy HH:mm:ss}" Width="155" />
+       <DataGridTextColumn Header="Задание" Binding="{Binding JobName}" Width="180" />
+       <DataGridTextColumn Header="Хранилище" Binding="{Binding StorageDescription}" Width="120" />
+       <DataGridTextColumn Header="Размер" Binding="{Binding SizeDescription}" Width="85" />
+       <DataGridTextColumn Header="Расположение" Binding="{Binding Location}" Width="*" MinWidth="180" />
+       <DataGridTextColumn Header="SHA256 при сохранении" Binding="{Binding Sha256}" Width="240" />
+      </DataGrid.Columns>
+     </DataGrid>
+    </DockPanel>
+   </Border>
+   <ScrollViewer x:Name="AgentView" Grid.Row="2" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+    <Border Style="{StaticResource Card}" MaxWidth="700" HorizontalAlignment="Left">
+   <StackPanel Margin="24">
+    <TextBlock x:Name="AgentIdentity" Margin="0,0,0,8" />
+    <ComboBox x:Name="AgentModePicker" Width="300" HorizontalAlignment="Left" DisplayMemberPath="Value" SelectedValuePath="Key"
+     SelectionChanged="AgentMode_Changed" Margin="0,0,0,8" />
+    <StackPanel x:Name="ServerPanel" Visibility="Collapsed">
+     <TextBlock Text="Адрес сервера управления (HTTPS, например https://backup.example.com/)" />
+     <TextBox x:Name="ServerAddress" Margin="0,4,0,8" />
+     <TextBlock Text="Идентификатор учётных данных агента (без токена или пароля)" />
+     <TextBox x:Name="AgentCredentialKey" Margin="0,4,0,8" />
+     <TextBlock Text="Интервал связи с сервером, секунд" /><TextBox x:Name="SyncInterval" Text="60" Width="120" HorizontalAlignment="Left" Margin="0,4,0,8" />
+    </StackPanel>
+    <Button x:Name="SaveAgentSettingsButton" Content="Сохранить режим агента" HorizontalAlignment="Left" Padding="12,6" Click="SaveAgentSettings_Click" IsEnabled="False" />
+    <TextBlock Text="Подключение к серверу из интерфейса ещё не включено. Учётные данные и запуск агента будут подключены через службу."
+     TextWrapping="Wrap" Margin="0,8,0,0" />
+    <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="0,16,0,0" Margin="0,20,0,0">
+     <StackPanel>
+      <TextBlock Text="Фоновая работа" FontSize="18" FontWeight="SemiBold" />
+      <CheckBox x:Name="AgentStartup" Content="Запускать фоновый агент при входе в Windows" Margin="0,12,0,12" />
+      <Button x:Name="SaveStartupButton" Content="Сохранить автозапуск" HorizontalAlignment="Left" Click="SaveStartup_Click" IsEnabled="False" />
+      <TextBlock x:Name="StartupStatus" Text="Запуск от имени текущего пользователя. После переноса папки программы сохраните автозапуск заново. Это не служба Windows: работа без входа пользователя пока не поддерживается." TextWrapping="Wrap" Margin="0,10,0,0" Foreground="{StaticResource MutedBrush}" />
+     </StackPanel>
+    </Border>
+   </StackPanel>
+
+    </Border>
+   </ScrollViewer>
+   <Border Grid.Row="3" Background="#E8EEF5" CornerRadius="6" Padding="12" Margin="0,16,0,0">
+    <TextBlock x:Name="Status" Text="Загрузка настроек…" TextWrapping="Wrap" Foreground="#475569" />
+   </Border>
+  </Grid>
+ </Grid>
+</Window>

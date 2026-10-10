@@ -1,0 +1,71 @@
+<Window x:Class="OneCBackup.Desktop.ExternalMonitoringWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="Мониторинг внешних копий SQL" Width="1000" Height="720" MinWidth="780" MinHeight="580">
+ <DockPanel Margin="20">
+  <TextBlock DockPanel.Dock="Top" Text="Мониторинг внешних резервных копий" FontSize="22" Margin="0,0,0,12" />
+  <TextBlock x:Name="Status" DockPanel.Dock="Bottom" TextWrapping="Wrap" Margin="0,12,0,0" />
+  <Button DockPanel.Dock="Top" Content="Обновить историю" Click="Refresh_Click" HorizontalAlignment="Left" Margin="0,0,0,10" />
+  <Expander DockPanel.Dock="Top" Header="Источники и настройки опроса" IsExpanded="True" Margin="0,0,0,10">
+  <ScrollViewer MaxHeight="400" VerticalScrollBarVisibility="Auto">
+  <StackPanel x:Name="Editor" Margin="0,8,8,0">
+   <TextBlock Text="Сохранённые источники" />
+   <ComboBox x:Name="Sources" DisplayMemberPath="Name" SelectionChanged="Source_Changed" Margin="0,4,0,10" />
+   <WrapPanel>
+    <StackPanel Width="300" Margin="0,0,16,0"><TextBlock Text="Название" /><TextBox x:Name="MonitorName" Margin="0,4,0,10" /></StackPanel>
+    <StackPanel Width="300"><TextBlock Text="Источник сведений" /><ComboBox x:Name="SourceKind" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="Kind_Changed" Margin="0,4,0,10" /></StackPanel>
+   </WrapPanel>
+   <TextBlock Text="Имя базы (пусто — все базы источника)" /><TextBox x:Name="Database" Margin="0,4,0,10" />
+   <StackPanel x:Name="SqlPanel">
+    <TextBlock Text="SQL Server (например SERVER\INSTANCE). Windows-аутентификация текущего пользователя, проверка TLS-сертификата." TextWrapping="Wrap" />
+    <TextBox x:Name="SqlServer" Margin="0,4,0,10" />
+    <WrapPanel>
+     <StackPanel Width="300" Margin="0,0,16,0"><TextBlock Text="Часовой пояс SQL Server" /><TextBox x:Name="Zone" Margin="0,4,0,10" /></StackPanel>
+     <StackPanel Width="200"><TextBlock Text="История за дней" /><TextBox x:Name="Days" Text="30" Margin="0,4,0,10" /></StackPanel>
+    </WrapPanel>
+   </StackPanel>
+   <StackPanel x:Name="PostgresPanel" Visibility="Collapsed">
+    <TextBlock Text="Каталог JSON-отчётов скрипта PostgreSQL" /><TextBox x:Name="ReportDirectory" Margin="0,4,0,10" />
+   </StackPanel>
+   <WrapPanel Margin="0,0,0,12">
+    <CheckBox x:Name="MonitorEnabled" Content="Автоматический опрос" IsChecked="True" VerticalAlignment="Center" Margin="0,0,16,0" />
+    <TextBlock Text="Интервал, секунд" VerticalAlignment="Center" /><TextBox x:Name="PollInterval" Text="60" Width="90" Margin="8,0,0,0" />
+   </WrapPanel>
+   <WrapPanel Margin="0,0,0,12">
+    <Button Content="Сохранить источник" Padding="12,6" Click="Save_Click" />
+    <Button Content="Новый источник" Padding="12,6" Margin="8,0,0,0" Click="New_Click" />
+    <Button Content="Проверить сохранённый источник" Padding="12,6" Margin="8,0,0,0" Click="Collect_Click" />
+   </WrapPanel>
+   <TextBlock Text="История SQL подтверждает завершение команды, а не наличие файла или возможность восстановления. Внешние копии агент не изменяет и не удаляет. Отчёты сохраняются локально; отправка из интерфейса будет подключена вместе со службой и сервером."
+    TextWrapping="Wrap" Margin="0,0,0,12" />
+  </StackPanel>
+  </ScrollViewer>
+  </Expander>
+  <Expander DockPanel.Dock="Bottom" Header="Последний автоматический опрос источников" Margin="0,8,0,0">
+   <DataGrid x:Name="PollStatuses" Height="150" IsReadOnly="True" AutoGenerateColumns="False" CanUserAddRows="False">
+    <DataGrid.Columns>
+     <DataGridTextColumn Header="Источник" Binding="{Binding MonitorName}" Width="170" />
+     <DataGridTextColumn Header="Опрос (UTC)" Binding="{Binding PolledUtc, StringFormat=dd.MM.yyyy HH:mm:ss}" Width="160" />
+     <DataGridTextColumn Header="Получено" Binding="{Binding Observations}" Width="85" />
+     <DataGridTextColumn Header="Новых" Binding="{Binding Added}" Width="70" />
+     <DataGridTextColumn Header="Ошибка" Binding="{Binding Error}" Width="*" />
+    </DataGrid.Columns>
+   </DataGrid>
+  </Expander>
+  <DataGrid x:Name="Reports" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+   <DataGrid.Columns>
+    <DataGridTextColumn Header="База" Binding="{Binding Observation.DatabaseName}" Width="120" />
+    <DataGridTextColumn Header="Тип" Binding="{Binding Observation.BackupType}" Width="80" />
+    <DataGridTextColumn Header="Окончание" Binding="{Binding Observation.FinishedAt, StringFormat=dd.MM.yyyy HH:mm:ss}" Width="155" />
+    <DataGridTextColumn Header="Часовой пояс" Binding="{Binding Observation.TimeZoneId}" Width="120" />
+    <DataGridTextColumn Header="Результат" Binding="{Binding Observation.OutcomeDescription}" Width="90" />
+    <DataGridTextColumn Header="Байт" Binding="{Binding Observation.SizeBytes}" Width="100" />
+    <DataGridTextColumn Header="Путь из отчёта" Binding="{Binding Observation.LocationDescription}" Width="200" />
+    <DataGridTextColumn Header="Основание результата" Binding="{Binding Observation.EvidenceDescription}" Width="170" />
+    <DataGridTextColumn Header="Отправка" Binding="{Binding DeliveryDescription}" Width="140" />
+    <DataGridTextColumn Header="Причина ошибки" Binding="{Binding Observation.Error}" Width="*" />
+    <DataGridTextColumn Header="Отправлено (UTC)" Binding="{Binding DeliveredUtc}" Width="130" />
+   </DataGrid.Columns>
+  </DataGrid>
+ </DockPanel>
+</Window>
