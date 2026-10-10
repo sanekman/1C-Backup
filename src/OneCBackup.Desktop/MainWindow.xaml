@@ -205,7 +205,8 @@
     <CheckBox x:Name="Sun" Content="Вс" Margin="0,0,10,4" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
    </WrapPanel>
    <StackPanel x:Name="TimePanel">
-    <TextBlock Text="Время запуска (чч:мм)" /><TextBox x:Name="DailyAt" Text="23:00" Margin="0,4,0,10" TextChanged="Schedule_Changed" />
+    <TextBlock Text="Время запусков (чч:мм через запятую)" /><TextBox x:Name="DailyAt" Text="23:00" Margin="0,4,0,4" TextChanged="Schedule_Changed" />
+    <TextBlock Text="Например: 09:00, 13:00, 23:00. До 48 запусков в выбранные дни." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10" FontSize="12" />
    </StackPanel>
    <TextBlock Text="Часовой пояс (идентификатор Windows)" /><TextBox x:Name="Zone" Margin="0,4,0,10" TextChanged="Schedule_Changed" />
    <TextBlock x:Name="NextRun" TextWrapping="Wrap" Margin="0,0,0,10" />

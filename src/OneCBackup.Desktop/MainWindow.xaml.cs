@@ -134,10 +134,10 @@ public partial class MainWindow : Window
     {
         if (!canSave) return;
         var scheduleKind = (ScheduleKind)Schedule.SelectedValue;
-        var at = new TimeOnly(23, 0);
-        if ((scheduleKind != ScheduleKind.Manual && !TimeOnly.TryParseExact(DailyAt.Text.Trim(), "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out at))
+        TimeOnly[] times = [new(23, 0)];
+        if ((scheduleKind != ScheduleKind.Manual && !TryParseRunTimes(DailyAt.Text, out times))
             || !int.TryParse(KeepLast.Text, out var keep))
-        { Status.Text = "Укажите время в формате чч:мм и целое число копий."; return; }
+        { Status.Text = "Укажите от 1 до 48 уникальных времён в формате чч:мм через запятую и целое число копий."; return; }
         var storageKind = (StorageKind)Storage.SelectedValue;
         OneCSettings? oneC = null;
         var oneCMethod = OneCMethodPicker.SelectedValue is OneCBackupMethod method ? method : OneCBackupMethod.PlatformDump;
@@ -170,7 +170,8 @@ public partial class MainWindow : Window
         {
             Id = editingId ?? Guid.NewGuid(), Name = JobName.Text.Trim(), Kind = (DatabaseKind)Kind.SelectedItem,
             Source = Source.Text.Trim(), DestinationDirectory = Destination.Text.Trim(),
-            DailyAt = at, TimeZoneId = Zone.Text.Trim(), KeepLast = keep, Enabled = Enabled.IsChecked == true,
+            DailyAt = times[0], AdditionalDailyTimes = times.Length > 1 ? times.Skip(1).ToArray() : null,
+            TimeZoneId = Zone.Text.Trim(), KeepLast = keep, Enabled = Enabled.IsChecked == true,
             ArchiveCopies = ArchiveCopies.IsChecked == true, StorageKind = storageKind,
             ScheduleKind = scheduleKind, DaysOfWeek = SelectedDays(),
             OneC = oneC,
@@ -276,7 +277,8 @@ public partial class MainWindow : Window
         PgTimeout.Text = (job.PostgreSql?.TimeoutMinutes ?? 120).ToString();
         JobName.Text = job.Name; Kind.SelectedItem = job.Kind; Source.Text = job.Source;
         OneCMethodPicker.SelectedValue = job.OneCMethod;
-        Destination.Text = job.DestinationDirectory; DailyAt.Text = job.DailyAt.ToString("HH:mm", CultureInfo.InvariantCulture);
+        Destination.Text = job.DestinationDirectory;
+        DailyAt.Text = string.Join(", ", job.ScheduledTimes.Select(time => time.ToString("HH:mm", CultureInfo.InvariantCulture)));
         KeepLast.Text = job.KeepLast.ToString(); Enabled.IsChecked = job.Enabled;
         ArchiveCopies.IsChecked = job.ArchiveCopies;
         UpdateOneCControls();
@@ -820,6 +822,22 @@ public partial class MainWindow : Window
 
     private void Schedule_Changed(object sender, RoutedEventArgs e) => UpdateSchedulePreview();
 
+    private static bool TryParseRunTimes(string text, out TimeOnly[] times)
+    {
+        times = [];
+        var parts = text.Split([',', ';'], StringSplitOptions.TrimEntries);
+        if (parts.Length is < 1 or > 48) return false;
+        var parsed = new List<TimeOnly>();
+        foreach (var part in parts)
+        {
+            if (!TimeOnly.TryParseExact(part, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time)
+                || parsed.Contains(time)) return false;
+            parsed.Add(time);
+        }
+        times = parsed.Order().ToArray();
+        return true;
+    }
+
     private void UpdateSchedulePreview()
     {
         if (NextRun is null || Enabled is null || Schedule.SelectedValue is not ScheduleKind kind) return;
@@ -827,11 +845,12 @@ public partial class MainWindow : Window
         TimePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         if (Enabled.IsChecked != true) { NextRun.Text = "Автоматические запуски отключены."; return; }
         if (kind == ScheduleKind.Manual) { NextRun.Text = "Запуск только вручную."; return; }
-        if (!TimeOnly.TryParseExact(DailyAt.Text.Trim(), "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var at))
-        { NextRun.Text = "Укажите время в формате чч:мм."; return; }
+        if (!TryParseRunTimes(DailyAt.Text, out var times))
+        { NextRun.Text = "Укажите от 1 до 48 уникальных времён в формате чч:мм через запятую."; return; }
         try
         {
-            var job = new BackupJob { DailyAt = at, TimeZoneId = Zone.Text.Trim(), ScheduleKind = kind, DaysOfWeek = SelectedDays() };
+            var job = new BackupJob { DailyAt = times[0], AdditionalDailyTimes = times.Skip(1).ToArray(),
+                TimeZoneId = Zone.Text.Trim(), ScheduleKind = kind, DaysOfWeek = SelectedDays() };
             var errors = job.ValidateSchedule();
             if (errors.Count != 0) { NextRun.Text = string.Join(" ", errors); return; }
             var next = BackupSchedule.NextRun(job, DateTimeOffset.UtcNow)!.Value;

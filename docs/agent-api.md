@@ -57,6 +57,7 @@ If-None-Match: "42"
       "destinationDirectory": "E:\\Backups",
       "storageKind": "LocalDirectory",
       "dailyAt": "23:00:00",
+      "additionalDailyTimes": ["09:00:00", "13:00:00"],
       "scheduleKind": "Daily",
       "daysOfWeek": "Monday",
       "timeZoneId": "Vladivostok Standard Time",

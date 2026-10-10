@@ -27,14 +27,19 @@ public static class BackupSchedule
         {
             var date = firstDate.AddDays(offset);
             if (job.ScheduleKind == ScheduleKind.Weekly && !job.DaysOfWeek.HasFlag(DayFlag(date.DayOfWeek))) continue;
-            var local = date.ToDateTime(job.DailyAt, DateTimeKind.Unspecified);
-            // When clocks jump forward, move to the first valid minute on that date.
-            while (zone.IsInvalidTime(local) && DateOnly.FromDateTime(local) == date) local = local.AddMinutes(1);
-            if (DateOnly.FromDateTime(local) != date) continue;
-            var utc = zone.IsAmbiguousTime(local)
-                ? new DateTimeOffset(local, zone.GetAmbiguousTimeOffsets(local).Max()).ToUniversalTime()
-                : new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, zone));
-            if (utc > after) return utc;
+            DateTimeOffset? earliest = null;
+            foreach (var time in job.ScheduledTimes)
+            {
+                var local = date.ToDateTime(time, DateTimeKind.Unspecified);
+                // When clocks jump forward, move to the first valid minute on that date.
+                while (zone.IsInvalidTime(local) && DateOnly.FromDateTime(local) == date) local = local.AddMinutes(1);
+                if (DateOnly.FromDateTime(local) != date) continue;
+                var utc = zone.IsAmbiguousTime(local)
+                    ? new DateTimeOffset(local, zone.GetAmbiguousTimeOffsets(local).Max()).ToUniversalTime()
+                    : new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, zone));
+                if (utc > after && (earliest is null || utc < earliest)) earliest = utc;
+            }
+            if (earliest is not null) return earliest;
         }
         throw new InvalidOperationException("Не удалось определить следующий запуск.");
     }

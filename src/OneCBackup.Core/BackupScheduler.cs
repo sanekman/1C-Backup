@@ -42,7 +42,7 @@ public sealed class BackupScheduler
             foreach (var job in jobs)
             {
                 if (!job.Enabled || job.ScheduleKind == ScheduleKind.Manual) { pending.Remove(job.Id); continue; }
-                var settings = $"{job.ScheduleKind}|{(int)job.DaysOfWeek}|{job.DailyAt.Ticks}|{job.TimeZoneId}";
+                var settings = $"{job.ScheduleKind}|{(int)job.DaysOfWeek}|{string.Join(',', job.ScheduledTimes.Select(t => t.Ticks))}|{job.TimeZoneId}";
                 if (!pending.TryGetValue(job.Id, out var state) || state.Settings != settings)
                     state = (settings, BackupSchedule.NextRun(job, now.AddTicks(-1))!.Value);
                 if (state.Next > now) { pending[job.Id] = state; continue; }

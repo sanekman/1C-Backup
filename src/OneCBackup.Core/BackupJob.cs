@@ -17,6 +17,7 @@ public sealed record BackupJob
     public StorageKind StorageKind { get; init; } = StorageKind.LocalDirectory;
     public FtpSettings? Ftp { get; init; }
     public TimeOnly DailyAt { get; init; } = new(23, 0);
+    public IReadOnlyList<TimeOnly>? AdditionalDailyTimes { get; init; }
     public ScheduleKind ScheduleKind { get; init; } = ScheduleKind.Daily;
     public WeekDays DaysOfWeek { get; init; } = WeekDays.Monday;
     public string TimeZoneId { get; init; } = "UTC";
@@ -33,11 +34,14 @@ public sealed record BackupJob
         !(Kind == DatabaseKind.OneCFile && OneCMethod == OneCBackupMethod.FileArchive);
 
     [JsonIgnore]
+    public IReadOnlyList<TimeOnly> ScheduledTimes => new[] { DailyAt }.Concat(AdditionalDailyTimes ?? []).Order().ToArray();
+
+    [JsonIgnore]
     public string ScheduleDescription => ScheduleKind switch
     {
         ScheduleKind.Manual => "Вручную",
-        ScheduleKind.Daily => $"Ежедневно в {DailyAt:HH:mm}",
-        ScheduleKind.Weekly => $"По дням недели в {DailyAt:HH:mm}",
+        ScheduleKind.Daily => "Ежедневно в " + string.Join(", ", ScheduledTimes.Select(time => time.ToString("HH:mm"))),
+        ScheduleKind.Weekly => "По дням недели в " + string.Join(", ", ScheduledTimes.Select(time => time.ToString("HH:mm"))),
         _ => "Некорректное расписание"
     };
 
@@ -82,6 +86,10 @@ public sealed record BackupJob
     {
         var errors = new List<string>();
         if (!Enum.IsDefined(ScheduleKind)) errors.Add("Неизвестный тип расписания.");
+        if (AdditionalDailyTimes?.Count > 47) errors.Add("Укажите не более 48 запусков в день.");
+        if (AdditionalDailyTimes is not null && (AdditionalDailyTimes.Contains(DailyAt)
+            || AdditionalDailyTimes.Distinct().Count() != AdditionalDailyTimes.Count))
+            errors.Add("Время каждого запуска должно быть уникальным.");
         if (ScheduleKind == ScheduleKind.Weekly && (DaysOfWeek == WeekDays.None || ((int)DaysOfWeek & ~127) != 0))
             errors.Add("Выберите хотя бы один корректный день недели.");
         try { TimeZoneInfo.FindSystemTimeZoneById(TimeZoneId ?? ""); }

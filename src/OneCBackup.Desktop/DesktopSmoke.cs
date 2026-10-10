@@ -48,6 +48,12 @@ internal static class DesktopSmoke
             Control<TextBox>("Source").Text = source;
             Control<TextBox>("Destination").Text = Path.Combine(DesktopPaths.DataDirectory, "copies");
             Control<ComboBox>("OneCMethodPicker").SelectedValue = OneCBackupMethod.FileArchive;
+            Control<TextBox>("DailyAt").Text = "23:00, 09:00, 13:00";
+            Click("SaveButton");
+            await WaitUntil(() => Control<DataGrid>("Jobs").Items.Count == 1 && Control<Button>("RunButton").IsEnabled, "Расписание не сохранено.");
+            var configured = (BackupJob)Control<DataGrid>("Jobs").Items[0];
+            if (!configured.ScheduledTimes.SequenceEqual(new TimeOnly[] { new(9, 0), new(13, 0), new(23, 0) }))
+                throw new InvalidOperationException("Несколько времён запуска не сохранены через интерфейс.");
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Manual;
             Click("SaveButton");
             await WaitUntil(() => Control<DataGrid>("Jobs").Items.Count == 1 && Control<Button>("RunButton").IsEnabled, "Задание не сохранено.");
