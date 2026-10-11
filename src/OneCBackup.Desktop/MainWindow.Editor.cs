@@ -296,7 +296,7 @@ public partial class MainWindow
             if (latest is not null)
             {
                 Copies.ScrollIntoView(latest);
-                CopyVerificationStatus.Text = "Выбрана последняя зарегистрированная копия этого задания. Нажмите «Проверить целостность», чтобы проверить файл.";
+                CopyVerificationStatus.Text = "Выбрана последняя копия задания. Для проверки файла нажмите «Проверить целостность».";
             }
             else CopyVerificationStatus.Text = "Для этого задания нет зарегистрированных копий. Создайте копию в разделе «Задания».";
         }

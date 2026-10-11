@@ -349,7 +349,7 @@
        <Expander x:Name="CopyDetailsPanel" Header="Подробности копии и проверки" Margin="0,4,0,0">
         <ScrollViewer x:Name="CopyDetailsScroll" MaxHeight="150" VerticalScrollBarVisibility="Auto"><StackPanel Margin="4,6,4,0">
        <TextBlock Text="{Binding Text, ElementName=CopyVerificationStatus}" TextWrapping="Wrap" />
-       <TextBox x:Name="CopyDetails" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="100" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0" />
+       <TextBox x:Name="CopyDetails" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Disabled" BorderThickness="0" Padding="0" Background="Transparent" Margin="0,6,0,0" />
        <TextBlock Text="Список из журнала успешных копий. Наличие файлов проверяется кнопкой «Проверить целостность». Для проверки остановите планировщик. FTP-копия скачивается полностью; нужны свободное место и доступ к серверу." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" Margin="0,6,0,0" />
         </StackPanel></ScrollViewer>
        </Expander>
