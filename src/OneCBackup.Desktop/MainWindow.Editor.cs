@@ -13,6 +13,13 @@ public partial class MainWindow
     private bool editorOpen;
     private BackupJob? selectionBeforeEdit;
 
+    private void EditorFieldChanged(object sender, RoutedEventArgs e)
+    {
+        if (!editorOpen || persisting || WizardError.Visibility != Visibility.Visible) return;
+        WizardError.Visibility = Visibility.Collapsed;
+        Status.Text = "Настройка задания. Изменения ещё не сохранены.";
+    }
+
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (editorOpen && e.Key == Key.Escape && !persisting)
@@ -92,7 +99,11 @@ public partial class MainWindow
             2 => ("Когда запускать и сколько хранить?", "Время указано в выбранном часовом поясе. Сохраняются только успешные копии."),
             _ => ("Всё верно?", "Проверьте настройки перед сохранением. Доступ к базе и хранилищу проверяется при создании первой копии.")
         };
-        if (!keepError) WizardError.Visibility = Visibility.Collapsed;
+        if (!keepError)
+        {
+            WizardError.Visibility = Visibility.Collapsed;
+            Status.Text = "Настройка задания. Изменения ещё не сохранены.";
+        }
         if (step == 3)
         {
             var type = Kind.SelectedItem switch { DatabaseKind.SqlServer => "Microsoft SQL Server", DatabaseKind.PostgreSql => "PostgreSQL", _ => "Файловая 1С" };
@@ -109,7 +120,8 @@ public partial class MainWindow
                 : Kind.SelectedItem is DatabaseKind.PostgreSql ? "\nСервер: " + PgHost.Text.Trim() + ":" + PgPort.Text.Trim() : "";
             var ftpAddress = Storage.SelectedValue is StorageKind.Ftp ? "\nFTP-сервер: " + FtpHost.Text.Trim() + ":" + FtpPort.Text.Trim()
                 + (FtpTls.IsChecked == true ? " (FTPS)" : " (без TLS)") : "";
-            WizardSummary.Text = $"{JobName.Text.Trim()}\n\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\n\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}\nЗащита: {format}\n\nЗапуск: {schedule}\nЧасовой пояс: {TimeZonePicker.Text}\nХранить: {KeepLast.Text.Trim()} успешных копий";
+            var zoneDescription = Schedule.SelectedValue is ScheduleKind.Manual ? "" : "\nЧасовой пояс: " + TimeZonePicker.Text;
+            WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nХранить: {KeepLast.Text.Trim()} успешных копий";
         }
         // Realize the scroll content before focusing a field on a newly opened step.
         UpdateLayout();
@@ -124,6 +136,7 @@ public partial class MainWindow
         Status.Text = "Настройки ещё не сохранены. " + message;
         for (DependencyObject? parent = field; parent is not null; parent = LogicalTreeHelper.GetParent(parent))
             if (parent is Expander expander) expander.IsExpanded = true;
+        if (field == TimeZonePicker) ZonePanel.Visibility = Visibility.Visible;
         field.BringIntoView(); field.Focus();
         return false;
     }

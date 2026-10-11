@@ -74,6 +74,8 @@ internal static class DesktopSmoke
             Control<TextBox>("JobName").Text = "Тестовая база 1С";
             Control<TextBox>("Source").Text = source;
             Control<ComboBox>("OneCMethodPicker").SelectedValue = OneCBackupMethod.FileArchive;
+            if (Control<TextBlock>("WizardError").IsVisible)
+                throw new InvalidOperationException("Устаревшая ошибка осталась после исправления поля.");
             Screenshot("wizard-base");
             Click("NextStepButton");
             Click("NextStepButton");

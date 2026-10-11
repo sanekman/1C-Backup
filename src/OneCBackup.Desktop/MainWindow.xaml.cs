@@ -51,6 +51,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        JobEditor.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent, new TextChangedEventHandler(EditorFieldChanged));
+        JobEditor.AddHandler(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent, new SelectionChangedEventHandler(EditorFieldChanged));
+        JobEditor.AddHandler(System.Windows.Controls.Primitives.ToggleButton.CheckedEvent, new RoutedEventHandler(EditorFieldChanged));
+        JobEditor.AddHandler(System.Windows.Controls.Primitives.ToggleButton.UncheckedEvent, new RoutedEventHandler(EditorFieldChanged));
         var dataDirectory = DesktopPaths.DataDirectory;
         engine = new BackupEngineCoordinator(dataDirectory);
         backgroundControl = new LocalAgentControlStore(dataDirectory);
@@ -370,7 +374,7 @@ public partial class MainWindow : Window
         EditJobButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
         PreviousStepButton.IsEnabled = ready && canSave && idle && wizardStep > 0;
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
-        JobsSummary.Text = $"Всего: {jobs.Count} · Включено: {jobs.Count(job => job.Enabled)}";
+        JobsSummary.Text = $"Всего: {jobs.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}";
         RunButton.IsEnabled = ready && canSave && idle && engineAvailable && !editorOpen && Jobs.SelectedItem is BackupJob;
         JobEditor.IsEnabled = SaveButton.IsEnabled = ready && canSave && idle;
         DeleteButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
@@ -927,6 +931,7 @@ public partial class MainWindow : Window
         if (ZonePanel is not null) ZonePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         DaysPanel.Visibility = kind == ScheduleKind.Weekly ? Visibility.Visible : Visibility.Collapsed;
         TimePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
+        Enabled.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         if (Enabled.IsChecked != true) { NextRun.Text = "Автоматические запуски отключены."; return; }
         if (kind == ScheduleKind.Manual) { NextRun.Text = "Запуск только вручную."; return; }
         if (!TryParseRunTimes(DailyAt.Text, out var times))
@@ -973,6 +978,7 @@ public partial class MainWindow : Window
         var dialog = new ArchivePasswordWindow { Owner = this };
         if (dialog.ShowDialog() != true) return;
         archivePasswordKey = dialog.NewKey;
+        EditorFieldChanged(sender, e);
         EncryptArchive.IsChecked = true;
         UpdateArchivePasswordStatus();
         Status.Text = "Новый пароль сохранён в Windows. Сохраните задание, чтобы использовать его для новых копий.";
@@ -987,10 +993,13 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(key))
         {
             key = "ftp-" + (editingId ?? Guid.NewGuid()).ToString("N");
-            FtpCredentialKey.Text = key;
         }
         if (new FtpCredentialsWindow(key, ftpCredentials) { Owner = this }.ShowDialog() == true)
-            Status.Text = "Учётные данные сохранены в Windows. Сохраните задание с этим идентификатором; доступ к FTP проверяется при выполнении.";
+        {
+            FtpCredentialKey.Text = key;
+            EditorFieldChanged(sender, e);
+            Status.Text = "Логин и пароль FTP сохранены в Windows. Сохраните задание; соединение проверяется при создании копии.";
+        }
     }
 
     private async void Delete_Click(object sender, RoutedEventArgs e)
