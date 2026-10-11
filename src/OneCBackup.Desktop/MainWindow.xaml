@@ -69,7 +69,7 @@
      <StackPanel><TextBlock Text="Автоматическое копирование" FontWeight="SemiBold" /><TextBlock x:Name="BackgroundStatus" Text="Проверка состояния…" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,0" /></StackPanel>
     </DockPanel>
    </Border>
-   <Grid x:Name="JobsView" Grid.Row="2">
+   <Grid x:Name="JobsView" Grid.Row="2" SizeChanged="JobsView_SizeChanged">
     <Border x:Name="JobListCard" Style="{StaticResource Card}">
      <DockPanel>
       <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">

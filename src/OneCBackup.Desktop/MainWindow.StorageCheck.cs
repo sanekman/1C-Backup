@@ -6,6 +6,11 @@ namespace OneCBackup.Desktop;
 
 public partial class MainWindow
 {
+    private void JobsView_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (StorageCheckDetails is not null) StorageCheckDetails.MaxHeight = ActualHeight < 650 ? 60 : 130;
+    }
+
     private async void CheckStorage_Click(object sender, RoutedEventArgs e)
     {
         if (!CheckStorageButton.IsEnabled || Jobs.SelectedItem is not BackupJob job) return;

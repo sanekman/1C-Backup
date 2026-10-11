@@ -27,6 +27,11 @@ internal static partial class DesktopSmoke
             if (!button.IsEnabled) throw new InvalidOperationException("Проверка последних копий недоступна.");
             button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitUntil(() => window.SmokeReady, "Проверка последних копий не завершилась.");
+            window.UpdateLayout();
+            var row = grid.ItemContainerGenerator.ContainerFromItem(selected) as DataGridRow;
+            var buttonPosition = button.TranslatePoint(new Point(), window);
+            if (row is null || row.ActualHeight < 20 || buttonPosition.Y + button.ActualHeight > window.ActualHeight)
+                throw new InvalidOperationException("Проверка копий скрывает строку задания или кнопку в компактном окне.");
             var header = Control<Expander>("StorageCheckResults").Header.ToString()!;
             if (!header.Contains(expected) || !Control<TextBox>("StorageCheckDetails").Text.Contains("Нет зарегистрированной копии."))
                 throw new InvalidOperationException("Проверка последних копий потеряла результат или отсутствующее хранилище: " + header);
