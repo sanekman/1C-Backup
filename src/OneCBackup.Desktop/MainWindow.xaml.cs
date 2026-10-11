@@ -13,7 +13,7 @@ namespace OneCBackup.Desktop;
 
 public partial class MainWindow : Window
 {
-    internal bool SmokeReady => ready && !persisting && activeRun is null && !manualPending && copyVerification is null;
+    internal bool SmokeReady => ready && !persisting && !copiesRefreshing && activeRun is null && !manualPending && copyVerification is null;
     private readonly JobStore store = new(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"));
     private List<BackupJob> jobs = [];
     private readonly AgentSettingsStore agentSettingsStore = new(Path.Combine(DesktopPaths.DataDirectory, "agent.json"));
@@ -535,10 +535,10 @@ public partial class MainWindow : Window
         if (historyRefreshing) return;
         historyRefreshing = true;
         UpdateRunControls();
-        var selectedId = (RunHistory.SelectedItem as BackupRun)?.RunId;
         try
         {
             historyRuns = (await history.ReadAsync()).OrderByDescending(r => r.StartedUtc).ToList();
+            var selectedId = (RunHistory.SelectedItem as BackupRun)?.RunId;
             RunHistory.ItemsSource = historyRuns;
             ApplyHistoryFilter();
             RunHistory.SelectedItem = RunHistory.Items.OfType<BackupRun>().FirstOrDefault(run => run.RunId == selectedId);
@@ -637,7 +637,6 @@ public partial class MainWindow : Window
         var version = ++copiesRefreshVersion;
         copiesRefreshing = true;
         UpdateRunControls();
-        var selectedId = (Copies.SelectedItem as BackupCopyRow)?.Record.Id;
         try
         {
             var records = await Task.Run(() => catalog.ReadAsync());
@@ -645,6 +644,7 @@ public partial class MainWindow : Window
             var rows = records.OrderByDescending(record => record.CompletedUtc).Select(record =>
                 new BackupCopyRow(record, jobs.FirstOrDefault(job => job.Id == record.JobId)?.Name
                     ?? $"Задание недоступно ({record.JobId.ToString("N")[..8]})")).ToList();
+            var selectedId = (Copies.SelectedItem as BackupCopyRow)?.Record.Id;
             Copies.ItemsSource = rows;
             Copies.SelectedItem = rows.FirstOrDefault(row => row.Record.Id == selectedId);
             CopiesSummary.Text = rows.Count == 0 ? "Копий пока нет. Создайте первую копию в разделе «Задания»."

@@ -108,7 +108,7 @@ internal static class DesktopSmoke
                 using var file = File.Create(Path.Combine(output, name + ".png")); encoder.Save(file);
             }
             Click("CopiesNavigation");
-            await WaitUntil(() => Control<DataGrid>("Copies").Items.Count == 1, "Каталог копий не обновился.");
+            await WaitUntil(() => Control<DataGrid>("Copies").Items.Count == 1 && window.SmokeReady, "Каталог копий не обновился.");
             Control<DataGrid>("Copies").SelectedIndex = 0;
             Click("VerifyCopyButton");
             await WaitUntil(() => Control<TextBlock>("CopyVerificationStatus").Text.StartsWith("Размер и SHA256 совпадают"), "Проверка копии не завершилась.");

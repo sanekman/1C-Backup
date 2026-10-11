@@ -23,7 +23,9 @@ def main():
         content = b"smoke database content\n" * 4096
         (source / "1Cv8.1CD").write_bytes(content)
         job_id = str(uuid.uuid4())
-        due = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+        # Leave startup margin even when this fixture begins just before a minute boundary.
+        # The product intentionally skips past slots after a fresh start.
+        due = (datetime.now(timezone.utc) + timedelta(seconds=10)).replace(second=0, microsecond=0) + timedelta(minutes=1)
         jobs = [{"Id": job_id, "Name": "Agent smoke", "Source": str(source), "Kind": "OneCFile",
                  "OneCMethod": "FileArchive", "DestinationDirectory": str(data / "copies"),
                  "ScheduleKind": "Daily", "DailyAt": due.strftime("%H:%M:%S"), "TimeZoneId": "UTC", "KeepLast": 1}]
@@ -44,7 +46,7 @@ def main():
             assert duplicate.returncode == 1, "Second owner was allowed"
             assert json.loads((data / "local-agent.json").read_text())["SessionId"] == initial["SessionId"]
             print("Duplicate owner rejected; waiting for the scheduled backup.", flush=True)
-            deadline = time.monotonic() + 75
+            deadline = time.monotonic() + 90
             while True:
                 if process.poll() is not None:
                     raise RuntimeError(process.communicate()[1])
