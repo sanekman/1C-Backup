@@ -271,6 +271,7 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Краткий итог не показывает защиту, лимиты, расписание или временную папку.");
             AssertEditorContentVisible("ReviewJobName");
             AssertEditorContentVisible("ReviewTemporary");
+            AssertEditorContentVisible("ReviewTechnicalDetails");
             Screenshot("wizard-review-compact");
             Control<Expander>("ReviewTechnicalDetails").IsExpanded = true;
             window.UpdateLayout();

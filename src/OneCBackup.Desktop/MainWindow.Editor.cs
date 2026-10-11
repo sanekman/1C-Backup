@@ -122,6 +122,8 @@ public partial class MainWindow
         PreviousStepButton.IsEnabled = step > 0;
         NextStepButton.Visibility = step < 3 ? Visibility.Visible : Visibility.Collapsed;
         SaveButton.Visibility = step == 3 ? Visibility.Visible : Visibility.Collapsed;
+        JobEditor.Margin = step == 3 ? new Thickness(20, 8, 20, 8) : new Thickness(20, 16, 20, 16);
+        WizardHint.Margin = new Thickness(0, 6, 0, step == 3 ? 8 : 16);
         var labels = new[] { "База", "Хранилище", "Расписание", "Проверка" };
         WizardProgress.Text = $"Шаг {step + 1} из 4 · " + string.Join("  →  ", labels.Select((label, index) => index == step ? "[" + label + "]" : label));
         (WizardHeading.Text, WizardHint.Text) = step switch
@@ -171,7 +173,12 @@ public partial class MainWindow
             }
             ReviewDatabase.Text = type + " · " + sourceLabel;
             ReviewDatabase.ToolTip = Source.Text.Trim() + connection;
-            ReviewFormat.Text = format + " · " + method;
+            var shortMethod = Kind.SelectedItem switch
+            {
+                DatabaseKind.SqlServer => "SQL .bak", DatabaseKind.PostgreSql => "PG .dump",
+                _ => OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive ? "1Cv8.1CD, без платформы" : "Выгрузка .dt"
+            };
+            ReviewFormat.Text = format + " · " + shortMethod;
             ReviewFormat.ToolTip = ReviewFormat.Text;
             static string StorageLabel(StorageKind kind, bool tls) => kind switch
             { StorageKind.Ftp => tls ? "FTPS" : "FTP", StorageKind.NetworkShare => "Сеть", _ => "Диск" };
