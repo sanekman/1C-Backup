@@ -361,6 +361,18 @@ internal static class DesktopSmoke
                 || !Control<TextBlock>("HistorySummary").Text.Contains("на этом компьютере"))
                 throw new InvalidOperationException("Переход к результату сохранил скрывающий запись фильтр или неверную подпись времени.");
             Screenshot("failed-copy-result");
+            if (!Control<TextBlock>("RunNextStep").Text.Contains("ошибкой"))
+                throw new InvalidOperationException("Ошибка запуска не показывает дальнейшие действия.");
+            var runsBeforeNavigation = Control<DataGrid>("RunHistory").Items.Count;
+            var copiesBeforeNavigation = Control<DataGrid>("Copies").Items.Count;
+            Control<TextBox>("JobSearch").Text = "no-such-job-before-history-navigation";
+            Click("OpenHistoryJobButton");
+            if (!Control<Grid>("JobsView").IsVisible || Control<TextBox>("JobSearch").Text.Length != 0
+                || Control<DataGrid>("Jobs").SelectedItem is not BackupJob navigated || navigated.Id != configured.Id
+                || Control<DataGrid>("RunHistory").Items.Count != runsBeforeNavigation || Control<DataGrid>("Copies").Items.Count != copiesBeforeNavigation)
+                throw new InvalidOperationException("Переход из ошибки не выбрал задание после поиска или изменил копии / историю.");
+            Click("HistoryNavigation");
+            await WaitUntil(() => window.SmokeReady, "История не обновилась после перехода к заданию.");
             Control<ComboBox>("HistoryStatusFilter").SelectedIndex = 1;
             var filtered = Control<DataGrid>("RunHistory");
             if (filtered.Items.Count != 1 || filtered.Items[0] is not BackupRun { Status: BackupRunStatus.Failed })
@@ -383,7 +395,9 @@ internal static class DesktopSmoke
             }
             catch (InvalidOperationException ex) when (ex.Message.StartsWith("Выберите папку вне")) { }
             Control<TextBox>("HistorySearch").Text = "no-such-job-or-error-203a8b";
-            if (filtered.Items.Count != 0 || Control<Button>("ExportHistoryButton").IsEnabled)
+            if (filtered.Items.Count != 0 || Control<Button>("ExportHistoryButton").IsEnabled
+                || Control<Button>("OpenHistoryJobButton").IsEnabled || filtered.SelectedItem is not null
+                || Control<TextBlock>("RunNextStep").IsVisible)
                 throw new InvalidOperationException("Поиск в истории не скрывает неподходящие записи.");
             Control<TextBox>("HistorySearch").Text = "";
             Control<ComboBox>("HistoryStatusFilter").SelectedIndex = 0;
@@ -465,6 +479,8 @@ internal static class DesktopSmoke
             Control<ComboBox>("HistoryStatusFilter").SelectedIndex = 1;
             if (Control<DataGrid>("RunHistory").Items.Count != 2 || !Control<TextBox>("RunDetails").Text.Contains("Доставка по хранилищам:"))
                 throw new InvalidOperationException("Частичная ошибка не попала в фильтр проблем или потеряла результаты доставки.");
+            if (!Control<TextBlock>("RunNextStep").Text.Contains("новую копию для всех хранилищ"))
+                throw new InvalidOperationException("Частичная доставка не объясняет повторный запуск.");
             Screenshot("multiple-storage-partial-result");
             Click("JobsNavigation"); Click("RunButton");
             await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Copies").Items.Count == 5,
@@ -532,6 +548,19 @@ internal static class DesktopSmoke
             Control<TextBox>("JobName").Text = original.Name;
             Click("NextStepButton"); Click("NextStepButton"); Click("NextStepButton"); Click("SaveButton");
             await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled, "Переименование второй базы не сохранилось.");
+            var historyBeforeNavigation = new BackupRunHistory(Path.Combine(DesktopPaths.DataDirectory, "runs.json"));
+            var recordedBeforeNavigation = JsonSerializer.Serialize(await historyBeforeNavigation.ReadAsync());
+            Control<TextBox>("JobSearch").Text = original.Source;
+            Click("HistoryNavigation");
+            await WaitUntil(() => window.SmokeReady, "История переименованной базы не обновилась.");
+            Control<ComboBox>("HistoryStatusFilter").SelectedIndex = 0;
+            Control<TextBox>("HistorySearch").Text = "";
+            Control<DataGrid>("RunHistory").SelectedItem = Control<DataGrid>("RunHistory").Items.OfType<BackupRun>().First(run => run.JobId == duplicate.Id);
+            Click("OpenHistoryJobButton");
+            if (Control<DataGrid>("Jobs").SelectedItem is not BackupJob renamedJob || renamedJob.Id != duplicate.Id || renamedJob.Name != original.Name
+                || Control<TextBox>("JobSearch").Text.Length != 0 || Control<DataGrid>("Copies").Items.Count != 8
+                || JsonSerializer.Serialize(await historyBeforeNavigation.ReadAsync()) != recordedBeforeNavigation)
+                throw new InvalidOperationException("История открыла другую базу с тем же названием или запустила новое копирование.");
             Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(job => job.Id == original.Id);
             Click("CopiesNavigation");
             await WaitUntil(() => window.SmokeReady, "Каталог двух заданий не загрузился.");
@@ -632,8 +661,49 @@ internal static class DesktopSmoke
                     Control<Expander>("CopyDetailsPanel").IsExpanded = false;
                 }
             }
+            // Exercise additional history states in the UI without changing the persisted journal.
+            Click("HistoryNavigation");
+            await WaitUntil(() => window.SmokeReady, "История не готова для проверки пояснений.");
+            var persistedRunsBeforeGuidance = JsonSerializer.Serialize(await historyBeforeNavigation.ReadAsync());
+            var partialRun = (await historyBeforeNavigation.ReadAsync()).First(run => run.Status == BackupRunStatus.PartiallySucceeded);
+            foreach (var (sample, phrase) in new[]
+            {
+                (partialRun, "новую копию для всех хранилищ"),
+                (successfulRun with { Status = BackupRunStatus.Cancelled }, "Запуск отменён"),
+                (successfulRun with { Status = BackupRunStatus.Interrupted }, "Завершение запуска не записано"),
+                (successfulRun with { Status = BackupRunStatus.Running, FinishedUtc = null }, "ещё не имеет результата"),
+                (successfulRun with { Warnings = new[] { "Проверка предупреждения об очистке" } }, "есть предупреждения")
+            })
+            {
+                var grid = Control<DataGrid>("RunHistory");
+                grid.ItemsSource = new[] { sample };
+                grid.SelectedItem = sample;
+                window.UpdateLayout();
+                if (!Control<TextBlock>("RunNextStep").Text.Contains(phrase) || !Control<Button>("OpenHistoryJobButton").IsEnabled)
+                    throw new InvalidOperationException("Результат не показывает нужное пояснение: " + sample.Status);
+                if (grid.ItemContainerGenerator.ContainerFromIndex(0) is not DataGridRow row
+                    || row.ActualHeight <= 0 || row.TranslatePoint(new Point(), grid).Y < 0
+                    || row.TranslatePoint(new Point(), grid).Y + row.ActualHeight > grid.ActualHeight + 1)
+                    throw new InvalidOperationException("Пояснение скрывает строку истории в компактном окне.");
+                AssertVisibleFooter("OpenHistoryJobButton");
+                if (sample.Status == BackupRunStatus.PartiallySucceeded) Screenshot("history-guidance-compact-partial");
+            }
+            var orphanRun = successfulRun with { JobId = Guid.NewGuid() };
+            Control<DataGrid>("RunHistory").ItemsSource = new[] { orphanRun };
+            Control<DataGrid>("RunHistory").SelectedItem = orphanRun;
+            if (Control<Button>("OpenHistoryJobButton").IsEnabled || !Control<TextBlock>("RunNextStep").Text.Contains("Задание сейчас недоступно"))
+                throw new InvalidOperationException("История недоступного задания использует чужую базу с тем же названием.");
+            Control<Button>("OpenHistoryJobButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            if (!Control<Border>("HistoryView").IsVisible)
+                throw new InvalidOperationException("Недоступное задание разрешило переход.");
+            Screenshot("history-guidance-orphan");
+            Click("RefreshHistoryButton");
+            await WaitUntil(() => window.SmokeReady, "Настоящая история не восстановилась после проверки пояснений.");
+            if (JsonSerializer.Serialize(await historyBeforeNavigation.ReadAsync()) != persistedRunsBeforeGuidance
+                || Control<DataGrid>("Copies").Items.Count != 8)
+                throw new InvalidOperationException("Пояснения истории изменили сохранённые запуски или копии.");
             await VerifyPostgreSqlMonitoringAsync(window);
-            Finish(output, true, "Три ближайших запуска, смена дней / часового пояса / режима и итог, компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
+            Finish(output, true, "Пояснения истории, переход к текущему заданию по ID, три ближайших запуска, смена дней / часового пояса / режима и итог, компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
         }
         catch (Exception ex) { Finish(output, false, ex.ToString()); }
         finally

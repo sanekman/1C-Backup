@@ -288,9 +288,9 @@
      </Grid>
     </Border>
    </Grid>
-   <Border x:Name="HistoryView" Grid.Row="2" Style="{StaticResource Card}" Visibility="Collapsed">
+   <Border x:Name="HistoryView" Grid.Row="2" Style="{StaticResource Card}" Visibility="Collapsed" SizeChanged="HistoryView_SizeChanged">
    <DockPanel>
-    <Border DockPanel.Dock="Top" Padding="16" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+    <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
      <StackPanel>
       <DockPanel>
        <Button x:Name="ExportHistoryButton" DockPanel.Dock="Right" Content="Экспорт JSON" Click="ExportHistory_Click" IsEnabled="False" Margin="8,0,0,0" />
@@ -306,16 +306,18 @@
       <TextBlock x:Name="HistorySummary" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" />
      </StackPanel>
     </Border>
-    <Border DockPanel.Dock="Bottom" Padding="16" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
+    <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
      <StackPanel>
       <DockPanel Margin="0,0,0,8">
        <Button x:Name="OpenRunDirectoryButton" DockPanel.Dock="Right" Content="Рабочая папка" Click="OpenRunDirectory_Click" IsEnabled="False" Padding="10,5" />
+       <Button x:Name="OpenHistoryJobButton" DockPanel.Dock="Right" Content="К заданию" Click="OpenHistoryJob_Click" IsEnabled="False" Padding="10,5" Margin="0,0,8,0" ToolTipService.ShowOnDisabled="True" />
        <TextBlock Text="Подробности выбранного запуска" FontWeight="SemiBold" VerticalAlignment="Center" />
       </DockPanel>
+      <TextBlock x:Name="RunNextStep" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,8" Visibility="Collapsed" />
       <TextBox x:Name="RunDetails" Text="Выберите запуск в таблице." IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" Height="120" VerticalScrollBarVisibility="Auto" />
      </StackPanel>
     </Border>
-   <DataGrid x:Name="RunHistory" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="RunHistory_SelectionChanged">
+   <DataGrid x:Name="RunHistory" RowHeight="30" ColumnHeaderHeight="30" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="RunHistory_SelectionChanged">
     <DataGrid.Columns>
      <DataGridTextColumn Header="Начало" Binding="{Binding StartedUtc, Converter={StaticResource LocalTimeConverter}}" Width="145" />
      <DataGridTextColumn Header="Задание" Binding="{Binding JobName}" Width="170" />

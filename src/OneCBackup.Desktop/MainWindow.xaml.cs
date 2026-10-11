@@ -445,6 +445,7 @@ public partial class MainWindow : Window
         ExportHistoryButton.IsEnabled = ready && !historyRefreshing && RunHistory.Items.Count != 0;
         OpenRunDirectoryButton.IsEnabled = ready && RunHistory.SelectedItem is BackupRun;
         UpdateSelectedJobSummary();
+        UpdateRunGuidance();
     }
 
     private IDisposable? AcquireEngineOrReport()
@@ -656,6 +657,7 @@ public partial class MainWindow : Window
                 || run.WorkDirectory.Contains(query, StringComparison.CurrentCultureIgnoreCase));
             view.Refresh();
         }
+        if (RunHistory.SelectedItem is BackupRun selected && !RunHistory.Items.Contains(selected)) RunHistory.SelectedItem = null;
         HistorySummary.Text = $"Показано: {RunHistory.Items.Count} из {historyRuns.Count}. Время — на этом компьютере. Экспорт включает выбранные фильтром записи.";
         if (ExportHistoryButton is not null) ExportHistoryButton.IsEnabled = ready && !historyRefreshing && RunHistory.Items.Count != 0;
     }
