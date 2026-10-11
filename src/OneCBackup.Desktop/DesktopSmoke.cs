@@ -460,7 +460,13 @@ internal static class DesktopSmoke
             window.Width = 900; window.Height = 580;
             foreach (var navigation in new[] { "JobsNavigation", "CopiesNavigation", "HistoryNavigation", "AgentNavigation" })
             {
-                Click(navigation); await Task.Delay(100);
+                if (navigation == "CopiesNavigation")
+                {
+                    Click("ShowLatestCopyButton");
+                    await WaitUntil(() => window.SmokeReady, "Переход к копии не завершился в компактном окне.");
+                }
+                else Click(navigation);
+                await Task.Delay(100);
                 Screenshot("compact-" + navigation);
                 if (navigation == "JobsNavigation")
                 {

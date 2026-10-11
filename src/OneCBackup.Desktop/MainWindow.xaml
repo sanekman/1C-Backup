@@ -343,7 +343,9 @@
         <Button x:Name="CancelCopyVerificationButton" Content="Отменить операцию" Click="CancelCopyVerification_Click" IsEnabled="False" Margin="0,0,8,8" />
         <Button x:Name="OpenCopyDirectoryButton" Content="Открыть папку" Click="OpenCopyDirectory_Click" IsEnabled="False" Margin="0,0,0,8" />
        </WrapPanel>
-       <TextBlock x:Name="CopyVerificationStatus" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
+       <TextBlock x:Name="CopyVerificationStatus" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}">
+        <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed" /></Trigger></Style.Triggers></Style></TextBlock.Style>
+       </TextBlock>
        <Expander x:Name="CopyDetailsPanel" Header="Подробности копии и проверки" Margin="0,4,0,0">
         <ScrollViewer x:Name="CopyDetailsScroll" MaxHeight="150" VerticalScrollBarVisibility="Auto"><StackPanel Margin="4,6,4,0">
        <TextBlock Text="{Binding Text, ElementName=CopyVerificationStatus}" TextWrapping="Wrap" />
@@ -401,7 +403,7 @@
 
     </Border>
    </ScrollViewer>
-   <Border Grid.Row="3" Background="#E8EEF5" CornerRadius="6" Padding="12" Margin="0,16,0,0">
+   <Border Grid.Row="3" Background="#E8EEF5" CornerRadius="6" Padding="8" Margin="0,10,0,0">
     <ScrollViewer MaxHeight="64" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><TextBlock x:Name="Status" Text="Загрузка настроек…" TextWrapping="Wrap" Foreground="#475569" /></ScrollViewer>
    </Border>
   </Grid>
