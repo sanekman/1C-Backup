@@ -108,6 +108,12 @@ public sealed class FtpStorageIntegrationTests : IDisposable
         var remote = Assert.Single(records, record => record.Backup.Location.StartsWith("ftp", StringComparison.Ordinal));
         Assert.Equal(remote.Backup.Sha256, latestLocal.Backup.Sha256);
         Assert.Equal(2, records.Select(record => record.Backup.Sha256).Distinct().Count());
+        var beforeAudit = System.Text.Json.JsonSerializer.Serialize(records);
+        var audit = await new LatestBackupAudit(router, catalog).CheckAsync(job);
+        Assert.False(audit.Cancelled);
+        Assert.Equal(2, audit.Destinations.Count);
+        Assert.All(audit.Destinations, result => Assert.Equal(BackupAuditStatus.Verified, result.Status));
+        Assert.Equal(beforeAudit, System.Text.Json.JsonSerializer.Serialize(await catalog.ReadAsync()));
         Assert.Equal(2, Directory.GetFiles(localDirectory).Length);
         Assert.Single(Directory.GetFiles(Path.Combine(RemoteRoot, remoteDirectory.TrimStart('/'))));
         foreach (var record in records) await new BackupCopyVerifier(router).VerifyAsync(record, job);

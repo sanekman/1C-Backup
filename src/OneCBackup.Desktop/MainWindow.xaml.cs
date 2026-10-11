@@ -409,6 +409,10 @@ public partial class MainWindow : Window
         CheckStorageButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
         CheckStorageButton.ToolTip = !engineAvailable || schedulingTask is not null
             ? "Остановите автоматическое копирование, чтобы проверить хранилища." : "Проверить временную папку и запись, чтение и удаление тестового файла во всех хранилищах";
+        CheckLatestCopiesButton.IsEnabled = CheckStorageButton.IsEnabled;
+        CheckLatestCopiesButton.ToolTip = !engineAvailable || schedulingTask is not null
+            ? "Остановите автоматическое копирование, чтобы проверить последние копии."
+            : "Проверить размер и SHA-256 последней зарегистрированной копии в каждом хранилище задания. База и сохранённые копии не изменяются.";
         CancelStorageCheckButton.Visibility = checkingStorages ? Visibility.Visible : Visibility.Collapsed;
         CancelStorageCheckButton.IsEnabled = checkingStorages && copyVerification is { IsCancellationRequested: false };
         CancelRunButton.Visibility = activeRun is null ? Visibility.Collapsed : Visibility.Visible;
@@ -805,7 +809,9 @@ public partial class MainWindow : Window
     {
         copyVerification?.Cancel();
         if (checkingStorages)
-            StorageCheckResults.Header = Status.Text = "Отмена проверки. Дождитесь очистки тестовых файлов.";
+            StorageCheckResults.Header = Status.Text = checkingLatestCopies
+                ? "Отмена проверки копий. Дождитесь остановки чтения и очистки временных файлов FTP."
+                : "Отмена проверки. Дождитесь очистки тестовых файлов.";
         UpdateRunControls();
     }
 

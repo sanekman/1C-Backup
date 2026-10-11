@@ -91,6 +91,7 @@
         <Button x:Name="ShowLatestCopyButton" Content="Последняя копия" Margin="8,0,0,0" IsEnabled="False" Click="ShowLatestCopy_Click" ToolTip="Открыть последнюю сохранённую копию выбранного задания" />
         <Button x:Name="ShowLatestRunButton" Content="Результат" Margin="8,0,0,0" IsEnabled="False" Click="ShowLatestRun_Click" ToolTip="Открыть последний запуск выбранного задания, включая ошибки и предупреждения" />
         <Button x:Name="CheckStorageButton" Content="Проверить хранилища" Margin="8,0,0,0" IsEnabled="False" Click="CheckStorage_Click" ToolTipService.ShowOnDisabled="True" ToolTip="Проверить временную папку и запись, чтение и удаление тестового файла во всех хранилищах" />
+        <Button x:Name="CheckLatestCopiesButton" Content="Проверить последние копии" Margin="8,0,0,0" IsEnabled="False" Click="CheckLatestCopies_Click" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="CancelStorageCheckButton" Content="Отменить проверку" Margin="8,0,0,0" Visibility="Collapsed" Click="CancelCopyVerification_Click" />
        </WrapPanel>
        <ProgressBar x:Name="JobProgress" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,8,0,0" AutomationProperties.Name="Создание резервной копии" />
