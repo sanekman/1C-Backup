@@ -46,8 +46,15 @@ class BackupReportTests(unittest.TestCase):
             self.assertIsNone(report["sizeBytes"])
 
     def test_connection_string_is_not_accepted_as_database_name(self):
-        with self.assertRaises(ValueError):
-            pg_report.run_backup("host=server password=secret", "cluster", "unused", "unused")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for database in ("host=server password=fixture", "postgresql://user:fixture@server/db",
+                             "postgres://server/db", "  POSTGRESQL://server/db"):
+                with self.subTest(database=database), patch.object(pg_report.subprocess, "run") as run:
+                    with self.assertRaises(ValueError):
+                        pg_report.run_backup(database, "cluster", root / "copies", root / "reports")
+                    run.assert_not_called()
+            self.assertEqual([], list(root.iterdir()))
 
 
 if __name__ == "__main__":

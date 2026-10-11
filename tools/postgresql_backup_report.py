@@ -15,7 +15,7 @@ import uuid
 
 def run_backup(database, instance, backup_directory, report_directory,
                pg_dump="pg_dump", pg_restore="pg_restore", timeout_seconds=7200):
-    if not database or "=" in database or any(ord(c) < 32 for c in database):
+    if not database or "=" in database or database.lstrip().lower().startswith(("postgresql://", "postgres://")) or any(ord(c) < 32 for c in database):
         raise ValueError("Use a database name; pass connection settings via PostgreSQL environment/service files.")
     if not instance.strip() or timeout_seconds < 1:
         raise ValueError("Instance label and positive timeout are required.")

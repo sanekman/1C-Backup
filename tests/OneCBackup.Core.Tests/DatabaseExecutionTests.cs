@@ -176,6 +176,23 @@ public sealed class DatabaseExecutionTests : IDisposable
         Assert.Equal(2, (await new LocalBackupDispatcher(store, (_, _) => Task.CompletedTask).LoadScheduledJobsAsync()).Count);
     }
 
+    [Theory]
+    [InlineData("postgresql://user:fixture@server/db")]
+    [InlineData("postgres://server/db")]
+    [InlineData("  POSTGRESQL://server/db")]
+    public async Task PostgreSqlConnectionUrisAreRejectedBeforePersistingOrLaunching(string source)
+    {
+        var job = PgJob with { Source = source };
+        var store = new JobStore(Path.Combine(root, "jobs.json"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync([job]));
+        Assert.False(File.Exists(Path.Combine(root, "jobs.json")));
+        var called = false;
+        await Assert.ThrowsAsync<InvalidDataException>(() => Runner(new PostgreSqlBackupExecutor(
+            new FixtureProcess((_, _) => { called = true; return Task.FromResult(0); }))).RunAsync(job));
+        Assert.False(called);
+        Assert.False(File.Exists(Path.Combine(root, "history.json")));
+    }
+
     private sealed class FixtureProcess(Func<BackupProcess, CancellationToken, Task<int>> run) : IBackupProcessRunner
     {
         public Task<int> RunAsync(BackupProcess command, CancellationToken token) => run(command, token);

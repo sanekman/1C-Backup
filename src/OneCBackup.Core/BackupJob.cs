@@ -76,7 +76,10 @@ public sealed record BackupJob
         if (Kind == DatabaseKind.SqlServer && SqlServer is not null) errors.AddRange(SqlServer.Validate());
         if (Kind == DatabaseKind.PostgreSql)
         {
-            if (Source?.Contains('=') == true) errors.Add("Укажите имя базы PostgreSQL, а не строку подключения.");
+            var database = Source?.TrimStart() ?? "";
+            if (database.Contains('=') || database.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase)
+                || database.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase))
+                errors.Add("Укажите имя базы PostgreSQL, а не строку подключения.");
             if (PostgreSql is not null) errors.AddRange(PostgreSql.Validate());
         }
         return errors;
