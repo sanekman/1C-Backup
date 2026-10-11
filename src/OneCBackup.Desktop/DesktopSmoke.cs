@@ -195,6 +195,18 @@ internal static class DesktopSmoke
             Click("NextStepButton"); Click("SaveButton");
             await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Jobs").SelectedItem is BackupJob { ScheduleKind: ScheduleKind.Manual }
                 && Control<Button>("RunButton").IsEnabled, "Задание не сохранено.");
+            using (var lockedSource = new FileStream(Path.Combine(source, "1Cv8.1CD"), FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                Click("CheckStorageButton");
+                await WaitUntil(() => window.SmokeReady && Control<Expander>("StorageCheckResults").Header.ToString()!.StartsWith("Все хранилища доступны"),
+                    "Проверка хранилищ не завершилась через интерфейс.");
+            }
+            if (Control<DataGrid>("Copies").Items.Count != 0 || Control<DataGrid>("RunHistory").Items.Count != 0
+                || File.ReadAllText(temporaryMarker) != "keep unrelated files")
+                throw new InvalidOperationException("Проверка доступа создала копию, запуск или изменила посторонний файл.");
+            Control<Expander>("StorageCheckResults").IsExpanded = true;
+            Screenshot("storage-readiness-success");
+            Control<Expander>("StorageCheckResults").IsExpanded = false;
             Click("RunButton");
             await WaitUntil(() => Control<DataGrid>("RunHistory").Items.OfType<BackupRun>().Any(run => run.Status == BackupRunStatus.Succeeded)
                 && window.SmokeReady, "Копия не создана через интерфейс.");
@@ -318,6 +330,16 @@ internal static class DesktopSmoke
             SetAdditionalStorage(blockedDirectory);
             Click("NextStepButton"); Click("NextStepButton"); Click("SaveButton");
             await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled, "Третье хранилище не сохранено.");
+            var copiesBeforeCheck = Control<DataGrid>("Copies").Items.Count;
+            var runsBeforeCheck = Control<DataGrid>("RunHistory").Items.Count;
+            Click("CheckStorageButton");
+            await WaitUntil(() => window.SmokeReady && Control<Expander>("StorageCheckResults").Header.ToString()!.Contains("2 из 3"),
+                "Недоступное хранилище не показано проверкой доступа.");
+            if (!Control<TextBox>("StorageCheckDetails").Text.Contains(blockedDirectory)
+                || Control<DataGrid>("Copies").Items.Count != copiesBeforeCheck || Control<DataGrid>("RunHistory").Items.Count != runsBeforeCheck)
+                throw new InvalidOperationException("Проверка доступа потеряла ошибку или изменила журнал копий / запусков.");
+            Screenshot("storage-readiness-failure");
+            Control<Expander>("StorageCheckResults").IsExpanded = false;
             Click("RunButton");
             await WaitUntil(() => window.SmokeReady && Control<TextBlock>("SelectedJobSummary").Text.Contains("в 2 из 3 хранилищ"), "Частичная доставка не показана.");
             if (Control<DataGrid>("Copies").Items.Count != 4)

@@ -34,6 +34,8 @@ public partial class MainWindow : Window
     private Process? launchedAgent;
     private DateTimeOffset lastBackgroundRefresh;
     private CancellationTokenSource? copyVerification;
+    private bool checkingStorages;
+    private Guid? storageCheckJobId;
     private bool copiesRefreshing;
     private int copiesRefreshVersion;
     private CancellationTokenSource? activeRun;
@@ -286,6 +288,9 @@ public partial class MainWindow : Window
 
     private void Jobs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!checkingStorages && StorageCheckResults is not null)
+            StorageCheckResults.Visibility = Jobs.SelectedItem is BackupJob selected && selected.Id == storageCheckJobId
+                ? Visibility.Visible : Visibility.Collapsed;
         if (Jobs.SelectedItem is not BackupJob job) { UpdateRunControls(); return; }
         LoadJobEditor(job);
     }
@@ -388,6 +393,11 @@ public partial class MainWindow : Window
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
         JobsSummary.Text = $"Всего: {jobs.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}";
         RunButton.IsEnabled = ready && canSave && idle && engineAvailable && !editorOpen && Jobs.SelectedItem is BackupJob;
+        CheckStorageButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
+        CheckStorageButton.ToolTip = !engineAvailable || schedulingTask is not null
+            ? "Остановите автоматическое копирование, чтобы проверить хранилища." : "Проверить временную папку и запись, чтение и удаление тестового файла во всех хранилищах";
+        CancelStorageCheckButton.Visibility = checkingStorages ? Visibility.Visible : Visibility.Collapsed;
+        CancelStorageCheckButton.IsEnabled = checkingStorages && copyVerification is { IsCancellationRequested: false };
         CancelRunButton.Visibility = activeRun is null ? Visibility.Collapsed : Visibility.Visible;
         ShowLatestCopyButton.IsEnabled = ready && !copiesRefreshing && Jobs.SelectedItem is BackupJob copyJob
             && Copies.Items.OfType<BackupCopyRow>().Any(row => row.Record.JobId == copyJob.Id);
@@ -773,6 +783,8 @@ public partial class MainWindow : Window
     private void CancelCopyVerification_Click(object sender, RoutedEventArgs e)
     {
         copyVerification?.Cancel();
+        if (checkingStorages)
+            StorageCheckResults.Header = Status.Text = "Отмена проверки. Дождитесь очистки тестовых файлов.";
         UpdateRunControls();
     }
 

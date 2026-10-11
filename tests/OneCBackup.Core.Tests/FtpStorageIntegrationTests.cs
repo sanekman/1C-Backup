@@ -124,6 +124,30 @@ public sealed class FtpStorageIntegrationTests : IDisposable
             return Task.FromResult(new NetworkCredential("backup-test", "local-fixture-password"));
         }
     }
+
+    [FtpFact]
+    public async Task ReadinessProbeChecksFtpAndLocalWithoutKeepingFilesOrChangingExistingBackups()
+    {
+        var temporary = Path.Combine(directory, "HDD probe");
+        var local = Path.Combine(directory, "local probe");
+        var job = Job with { TemporaryDirectory = temporary,
+            AdditionalDestinations = [new BackupDestination { DestinationDirectory = local }] };
+        var remote = Path.Combine(RemoteRoot, remoteDirectory.TrimStart('/'));
+        Directory.CreateDirectory(remote);
+        Directory.CreateDirectory(local);
+        await File.WriteAllTextAsync(Path.Combine(remote, "unrelated.bak"), "remote backup marker");
+        await File.WriteAllTextAsync(Path.Combine(local, "unrelated.bak"), "local backup marker");
+        var router = new RoutedBackupStorage(new FixtureCredentials(), Path.Combine(directory, "default verify"));
+        var report = await new StorageReadinessChecker(router, Path.Combine(directory, "default work")).CheckAsync(job);
+        Assert.Null(report.TemporaryError);
+        Assert.Equal(2, report.Destinations.Count);
+        Assert.All(report.Destinations, result => Assert.True(result.Succeeded, result.Error));
+        Assert.Equal("remote backup marker", await File.ReadAllTextAsync(Assert.Single(Directory.GetFiles(remote))));
+        Assert.Equal("local backup marker", await File.ReadAllTextAsync(Assert.Single(Directory.GetFiles(local))));
+        Assert.Empty(Directory.GetFiles(temporary, "*", SearchOption.AllDirectories));
+        Assert.False(Directory.Exists(Path.Combine(directory, "default work")));
+        Assert.False(Directory.Exists(Path.Combine(directory, "default verify")));
+    }
     private sealed class FixtureClock : TimeProvider
     { public override DateTimeOffset GetUtcNow() => new(2026, 10, 11, 13, 0, 0, TimeSpan.Zero); }
 

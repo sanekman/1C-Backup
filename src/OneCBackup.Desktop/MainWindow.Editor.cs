@@ -225,6 +225,14 @@ public partial class MainWindow
     {
         if (SelectedJobSummary is null) return;
         JobProgress.Visibility = Visibility.Collapsed;
+        System.Windows.Automation.AutomationProperties.SetName(JobProgress, checkingStorages ? "Проверка хранилищ" : "Создание резервной копии");
+        if (checkingStorages)
+        {
+            SelectedJobSummary.Foreground = (System.Windows.Media.Brush)FindResource("MutedBrush");
+            JobProgress.Visibility = Visibility.Visible;
+            SelectedJobSummary.Text = "Проверяются временная папка и хранилища. Дождитесь результата или отмените проверку.";
+            return;
+        }
         SelectedJobSummary.Foreground = (System.Windows.Media.Brush)FindResource("MutedBrush");
         if (Jobs.SelectedItem is not BackupJob job) { SelectedJobSummary.Text = "Выберите задание, чтобы создать копию или изменить настройки."; return; }
         var latest = historyRuns.FirstOrDefault(run => run.JobId == job.Id);
