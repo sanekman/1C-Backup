@@ -82,7 +82,10 @@
         <Button x:Name="EditJobButton" Content="Изменить" Click="EditJob_Click" IsEnabled="False" Margin="8,0,0,0" />
         <Button x:Name="DeleteButton" Content="Удалить" Click="Delete_Click" IsEnabled="False" Margin="8,0,0,0" />
         <Button x:Name="CancelRunButton" Content="Отменить" Margin="8,0,0,0" IsEnabled="False" Click="CancelRun_Click" />
+        <Button x:Name="ShowLatestCopyButton" Content="Последняя копия" Margin="8,0,0,0" IsEnabled="False" Click="ShowLatestCopy_Click" ToolTip="Открыть последнюю сохранённую копию выбранного задания" />
+        <Button x:Name="ShowLatestRunButton" Content="Результат" Margin="8,0,0,0" IsEnabled="False" Click="ShowLatestRun_Click" ToolTip="Открыть последний запуск выбранного задания, включая ошибки и предупреждения" />
        </WrapPanel>
+       <ProgressBar x:Name="JobProgress" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,8,0,0" AutomationProperties.Name="Создание резервной копии" />
        <TextBlock x:Name="SelectedJobSummary" Text="Выберите задание, чтобы создать копию или изменить настройки." TextWrapping="Wrap" Margin="0,10,0,0" Foreground="{StaticResource MutedBrush}" />
       </StackPanel></Border>
       <Grid>

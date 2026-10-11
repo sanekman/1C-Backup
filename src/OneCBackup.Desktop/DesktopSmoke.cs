@@ -131,6 +131,18 @@ internal static class DesktopSmoke
             Click("RunButton");
             await WaitUntil(() => Control<DataGrid>("RunHistory").Items.OfType<BackupRun>().Any(run => run.Status == BackupRunStatus.Succeeded)
                 && window.SmokeReady, "Копия не создана через интерфейс.");
+            if (!Control<TextBlock>("SelectedJobSummary").Text.Contains("Копия создана.")
+                || Control<ProgressBar>("JobProgress").Visibility != Visibility.Collapsed)
+                throw new InvalidOperationException("После копирования не показан понятный итог или остался индикатор работы.");
+            Click("ShowLatestCopyButton");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Copies").SelectedItem is BackupCopyRow,
+                "Переход к последней копии не выбрал файл.");
+            var selectedCopy = (BackupCopyRow)Control<DataGrid>("Copies").SelectedItem;
+            var savedJob = (BackupJob)Control<DataGrid>("Jobs").SelectedItem;
+            if (selectedCopy.Record.JobId != savedJob.Id || Control<Border>("CopiesView").Visibility != Visibility.Visible)
+                throw new InvalidOperationException("Переход к копии выбрал другое задание.");
+            Screenshot("first-copy-result");
+            Click("JobsNavigation");
             // A locked source must produce a visible failure without creating another copy.
             using (var lockedSource = new FileStream(Path.Combine(source, "1Cv8.1CD"), FileMode.Open, FileAccess.Read, FileShare.None))
             {
@@ -138,7 +150,17 @@ internal static class DesktopSmoke
                 await WaitUntil(() => Control<DataGrid>("RunHistory").Items.OfType<BackupRun>().Any(run => run.Status == BackupRunStatus.Failed)
                     && window.SmokeReady, "Ошибка занятого файла не появилась в истории.");
             }
-            Click("HistoryNavigation");
+            if (!Control<TextBlock>("SelectedJobSummary").Text.Contains("не создала копию"))
+                throw new InvalidOperationException("После ошибки выбранное задание показывает успешное копирование.");
+            Control<ComboBox>("HistoryStatusFilter").SelectedIndex = 2;
+            Control<TextBox>("HistorySearch").Text = "no-such-job-before-result-navigation";
+            Click("ShowLatestRunButton");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("RunHistory").SelectedItem is BackupRun { Status: BackupRunStatus.Failed },
+                "Переход к результату не открыл последнюю ошибку после фильтра успешных запусков.");
+            if (Control<ComboBox>("HistoryStatusFilter").SelectedIndex != 0 || Control<TextBox>("HistorySearch").Text.Length != 0
+                || !Control<TextBlock>("HistorySummary").Text.Contains("на этом компьютере"))
+                throw new InvalidOperationException("Переход к результату сохранил скрывающий запись фильтр или неверную подпись времени.");
+            Screenshot("failed-copy-result");
             Control<ComboBox>("HistoryStatusFilter").SelectedIndex = 1;
             var filtered = Control<DataGrid>("RunHistory");
             if (filtered.Items.Count != 1 || filtered.Items[0] is not BackupRun { Status: BackupRunStatus.Failed })

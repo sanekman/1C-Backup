@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private bool copiesRefreshing;
     private int copiesRefreshVersion;
     private CancellationTokenSource? activeRun;
+    private Guid? activeJobId;
     private readonly LocalBackupDispatcher dispatcher;
     private CancellationTokenSource? schedulerCancellation;
     private Task? schedulingTask;
@@ -376,6 +377,11 @@ public partial class MainWindow : Window
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
         JobsSummary.Text = $"Всего: {jobs.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}";
         RunButton.IsEnabled = ready && canSave && idle && engineAvailable && !editorOpen && Jobs.SelectedItem is BackupJob;
+        CancelRunButton.Visibility = activeRun is null ? Visibility.Collapsed : Visibility.Visible;
+        ShowLatestCopyButton.IsEnabled = ready && !copiesRefreshing && Jobs.SelectedItem is BackupJob copyJob
+            && Copies.Items.OfType<BackupCopyRow>().Any(row => row.Record.JobId == copyJob.Id);
+        ShowLatestRunButton.IsEnabled = ready && !historyRefreshing && Jobs.SelectedItem is BackupJob runJob
+            && historyRuns.Any(run => run.JobId == runJob.Id);
         JobEditor.IsEnabled = SaveButton.IsEnabled = ready && canSave && idle;
         DeleteButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
         AgentModePicker.IsEnabled = SaveAgentSettingsButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null;
@@ -614,7 +620,7 @@ public partial class MainWindow : Window
                 || run.WorkDirectory.Contains(query, StringComparison.CurrentCultureIgnoreCase));
             view.Refresh();
         }
-        HistorySummary.Text = $"Показано: {RunHistory.Items.Count} из {historyRuns.Count}. Время указано в UTC. Экспорт включает выбранные фильтром записи.";
+        HistorySummary.Text = $"Показано: {RunHistory.Items.Count} из {historyRuns.Count}. Время — на этом компьютере. Экспорт включает выбранные фильтром записи.";
         if (ExportHistoryButton is not null) ExportHistoryButton.IsEnabled = ready && !historyRefreshing && RunHistory.Items.Count != 0;
     }
 
@@ -627,7 +633,9 @@ public partial class MainWindow : Window
     private void RunHistory_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         RunDetails.Text = RunHistory.SelectedItem is BackupRun run ?
-            $"Задание: {run.JobName}\nРезультат: {run.StatusDescription}\nНачало (UTC): {run.StartedUtc:dd.MM.yyyy HH:mm:ss}\n"
+            $"Задание: {run.JobName}\nРезультат: {run.StatusDescription}\nНачало: {run.StartedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n"
+            + $"Окончание: {run.FinishedUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}\n"
+            + $"Начало (UTC): {run.StartedUtc:dd.MM.yyyy HH:mm:ss}\n"
             + $"Окончание (UTC): {run.FinishedUtc?.ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}\n"
             + $"ID запуска: {run.RunId}\nРабочая папка: {run.WorkDirectory}\n"
             + (run.Backup is null ? "" : $"Копия: {run.Backup.Location}\nРазмер: {run.Backup.Length} байт\nSHA256: {run.Backup.Sha256}\n")
@@ -817,6 +825,7 @@ public partial class MainWindow : Window
     private async Task ExecuteJobAsync(BackupJob job, CancellationToken cancellationToken)
     {
         using var lease = engine.Acquire();
+        activeJobId = job.Id;
         activeRun = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         UpdateRunControls();
         CancelRunButton.IsEnabled = true;
@@ -834,6 +843,7 @@ public partial class MainWindow : Window
         finally
         {
             activeRun.Dispose(); activeRun = null;
+            activeJobId = null;
             CancelRunButton.IsEnabled = false;
             UpdateRunControls();
         }

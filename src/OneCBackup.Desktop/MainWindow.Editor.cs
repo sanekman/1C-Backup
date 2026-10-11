@@ -215,8 +215,12 @@ public partial class MainWindow
     private void UpdateSelectedJobSummary()
     {
         if (SelectedJobSummary is null) return;
+        JobProgress.Visibility = Visibility.Collapsed;
+        SelectedJobSummary.Foreground = (System.Windows.Media.Brush)FindResource("MutedBrush");
         if (Jobs.SelectedItem is not BackupJob job) { SelectedJobSummary.Text = "Выберите задание, чтобы создать копию или изменить настройки."; return; }
         var latest = historyRuns.FirstOrDefault(run => run.JobId == job.Id);
+        var running = activeJobId == job.Id || latest?.Status == BackupRunStatus.Running;
+        JobProgress.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         DateTimeOffset? next;
         try { next = BackupSchedule.NextRun(job, DateTimeOffset.UtcNow); }
         catch (ArgumentException) { SelectedJobSummary.Text = "Проверьте расписание и часовой пояс задания."; return; }
@@ -224,8 +228,58 @@ public partial class MainWindow
         var nextText = !job.Enabled || job.ScheduleKind == ScheduleKind.Manual || next is null ? "Автозапуск для задания выключен"
             : "По расписанию: " + TimeZoneInfo.ConvertTime(next.Value, TimeZoneInfo.FindSystemTimeZoneById(job.TimeZoneId)).ToString("dd.MM HH:mm", CultureInfo.InvariantCulture)
                 + (backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running || schedulingTask is not null ? "" : " · включите автоматическое копирование");
-        SelectedJobSummary.Text = (latest is null ? "Первая копия ещё не создана" : "Последний запуск: " + latest.StatusDescription + " · " + latest.StartedUtc.ToLocalTime().ToString("dd.MM HH:mm"))
-            + "\n" + nextText;
+        var resultText = running ? "Создаётся копия. Дождитесь результата; отмена доступна в программе, которая запустила копирование."
+            : latest is null ? "Первая копия ещё не создана. Нажмите «Создать копию», чтобы проверить настройки."
+            : latest.Status switch
+            {
+                BackupRunStatus.Succeeded when latest.Warnings?.Count > 0 => "Копия создана, есть предупреждения. Откройте «Результат».",
+                BackupRunStatus.Succeeded => "Копия создана. Откройте «Последняя копия», чтобы проверить её или найти файл.",
+                BackupRunStatus.Cancelled => "Последний запуск отменён. Откройте «Результат» перед повторным запуском.",
+                BackupRunStatus.Interrupted => "Последний запуск прерван. Откройте «Результат» перед повторным запуском.",
+                _ => "Последняя попытка не создала копию. Откройте «Результат», чтобы узнать причину."
+            };
+        if (!running && latest is not null)
+        {
+            resultText += " · " + (latest.FinishedUtc ?? latest.StartedUtc).ToLocalTime().ToString("dd.MM HH:mm");
+            SelectedJobSummary.Foreground = latest.Status == BackupRunStatus.Succeeded && latest.Warnings?.Count is not > 0
+                ? System.Windows.Media.Brushes.DarkGreen : System.Windows.Media.Brushes.Maroon;
+        }
+        SelectedJobSummary.Text = resultText + "\n" + nextText;
+    }
+
+    private async void ShowLatestCopy_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ready || copiesRefreshing || Jobs.SelectedItem is not BackupJob job) return;
+        try
+        {
+            ShowPage("copies");
+            await RefreshCopiesAsync();
+            var latest = Copies.Items.OfType<BackupCopyRow>().FirstOrDefault(row => row.Record.JobId == job.Id);
+            Copies.SelectedItem = latest;
+            if (latest is not null)
+            {
+                Copies.ScrollIntoView(latest);
+                CopyVerificationStatus.Text = "Выбрана последняя зарегистрированная копия этого задания. Нажмите «Проверить целостность», чтобы проверить файл.";
+            }
+            else CopyVerificationStatus.Text = "Для этого задания нет зарегистрированных копий. Создайте копию в разделе «Задания».";
+        }
+        catch (Exception ex) { Status.Text = "Не удалось открыть копию: " + ex.Message; }
+    }
+
+    private async void ShowLatestRun_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ready || historyRefreshing || Jobs.SelectedItem is not BackupJob job) return;
+        try
+        {
+            ShowPage("history");
+            HistorySearch.Clear();
+            HistoryStatusFilter.SelectedIndex = 0;
+            await RefreshHistoryAsync();
+            var latest = historyRuns.FirstOrDefault(run => run.JobId == job.Id);
+            RunHistory.SelectedItem = latest;
+            if (latest is not null) RunHistory.ScrollIntoView(latest);
+        }
+        catch (Exception ex) { Status.Text = "Не удалось открыть результат: " + ex.Message; }
     }
 }
 
