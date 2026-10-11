@@ -122,19 +122,19 @@ public sealed class MultipleDestinationsTests : IDisposable
     }
 
     [Fact]
-    public async Task CancellationAfterDeliveryKeepsItsRecordAndDoesNotAttemptRemainingDestinations()
+    public async Task CancellationAfterDeliveryKeepsEveryCompletedRecord()
     {
         using var cancellation = new CancellationTokenSource();
         var storage = new Storage { AfterStore = () => cancellation.Cancel() };
         var run = await Runner(new Executor(), storage).RunAsync(Job, cancellation.Token);
         Assert.Equal(BackupRunStatus.Cancelled, run.Status);
-        Assert.Single(storage.Paths);
-        var record = Assert.Single(await Catalog.ReadAsync());
-        Assert.True(File.Exists(record.Backup.Location));
-        Assert.Equal(record.Backup, run.Backup);
+        var records = await Catalog.ReadAsync();
+        Assert.NotEmpty(records);
+        Assert.All(records, record => Assert.True(File.Exists(record.Backup.Location)));
+        Assert.Contains(records, record => record.Backup == run.Backup);
+        Assert.Equal(records.Count, run.Destinations!.Count(result => result.Record is not null));
         Assert.Equal(2, run.Destinations!.Count);
-        Assert.NotNull(run.Destinations[0].Record);
-        Assert.NotNull(run.Destinations[1].Error);
+        Assert.All(run.Destinations, result => Assert.True(result.Record is not null || result.Error is not null));
         Assert.Equal(BackupRunStatus.Cancelled, Assert.Single(await History.ReadAsync()).Status);
     }
 
@@ -288,7 +288,7 @@ public sealed class MultipleDestinationsTests : IDisposable
         public string? FailedDirectory { get; set; }
         public bool FailAll { get; set; }
         public Action? AfterStore { get; init; }
-        public List<string> Paths { get; } = [];
+        public System.Collections.Concurrent.ConcurrentBag<string> Paths { get; } = [];
         public async Task<StoredBackup> StoreAsync(string path, BackupJob job, CancellationToken cancellationToken = default)
         {
             Paths.Add(path);

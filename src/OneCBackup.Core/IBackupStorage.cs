@@ -6,7 +6,8 @@ public sealed record StoredBackup(string Location, long Length, string Sha256)
     public string? ArchivePasswordKey { get; init; }
 }
 
-/// <summary>Stores a stable completed file; success means the stored bytes were verified.</summary>
+/// <summary>Stores a stable completed file; success means the stored bytes were verified.
+/// Implementations must support concurrent calls for independent destinations of one job.</summary>
 public interface IBackupStorage
 {
     /// <summary>Checks local prerequisites before database creation; does not prove remote access.</summary>

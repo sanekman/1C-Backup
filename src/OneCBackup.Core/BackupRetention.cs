@@ -78,15 +78,23 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
         {
             using var prepared = await new BackupDelivery(storage, passwords).PrepareFileAsync(job,
                 completedBackupPath, stagingDirectory, cancellationToken);
-            var results = new List<DestinationResult>();
-            var cancelled = false;
-            foreach (var target in job.StorageJobs)
+            // Keep the prepared archive alive until every active delivery has finished cleanup.
+            using var deliveries = new SemaphoreSlim(3, 3);
+            var tasks = job.StorageJobs.Select(DeliverToAsync).ToArray();
+            var outcomes = await Task.WhenAll(tasks);
+            var results = outcomes.Select(outcome => outcome.Result).ToArray();
+            return new MultipleBackupCompletion(results, outcomes.Any(outcome => outcome.Cancelled));
+
+            async Task<(DestinationResult Result, bool Cancelled)> DeliverToAsync(BackupJob target)
             {
                 var destination = new BackupDestination { StorageKind = target.StorageKind,
                     DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, KeepLast = target.KeepLast }.Description;
                 BackupRecord? record = null;
+                var acquired = false;
                 try
                 {
+                    await deliveries.WaitAsync(cancellationToken);
+                    acquired = true;
                     cancellationToken.ThrowIfCancellationRequested();
                     await storage.PrepareAsync(target, cancellationToken);
                     var stored = (await storage.StoreAsync(prepared.Path, target, cancellationToken))
@@ -94,25 +102,23 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                     // A delivered file must enter the ledger even if cancellation was requested meanwhile.
                     record = await catalog.RegisterAsync(target, stored, completedUtc, CancellationToken.None);
                     var retention = await new BackupRetention(catalog, storage).ApplyAsync(target, record, cancellationToken);
-                    results.Add(new DestinationResult(destination, record, null,
-                        retention.Failures.Select(f => "Очистка: " + f.Error.Message).ToArray()));
+                    return (new DestinationResult(destination, record, null,
+                        retention.Failures.Select(f => "Очистка: " + f.Error.Message).ToArray()), false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    cancelled = true;
-                    results.Add(new DestinationResult(destination, record, record is null ? "Доставка отменена или не начата." : null,
-                        record is null ? null : ["Копия сохранена; очистка отменена."]));
+                    return (new DestinationResult(destination, record, record is null ? "Доставка отменена или не начата." : null,
+                        record is null ? null : ["Копия сохранена; очистка отменена."]), true);
                 }
                 catch (Exception ex)
                 {
                     var error = ex is IOException && target.StorageKind != StorageKind.Ftp && File.Exists(target.DestinationDirectory)
                         ? "Вместо папки копий указан файл. Выберите другую папку в настройках хранилища." : ex.Message;
-                    results.Add(new DestinationResult(destination, record, record is null ? error : null,
-                        record is null ? null : ["Копия сохранена; очистка: " + ex.Message]));
+                    return (new DestinationResult(destination, record, record is null ? error : null,
+                        record is null ? null : ["Копия сохранена; очистка: " + ex.Message]), false);
                 }
+                finally { if (acquired) deliveries.Release(); }
             }
-            return new MultipleBackupCompletion(results, cancelled ||
-                cancellationToken.IsCancellationRequested && results.Any(result => result.Error is not null));
         }
         finally { gate.Release(); }
     }
