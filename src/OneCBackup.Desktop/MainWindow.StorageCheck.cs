@@ -29,12 +29,18 @@ public partial class MainWindow
             var all = report.TemporaryError is null && passed == job.StorageJobs.Count && !report.Cancelled;
             StorageCheckResults.Header = report.Cancelled ? "Проверка отменена: " + job.Name
                 : all ? "Все хранилища доступны: " + job.Name : $"Проверено хранилищ: {passed} из {job.StorageJobs.Count} — {job.Name}";
-            StorageCheckDetails.Text = "Задание: " + job.Name + "\nВременная папка: " + report.TemporaryDirectory + "\n"
-                + (report.TemporaryError is null ? "Запись и чтение временного файла проверены." : "Ошибка временной папки: " + report.TemporaryError)
-                + "\n\n" + string.Join("\n\n", report.Destinations.Select(result => result.Destination + "\n"
-                    + (result.Succeeded ? "Запись, чтение и удаление проверены." : result.Error)))
-                + (report.Destinations.Count == 0 ? "\nХранилища не проверены." : "")
-                + "\n\nЭто проверка доступа. Создание копии базы проверяется отдельным запуском.";
+            var details = new List<string> { "Задание: " + job.Name };
+            if (report.TemporaryError is not null)
+                details.Add("Ошибка временной папки: " + report.TemporaryDirectory + "\n" + report.TemporaryError);
+            details.AddRange(report.Destinations.Where(result => !result.Succeeded)
+                .Select(result => result.Destination + "\nОшибка: " + result.Error));
+            if (report.TemporaryError is null)
+                details.Add("Временная папка: " + report.TemporaryDirectory + "\nЗапись и чтение временного файла проверены.");
+            details.AddRange(report.Destinations.Where(result => result.Succeeded)
+                .Select(result => result.Destination + "\nЗапись, чтение и удаление проверены."));
+            if (report.Destinations.Count == 0) details.Add("Хранилища не проверены.");
+            details.Add("Это проверка доступа. Создание копии базы проверяется отдельным запуском.");
+            StorageCheckDetails.Text = string.Join("\n\n", details);
             StorageCheckResults.IsExpanded = !all;
             Status.Text = StorageCheckResults.Header.ToString();
         }

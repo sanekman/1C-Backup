@@ -75,7 +75,8 @@ public partial class MainWindow : Window
         {
             if (!persisting && activeRun is null && schedulingTask is null && !manualPending && copyVerification is null) return;
             e.Cancel = true;
-            Status.Text = "Остановите планировщик и дождитесь завершения операции или сохранения настроек перед закрытием программы.";
+            Status.Text = checkingStorages ? "Дождитесь завершения проверки хранилищ или нажмите «Отменить проверку» перед закрытием программы."
+                : "Остановите планировщик и дождитесь завершения операции или сохранения настроек перед закрытием программы.";
         };
         AgentModePicker.ItemsSource = new Dictionary<AgentMode, string>
         {

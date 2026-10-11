@@ -338,6 +338,9 @@ internal static class DesktopSmoke
             if (!Control<TextBox>("StorageCheckDetails").Text.Contains(blockedDirectory)
                 || Control<DataGrid>("Copies").Items.Count != copiesBeforeCheck || Control<DataGrid>("RunHistory").Items.Count != runsBeforeCheck)
                 throw new InvalidOperationException("Проверка доступа потеряла ошибку или изменила журнал копий / запусков.");
+            if (Control<TextBox>("StorageCheckDetails").Text.IndexOf(blockedDirectory, StringComparison.Ordinal)
+                > Control<TextBox>("StorageCheckDetails").Text.IndexOf(Path.Combine(DesktopPaths.DataDirectory, "copies"), StringComparison.Ordinal))
+                throw new InvalidOperationException("Ошибка хранилища скрыта ниже успешных результатов.");
             Screenshot("storage-readiness-failure");
             Control<Expander>("StorageCheckResults").IsExpanded = false;
             Click("RunButton");
