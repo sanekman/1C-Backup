@@ -107,7 +107,9 @@
   <DataGrid Grid.Row="1" x:Name="Jobs" RowHeight="30" ColumnHeaderHeight="30" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
    SelectionChanged="Jobs_SelectionChanged" MouseDoubleClick="Jobs_DoubleClick" CanUserAddRows="False">
    <DataGrid.Columns>
-    <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" MinWidth="180" />
+    <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" MinWidth="160">
+     <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding Name}" /></Style></DataGridTextColumn.ElementStyle>
+    </DataGridTextColumn>
     <DataGridTemplateColumn Header="Тип" Width="100">
      <DataGridTemplateColumn.CellTemplate><DataTemplate>
       <ContentControl Content="{Binding Kind}" ContentTemplate="{StaticResource DatabaseKindLabel}" />

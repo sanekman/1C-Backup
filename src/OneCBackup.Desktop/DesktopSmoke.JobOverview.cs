@@ -7,7 +7,7 @@ namespace OneCBackup.Desktop;
 
 internal static partial class DesktopSmoke
 {
-    private static Task VerifyJobOverviewAsync(MainWindow window, Action<string> screenshot)
+    private static async Task VerifyJobOverviewAsync(MainWindow window, Action<string> screenshot)
     {
         var grid = (DataGrid)window.FindName("Jobs");
         var savedItems = grid.ItemsSource;
@@ -62,9 +62,13 @@ internal static partial class DesktopSmoke
             window.LatestJobRuns = overview;
             grid.ScrollIntoView(jobs[0]);
             window.UpdateLayout();
+            await window.Dispatcher.InvokeAsync(window.UpdateLayout, System.Windows.Threading.DispatcherPriority.ContextIdle);
+            window.LatestJobRuns = overview;
+            window.UpdateLayout();
+            screenshot("jobs-latest-results-compact");
             var scroll = FindDescendant<ScrollViewer>(grid);
             if (scroll is null || scroll.ExtentWidth > scroll.ViewportWidth + 1)
-                throw new InvalidOperationException("Таблица заданий требует горизонтальной прокрутки в компактном окне.");
+                throw new InvalidOperationException($"Таблица заданий требует горизонтальной прокрутки: extent={scroll?.ExtentWidth}, viewport={scroll?.ViewportWidth}, visibility={scroll?.ComputedHorizontalScrollBarVisibility}.");
             if (!ReferenceEquals(grid.SelectedItem, jobs[1])) throw new InvalidOperationException("Обновление результатов сбросило выбор задания.");
             screenshot("jobs-latest-results-compact");
         }
@@ -76,7 +80,6 @@ internal static partial class DesktopSmoke
             grid.SelectedItem = savedSelection;
             window.UpdateLayout();
         }
-        return Task.CompletedTask;
     }
 
     private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
