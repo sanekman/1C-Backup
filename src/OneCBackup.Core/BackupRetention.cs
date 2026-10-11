@@ -55,6 +55,8 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
     public async Task<CompletedBackup> CompleteAsync(BackupJob job, string completedBackupPath, string stagingDirectory,
         DateTimeOffset completedUtc, CancellationToken cancellationToken = default)
     {
+        if (job.AdditionalDestinations?.Count > 0)
+            throw new InvalidOperationException("Для нескольких хранилищ используйте CompleteManyAsync.");
         await gate.WaitAsync(cancellationToken);
         try
         {
@@ -103,7 +105,9 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                 }
                 catch (Exception ex)
                 {
-                    results.Add(new DestinationResult(destination, record, record is null ? ex.Message : null,
+                    var error = ex is IOException && target.StorageKind != StorageKind.Ftp && File.Exists(target.DestinationDirectory)
+                        ? "Вместо папки копий указан файл. Выберите другую папку в настройках хранилища." : ex.Message;
+                    results.Add(new DestinationResult(destination, record, record is null ? error : null,
                         record is null ? null : ["Копия сохранена; очистка: " + ex.Message]));
                 }
             }

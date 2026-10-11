@@ -39,6 +39,7 @@ public partial class DestinationWindow : Window
     {
         if (FtpPanel is null || BrowseButton is null || PathHint is null) return;
         var kind = Storage.SelectedValue is StorageKind selected ? selected : StorageKind.LocalDirectory;
+        Height = kind == StorageKind.Ftp ? 540 : 340;
         FtpPanel.Visibility = kind == StorageKind.Ftp ? Visibility.Visible : Visibility.Collapsed;
         BrowseButton.Visibility = kind == StorageKind.Ftp ? Visibility.Collapsed : Visibility.Visible;
         PathHint.Text = kind switch
