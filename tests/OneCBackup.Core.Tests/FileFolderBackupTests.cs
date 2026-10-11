@@ -303,5 +303,32 @@ public sealed class FileFolderBackupTests : IDisposable
         Assert.Equal("keep", await File.ReadAllTextAsync(marker)); Assert.Equal(new[] { marker }, Directory.GetFileSystemEntries(RestoreParent));
     }
 
+    private sealed class RestoreProgress(Action<FileRestoreProgress> observe) : IProgress<FileRestoreProgress>
+    { public void Report(FileRestoreProgress value) => observe(value); }
+
+    [Fact]
+    public async Task RestoreReportsArchivesAndFinalVerificationAndCanCancelBeforePublishing()
+    {
+        var file = Path.Combine(Source, "a.txt"); await File.WriteAllTextAsync(file, "before"); await Run();
+        await File.WriteAllTextAsync(file, "after"); var increment = await Run();
+        var observed = new List<FileRestoreProgress>();
+        var result = await Restorer().RestoreAsync(increment, Job, RestoreParent, progress: new RestoreProgress(observed.Add));
+        Assert.Equal(2, result.Archives);
+        Assert.Contains(observed, value => value.Phase == FileRestorePhase.TransferringArchive && value.ArchiveNumber == 1);
+        Assert.Contains(observed, value => value.Phase == FileRestorePhase.VerifyingArchive && value.ArchiveNumber == 2 && value.Completed == value.Total);
+        Assert.Contains(observed, value => value.Phase == FileRestorePhase.ApplyingSnapshot && value.ArchiveNumber == 2 && value.Completed == 1);
+        Assert.Contains(observed, value => value.Phase == FileRestorePhase.VerifyingFiles && value.Completed == value.Total);
+        Assert.Equal(FileRestorePhase.Completed, observed.Last().Phase);
+        Assert.All(observed, value => { Assert.InRange(value.ArchiveNumber, 1, 2); Assert.Equal(2, value.Archives); Assert.InRange(value.Completed, 0, value.Total); });
+        using var cancellation = new CancellationTokenSource(); var cancelled = new List<FileRestoreProgress>();
+        var before = JsonSerializer.Serialize(await catalog.ReadAsync());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Restorer().RestoreAsync(increment, Job, RestoreParent, cancellation.Token,
+            progress: new RestoreProgress(value => { cancelled.Add(value); if (value.Phase == FileRestorePhase.Publishing) cancellation.Cancel(); })));
+        Assert.DoesNotContain(cancelled, value => value.Phase == FileRestorePhase.Completed);
+        Assert.Equal(new[] { result.Directory }, Directory.GetDirectories(RestoreParent));
+        Assert.Empty(Directory.GetDirectories(Job.TemporaryDirectory!, "file-restore-*"));
+        Assert.Equal(before, JsonSerializer.Serialize(await catalog.ReadAsync()));
+    }
+
     public void Dispose() => Directory.Delete(root, recursive: true);
 }

@@ -156,6 +156,7 @@ internal static class FileBackupPaths
             token.ThrowIfCancellationRequested(); RejectReparse(directory);
             foreach (var child in Directory.EnumerateFileSystemEntries(directory))
             {
+                token.ThrowIfCancellationRequested();
                 RejectReparse(child);
                 var relative = Path.GetRelativePath(source, child).Replace(Path.DirectorySeparatorChar, '/');
                 FileBackupManifest.ValidateRelativePath(relative);

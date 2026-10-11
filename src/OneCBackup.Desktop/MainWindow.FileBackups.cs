@@ -41,16 +41,56 @@ public partial class MainWindow
         var job = jobs.FirstOrDefault(job => job.Id == row.Record.JobId); if (job is null) return;
         using var lease = AcquireEngineOrReport(); if (lease is null) { CopyVerificationStatus.Text = Status.Text; return; }
         using var cancellation = new CancellationTokenSource(); copyVerification = cancellation; UpdateRunControls();
-        CopyVerificationStatus.Text = "Проверяется цепочка и восстанавливаются файлы в новую папку. Исходные данные не изменяются.";
+        CopyVerificationStatus.Text = Status.Text = "Проверяется цепочка и восстанавливаются файлы в новую папку. Исходные данные не изменяются.";
+        var progress = BeginFileRestoreProgress();
         try
         {
             var result = await Task.Run(() => new FileBackupRestorer(backupStorage, catalog, Path.Combine(DesktopPaths.DataDirectory, "work"), new WindowsArchivePasswordStore())
-                .RestoreAsync(row.Record, job, parentDirectory, cancellation.Token, passwordOverride));
+                .RestoreAsync(row.Record, job, parentDirectory, cancellation.Token, passwordOverride, progress));
             CopyVerificationStatus.Text = $"Восстановлено файлов: {result.Files}; архивов в цепочке: {result.Archives}. Папка: {result.Directory}";
+            Status.Text = $"Файлы восстановлены в новую папку. Файлов: {result.Files}; архивов: {result.Archives}.";
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        { CopyVerificationStatus.Text = "Восстановление отменено. Исходные данные и копии сохранены."; }
-        catch (Exception ex) { CopyVerificationStatus.Text = "Не удалось восстановить файлы: " + ex.Message; }
-        finally { copyVerification = null; UpdateRunControls(); }
+        { CopyVerificationStatus.Text = Status.Text = "Восстановление отменено. Исходные данные и копии сохранены."; }
+        catch (Exception ex) { CopyVerificationStatus.Text = Status.Text = "Не удалось восстановить файлы: " + ex.Message; }
+        finally { EndCopyExportProgress(); copyVerification = null; UpdateRunControls(); }
+    }
+
+    internal Action<FileRestoreProgress>? FileRestoreProgressObserved { get; set; }
+    private IProgress<FileRestoreProgress> BeginFileRestoreProgress()
+    {
+        BeginCopyExportProgress();
+        var generation = exportProgressGeneration;
+        latestFileRestoreProgress = new(FileRestorePhase.PreparingArchive, 0, 0, 0, 0);
+        RenderCopyExportProgress();
+        return new Progress<FileRestoreProgress>(value =>
+        {
+            if (generation != exportProgressGeneration) return;
+            latestFileRestoreProgress = value; RenderCopyExportProgress(); FileRestoreProgressObserved?.Invoke(value);
+        });
+    }
+    private void RenderFileRestoreProgress(FileRestoreProgress value)
+    {
+        var time = exportClock.Elapsed.TotalHours >= 1 ? exportClock.Elapsed.ToString(@"h\:mm\:ss") : exportClock.Elapsed.ToString(@"mm\:ss");
+        var phase = value.Phase switch
+        {
+            FileRestorePhase.TransferringArchive => "Получение архива",
+            FileRestorePhase.VerifyingArchive => "Проверка SHA-256 архива",
+            FileRestorePhase.ApplyingSnapshot => "Сборка файлов",
+            FileRestorePhase.VerifyingFiles => "Итоговая проверка файлов",
+            FileRestorePhase.Publishing => "Сохранение готовой папки",
+            FileRestorePhase.Completed => "Файлы восстановлены",
+            _ => "Подключение к хранилищу"
+        };
+        var filePhase = value.Phase is FileRestorePhase.ApplyingSnapshot or FileRestorePhase.VerifyingFiles;
+        var bytesPhase = value.Phase is FileRestorePhase.TransferringArchive or FileRestorePhase.VerifyingArchive;
+        var units = bytesPhase ? $"{ExportSize(value.Completed)} из {ExportSize(value.Total)}"
+            : filePhase ? $"файлов: {value.Completed} из {value.Total}" : "";
+        var cancelled = copyVerification?.IsCancellationRequested == true;
+        CopyExportProgressLabel.Text = cancelled ? "Отмена восстановления: ожидается остановка и очистка временных файлов · " + time
+            : phase + (value.Archives > 0 ? $" · архив {value.ArchiveNumber} из {value.Archives}" : "")
+                + (units.Length > 0 ? " · " + units : "") + " · " + time;
+        CopyExportProgressBar.IsIndeterminate = cancelled || value.Total == 0 || !bytesPhase && !filePhase;
+        CopyExportProgressBar.Value = value.Total == 0 ? 0 : Math.Clamp((double)value.Completed / value.Total, 0, 1);
     }
 }

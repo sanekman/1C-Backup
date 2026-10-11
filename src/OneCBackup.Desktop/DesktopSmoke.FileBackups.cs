@@ -95,9 +95,23 @@ internal static partial class DesktopSmoke
         }
         finally { window.CopyExportDialogOverride = null; }
         var parent = Path.Combine(fixture, "ordinary-restores"); Directory.CreateDirectory(parent);
-        await window.RestoreSelectedFilesAsync(parent);
+        var restoreProgress = new List<FileRestoreProgress>();
+        var progressCaptured = false;
+        window.FileRestoreProgressObserved = value =>
+        {
+            restoreProgress.Add(value);
+            if (!progressCaptured && value.Phase == FileRestorePhase.VerifyingFiles)
+            { progressCaptured = true; screenshot("files-restore-progress-compact"); }
+        };
+        try { await window.RestoreSelectedFilesAsync(parent); }
+        finally { window.FileRestoreProgressObserved = null; }
         if (!Control<TextBlock>("CopyVerificationStatus").Text.Contains("Восстановлено файлов: 3; архивов в цепочке: 2"))
             throw new InvalidOperationException(Control<TextBlock>("CopyVerificationStatus").Text);
+        if (!restoreProgress.Any(value => value.Phase == FileRestorePhase.TransferringArchive)
+            || !restoreProgress.Any(value => value.Phase == FileRestorePhase.VerifyingFiles)
+            || Control<Border>("CopyExportProgressPanel").Visibility != Visibility.Collapsed
+            || !Control<TextBlock>("Status").Text.Contains("Файлы восстановлены"))
+            throw new InvalidOperationException("Ход или конечный результат восстановления не показан в интерфейсе.");
         var restored = Directory.GetDirectories(parent).Single();
         if (await File.ReadAllTextAsync(Path.Combine(restored, "stable.txt")) != "unchanged"
             || await File.ReadAllTextAsync(Path.Combine(restored, "change.txt")) != "after"

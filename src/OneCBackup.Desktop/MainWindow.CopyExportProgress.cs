@@ -10,6 +10,7 @@ public partial class MainWindow
     private readonly Stopwatch exportClock = new();
     private readonly DispatcherTimer exportProgressTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private BackupExportProgress? latestExportProgress;
+    private FileRestoreProgress? latestFileRestoreProgress;
     private int exportProgressGeneration;
     internal Action<BackupExportProgress>? CopyExportProgressObserved { get; set; }
 
@@ -17,6 +18,7 @@ public partial class MainWindow
     {
         var generation = ++exportProgressGeneration;
         latestExportProgress = null;
+        latestFileRestoreProgress = null;
         exportClock.Restart();
         CopyExportProgressPanel.Visibility = Visibility.Visible;
         CopyExportProgressBar.IsIndeterminate = true;
@@ -37,6 +39,7 @@ public partial class MainWindow
 
     private void RenderCopyExportProgress()
     {
+        if (latestFileRestoreProgress is { } restore) { RenderFileRestoreProgress(restore); return; }
         var value = latestExportProgress;
         var elapsed = exportClock.Elapsed;
         var time = elapsed.TotalHours >= 1 ? elapsed.ToString(@"h\:mm\:ss") : elapsed.ToString(@"mm\:ss");
