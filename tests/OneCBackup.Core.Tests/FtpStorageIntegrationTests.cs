@@ -77,6 +77,33 @@ public sealed class FtpStorageIntegrationTests : IDisposable
         Assert.Equal(2, (await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync()).Count);
     }
 
+    [FtpFact]
+    public async Task OneArchiveReachesFtpAndLocalFolderWithIndependentRetention()
+    {
+        var source = Path.Combine(directory, "multi-database");
+        Directory.CreateDirectory(source);
+        await File.WriteAllTextAsync(Path.Combine(source, "1Cv8.1CD"), "multi-destination fixture");
+        var localDirectory = Path.Combine(directory, "local-copies");
+        var job = Job with { Source = source, OneCMethod = OneCBackupMethod.FileArchive, KeepLast = 1,
+            AdditionalDestinations = [new BackupDestination { DestinationDirectory = localDirectory }] };
+        var catalog = new BackupCatalog(Path.Combine(directory, "multi-catalog.json"));
+        var router = new RoutedBackupStorage(new FixtureCredentials(), Path.Combine(directory, "verify"));
+        var runner = new LocalBackupRunner(new OneCFileArchiveExecutor(), new BackupCompletion(router, catalog),
+            new BackupRunHistory(Path.Combine(directory, "multi-runs.json")), Path.Combine(directory, "work"));
+        for (var index = 0; index < 3; index++)
+        {
+            var run = await runner.RunAsync(job);
+            Assert.Equal(BackupRunStatus.Succeeded, run.Status);
+            Assert.Equal(2, run.Destinations!.Count);
+        }
+        var records = await catalog.ReadAsync();
+        Assert.Equal(2, records.Count);
+        Assert.Equal(records[0].Backup.Sha256, records[1].Backup.Sha256);
+        Assert.Single(Directory.GetFiles(localDirectory));
+        Assert.Single(Directory.GetFiles(Path.Combine(RemoteRoot, remoteDirectory.TrimStart('/'))));
+        foreach (var record in records) await new BackupCopyVerifier(router).VerifyAsync(record, job);
+    }
+
     private sealed class FixtureCredentials : IFtpCredentialStore
     {
         public Task<NetworkCredential> GetAsync(string key, CancellationToken token)

@@ -63,6 +63,26 @@ public sealed class LocalAgentHostTests : IDisposable
     }
 
     [Fact]
+    public async Task PartialManualDeliveryKeepsLocalCopyAndReturnsFailureToTheCaller()
+    {
+        var job = (await CreateJob()) with { AdditionalDestinations = [new BackupDestination
+        {
+            StorageKind = StorageKind.Ftp, DestinationDirectory = "/backups",
+            Ftp = new FtpSettings { Host = "localhost", CredentialKey = "unavailable" }
+        }] };
+        await new JobStore(Path.Combine(directory, "jobs.json")).SaveAsync([job]);
+        var host = new LocalAgentHost(directory, new DatabaseBackupExecutor(new BackupProcessRunner()), new NoCredentials());
+        Assert.Equal(1, await host.RunAsync(job.Id));
+        var run = Assert.Single(await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync());
+        Assert.Equal(BackupRunStatus.PartiallySucceeded, run.Status);
+        Assert.Equal(2, run.Destinations!.Count);
+        var record = Assert.Single(await new BackupCatalog(Path.Combine(directory, "copies.json")).ReadAsync());
+        Assert.True(File.Exists(record.Backup.Location));
+        Assert.Equal(LocalAgentPhase.Faulted, (await new LocalAgentControlStore(directory).ReadAsync())!.Phase);
+        Assert.False(new BackupEngineCoordinator(directory).IsHeldElsewhere());
+    }
+
+    [Fact]
     public async Task StopCancelsRunningBackupAndWaitsForItsTerminalHistory()
     {
         var job = await CreateJob();

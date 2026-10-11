@@ -52,6 +52,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        AdditionalStorageList.ItemsSource = additionalDestinations;
+        additionalDestinations.CollectionChanged += (_, _) => AdditionalStorageOptions.Header =
+            $"Копировать также в другие хранилища ({additionalDestinations.Count})";
         JobEditor.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent, new TextChangedEventHandler(EditorFieldChanged));
         JobEditor.AddHandler(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent, new SelectionChangedEventHandler(EditorFieldChanged));
         JobEditor.AddHandler(System.Windows.Controls.Primitives.ToggleButton.CheckedEvent, new RoutedEventHandler(EditorFieldChanged));
@@ -180,6 +183,7 @@ public partial class MainWindow : Window
         {
             Id = editingId ?? Guid.NewGuid(), Name = JobName.Text.Trim(), Kind = (DatabaseKind)Kind.SelectedItem,
             Source = Source.Text.Trim(), DestinationDirectory = Destination.Text.Trim(),
+            AdditionalDestinations = additionalDestinations.Count == 0 ? null : additionalDestinations.ToArray(),
             DailyAt = times[0], AdditionalDailyTimes = times.Length > 1 ? times.Skip(1).ToArray() : null,
             TimeZoneId = Zone.Text.Trim(), KeepLast = keep, Enabled = Enabled.IsChecked == true,
             ArchiveCopies = ArchiveCopies.IsChecked == true,
@@ -301,6 +305,8 @@ public partial class MainWindow : Window
         JobName.Text = job.Name; Kind.SelectedItem = job.Kind; Source.Text = job.Source;
         OneCMethodPicker.SelectedValue = job.OneCMethod;
         Destination.Text = job.DestinationDirectory;
+        additionalDestinations.Clear();
+        foreach (var destination in job.AdditionalDestinations ?? []) additionalDestinations.Add(destination);
         DailyAt.Text = string.Join(", ", job.ScheduledTimes.Select(time => time.ToString("HH:mm", CultureInfo.InvariantCulture)));
         KeepLast.Text = job.KeepLast.ToString(); Enabled.IsChecked = job.Enabled;
         archivePasswordKey = job.ArchivePasswordKey;
@@ -324,6 +330,7 @@ public partial class MainWindow : Window
         JobSearch.Clear();
         Jobs.SelectedItem = null; editingId = null; Zone.Text = TimeZoneInfo.Local.Id;
         JobName.Clear(); Source.Clear(); Destination.Clear(); Kind.SelectedItem = DatabaseKind.OneCFile;
+        additionalDestinations.Clear();
         OneCMethodPicker.SelectedValue = OneCBackupMethod.FileArchive;
         OneCExecutable.Clear(); OneCTimeout.Text = "120";
         SqlBackupServer.Clear(); SqlServerDirectory.Clear(); SqlAgentDirectory.Clear(); SqlBackupTimeout.Text = "120";
@@ -395,7 +402,7 @@ public partial class MainWindow : Window
             Copies.SelectedItem is BackupCopyRow selected && jobs.Any(job => job.Id == selected.Record.JobId);
         ExtractOneCButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null &&
             Copies.SelectedItem is BackupCopyRow extractable && jobs.Any(job => job.Id == extractable.Record.JobId &&
-                job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.FileArchive && job.StorageKind != StorageKind.Ftp);
+                CanExtractCopy(extractable.Record, job));
         CancelCopyVerificationButton.IsEnabled = copyVerification is { IsCancellationRequested: false };
         OpenCopyDirectoryButton.IsEnabled = ready && Copies.SelectedItem is BackupCopyRow { CanOpenDirectory: true };
         StartBackgroundButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null && !editorOpen;
@@ -611,7 +618,7 @@ public partial class MainWindow : Window
         {
             view.Filter = item => item is BackupRun run && (filter switch
             {
-                "problems" => run.Status is BackupRunStatus.Failed or BackupRunStatus.Cancelled or BackupRunStatus.Interrupted,
+                "problems" => run.Status is BackupRunStatus.Failed or BackupRunStatus.Cancelled or BackupRunStatus.Interrupted or BackupRunStatus.PartiallySucceeded,
                 "succeeded" => run.Status == BackupRunStatus.Succeeded,
                 "running" => run.Status == BackupRunStatus.Running,
                 _ => true
@@ -636,6 +643,8 @@ public partial class MainWindow : Window
             $"Задание: {run.JobName}\nРезультат: {run.StatusDescription}\n"
             + (run.Error is null ? "" : "Ошибка: " + run.Error + "\n")
             + (run.Warnings?.Count > 0 ? "Предупреждения:\n" + string.Join("\n", run.Warnings) + "\n" : "")
+            + (run.Destinations is null ? "" : "Доставка по хранилищам:\n" + string.Join("\n", run.Destinations.Select(destination =>
+                destination.Destination + ": " + (destination.Record is null ? destination.Error : "Сохранено · " + destination.Record.Backup.Location))) + "\n")
             + (run.Backup is null ? "" : $"Копия: {run.Backup.Location}\nРазмер: {run.Backup.Length} байт\n")
             + $"Начало: {run.StartedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n"
             + $"Окончание: {run.FinishedUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}\n"

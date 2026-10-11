@@ -1,16 +1,19 @@
 namespace OneCBackup.Core;
 
-public enum BackupRunStatus { Running, Succeeded, Failed, Cancelled, Interrupted }
+public enum BackupRunStatus { Running, Succeeded, Failed, Cancelled, Interrupted, PartiallySucceeded }
 
 public sealed record BackupRun(Guid RunId, Guid JobId, string JobName, DateTimeOffset StartedUtc,
     DateTimeOffset? FinishedUtc, BackupRunStatus Status, string WorkDirectory,
     StoredBackup? Backup = null, string? Error = null, IReadOnlyList<string>? Warnings = null)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<DestinationResult>? Destinations { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public string StatusDescription => Status switch
     {
         BackupRunStatus.Running => "Выполняется", BackupRunStatus.Succeeded => "Успешно",
-        BackupRunStatus.Cancelled => "Отменено", BackupRunStatus.Interrupted => "Прервано", _ => "Ошибка"
+        BackupRunStatus.Cancelled => "Отменено", BackupRunStatus.Interrupted => "Прервано",
+        BackupRunStatus.PartiallySucceeded => "Частично", _ => "Ошибка"
     };
     [System.Text.Json.Serialization.JsonIgnore]
     public string Details => Error ?? (Warnings?.Count > 0 ? string.Join(" ", Warnings) : Backup?.Location ?? "");

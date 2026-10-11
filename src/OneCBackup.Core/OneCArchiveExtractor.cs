@@ -12,6 +12,7 @@ public sealed class OneCArchiveExtractor(IArchivePasswordStore? passwords = null
         CancellationToken cancellationToken = default, string? passwordOverride = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        job = BackupCopyVerifier.GetStorageJob(record, job);
         if (job.Kind != DatabaseKind.OneCFile || job.OneCMethod != OneCBackupMethod.FileArchive ||
             job.StorageKind is not (StorageKind.LocalDirectory or StorageKind.NetworkShare))
             throw new NotSupportedException("Извлечение поддерживает ZIP файла 1Cv8.1CD на локальном диске или в сетевой папке.");

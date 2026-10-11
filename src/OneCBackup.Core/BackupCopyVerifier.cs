@@ -7,6 +7,7 @@ public sealed class BackupCopyVerifier(IBackupStorage storage)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidateRecord(record, job);
+        job = GetStorageJob(record, job);
         await storage.PrepareAsync(job, cancellationToken);
         await storage.VerifyAsync(record.Backup, job, cancellationToken);
     }
@@ -17,8 +18,17 @@ public sealed class BackupCopyVerifier(IBackupStorage storage)
             throw new InvalidDataException("Копия принадлежит другому заданию.");
         var errors = job.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
-        if (!string.Equals(record.StorageIdentity, StorageAddress.Identity(job), StringComparison.Ordinal))
-            throw new InvalidDataException("Хранилище задания изменено. Для проверки этой копии нужны прежние настройки хранилища.");
+        job = GetStorageJob(record, job);
         return StorageAddress.ValidateLocation(job, record.Backup);
+    }
+
+    public static BackupJob GetStorageJob(BackupRecord record, BackupJob job)
+    {
+        if (record.JobId != job.Id) throw new InvalidDataException("Копия принадлежит другому заданию.");
+        var errors = job.Validate();
+        if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
+        return job.StorageJobs.FirstOrDefault(target => string.Equals(record.StorageIdentity,
+            StorageAddress.Identity(target), StringComparison.Ordinal))
+            ?? throw new InvalidDataException("Хранилище задания изменено. Для проверки этой копии нужны прежние настройки хранилища.");
     }
 }

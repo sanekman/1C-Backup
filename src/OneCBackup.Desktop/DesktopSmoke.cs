@@ -44,14 +44,42 @@ internal static class DesktopSmoke
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 window.UpdateLayout();
             }
-            void Screenshot(string name)
+            void Screenshot(string name, Window? target = null)
             {
-                window.UpdateLayout();
-                var bitmap = new RenderTargetBitmap((int)Math.Ceiling(window.ActualWidth), (int)Math.Ceiling(window.ActualHeight),
+                target ??= window;
+                target.UpdateLayout();
+                var bitmap = new RenderTargetBitmap((int)Math.Ceiling(target.ActualWidth), (int)Math.Ceiling(target.ActualHeight),
                     96, 96, PixelFormats.Pbgra32);
-                bitmap.Render(window);
+                bitmap.Render(target);
                 var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
                 using var file = File.Create(Path.Combine(output, name + ".png")); encoder.Save(file);
+            }
+            void SetAdditionalStorage(string directory, bool edit = false, bool checkRequired = false)
+            {
+                Control<Expander>("AdditionalStorageOptions").IsExpanded = true;
+                window.UpdateLayout();
+                Control<Button>(edit ? "EditStorageButton" : "AddStorageButton").BringIntoView();
+                Exception? dialogFailure = null;
+                _ = window.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    var dialog = Application.Current.Windows.OfType<DestinationWindow>().Single();
+                    try
+                    {
+                        var save = (Button)dialog.FindName("SaveButton");
+                        if (checkRequired)
+                        {
+                            save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                            if (((TextBlock)dialog.FindName("Status")).Text.Length == 0)
+                                throw new InvalidOperationException("Пустое дополнительное хранилище принято.");
+                        }
+                        ((TextBox)dialog.FindName("Destination")).Text = directory;
+                        Screenshot("additional-storage-dialog", dialog);
+                        save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    }
+                    catch (Exception ex) { dialogFailure = ex; dialog.Close(); }
+                }));
+                Click(edit ? "EditStorageButton" : "AddStorageButton");
+                if (dialogFailure is not null) throw dialogFailure;
             }
             void AssertVisibleFooter(string buttonName)
             {
@@ -82,7 +110,17 @@ internal static class DesktopSmoke
             if (!Control<TextBlock>("WizardError").IsVisible || !Control<StackPanel>("StorageStep").IsVisible)
                 throw new InvalidOperationException("Пустая папка копий не остановила мастер.");
             Control<TextBox>("Destination").Text = Path.Combine(DesktopPaths.DataDirectory, "copies");
+            var secondaryDirectory = Path.Combine(DesktopPaths.DataDirectory, "second-copies");
+            SetAdditionalStorage(secondaryDirectory, checkRequired: true);
+            Control<ListBox>("AdditionalStorageList").SelectedIndex = 0;
+            SetAdditionalStorage(Control<TextBox>("Destination").Text, edit: true);
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WizardError").Text.Contains("несколько раз") || !Control<StackPanel>("StorageStep").IsVisible)
+                throw new InvalidOperationException("Повторное хранилище не остановило мастер.");
+            SetAdditionalStorage(secondaryDirectory, edit: true);
+            Screenshot("wizard-multiple-storage");
             Control<Expander>("ArchiveOptions").IsExpanded = true;
+            Control<Button>("ArchivePasswordButton").BringIntoView();
             _ = window.Dispatcher.BeginInvoke(new Action(() =>
             {
                 var passwordDialog = Application.Current.Windows.OfType<ArchivePasswordWindow>().Single();
@@ -131,9 +169,13 @@ internal static class DesktopSmoke
             Click("RunButton");
             await WaitUntil(() => Control<DataGrid>("RunHistory").Items.OfType<BackupRun>().Any(run => run.Status == BackupRunStatus.Succeeded)
                 && window.SmokeReady, "Копия не создана через интерфейс.");
-            if (!Control<TextBlock>("SelectedJobSummary").Text.Contains("Копия создана.")
+            if (!Control<TextBlock>("SelectedJobSummary").Text.Contains("во все 2 хранилища")
                 || Control<ProgressBar>("JobProgress").Visibility != Visibility.Collapsed)
                 throw new InvalidOperationException("После копирования не показан понятный итог или остался индикатор работы.");
+            var successfulCopies = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().ToArray();
+            if (successfulCopies.Length != 2 || successfulCopies[0].Sha256 != successfulCopies[1].Sha256
+                || !Directory.GetFiles(secondaryDirectory).Any())
+                throw new InvalidOperationException("Один и тот же архив не доставлен в оба хранилища.");
             Click("ShowLatestCopyButton");
             await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Copies").SelectedItem is BackupCopyRow,
                 "Переход к последней копии не выбрал файл.");
@@ -198,7 +240,7 @@ internal static class DesktopSmoke
             // Select while the asynchronous refresh is pending; the refresh must keep the user's latest selection.
             Control<DataGrid>("Copies").SelectedIndex = 0;
             var selectedCopyId = (Control<DataGrid>("Copies").SelectedItem as BackupCopyRow)?.Record.Id;
-            await WaitUntil(() => Control<DataGrid>("Copies").Items.Count == 1 && window.SmokeReady, "Каталог копий не обновился.");
+            await WaitUntil(() => Control<DataGrid>("Copies").Items.Count == 2 && window.SmokeReady, "Каталог копий не обновился.");
             if (selectedCopyId is null || (Control<DataGrid>("Copies").SelectedItem as BackupCopyRow)?.Record.Id != selectedCopyId)
                 throw new InvalidOperationException("Обновление каталога сбросило выбранную пользователем копию.");
             Click("VerifyCopyButton");
@@ -221,10 +263,34 @@ internal static class DesktopSmoke
             // Cancelling edits must retain the saved model used by backup execution.
             Click("JobsNavigation"); Click("EditJobButton");
             Control<TextBox>("JobName").Text = "unsaved draft must be discarded";
+            Click("NextStepButton");
+            Control<Expander>("AdditionalStorageOptions").IsExpanded = true;
+            Control<ListBox>("AdditionalStorageList").SelectedIndex = 0;
+            Click("RemoveStorageButton");
             Click("CancelEditorButton");
             if (Control<DataGrid>("Jobs").SelectedItem is not BackupJob { Name: "Тестовая база 1С" }
                 || Control<TextBox>("JobName").Text != "Тестовая база 1С" || Control<Border>("EditorCard").IsVisible)
                 throw new InvalidOperationException("Отмена мастера изменила сохранённое задание.");
+            if (Control<ListBox>("AdditionalStorageList").Items.Count != 1
+                || ((BackupJob)Control<DataGrid>("Jobs").SelectedItem).AdditionalDestinations?.Count != 1)
+                throw new InvalidOperationException("Отмена удаления хранилища изменила сохранённые назначения.");
+            // One destination is a fixture file instead of a directory; the other two must still receive copies.
+            var blockedDirectory = Path.Combine(DesktopPaths.DataDirectory, "blocked-storage");
+            File.WriteAllText(blockedDirectory, "fixture file, not a directory");
+            Click("EditJobButton"); Click("NextStepButton");
+            SetAdditionalStorage(blockedDirectory);
+            Click("NextStepButton"); Click("NextStepButton"); Click("SaveButton");
+            await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled, "Третье хранилище не сохранено.");
+            Click("RunButton");
+            await WaitUntil(() => window.SmokeReady && Control<TextBlock>("SelectedJobSummary").Text.Contains("в 2 из 3 хранилищ"), "Частичная доставка не показана.");
+            if (Control<DataGrid>("Copies").Items.Count != 4)
+                throw new InvalidOperationException("Ошибка третьего хранилища помешала другим копиям.");
+            Click("ShowLatestRunButton");
+            await WaitUntil(() => Control<DataGrid>("RunHistory").SelectedItem is BackupRun { Status: BackupRunStatus.PartiallySucceeded }, "Не выбран частичный результат.");
+            Control<ComboBox>("HistoryStatusFilter").SelectedIndex = 1;
+            if (Control<DataGrid>("RunHistory").Items.Count != 2 || !Control<TextBox>("RunDetails").Text.Contains("Доставка по хранилищам:"))
+                throw new InvalidOperationException("Частичная ошибка не попала в фильтр проблем или потеряла результаты доставки.");
+            Screenshot("multiple-storage-partial-result");
             window.Width = 900; window.Height = 580;
             foreach (var navigation in new[] { "JobsNavigation", "CopiesNavigation", "HistoryNavigation", "AgentNavigation" })
             { Click(navigation); await Task.Delay(100); Screenshot("compact-" + navigation); }

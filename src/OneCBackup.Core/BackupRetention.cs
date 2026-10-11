@@ -36,6 +36,9 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
 }
 
 public sealed record CompletedBackup(BackupRecord Record, RetentionResult Retention);
+public sealed record DestinationResult(string Destination, BackupRecord? Record, string? Error,
+    IReadOnlyList<string>? Warnings = null);
+public sealed record MultipleBackupCompletion(IReadOnlyList<DestinationResult> Destinations, bool Cancelled);
 
 /// <summary>One coordinator per service: deliver, register success, then apply retention.</summary>
 public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catalog, IArchivePasswordStore? passwords = null)
@@ -45,7 +48,8 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
     {
         // Refuse before creating a plaintext dump when the password is unavailable.
         await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, cancellationToken);
-        await storage.PrepareAsync(job, cancellationToken);
+        // A missing FTP login must not prevent delivery to other independent destinations.
+        if (job.AdditionalDestinations?.Count is not > 0) await storage.PrepareAsync(job, cancellationToken);
     }
 
     public async Task<CompletedBackup> CompleteAsync(BackupJob job, string completedBackupPath, string stagingDirectory,
@@ -58,6 +62,53 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
             var record = await catalog.RegisterAsync(job, stored, completedUtc, cancellationToken);
             var retention = await new BackupRetention(catalog, storage).ApplyAsync(job, record, cancellationToken);
             return new CompletedBackup(record, retention);
+        }
+        finally { gate.Release(); }
+    }
+
+    public async Task<MultipleBackupCompletion> CompleteManyAsync(BackupJob job, string completedBackupPath,
+        string stagingDirectory, DateTimeOffset completedUtc, CancellationToken cancellationToken = default)
+    {
+        var errors = job.Validate();
+        if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            using var prepared = await new BackupDelivery(storage, passwords).PrepareFileAsync(job,
+                completedBackupPath, stagingDirectory, cancellationToken);
+            var results = new List<DestinationResult>();
+            var cancelled = false;
+            foreach (var target in job.StorageJobs)
+            {
+                var destination = new BackupDestination { StorageKind = target.StorageKind,
+                    DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp }.Description;
+                BackupRecord? record = null;
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await storage.PrepareAsync(target, cancellationToken);
+                    var stored = (await storage.StoreAsync(prepared.Path, target, cancellationToken))
+                        with { ArchivePasswordKey = job.ArchivePasswordKey };
+                    // A delivered file must enter the ledger even if cancellation was requested meanwhile.
+                    record = await catalog.RegisterAsync(target, stored, completedUtc, CancellationToken.None);
+                    var retention = await new BackupRetention(catalog, storage).ApplyAsync(target, record, cancellationToken);
+                    results.Add(new DestinationResult(destination, record, null,
+                        retention.Failures.Select(f => "Очистка: " + f.Error.Message).ToArray()));
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    cancelled = true;
+                    results.Add(new DestinationResult(destination, record, record is null ? "Доставка отменена или не начата." : null,
+                        record is null ? null : ["Копия сохранена; очистка отменена."]));
+                }
+                catch (Exception ex)
+                {
+                    results.Add(new DestinationResult(destination, record, record is null ? ex.Message : null,
+                        record is null ? null : ["Копия сохранена; очистка: " + ex.Message]));
+                }
+            }
+            return new MultipleBackupCompletion(results, cancelled ||
+                cancellationToken.IsCancellationRequested && results.Any(result => result.Error is not null));
         }
         finally { gate.Release(); }
     }

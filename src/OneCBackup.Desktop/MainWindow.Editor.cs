@@ -121,7 +121,8 @@ public partial class MainWindow
             var ftpAddress = Storage.SelectedValue is StorageKind.Ftp ? "\nFTP-сервер: " + FtpHost.Text.Trim() + ":" + FtpPort.Text.Trim()
                 + (FtpTls.IsChecked == true ? " (FTPS)" : " (без TLS)") : "";
             var zoneDescription = Schedule.SelectedValue is ScheduleKind.Manual ? "" : "\nЧасовой пояс: " + TimeZonePicker.Text;
-            WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nХранить: {KeepLast.Text.Trim()} успешных копий";
+            var extraDestinations = additionalDestinations.Count == 0 ? "" : "\nТакже отправлять:\n" + string.Join("\n", additionalDestinations.Select(destination => "• " + destination.Description));
+            WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}{extraDestinations}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nХранить: {KeepLast.Text.Trim()} успешных копий в каждом хранилище";
         }
         // Realize the scroll content before focusing a field on a newly opened step.
         UpdateLayout();
@@ -188,6 +189,7 @@ public partial class MainWindow
                 if (string.IsNullOrWhiteSpace(FtpCredentialKey.Text)) return RejectWizard("Нажмите «Настроить логин и пароль», чтобы сохранить доступ к FTP.", 1, FtpCredentialsButton);
             }
             var job = new BackupJob { Name = "check", Source = "check", DestinationDirectory = Destination.Text.Trim(), StorageKind = (StorageKind)Storage.SelectedValue,
+                AdditionalDestinations = additionalDestinations.Count == 0 ? null : additionalDestinations.ToArray(),
                 Ftp = Storage.SelectedValue is StorageKind.Ftp ? new FtpSettings { Host = FtpHost.Text.Trim(), Port = ftpPort, UseTls = FtpTls.IsChecked == true,
                     CredentialKey = FtpCredentialKey.Text.Trim() } : null };
             var errors = job.Validate();
@@ -233,7 +235,9 @@ public partial class MainWindow
             : latest.Status switch
             {
                 BackupRunStatus.Succeeded when latest.Warnings?.Count > 0 => "Копия создана, есть предупреждения. Откройте «Результат».",
+                BackupRunStatus.Succeeded when latest.Destinations is not null => $"Копия доставлена во все {latest.Destinations.Count} хранилища. Откройте «Результат».",
                 BackupRunStatus.Succeeded => "Копия создана. Откройте «Последняя копия», чтобы проверить её или найти файл.",
+                BackupRunStatus.PartiallySucceeded => $"Копия доставлена в {latest.Destinations?.Count(destination => destination.Record is not null)} из {latest.Destinations?.Count} хранилищ. Откройте «Результат» для ошибок доставки.",
                 BackupRunStatus.Cancelled => "Последний запуск отменён. Откройте «Результат» перед повторным запуском.",
                 BackupRunStatus.Interrupted => "Последний запуск прерван. Откройте «Результат» перед повторным запуском.",
                 _ => "Копирование завершилось с ошибкой. Откройте «Результат», чтобы узнать причину."

@@ -30,7 +30,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         var dispatcher = new LocalBackupDispatcher(store, async (job, token) =>
         {
             lastRun = await runner.RunAsync(job, token);
-            Volatile.Write(ref lastError, lastRun.Status == BackupRunStatus.Failed ? lastRun.Error : null);
+            Volatile.Write(ref lastError, lastRun.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded ? lastRun.Error : null);
             if (report is not null) await report(lastRun);
         });
 
@@ -95,11 +95,11 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             try { await Task.WhenAll(executionTask, controlTask, monitoringTask); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) { failure ??= ex; }
-            var error = failure?.Message ?? (manual is not null && lastRun?.Status == BackupRunStatus.Failed ? lastRun.Error : null);
+            var error = failure?.Message ?? (manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? lastRun.Error : null);
             await control.WriteAsync(state with { UpdatedUtc = DateTimeOffset.UtcNow,
                 Phase = error is null ? LocalAgentPhase.Stopped : LocalAgentPhase.Faulted, Error = error,
                 MonitoringError = Volatile.Read(ref monitorError) }, CancellationToken.None);
         }
-        return failure is not null || manual is not null && lastRun?.Status == BackupRunStatus.Failed ? 1 : 0;
+        return failure is not null || manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? 1 : 0;
     }
 }

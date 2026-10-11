@@ -16,6 +16,12 @@ public sealed record BackupJob
     public string DestinationDirectory { get; init; } = "";
     public StorageKind StorageKind { get; init; } = StorageKind.LocalDirectory;
     public FtpSettings? Ftp { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<BackupDestination>? AdditionalDestinations { get; init; }
+
+    [JsonIgnore]
+    public IReadOnlyList<BackupJob> StorageJobs => new[] { this with { AdditionalDestinations = null } }
+        .Concat((AdditionalDestinations ?? []).Select(destination => destination.ApplyTo(this))).ToArray();
     public TimeOnly DailyAt { get; init; } = new(23, 0);
     public IReadOnlyList<TimeOnly>? AdditionalDailyTimes { get; init; }
     public ScheduleKind ScheduleKind { get; init; } = ScheduleKind.Daily;
@@ -67,6 +73,33 @@ public sealed record BackupJob
             if (!destination.StartsWith('/') || destination.Contains('\\') ||
                 destination.Any(char.IsControl) || destination.Split('/').Contains(".."))
                 errors.Add("Для FTP укажите абсолютный каталог, например /backups, без переходов '..'.");
+        }
+        if (AdditionalDestinations is not null)
+        {
+            if (AdditionalDestinations.Count > 7) errors.Add("Можно указать не более 8 хранилищ для одного задания.");
+            for (var index = 0; index < Math.Min(AdditionalDestinations.Count, 7); index++)
+            {
+                var destinationSettings = AdditionalDestinations[index];
+                if (destinationSettings is null) { errors.Add("Не заданы параметры дополнительного хранилища."); continue; }
+                var target = destinationSettings.ApplyTo(this);
+                errors.AddRange(target.Validate().Select(error => $"Хранилище {index + 2}: {error}"));
+                if (target.StorageKind != StorageKind.Ftp && !Path.IsPathFullyQualified(target.DestinationDirectory))
+                    errors.Add($"Хранилище {index + 2}: укажите полный путь к папке.");
+            }
+            if (errors.Count == 0)
+            {
+                try
+                {
+                    var identities = StorageJobs.Select(target => target.StorageKind == StorageKind.Ftp
+                        ? StorageAddress.Identity(target with { Ftp = target.Ftp! with { UseTls = false } }) : "file:" + (OperatingSystem.IsWindows()
+                            ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.DestinationDirectory)).ToUpperInvariant()
+                            : Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.DestinationDirectory))));
+                    if (identities.Distinct(StringComparer.Ordinal).Count() != AdditionalDestinations.Count + 1)
+                        errors.Add("Одно и то же хранилище указано несколько раз.");
+                }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+                { errors.Add("Укажите корректные пути хранилищ."); }
+            }
         }
         if (ArchivePasswordKey is not null)
         {

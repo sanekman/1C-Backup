@@ -209,6 +209,12 @@
     <TextBlock Text="Пароль хранится в Windows. Защищённое соединение FTPS проверяет сертификат сервера."
      TextWrapping="Wrap" Margin="0,0,0,10" />
    </StackPanel>
+   <Expander x:Name="AdditionalStorageOptions" Header="Копировать также в другие хранилища (0)" Margin="0,8,0,0"><StackPanel Margin="0,8,0,0">
+    <TextBlock Text="Тот же файл будет отправлен во все хранилища. Число копий применяется отдельно к каждой папке; ошибка доставки не останавливает остальные." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />
+    <ListBox x:Name="AdditionalStorageList" DisplayMemberPath="Description" MaxHeight="120" Margin="0,0,0,8" SelectionChanged="AdditionalStorage_Changed" />
+    <WrapPanel><Button x:Name="AddStorageButton" Content="+ Добавить хранилище" Click="AddStorage_Click" /><Button x:Name="EditStorageButton" Content="Изменить" Click="EditStorage_Click" IsEnabled="False" Margin="8,0,0,0" /><Button x:Name="RemoveStorageButton" Content="Убрать" Click="RemoveStorage_Click" IsEnabled="False" Margin="8,0,0,0" /></WrapPanel>
+    <TextBlock Text="Изменения вступят в силу после сохранения задания. Удаление хранилища из списка не удаляет сохранённые файлы." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" />
+   </StackPanel></Expander>
 <Expander x:Name="ArchiveOptions" Header="Архивация и пароль" Margin="0,8,0,0"><StackPanel Margin="0,10,0,0">   <CheckBox x:Name="ArchiveCopies" Content="Архивировать копии в ZIP" Margin="0,0,0,8" />
    <CheckBox x:Name="EncryptArchive" Content="Шифровать ZIP паролем (AES-256)" Margin="0,0,0,8" Checked="Encryption_Changed" Unchecked="Encryption_Changed" />
    <Button x:Name="ArchivePasswordButton" Content="Задать новый пароль архива" HorizontalAlignment="Left" Padding="12,6" Click="ArchivePassword_Click" Margin="0,0,0,6" />
