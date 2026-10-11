@@ -367,6 +367,7 @@ public partial class MainWindow : Window
         OneCMethodPanel.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
         OneCPanel.Visibility = isOneC && !fileArchive ? Visibility.Visible : Visibility.Collapsed;
         SqlBackupPanel.Visibility = Kind.SelectedItem is DatabaseKind.SqlServer ? Visibility.Visible : Visibility.Collapsed;
+        if (SqlTemporaryHint is not null) SqlTemporaryHint.Visibility = SqlBackupPanel.Visibility;
         PostgresBackupPanel.Visibility = Kind.SelectedItem is DatabaseKind.PostgreSql ? Visibility.Visible : Visibility.Collapsed;
         FileArchiveHint.Visibility = fileArchive ? Visibility.Visible : Visibility.Collapsed;
         ArchiveCopies.IsEnabled = !fileArchive;
