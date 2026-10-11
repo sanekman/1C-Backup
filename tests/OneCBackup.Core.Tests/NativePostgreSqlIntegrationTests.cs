@@ -53,8 +53,10 @@ public sealed class NativePostgreSqlIntegrationTests
                 "--auth=scram-sha-256", "--pwfile=" + passwordFile, "--encoding=UTF8", "--locale=C"]);
             initialized = true;
             File.Delete(passwordFile);
+            // The background server can inherit redirected pipe handles on Windows.
+            // pg_ctl reports readiness itself; server diagnostics go to its private log.
             await NativeSqlTestTools.RunAsync(Tool("pg_ctl"), ["start", "-D", cluster, "-w", "-t", "60",
-                "-l", Path.Combine(root, "postgres.log"), "-o", $"-h 127.0.0.1 -p {port}"]);
+                "-l", Path.Combine(root, "postgres.log"), "-o", $"-h 127.0.0.1 -p {port}"], captureOutput: false);
             foreach (var pair in environment) Environment.SetEnvironmentVariable(pair.Key, pair.Value);
             await Sql("postgres", "CREATE DATABASE source_fixture;");
             await Sql("source_fixture", "CREATE TABLE backup_fixture (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO backup_fixture VALUES (1,'first'),(2,'second');");

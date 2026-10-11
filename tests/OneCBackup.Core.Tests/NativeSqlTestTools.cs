@@ -15,11 +15,11 @@ public sealed class NativeSqlFactAttribute : FactAttribute
 internal static class NativeSqlTestTools
 {
     public static async Task<string> RunAsync(string executable, IEnumerable<string> arguments,
-        IReadOnlyDictionary<string, string?>? environment = null)
+        IReadOnlyDictionary<string, string?>? environment = null, bool captureOutput = true)
     {
         var start = new ProcessStartInfo(executable)
         {
-            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
+            UseShellExecute = false, RedirectStandardOutput = captureOutput, RedirectStandardError = captureOutput, CreateNoWindow = true
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         if (environment is not null)
@@ -27,8 +27,8 @@ internal static class NativeSqlTestTools
                 if (pair.Value is null) start.Environment.Remove(pair.Key); else start.Environment[pair.Key] = pair.Value;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         using var process = Process.Start(start) ?? throw new IOException("Could not start fixture tool: " + Path.GetFileName(executable));
-        var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-        var errors = process.StandardError.ReadToEndAsync(timeout.Token);
+        var output = captureOutput ? process.StandardOutput.ReadToEndAsync(timeout.Token) : Task.FromResult("");
+        var errors = captureOutput ? process.StandardError.ReadToEndAsync(timeout.Token) : Task.FromResult("");
         try
         {
             await process.WaitForExitAsync(timeout.Token);
