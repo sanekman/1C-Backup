@@ -70,6 +70,25 @@ public sealed class RoutedStorageTests : IDisposable
     }
 
     [Fact]
+    public async Task FtpVerificationAndRetentionUseSelectedTemporaryFolder()
+    {
+        var temporary = Path.Combine(root, "HDD temporary");
+        var remote = new RecordingStorage();
+        var router = new RoutedBackupStorage(new Credentials(), Path.Combine(root, "default verify"), (_, directory) =>
+        {
+            Assert.Equal(Path.Combine(temporary, ".onec-backup-ftp-verification"), directory);
+            return remote;
+        });
+        var job = FtpJob with { TemporaryDirectory = temporary };
+        await router.PrepareAsync(job);
+        var stored = await router.StoreAsync("completed.bak", job);
+        await router.VerifyAsync(stored, job);
+        await router.DeleteAsync(stored, job);
+        Assert.Equal(new[] { "store", "verify", "delete" }, remote.Calls);
+        Assert.False(Directory.Exists(Path.Combine(root, "default verify")));
+    }
+
+    [Fact]
     public async Task InvalidCredentialsAreRejectedBeforeFtpAdapterIsCreated()
     {
         var credentials = new Credentials { Username = "user\r\nPASS injected" };

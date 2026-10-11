@@ -183,6 +183,7 @@ public partial class MainWindow : Window
         {
             Id = editingId ?? Guid.NewGuid(), Name = JobName.Text.Trim(), Kind = (DatabaseKind)Kind.SelectedItem,
             Source = Source.Text.Trim(), DestinationDirectory = Destination.Text.Trim(),
+            TemporaryDirectory = string.IsNullOrWhiteSpace(TemporaryFolder.Text) ? null : TemporaryFolder.Text.Trim(),
             AdditionalDestinations = additionalDestinations.Count == 0 ? null : additionalDestinations.ToArray(),
             DailyAt = times[0], AdditionalDailyTimes = times.Length > 1 ? times.Skip(1).ToArray() : null,
             TimeZoneId = Zone.Text.Trim(), KeepLast = keep, Enabled = Enabled.IsChecked == true,
@@ -305,6 +306,7 @@ public partial class MainWindow : Window
         JobName.Text = job.Name; Kind.SelectedItem = job.Kind; Source.Text = job.Source;
         OneCMethodPicker.SelectedValue = job.OneCMethod;
         Destination.Text = job.DestinationDirectory;
+        TemporaryFolder.Text = job.TemporaryDirectory ?? "";
         additionalDestinations.Clear();
         foreach (var destination in job.AdditionalDestinations ?? []) additionalDestinations.Add(destination);
         DailyAt.Text = string.Join(", ", job.ScheduledTimes.Select(time => time.ToString("HH:mm", CultureInfo.InvariantCulture)));
@@ -330,6 +332,7 @@ public partial class MainWindow : Window
         JobSearch.Clear();
         Jobs.SelectedItem = null; editingId = null; Zone.Text = TimeZoneInfo.Local.Id;
         JobName.Clear(); Source.Clear(); Destination.Clear(); Kind.SelectedItem = DatabaseKind.OneCFile;
+        TemporaryFolder.Clear();
         additionalDestinations.Clear();
         OneCMethodPicker.SelectedValue = OneCBackupMethod.FileArchive;
         OneCExecutable.Clear(); OneCTimeout.Text = "120";
@@ -536,6 +539,7 @@ public partial class MainWindow : Window
         var field = target switch
         {
             "Source" => Source, "Destination" => Destination, "OneCExecutable" => OneCExecutable,
+            "TemporaryFolder" => TemporaryFolder,
             "SqlAgentDirectory" => SqlAgentDirectory, "PgDumpPath" => PgDumpPath, "PgRestorePath" => PgRestorePath,
             _ => null
         };
@@ -556,7 +560,7 @@ public partial class MainWindow : Window
             }
             else
             {
-                var dialog = new OpenFolderDialog { Title = "Выберите каталог", Multiselect = false };
+                var dialog = new OpenFolderDialog { Title = target == "TemporaryFolder" ? "Выберите временную папку на HDD" : "Выберите каталог", Multiselect = false };
                 if (dialog.ShowDialog(this) == true) field.Text = dialog.FolderName;
             }
         }

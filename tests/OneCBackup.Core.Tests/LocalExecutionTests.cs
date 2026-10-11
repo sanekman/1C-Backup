@@ -78,6 +78,104 @@ public sealed class LocalExecutionTests : IDisposable
         Assert.Single(await new BackupCatalog(Path.Combine(root, "catalog.json")).ReadAsync());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SelectedTemporaryFolderContainsDumpAndArchiveAndPreservesUnrelatedFiles(bool nativeArchive)
+    {
+        var temporary = Path.Combine(root, "HDD temporary");
+        Directory.CreateDirectory(temporary);
+        var marker = Path.Combine(temporary, "keep-me.txt");
+        await File.WriteAllTextAsync(marker, "unrelated file");
+        var storage = new TrackingStorage();
+        var process = new FakeProcess(async (command, ct) =>
+        {
+            Assert.StartsWith(temporary + Path.DirectorySeparatorChar, command.Arguments[4]);
+            await File.WriteAllTextAsync(command.Arguments[4], "dump fixture", ct);
+            return 0;
+        });
+        IBackupExecutor executor = nativeArchive ? new OneCFileArchiveExecutor() : new OneCBackupExecutor(process);
+        var job = Job with { TemporaryDirectory = temporary, ArchiveCopies = true,
+            OneCMethod = nativeArchive ? OneCBackupMethod.FileArchive : OneCBackupMethod.PlatformDump,
+            AdditionalDestinations = [new BackupDestination { DestinationDirectory = Path.Combine(root, "second copies") }] };
+        var runner = new LocalBackupRunner(executor,
+            new BackupCompletion(storage, new BackupCatalog(Path.Combine(root, "catalog.json"))), History, Path.Combine(root, "work"));
+        var result = await runner.RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, result.Status);
+        Assert.Equal(temporary, Path.GetDirectoryName(result.WorkDirectory));
+        Assert.Equal(2, storage.Paths.Count);
+        Assert.Single(storage.Paths.Distinct());
+        Assert.StartsWith(result.WorkDirectory + Path.DirectorySeparatorChar, storage.Paths[0]);
+        Assert.False(Directory.Exists(result.WorkDirectory));
+        Assert.False(Directory.Exists(Path.Combine(root, "work")));
+        Assert.Equal("unrelated file", await File.ReadAllTextAsync(marker));
+        Assert.Equal("source database", await File.ReadAllTextAsync(Path.Combine(Job.Source, "1Cv8.1CD")));
+        using var zip = ZipFile.OpenRead(result.Backup!.Location);
+        using var reader = new StreamReader(Assert.Single(zip.Entries).Open());
+        Assert.Equal(nativeArchive ? "source database" : "dump fixture", await reader.ReadToEndAsync());
+    }
+
+    [Fact]
+    public async Task UnavailableTemporaryFolderFailsBeforeDumpWithoutFallingBackToDefault()
+    {
+        var temporary = Path.Combine(root, "blocked temporary");
+        await File.WriteAllTextAsync(temporary, "keep this file");
+        var process = new FakeProcess((_, _) => throw new Exception("Must not launch"));
+        var result = await Runner(process, History).RunAsync(Job with { TemporaryDirectory = temporary });
+        Assert.Equal(BackupRunStatus.Failed, result.Status);
+        Assert.Equal(temporary, Path.GetDirectoryName(result.WorkDirectory));
+        Assert.Equal("keep this file", await File.ReadAllTextAsync(temporary));
+        Assert.False(Directory.Exists(Path.Combine(root, "work")));
+        Assert.False(Directory.Exists(Job.DestinationDirectory));
+        Assert.Equal(BackupRunStatus.Failed, Assert.Single(await History.ReadAsync()).Status);
+    }
+
+    [Fact]
+    public async Task FailedDumpRemainsInSelectedTemporaryFolderForRecovery()
+    {
+        var temporary = Path.Combine(root, "HDD temporary");
+        var process = new FakeProcess(async (command, ct) =>
+        { await File.WriteAllTextAsync(command.Arguments[4], "partial", ct); return 1; });
+        var result = await Runner(process, History).RunAsync(Job with { TemporaryDirectory = temporary });
+        Assert.Equal(BackupRunStatus.Failed, result.Status);
+        Assert.Equal(temporary, Path.GetDirectoryName(result.WorkDirectory));
+        Assert.Equal("partial", await File.ReadAllTextAsync(Assert.Single(Directory.GetFiles(result.WorkDirectory, "*.dt"))));
+        Assert.False(Directory.Exists(Path.Combine(root, "work")));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("relative/folder")]
+    [InlineData("\0")]
+    public async Task InvalidTemporaryFolderIsRejectedBeforeCreatingFiles(string temporary)
+    {
+        var process = new FakeProcess((_, _) => throw new Exception("Must not launch"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Runner(process, History).RunAsync(Job with { TemporaryDirectory = temporary }));
+        Assert.False(File.Exists(Path.Combine(root, "runs.json")));
+    }
+
+    [Fact]
+    public async Task TemporaryFolderSurvivesJobStoreRoundTripAndLegacyJobsUseDefault()
+    {
+        var store = new JobStore(Path.Combine(root, "jobs.json"));
+        await store.SaveAsync([Job]);
+        Assert.DoesNotContain("temporaryDirectory", await File.ReadAllTextAsync(Path.Combine(root, "jobs.json")), StringComparison.OrdinalIgnoreCase);
+        Assert.Null(Assert.Single(await store.LoadAsync()).TemporaryDirectory);
+        var temporary = Path.Combine(root, "HDD temporary");
+        await store.SaveAsync([Job with { TemporaryDirectory = temporary }]);
+        Assert.Equal(temporary, Assert.Single(await store.LoadAsync()).TemporaryDirectory);
+    }
+
+    private sealed class TrackingStorage : IBackupStorage
+    {
+        private readonly FileBackupStorage files = new();
+        public List<string> Paths { get; } = [];
+        public Task<StoredBackup> StoreAsync(string path, BackupJob job, CancellationToken token)
+        { Paths.Add(path); return files.StoreAsync(path, job, token); }
+        public Task VerifyAsync(StoredBackup backup, BackupJob job, CancellationToken token) => files.VerifyAsync(backup, job, token);
+        public Task DeleteAsync(StoredBackup backup, BackupJob job, CancellationToken token) => files.DeleteAsync(backup, job, token);
+    }
+
     [Fact]
     public async Task EmptyDumpIsRejected()
     {

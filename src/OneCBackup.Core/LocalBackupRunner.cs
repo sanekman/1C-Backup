@@ -14,7 +14,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
         try
         {
             var id = Guid.NewGuid();
-            var work = Path.Combine(Path.GetFullPath(workRoot), id.ToString("N"));
+            var work = Path.Combine(Path.GetFullPath(job.TemporaryDirectory ?? workRoot), id.ToString("N"));
             var run = new BackupRun(id, job.Id, job.Name, DateTimeOffset.UtcNow, null, BackupRunStatus.Running, work);
             // A corrupt or unwritable history prevents starting an untracked operation.
             await history.SaveAsync(run, cancellationToken);

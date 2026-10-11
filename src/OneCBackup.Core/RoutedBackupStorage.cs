@@ -31,7 +31,9 @@ public sealed class RoutedBackupStorage(IFtpCredentialStore credentials, string 
         if (string.IsNullOrWhiteSpace(login.UserName) || login.UserName.Any(char.IsControl) ||
             login.Password.IndexOfAny(['\r', '\n', '\0']) >= 0)
             throw new InvalidDataException("Некорректные учётные данные FTP: логин и пароль не должны содержать переводы строк или нулевые символы.");
-        return ftpFactory?.Invoke(login, verificationDirectory) ?? new FtpBackupStorage(login, verificationDirectory);
+        var verificationRoot = job.TemporaryDirectory is null ? verificationDirectory
+            : Path.Combine(job.TemporaryDirectory, ".onec-backup-ftp-verification");
+        return ftpFactory?.Invoke(login, verificationRoot) ?? new FtpBackupStorage(login, verificationRoot);
     }
 
     public async Task<StoredBackup> StoreAsync(string completedBackupPath, BackupJob job, CancellationToken cancellationToken = default) =>

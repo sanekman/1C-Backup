@@ -84,7 +84,9 @@ public sealed class FtpStorageIntegrationTests : IDisposable
         Directory.CreateDirectory(source);
         await File.WriteAllTextAsync(Path.Combine(source, "1Cv8.1CD"), "multi-destination fixture");
         var localDirectory = Path.Combine(directory, "local-copies");
+        var temporary = Path.Combine(directory, "HDD temporary");
         var job = Job with { Source = source, OneCMethod = OneCBackupMethod.FileArchive, KeepLast = 1,
+            TemporaryDirectory = temporary,
             AdditionalDestinations = [new BackupDestination { DestinationDirectory = localDirectory }] };
         var catalog = new BackupCatalog(Path.Combine(directory, "multi-catalog.json"));
         var router = new RoutedBackupStorage(new FixtureCredentials(), Path.Combine(directory, "verify"));
@@ -94,6 +96,8 @@ public sealed class FtpStorageIntegrationTests : IDisposable
         {
             var run = await runner.RunAsync(job);
             Assert.Equal(BackupRunStatus.Succeeded, run.Status);
+            Assert.Equal(temporary, Path.GetDirectoryName(run.WorkDirectory));
+            Assert.False(Directory.Exists(run.WorkDirectory));
             Assert.Equal(2, run.Destinations!.Count);
         }
         var records = await catalog.ReadAsync();
@@ -102,6 +106,9 @@ public sealed class FtpStorageIntegrationTests : IDisposable
         Assert.Single(Directory.GetFiles(localDirectory));
         Assert.Single(Directory.GetFiles(Path.Combine(RemoteRoot, remoteDirectory.TrimStart('/'))));
         foreach (var record in records) await new BackupCopyVerifier(router).VerifyAsync(record, job);
+        Assert.Empty(Directory.GetFiles(Path.Combine(temporary, ".onec-backup-ftp-verification")));
+        Assert.False(Directory.Exists(Path.Combine(directory, "verify")));
+        Assert.False(Directory.Exists(Path.Combine(directory, "work")));
     }
 
     private sealed class FixtureCredentials : IFtpCredentialStore

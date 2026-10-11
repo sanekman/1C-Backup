@@ -22,12 +22,17 @@ def main():
         source.mkdir()
         content = b"smoke database content\n" * 4096
         (source / "1Cv8.1CD").write_bytes(content)
+        temporary = data / "HDD temporary"
+        temporary.mkdir()
+        marker = temporary / "unrelated.txt"
+        marker.write_text("keep unrelated files")
         job_id = str(uuid.uuid4())
         # Leave startup margin even when this fixture begins just before a minute boundary.
         # The product intentionally skips past slots after a fresh start.
         due = (datetime.now(timezone.utc) + timedelta(seconds=10)).replace(second=0, microsecond=0) + timedelta(minutes=1)
         jobs = [{"Id": job_id, "Name": "Agent smoke", "Source": str(source), "Kind": "OneCFile",
                  "OneCMethod": "FileArchive", "DestinationDirectory": str(data / "copies"),
+                 "TemporaryDirectory": str(temporary),
                  "ScheduleKind": "Daily", "DailyAt": due.strftime("%H:%M:%S"), "TimeZoneId": "UTC", "KeepLast": 1}]
         (data / "jobs.json").write_text(json.dumps(jobs))
         base = [args.dotnet, str(assembly), "--data-dir", str(data)]
@@ -60,6 +65,10 @@ def main():
                     raise RuntimeError("Scheduled backup timed out")
                 time.sleep(0.2)
             record = json.loads((data / "copies.json").read_text())[0]
+            assert Path(runs[0]["WorkDirectory"]).parent == temporary
+            assert not Path(runs[0]["WorkDirectory"]).exists()
+            assert not (data / "work").exists()
+            assert marker.read_text() == "keep unrelated files"
             with zipfile.ZipFile(record["Backup"]["Location"]) as archive:
                 assert archive.namelist() == ["1Cv8.1CD"]
                 assert archive.read("1Cv8.1CD") == content

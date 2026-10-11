@@ -14,6 +14,8 @@ public sealed record BackupJob
     public DatabaseKind Kind { get; init; }
     public string Source { get; init; } = "";
     public string DestinationDirectory { get; init; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TemporaryDirectory { get; init; }
     public StorageKind StorageKind { get; init; } = StorageKind.LocalDirectory;
     public FtpSettings? Ftp { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -60,6 +62,9 @@ public sealed record BackupJob
         if (string.IsNullOrWhiteSpace(Name)) errors.Add("Укажите название задания.");
         if (!Enum.IsDefined(Kind)) errors.Add("Неизвестный тип базы данных.");
         if (string.IsNullOrWhiteSpace(Source)) errors.Add("Укажите источник базы данных.");
+        if (TemporaryDirectory is not null && (string.IsNullOrWhiteSpace(TemporaryDirectory)
+            || !Path.IsPathFullyQualified(TemporaryDirectory) || TemporaryDirectory.Any(char.IsControl)))
+            errors.Add("Для временной папки укажите полный путь, например D:\\1C-Backup-Temp.");
         if (string.IsNullOrWhiteSpace(DestinationDirectory)) errors.Add("Укажите каталог резервных копий.");
         var destination = DestinationDirectory ?? "";
         if (!Enum.IsDefined(StorageKind)) errors.Add("Неизвестный тип хранилища.");

@@ -122,7 +122,9 @@ public partial class MainWindow
                 + (FtpTls.IsChecked == true ? " (FTPS)" : " (без TLS)") : "";
             var zoneDescription = Schedule.SelectedValue is ScheduleKind.Manual ? "" : "\nЧасовой пояс: " + TimeZonePicker.Text;
             var extraDestinations = additionalDestinations.Count == 0 ? "" : "\nТакже отправлять:\n" + string.Join("\n", additionalDestinations.Select(destination => "• " + destination.Description));
-            WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}{extraDestinations}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nХранить: {KeepLast.Text.Trim()} успешных копий в каждом хранилище";
+            var temporary = string.IsNullOrWhiteSpace(TemporaryFolder.Text)
+                ? Path.Combine(DesktopPaths.DataDirectory, "work") + " (по умолчанию)" : TemporaryFolder.Text.Trim();
+            WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nХранить: {KeepLast.Text.Trim()} успешных копий в каждом хранилище";
         }
         // Realize the scroll content before focusing a field on a newly opened step.
         UpdateLayout();
@@ -177,6 +179,9 @@ public partial class MainWindow
         }
         if (step == 1)
         {
+            var temporary = string.IsNullOrWhiteSpace(TemporaryFolder.Text) ? null : TemporaryFolder.Text.Trim();
+            if (temporary is not null && (!Path.IsPathFullyQualified(temporary) || temporary.Any(char.IsControl)))
+                return RejectWizard("Укажите полный путь к временной папке или выберите её кнопкой справа.", 1, TemporaryFolder);
             if (string.IsNullOrWhiteSpace(Destination.Text)) return RejectWizard("Выберите папку, в которой будут храниться резервные копии.", 1, Destination);
             if (Storage.SelectedValue is not StorageKind.Ftp && !Path.IsPathFullyQualified(Destination.Text.Trim()))
                 return RejectWizard("Укажите полный путь к папке копий или выберите её кнопкой справа.", 1, Destination);
@@ -189,6 +194,7 @@ public partial class MainWindow
                 if (string.IsNullOrWhiteSpace(FtpCredentialKey.Text)) return RejectWizard("Нажмите «Настроить логин и пароль», чтобы сохранить доступ к FTP.", 1, FtpCredentialsButton);
             }
             var job = new BackupJob { Name = "check", Source = "check", DestinationDirectory = Destination.Text.Trim(), StorageKind = (StorageKind)Storage.SelectedValue,
+                TemporaryDirectory = temporary,
                 AdditionalDestinations = additionalDestinations.Count == 0 ? null : additionalDestinations.ToArray(),
                 Ftp = Storage.SelectedValue is StorageKind.Ftp ? new FtpSettings { Host = FtpHost.Text.Trim(), Port = ftpPort, UseTls = FtpTls.IsChecked == true,
                     CredentialKey = FtpCredentialKey.Text.Trim() } : null };

@@ -110,6 +110,17 @@ internal static class DesktopSmoke
             if (!Control<TextBlock>("WizardError").IsVisible || !Control<StackPanel>("StorageStep").IsVisible)
                 throw new InvalidOperationException("Пустая папка копий не остановила мастер.");
             Control<TextBox>("Destination").Text = Path.Combine(DesktopPaths.DataDirectory, "copies");
+            Control<TextBox>("TemporaryFolder").Text = "relative-work-folder";
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WizardError").Text.Contains("временной папке") || !Control<StackPanel>("StorageStep").IsVisible)
+                throw new InvalidOperationException("Относительная временная папка не остановила мастер.");
+            var temporaryDirectory = Path.Combine(DesktopPaths.DataDirectory, "HDD temporary");
+            Directory.CreateDirectory(temporaryDirectory);
+            var temporaryMarker = Path.Combine(temporaryDirectory, "unrelated.txt");
+            File.WriteAllText(temporaryMarker, "keep unrelated files");
+            Control<TextBox>("TemporaryFolder").Text = temporaryDirectory;
+            Control<TextBox>("TemporaryFolder").BringIntoView();
+            Screenshot("wizard-temporary-folder");
             var secondaryDirectory = Path.Combine(DesktopPaths.DataDirectory, "second-copies");
             SetAdditionalStorage(secondaryDirectory, checkRequired: true);
             Control<ListBox>("AdditionalStorageList").SelectedIndex = 0;
@@ -154,6 +165,8 @@ internal static class DesktopSmoke
             Click("SaveButton");
             await WaitUntil(() => Control<DataGrid>("Jobs").Items.Count == 1 && Control<Button>("RunButton").IsEnabled, "Расписание не сохранено.");
             var configured = (BackupJob)Control<DataGrid>("Jobs").Items[0];
+            if (configured.TemporaryDirectory != temporaryDirectory || !Control<TextBox>("WizardSummary").Text.Contains(temporaryDirectory))
+                throw new InvalidOperationException("Временная папка не показана в итоге или не сохранена.");
             if (configured.ArchivePasswordKey is null)
                 throw new InvalidOperationException("Ссылка на пароль архива не сохранена.");
             if (!configured.ScheduledTimes.SequenceEqual(new TimeOnly[] { new(9, 0), new(13, 0), new(23, 0) }))
@@ -173,6 +186,10 @@ internal static class DesktopSmoke
                 || Control<ProgressBar>("JobProgress").Visibility != Visibility.Collapsed)
                 throw new InvalidOperationException("После копирования не показан понятный итог или остался индикатор работы.");
             var successfulCopies = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().ToArray();
+            var successfulRun = Control<DataGrid>("RunHistory").Items.OfType<BackupRun>().Single(run => run.Status == BackupRunStatus.Succeeded);
+            if (Path.GetDirectoryName(successfulRun.WorkDirectory) != temporaryDirectory || Directory.Exists(successfulRun.WorkDirectory)
+                || Directory.Exists(Path.Combine(DesktopPaths.DataDirectory, "work")) || File.ReadAllText(temporaryMarker) != "keep unrelated files")
+                throw new InvalidOperationException("Копия не использовала выбранную временную папку или очистка затронула чужие файлы.");
             if (successfulCopies.Length != 2 || successfulCopies[0].Sha256 != successfulCopies[1].Sha256
                 || !Directory.GetFiles(secondaryDirectory).Any())
                 throw new InvalidOperationException("Один и тот же архив не доставлен в оба хранилища.");
@@ -265,9 +282,13 @@ internal static class DesktopSmoke
             Control<TextBox>("JobName").Text = "unsaved draft must be discarded";
             Click("NextStepButton");
             Control<Expander>("AdditionalStorageOptions").IsExpanded = true;
+            Control<TextBox>("TemporaryFolder").Text = Path.Combine(DesktopPaths.DataDirectory, "unsaved temporary");
             Control<ListBox>("AdditionalStorageList").SelectedIndex = 0;
             Click("RemoveStorageButton");
             Click("CancelEditorButton");
+            if (Control<TextBox>("TemporaryFolder").Text != temporaryDirectory
+                || ((BackupJob)Control<DataGrid>("Jobs").SelectedItem).TemporaryDirectory != temporaryDirectory)
+                throw new InvalidOperationException("Отмена мастера изменила временную папку.");
             if (Control<DataGrid>("Jobs").SelectedItem is not BackupJob { Name: "Тестовая база 1С" }
                 || Control<TextBox>("JobName").Text != "Тестовая база 1С" || Control<Border>("EditorCard").IsVisible)
                 throw new InvalidOperationException("Отмена мастера изменила сохранённое задание.");

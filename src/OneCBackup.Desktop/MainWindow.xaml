@@ -215,6 +215,13 @@
     <WrapPanel><Button x:Name="AddStorageButton" Content="+ Добавить хранилище" Click="AddStorage_Click" /><Button x:Name="EditStorageButton" Content="Изменить" Click="EditStorage_Click" IsEnabled="False" Margin="8,0,0,0" /><Button x:Name="RemoveStorageButton" Content="Убрать" Click="RemoveStorage_Click" IsEnabled="False" Margin="8,0,0,0" /></WrapPanel>
     <TextBlock Text="Изменения вступят в силу после сохранения задания. Удаление хранилища из списка не удаляет сохранённые файлы." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" />
    </StackPanel></Expander>
+   <TextBlock Text="Временная папка — где формировать копию" Margin="0,12,0,0" />
+   <DockPanel Margin="0,4,0,6">
+    <Button Content="Выбрать…" Tag="TemporaryFolder" Click="BrowsePath_Click" DockPanel.Dock="Right" Margin="6,0,0,0" Padding="10,6" />
+    <TextBox x:Name="TemporaryFolder" ToolTip="Оставьте пустым для использования стандартной рабочей папки приложения." />
+   </DockPanel>
+   <TextBlock Text="Выберите папку на HDD, чтобы выгрузка, ZIP и проверка FTP не записывались на SSD с базой. Пустое поле — рабочая папка приложения. После успешной доставки временные файлы удаляются; при ошибке остаются для восстановления. Для SQL Server исходный .bak создаётся в папке на SQL-сервере."
+    TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,4" />
 <Expander x:Name="ArchiveOptions" Header="Архивация и пароль" Margin="0,8,0,0"><StackPanel Margin="0,10,0,0">   <CheckBox x:Name="ArchiveCopies" Content="Архивировать копии в ZIP" Margin="0,0,0,8" />
    <CheckBox x:Name="EncryptArchive" Content="Шифровать ZIP паролем (AES-256)" Margin="0,0,0,8" Checked="Encryption_Changed" Unchecked="Encryption_Changed" />
    <Button x:Name="ArchivePasswordButton" Content="Задать новый пароль архива" HorizontalAlignment="Left" Padding="12,6" Click="ArchivePassword_Click" Margin="0,0,0,6" />
