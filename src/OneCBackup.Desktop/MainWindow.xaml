@@ -52,13 +52,13 @@
     </StackPanel>
    </DockPanel>
   </Border>
-  <Grid Grid.Column="1" Margin="18,16,18,14">
+  <Grid Grid.Column="1" Margin="18,12,18,12">
    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-   <StackPanel Margin="0,0,0,12">
+   <StackPanel Margin="0,0,0,8">
     <TextBlock x:Name="PageTitle" Text="Задания резервного копирования" FontSize="22" FontWeight="SemiBold" />
     <TextBlock x:Name="PageDescription" Text="Файловая 1С · Microsoft SQL Server · PostgreSQL" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,0" />
    </StackPanel>
-   <Border Grid.Row="1" Style="{StaticResource Card}" Padding="12" Margin="0,0,0,12">
+   <Border Grid.Row="1" Style="{StaticResource Card}" Padding="8" Margin="0,0,0,8">
     <DockPanel>
      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
       <Button x:Name="StartBackgroundButton" Content="Включить автоматически" Style="{StaticResource PrimaryButton}" Click="StartBackground_Click" IsEnabled="False" ToolTip="Выполнять сохранённые задания по расписанию даже после закрытия окна" />
@@ -70,13 +70,13 @@
    <Grid x:Name="JobsView" Grid.Row="2">
     <Border x:Name="JobListCard" Style="{StaticResource Card}">
      <DockPanel>
-      <Border DockPanel.Dock="Top" Padding="18" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+      <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
        <DockPanel>
         <Button x:Name="NewJobButton" Content="+ Новое задание" Style="{StaticResource PrimaryButton}" DockPanel.Dock="Right" Click="New_Click" IsEnabled="False" />
         <StackPanel VerticalAlignment="Center"><TextBlock Text="Мои задания" FontSize="17" FontWeight="SemiBold" /><TextBlock x:Name="JobsSummary" Text="Загрузка…" Foreground="{StaticResource MutedBrush}" Margin="0,4,12,0" /></StackPanel>
        </DockPanel>
       </Border>
-      <Border DockPanel.Dock="Bottom" Padding="12" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
+      <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
        <StackPanel><WrapPanel>
         <Button x:Name="RunButton" Content="Создать копию" Style="{StaticResource PrimaryButton}" IsEnabled="False" Click="Run_Click" />
         <Button x:Name="EditJobButton" Content="Изменить" Click="EditJob_Click" IsEnabled="False" Margin="8,0,0,0" />
@@ -89,17 +89,17 @@
         <Button x:Name="CancelStorageCheckButton" Content="Отменить проверку" Margin="8,0,0,0" Visibility="Collapsed" Click="CancelCopyVerification_Click" />
        </WrapPanel>
        <ProgressBar x:Name="JobProgress" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,8,0,0" AutomationProperties.Name="Создание резервной копии" />
-       <TextBlock x:Name="SelectedJobSummary" Text="Выберите задание, чтобы создать копию или изменить настройки." TextWrapping="Wrap" Margin="0,10,0,0" Foreground="{StaticResource MutedBrush}" />
+       <TextBlock x:Name="SelectedJobSummary" Text="Выберите задание, чтобы создать копию или изменить настройки." TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}" />
        <Expander x:Name="StorageCheckResults" Header="Проверка хранилищ" Visibility="Collapsed" Margin="0,6,0,0">
         <TextBox x:Name="StorageCheckDetails" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="130" VerticalScrollBarVisibility="Auto" BorderThickness="0" Padding="6" />
        </Expander>
       </StackPanel></Border>
       <Grid>
        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-       <StackPanel Margin="16,12"><TextBlock Text="Поиск по названию или источнику" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
-        <TextBox x:Name="JobSearch" TextChanged="JobSearch_TextChanged" ToolTip="Поиск по названию задания или источнику" AutomationProperties.Name="Поиск заданий" />
-       </StackPanel>
-  <DataGrid Grid.Row="1" x:Name="Jobs" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+       <DockPanel Margin="12,6"><TextBlock Text="Поиск" Foreground="{StaticResource MutedBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
+        <TextBox x:Name="JobSearch" TextChanged="JobSearch_TextChanged" ToolTip="Поиск по названию задания или источнику" AutomationProperties.Name="Поиск по названию задания или источнику" />
+       </DockPanel>
+  <DataGrid Grid.Row="1" x:Name="Jobs" RowHeight="30" ColumnHeaderHeight="30" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
    SelectionChanged="Jobs_SelectionChanged" MouseDoubleClick="Jobs_DoubleClick" CanUserAddRows="False">
    <DataGrid.Columns>
     <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" MinWidth="180" />

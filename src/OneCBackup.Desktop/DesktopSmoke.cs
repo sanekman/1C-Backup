@@ -411,7 +411,22 @@ internal static class DesktopSmoke
             Screenshot("duplicate-job-saved");
             window.Width = 900; window.Height = 580;
             foreach (var navigation in new[] { "JobsNavigation", "CopiesNavigation", "HistoryNavigation", "AgentNavigation" })
-            { Click(navigation); await Task.Delay(100); Screenshot("compact-" + navigation); }
+            {
+                Click(navigation); await Task.Delay(100);
+                if (navigation == "JobsNavigation")
+                {
+                    var grid = Control<DataGrid>("Jobs");
+                    window.UpdateLayout();
+                    foreach (var job in grid.Items.OfType<BackupJob>())
+                    {
+                        if (grid.ItemContainerGenerator.ContainerFromItem(job) is not DataGridRow row
+                            || row.ActualHeight <= 0 || row.TranslatePoint(new Point(), grid).Y < 0
+                            || row.TranslatePoint(new Point(), grid).Y + row.ActualHeight > grid.ActualHeight + 1)
+                            throw new InvalidOperationException("Панели скрыли строки заданий в компактном окне.");
+                    }
+                }
+                Screenshot("compact-" + navigation);
+            }
             await VerifyPostgreSqlMonitoringAsync(window);
             Finish(output, true, "Компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
         }
