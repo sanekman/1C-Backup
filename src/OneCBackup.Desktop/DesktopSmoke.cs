@@ -150,7 +150,7 @@ internal static class DesktopSmoke
                 await WaitUntil(() => Control<DataGrid>("RunHistory").Items.OfType<BackupRun>().Any(run => run.Status == BackupRunStatus.Failed)
                     && window.SmokeReady, "Ошибка занятого файла не появилась в истории.");
             }
-            if (!Control<TextBlock>("SelectedJobSummary").Text.Contains("не создала копию"))
+            if (!Control<TextBlock>("SelectedJobSummary").Text.Contains("завершилось с ошибкой"))
                 throw new InvalidOperationException("После ошибки выбранное задание показывает успешное копирование.");
             Control<ComboBox>("HistoryStatusFilter").SelectedIndex = 2;
             Control<TextBox>("HistorySearch").Text = "no-such-job-before-result-navigation";
