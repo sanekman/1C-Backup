@@ -7,18 +7,20 @@ namespace OneCBackup.Desktop;
 public partial class FtpCredentialsWindow : Window
 {
     private readonly string key;
-    private readonly WindowsFtpCredentialStore store;
+    private readonly Action<string, string, string> save;
     public FtpCredentialsWindow(string key, WindowsFtpCredentialStore store)
+        : this(key, store.Save, "Учётные данные FTP") { }
+    public FtpCredentialsWindow(string key, Action<string, string, string> save, string title)
     {
-        this.key = key; this.store = store;
-        InitializeComponent(); BindingName.Text = "Идентификатор: " + key;
+        this.key = key; this.save = save;
+        InitializeComponent(); Title = title; BindingName.Text = "Идентификатор: " + key;
         Closed += (_, _) => Password.Clear();
     }
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         try
         {
-            store.Save(key, Username.Text.Trim(), Password.Password);
+            save(key, Username.Text.Trim(), Password.Password);
             Password.Clear(); DialogResult = true;
         }
         catch (Exception ex) { Status.Text = "Не удалось сохранить: " + ex.Message; }

@@ -7,7 +7,7 @@ public sealed record SourceCheckReport(bool Succeeded, string Details, bool Canc
 
 /// <summary>Reads source availability without creating a database backup or running the 1C platform.</summary>
 public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, string defaultWorkRoot,
-    Func<BackupJob, DbConnection>? sqlConnectionFactory = null)
+    Func<BackupJob, DbConnection>? sqlConnectionFactory = null, Func<BackupJob, WebDavClient>? webDavClientFactory = null)
 {
     public async Task<SourceCheckReport> CheckAsync(BackupJob job, CancellationToken cancellationToken = default)
     {
@@ -24,6 +24,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
                 DatabaseKind.SqlServer => await CheckSqlAsync(job, timeout.Token),
                 DatabaseKind.PostgreSql => await CheckPostgreSqlAsync(job, timeout.Token),
                 DatabaseKind.FilesAndFolders => CheckFiles(job, timeout.Token),
+                DatabaseKind.WebDav => await CheckWebDavAsync(job, timeout.Token),
                 _ => throw new NotSupportedException("Неизвестный тип базы.")
             };
         }
@@ -33,6 +34,13 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         { return new(false, "Время проверки источника превысило 30 секунд. Проверьте подключение и доступ."); }
         catch (Exception ex)
         { return new(false, ex.Message); }
+    }
+
+    private async Task<SourceCheckReport> CheckWebDavAsync(BackupJob job, CancellationToken token)
+    {
+        using var client = webDavClientFactory?.Invoke(job) ?? await WebDavClient.OpenAsync(job, token);
+        var entries = await client.ScanAsync(token);
+        return new(true, $"WebDAV подтвердил список: {entries.Count(entry => !entry.IsDirectory)} файлов, {entries.Count(entry => entry.IsDirectory)} папок. Содержимое файлов не скачивалось. Доступ к скачиванию проверяется первой копией.");
     }
 
     private static SourceCheckReport CheckFiles(BackupJob job, CancellationToken token)

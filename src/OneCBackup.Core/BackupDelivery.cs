@@ -17,7 +17,7 @@ public sealed class BackupDelivery(IBackupStorage storage, IArchivePasswordStore
         var password = await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, cancellationToken);
         if (!job.ShouldArchiveCopy)
         {
-            if (job.Kind == DatabaseKind.FilesAndFolders)
+            if (job.IsFileSnapshot)
             {
                 var manifest = await FileBackupZip.ReadManifestAsync(completedBackupPath, password, cancellationToken);
                 return new PreparedBackup(completedBackupPath, null) { FileSnapshot = manifest.GetSnapshot() };

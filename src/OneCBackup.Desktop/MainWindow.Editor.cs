@@ -142,10 +142,10 @@ public partial class MainWindow
         if (step is 2 or 3) UpdateSchedulePreview();
         if (step == 3)
         {
-            var type = Kind.SelectedItem switch { DatabaseKind.SqlServer => "Microsoft SQL Server", DatabaseKind.PostgreSql => "PostgreSQL", DatabaseKind.FilesAndFolders => "Файлы и папки", _ => "Файловая 1С" };
+            var type = Kind.SelectedItem switch { DatabaseKind.SqlServer => "Microsoft SQL Server", DatabaseKind.PostgreSql => "PostgreSQL", DatabaseKind.FilesAndFolders => "Файлы и папки", DatabaseKind.WebDav => "Файлы WebDAV", _ => "Файловая 1С" };
             var method = Kind.SelectedItem is DatabaseKind.OneCFile
                 ? OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive ? "ZIP файла базы, без платформы" : "Выгрузка .dt через платформу 1С"
-                : Kind.SelectedItem is DatabaseKind.FilesAndFolders
+                : Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav
                     ? FileBackupModePicker.SelectedValue is FileBackupMode.Incremental ? "Инкрементная, первая копия полная" : "Полная файловая копия"
                     : Kind.SelectedItem is DatabaseKind.SqlServer ? "Полная копия .bak" : "Дамп .dump";
             var schedule = Schedule.SelectedValue is ScheduleKind.Manual ? "Только вручную"
@@ -165,7 +165,7 @@ public partial class MainWindow
                 ? Path.Combine(DesktopPaths.DataDirectory, "work") + " (по умолчанию)" : TemporaryFolder.Text.Trim();
             WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nОсновное хранилище: хранить {KeepLast.Text.Trim()} успешных копий";
             WizardSummary.Text += "\n\n" + NextRun.Text;
-            if (Kind.SelectedItem is DatabaseKind.FilesAndFolders && FileBackupModePicker.SelectedValue is FileBackupMode.Incremental)
+            if (Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav && FileBackupModePicker.SelectedValue is FileBackupMode.Incremental)
                 WizardSummary.Text += "\nВ цепочке не более " + FullBackupEvery.Text.Trim() + " архивов. Нужные предшествующие архивы сохраняются сверх лимита хранилища.";
             ReviewTechnicalDetails.IsExpanded = false;
             ReviewJobName.Text = JobName.Text.Trim();
@@ -181,7 +181,7 @@ public partial class MainWindow
             var shortMethod = Kind.SelectedItem switch
             {
                 DatabaseKind.SqlServer => "SQL .bak", DatabaseKind.PostgreSql => "PG .dump",
-                DatabaseKind.FilesAndFolders => FileBackupModePicker.SelectedValue is FileBackupMode.Incremental ? "Инкрементная, первая полная" : "Полная",
+                DatabaseKind.FilesAndFolders or DatabaseKind.WebDav => FileBackupModePicker.SelectedValue is FileBackupMode.Incremental ? "Инкрементная, первая полная" : "Полная",
                 _ => OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive ? "1Cv8.1CD, без платформы" : "Выгрузка .dt"
             };
             ReviewFormat.Text = format + " · " + shortMethod;
@@ -229,6 +229,17 @@ public partial class MainWindow
                 if (FileBackupModePicker.SelectedValue is FileBackupMode.Incremental
                     && (!int.TryParse(FullBackupEvery.Text, out var every) || every is < 1 or > 365))
                     return RejectWizard("Укажите от 1 до 365 архивов в инкрементной цепочке.", 0, FullBackupEvery);
+            }
+            if (Kind.SelectedItem is DatabaseKind.WebDav)
+            {
+                var errors = WebDavSettings.ValidateSource(Source.Text.Trim());
+                if (errors.Count != 0) return RejectWizard(string.Join(" ", errors), 0, Source);
+                if (string.IsNullOrEmpty(webDavCredentialKey)) return RejectWizard("Нажмите «Логин и пароль…» и сохраните подключение WebDAV.", 0, WebDavCredentialsButton);
+                if (!int.TryParse(WebDavTimeout.Text, out var timeout) || timeout is < 1 or > 1440)
+                    return RejectWizard("Время ожидания WebDAV: от 1 до 1440 минут.", 0, WebDavTimeout);
+                if (FileBackupModePicker.SelectedValue is FileBackupMode.Incremental
+                    && (!int.TryParse(FullBackupEvery.Text, out var every) || every is < 1 or > 365))
+                    return RejectWizard("Укажите от 1 до 365 архивов в цепочке.", 0, FullBackupEvery);
             }
             if (Kind.SelectedItem is DatabaseKind.OneCFile && OneCMethodPicker.SelectedValue is OneCBackupMethod.PlatformDump)
             {

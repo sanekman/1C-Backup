@@ -47,6 +47,11 @@ public partial class MainWindow
                 try { await new WindowsArchivePasswordStore().GetAsync(imported.ArchivePasswordKey); }
                 catch { passwordUnavailable = true; }
             }
+            if (imported.Kind == DatabaseKind.WebDav && imported.WebDav is not null)
+            {
+                try { await new WindowsWebDavCredentialStore().GetAsync(imported.WebDav.CredentialKey); }
+                catch { imported = imported with { WebDav = imported.WebDav with { CredentialKey = "" } }; }
+            }
             selectionBeforeEdit = Jobs.SelectedItem as BackupJob;
             LoadJobEditor(imported);
             editingId = null;

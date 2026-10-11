@@ -11,7 +11,8 @@ public sealed class BackupJobTransferTests : IDisposable
     public BackupJobTransferTests() => Directory.CreateDirectory(root);
     private BackupJob Job(DatabaseKind kind = DatabaseKind.OneCFile) => new()
     {
-        Id = Guid.NewGuid(), Name = "Бухгалтерия", Kind = kind, Source = kind is DatabaseKind.OneCFile or DatabaseKind.FilesAndFolders ? root : "database",
+        Id = Guid.NewGuid(), Name = "Бухгалтерия", Kind = kind, Source = kind == DatabaseKind.WebDav ? "https://dav.example/data/" : kind is DatabaseKind.OneCFile or DatabaseKind.FilesAndFolders ? root : "database",
+        WebDav = kind == DatabaseKind.WebDav ? new() { CredentialKey = "dav-binding", TimeoutMinutes = 45 } : null,
         FileBackupMode = FileBackupMode.Incremental, FullBackupEvery = 12,
         DestinationDirectory = Path.Combine(root, "copies"), TemporaryDirectory = Path.Combine(root, "work"),
         ArchiveCopies = true, ArchivePasswordKey = "archive-binding", Enabled = true, KeepLast = 7,
@@ -31,6 +32,7 @@ public sealed class BackupJobTransferTests : IDisposable
     [InlineData(DatabaseKind.SqlServer)]
     [InlineData(DatabaseKind.PostgreSql)]
     [InlineData(DatabaseKind.FilesAndFolders)]
+    [InlineData(DatabaseKind.WebDav)]
     public async Task RoundTripKeepsAllSettingsAndBindingsButCreatesNewDisabledIdentity(DatabaseKind kind)
     {
         var job = Job(kind); var path = Path.Combine(root, "settings.json");

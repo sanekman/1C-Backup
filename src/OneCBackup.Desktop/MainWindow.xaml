@@ -17,6 +17,7 @@
       <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.SqlServer}"><Setter Property="Text" Value="SQL Server" /></DataTrigger>
       <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.PostgreSql}"><Setter Property="Text" Value="PostgreSQL" /></DataTrigger>
       <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.FilesAndFolders}"><Setter Property="Text" Value="Файлы и папки" /></DataTrigger>
+      <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.WebDav}"><Setter Property="Text" Value="Файлы WebDAV" /></DataTrigger>
      </Style.Triggers>
     </Style></TextBlock.Style>
    </TextBlock>
@@ -59,7 +60,7 @@
    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
    <StackPanel Margin="0,0,0,8">
     <TextBlock x:Name="PageTitle" Text="Задания резервного копирования" FontSize="22" FontWeight="SemiBold" />
-    <TextBlock x:Name="PageDescription" Text="Файлы и папки · 1С · SQL Server · PostgreSQL" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,0" />
+    <TextBlock x:Name="PageDescription" Text="Файлы и папки · WebDAV · 1С · SQL Server · PostgreSQL" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,0" />
    </StackPanel>
    <Border Grid.Row="1" Style="{StaticResource Card}" Padding="8" Margin="0,0,0,8">
     <DockPanel>
@@ -190,6 +191,15 @@
     <TextBox x:Name="Source" />
    </DockPanel>
    <TextBlock x:Name="OneCSourceHelp" Text="Путь к базе можно посмотреть в окне запуска 1С: выделите базу и нажмите «Изменить»." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
+   <StackPanel x:Name="WebDavPanel" Visibility="Collapsed">
+    <DockPanel Margin="0,0,0,6"><Button DockPanel.Dock="Right" x:Name="WebDavCredentialsButton" Content="Логин и пароль…" Click="WebDavCredentials_Click" Padding="10,5" Margin="8,0,0,0" />
+     <TextBlock x:Name="WebDavCredentialStatus" Text="Подключение ещё не настроено" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+    </DockPanel>
+    <Expander Header="Адрес подключения и время ожидания" Margin="0,0,0,6"><StackPanel>
+     <TextBlock Text="Укажите конечный HTTPS-адрес нужной папки WebDAV, например https://cloud.example/remote.php/dav/files/user/Documents/. Используйте пароль приложения с доступом на чтение. Перенаправления не поддерживаются." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,6" />
+     <TextBlock Text="Ограничение времени копирования, минут" /><TextBox x:Name="WebDavTimeout" Text="120" Width="100" HorizontalAlignment="Left" Margin="0,4,0,6" />
+    </StackPanel></Expander>
+   </StackPanel>
    <StackPanel x:Name="FileBackupPanel" Visibility="Collapsed">
     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
     <StackPanel><TextBlock Text="Способ копирования" />
@@ -201,7 +211,7 @@
      <TextBlock Text="Архивов в цепочке" />
      <TextBox x:Name="FullBackupEvery" Text="7" Margin="0,4,0,8" ToolTip="Полная основа плюс инкрементные архивы, от 1 до 365. Например, 7: полная и до 6 изменений, затем новая полная." />
     </StackPanel></Grid>
-    <TextBlock Text="Перед копированием закройте программы, изменяющие эти файлы." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,6" />
+    <TextBlock x:Name="FileSourceConsistencyHint" Text="Перед копированием закройте программы, изменяющие эти файлы." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,6" />
     <Expander Header="Как работает копирование" Margin="0,0,0,8">
      <TextBlock Text="Первая инкрементная копия всегда полная. Число архивов включает полную основу; затем начинается новая полная цепочка. Нужные предшествующие архивы сохраняются даже сверх лимита хранилища. Копируются обычные файлы и пустые папки, без единого снимка открытых файлов. Для баз 1С и SQL выбирайте соответствующий тип задания. Ссылки, права доступа и системные атрибуты не переносятся." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,6,0,0" />
     </Expander>

@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace OneCBackup.Core;
 
-public enum DatabaseKind { OneCFile, SqlServer, PostgreSql, FilesAndFolders }
+public enum DatabaseKind { OneCFile, SqlServer, PostgreSql, FilesAndFolders, WebDav }
 public enum OneCBackupMethod { PlatformDump, FileArchive }
 public enum FileBackupMode { Full, Incremental }
 
@@ -41,9 +41,13 @@ public sealed record BackupJob
     public PostgreSqlBackupSettings? PostgreSql { get; init; }
     public FileBackupMode FileBackupMode { get; init; } = FileBackupMode.Full;
     public int FullBackupEvery { get; init; } = 7;
+    public WebDavSettings? WebDav { get; init; }
 
     [JsonIgnore]
-    public bool ShouldArchiveCopy => ArchiveCopies && Kind != DatabaseKind.FilesAndFolders &&
+    public bool IsFileSnapshot => Kind is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav;
+
+    [JsonIgnore]
+    public bool ShouldArchiveCopy => ArchiveCopies && !IsFileSnapshot &&
         !(Kind == DatabaseKind.OneCFile && OneCMethod == OneCBackupMethod.FileArchive);
 
     [JsonIgnore]
@@ -68,6 +72,12 @@ public sealed record BackupJob
         if (FullBackupEvery is < 1 or > 365) errors.Add("Полная копия должна создаваться не реже каждой 365-й копии и не чаще каждой первой.");
         if (Kind == DatabaseKind.FilesAndFolders && !Path.IsPathFullyQualified(Source ?? ""))
             errors.Add("Укажите полный путь к файлу или папке.");
+        if (Kind == DatabaseKind.WebDav)
+        {
+            errors.AddRange(WebDavSettings.ValidateSource(Source));
+            if (WebDav is null) errors.Add("Сохраните учётные данные WebDAV.");
+            else errors.AddRange(WebDav.Validate());
+        }
         if (string.IsNullOrWhiteSpace(Source)) errors.Add("Укажите источник базы данных.");
         if (TemporaryDirectory is not null && (string.IsNullOrWhiteSpace(TemporaryDirectory)
             || !Path.IsPathFullyQualified(TemporaryDirectory) || TemporaryDirectory.Any(char.IsControl)))
@@ -117,7 +127,7 @@ public sealed record BackupJob
         {
             if (string.IsNullOrWhiteSpace(ArchivePasswordKey) || ArchivePasswordKey.Length > 512 || ArchivePasswordKey.Any(char.IsControl))
                 errors.Add("Укажите корректный идентификатор пароля архива.");
-            if (!ArchiveCopies && Kind != DatabaseKind.FilesAndFolders && !(Kind == DatabaseKind.OneCFile && OneCMethod == OneCBackupMethod.FileArchive))
+            if (!ArchiveCopies && !IsFileSnapshot && !(Kind == DatabaseKind.OneCFile && OneCMethod == OneCBackupMethod.FileArchive))
                 errors.Add("Для шифрования копии включите архивацию в ZIP.");
         }
         if (KeepLast < 1) errors.Add("Нужно сохранять хотя бы одну успешную копию.");

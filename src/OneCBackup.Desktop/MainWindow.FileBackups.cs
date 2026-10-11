@@ -17,7 +17,7 @@ public partial class MainWindow
         if (FileIncrementalOptions is null || FileBackupModePicker is null) return;
         FileIncrementalOptions.Visibility = FileBackupModePicker.SelectedValue is FileBackupMode.Incremental ? Visibility.Visible : Visibility.Collapsed;
         if (WizardHeading is null || WizardHint is null || JobEditor is null) return;
-        var compactSource = wizardStep == 0 && Kind.SelectedItem is DatabaseKind.FilesAndFolders;
+        var compactSource = wizardStep == 0 && Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav;
         WizardHeading.Visibility = compactSource ? Visibility.Collapsed : Visibility.Visible;
         WizardHint.Margin = new Thickness(0, 6, 0, compactSource || wizardStep == 3 ? 8 : 16);
         JobEditor.Margin = new Thickness(20, compactSource || wizardStep == 3 ? 8 : 16, 20, compactSource || wizardStep == 3 ? 8 : 16);

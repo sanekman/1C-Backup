@@ -2,7 +2,7 @@ namespace OneCBackup.Core;
 
 /// <summary>Serializes runs and records failures before returning them to the desktop or service.</summary>
 public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion completion,
-    BackupRunHistory history, string workRoot)
+    BackupRunHistory history, string workRoot, Func<BackupJob, WebDavClient>? webDavClientFactory = null)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -23,11 +23,15 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 Directory.CreateDirectory(work);
                 await completion.PrepareAsync(job, cancellationToken);
                 var fileSnapshots = new FileBackupSnapshotStore(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(workRoot))!, "file-snapshots"));
-                var selectedExecutor = job.Kind == DatabaseKind.FilesAndFolders
-                    ? new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords) : executor;
+                IBackupExecutor selectedExecutor = job.Kind switch
+                {
+                    DatabaseKind.FilesAndFolders => new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords),
+                    DatabaseKind.WebDav => new WebDavBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, webDavClientFactory),
+                    _ => executor
+                };
                 var dump = await selectedExecutor.CreateAsync(job, work, cancellationToken);
                 FileBackupManifest? fileManifest = null;
-                if (job.Kind == DatabaseKind.FilesAndFolders)
+                if (job.IsFileSnapshot)
                     fileManifest = await FileBackupZip.ReadManifestAsync(dump,
                         await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, completion.Passwords, cancellationToken), cancellationToken);
                 var warnings = new List<string>();

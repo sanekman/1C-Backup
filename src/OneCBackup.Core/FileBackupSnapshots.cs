@@ -19,7 +19,11 @@ public sealed record FileBackupSnapshot(Guid SnapshotId, Guid FullSnapshotId, Gu
     }
 }
 
-public sealed record FileBackupEntry(string Path, long Length, string Sha256, DateTimeOffset LastWriteUtc);
+public sealed record FileBackupEntry(string Path, long Length, string Sha256, DateTimeOffset LastWriteUtc)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WebDavETag { get; init; }
+}
 
 public sealed record FileBackupManifest
 {
@@ -66,6 +70,8 @@ public sealed record FileBackupManifest
         {
             if (file is null || file.Length < 0 || !IsHash(file.Sha256) || file.LastWriteUtc == default || file.LastWriteUtc.Offset != TimeSpan.Zero)
                 throw new InvalidDataException("Некорректный файл в индексе копии.");
+            if (file.WebDavETag is not null && (file.WebDavETag.Length > 1024 || file.WebDavETag.Any(char.IsControl)))
+                throw new InvalidDataException("Некорректный ETag файла WebDAV.");
             ValidateRelativePath(file.Path);
             if (!names.Add(file.Path)) throw new InvalidDataException("Повторяющийся путь в индексе копии.");
         }

@@ -23,26 +23,7 @@ public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSn
         }
         var sourceIdentity = FileBackupManifest.IdentifySource(source, isFile);
         var password = await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, cancellationToken);
-        FileBackupManifest? previous = null;
-        if (job.FileBackupMode == FileBackupMode.Incremental)
-        {
-            try { previous = await snapshots.ReadAsync(job.Id, cancellationToken); }
-            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { previous = null; }
-            if (previous is not null && (previous.SourceIdentity != sourceIdentity || previous.Depth + 1 >= job.FullBackupEvery)) previous = null;
-            if (previous is not null)
-            {
-                var records = await catalog.ReadAsync(cancellationToken);
-                foreach (var target in job.StorageJobs)
-                {
-                    var newest = records.Where(record => record.JobId == job.Id && record.StorageIdentity == StorageAddress.Identity(target))
-                        .OrderByDescending(record => record.CompletedUtc).ThenByDescending(record => record.Id).FirstOrDefault();
-                    if (newest?.Backup.FileSnapshot != previous.GetSnapshot() || newest.Backup.ArchivePasswordKey != job.ArchivePasswordKey)
-                    { previous = null; break; }
-                    try { FileBackupChains.Resolve(newest, records); }
-                    catch (InvalidDataException) { previous = null; break; }
-                }
-            }
-        }
+        var previous = await FileBackupBases.ReadAsync(job, sourceIdentity, catalog, snapshots, cancellationToken);
         var scan = FileBackupPaths.Scan(source, isFile, cancellationToken);
         var oldFiles = previous?.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, FileBackupEntry>(StringComparer.OrdinalIgnoreCase);

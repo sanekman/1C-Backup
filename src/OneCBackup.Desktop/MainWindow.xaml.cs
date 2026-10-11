@@ -203,6 +203,7 @@ public partial class MainWindow : Window
             OneC = oneC,
             OneCMethod = oneCMethod,
             SqlServer = sql, PostgreSql = postgres,
+            WebDav = Kind.SelectedItem is DatabaseKind.WebDav ? new WebDavSettings { CredentialKey = webDavCredentialKey ?? "", TimeoutMinutes = int.TryParse(WebDavTimeout.Text, out var davTimeout) ? davTimeout : 120 } : null,
             Ftp = storageKind == StorageKind.Ftp ? new FtpSettings
             {
                 Host = FtpHost.Text.Trim(), Port = ftpPort, UseTls = FtpTls.IsChecked == true,
@@ -316,6 +317,8 @@ public partial class MainWindow : Window
         PgUsername.Text = job.PostgreSql?.Username ?? "postgres";
         PgDumpPath.Text = job.PostgreSql?.PgDumpPath ?? ""; PgRestorePath.Text = job.PostgreSql?.PgRestorePath ?? "";
         PgTimeout.Text = (job.PostgreSql?.TimeoutMinutes ?? 120).ToString();
+        webDavCredentialKey = job.WebDav?.CredentialKey;
+        WebDavTimeout.Text = (job.WebDav?.TimeoutMinutes ?? 120).ToString(); UpdateWebDavCredentialStatus();
         JobName.Text = job.Name; Kind.SelectedItem = job.Kind; Source.Text = job.Source;
         OneCMethodPicker.SelectedValue = job.OneCMethod;
         FileBackupModePicker.SelectedValue = job.FileBackupMode;
@@ -346,6 +349,7 @@ public partial class MainWindow : Window
         selectionBeforeEdit = Jobs.SelectedItem as BackupJob;
         JobSearch.Clear();
         Jobs.SelectedItem = null; editingId = null; Zone.Text = TimeZoneInfo.Local.Id;
+        webDavCredentialKey = null; WebDavTimeout.Text = "120"; UpdateWebDavCredentialStatus();
         JobName.Clear(); Source.Clear(); Destination.Clear(); Kind.SelectedItem = DatabaseKind.OneCFile;
         TemporaryFolder.Clear();
         FileBackupModePicker.SelectedValue = FileBackupMode.Full; FullBackupEvery.Text = "7";
@@ -379,7 +383,9 @@ public partial class MainWindow : Window
     {
         if (OneCPanel is null || OneCMethodPanel is null || ArchiveCopies is null) return;
         var isOneC = Kind.SelectedItem is DatabaseKind.OneCFile;
-        var isFiles = Kind.SelectedItem is DatabaseKind.FilesAndFolders;
+        var isLocalFiles = Kind.SelectedItem is DatabaseKind.FilesAndFolders;
+        var isWebDav = Kind.SelectedItem is DatabaseKind.WebDav;
+        var isFiles = isLocalFiles || isWebDav;
         var fileArchive = isOneC && OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive;
         OneCMethodPanel.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
         OneCPanel.Visibility = isOneC && !fileArchive ? Visibility.Visible : Visibility.Collapsed;
@@ -389,13 +395,15 @@ public partial class MainWindow : Window
         FileArchiveHint.Visibility = fileArchive ? Visibility.Visible : Visibility.Collapsed;
         ArchiveCopies.IsEnabled = !fileArchive && !isFiles;
         if (fileArchive || isFiles) ArchiveCopies.IsChecked = true;
-        SourceBrowseButton.Visibility = isOneC || isFiles ? Visibility.Visible : Visibility.Collapsed;
+        SourceBrowseButton.Visibility = isOneC || isLocalFiles ? Visibility.Visible : Visibility.Collapsed;
         SourceBrowseButton.Content = isFiles ? "Папка…" : "Выбрать…";
-        SourceFileBrowseButton.Visibility = isFiles ? Visibility.Visible : Visibility.Collapsed;
+        SourceFileBrowseButton.Visibility = isLocalFiles ? Visibility.Visible : Visibility.Collapsed;
         FileBackupPanel.Visibility = isFiles ? Visibility.Visible : Visibility.Collapsed;
+        WebDavPanel.Visibility = isWebDav ? Visibility.Visible : Visibility.Collapsed;
+        FileSourceConsistencyHint.Text = isWebDav ? "Копируются файлы выбранной папки, без единого снимка сервера. Избегайте изменений во время копирования." : "Перед копированием закройте программы, изменяющие эти файлы.";
         UpdateFileBackupControls();
         if (OneCSourceHelp is not null) OneCSourceHelp.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
-        if (SourceLabel is not null) SourceLabel.Text = isFiles ? "Исходный файл или папка" : isOneC ? "Папка базы 1С или файл 1Cv8.1CD" : "Имя базы данных";
+        if (SourceLabel is not null) SourceLabel.Text = isWebDav ? "HTTPS-адрес папки WebDAV" : isFiles ? "Исходный файл или папка" : isOneC ? "Папка базы 1С или файл 1Cv8.1CD" : "Имя базы данных";
     }
 
     private void UpdateRunControls()
