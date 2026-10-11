@@ -140,11 +140,13 @@ public sealed class PostgreSqlBackupExecutor(IBackupProcessRunner processRunner)
         {
             var code = await processRunner.RunAsync(new BackupProcess(settings.PgDumpPath,
                 ["--format=custom", "--no-password", "--host=" + settings.Host, "--port=" + settings.Port,
-                 "--username=" + settings.Username, "--dbname=" + job.Source, "--file=" + dump], work), timeout.Token);
-            if (code != 0) throw new IOException($"pg_dump завершился с кодом {code}. Проверьте доступ, файл паролей и совместимость утилиты.");
+                 "--username=" + settings.Username, "--dbname=" + job.Source, "--file=" + dump], work)
+                { ErrorLogPath = Path.Combine(work, "pg_dump.log"), DiscardStandardOutput = true }, timeout.Token);
+            if (code != 0) throw new IOException($"pg_dump завершился с кодом {code}. Проверьте доступ, файл паролей и совместимость утилиты. Журнал: {Path.Combine(work, "pg_dump.log")}");
             if (!File.Exists(dump) || new FileInfo(dump).Length == 0) throw new InvalidDataException("pg_dump не создал непустую копию.");
-            code = await processRunner.RunAsync(new BackupProcess(settings.PgRestorePath, ["--list", dump], work), timeout.Token);
-            if (code != 0) throw new InvalidDataException($"Проверка каталога дампа pg_restore завершилась с кодом {code}.");
+            code = await processRunner.RunAsync(new BackupProcess(settings.PgRestorePath, ["--list", dump], work)
+                { ErrorLogPath = Path.Combine(work, "pg_restore.log"), DiscardStandardOutput = true }, timeout.Token);
+            if (code != 0) throw new InvalidDataException($"Проверка каталога дампа pg_restore завершилась с кодом {code}. Журнал: {Path.Combine(work, "pg_restore.log")}");
             timeout.Token.ThrowIfCancellationRequested();
             return dump;
         }

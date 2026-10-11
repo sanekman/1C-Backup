@@ -102,17 +102,21 @@ public sealed class DatabaseExecutionTests : IDisposable
         var process = new FixtureProcess(async (command, token) =>
         {
             calls.Add(command);
+            Assert.True(command.DiscardStandardOutput);
+            Assert.Equal(command.WorkingDirectory, Path.GetDirectoryName(command.ErrorLogPath));
             if (command.Executable == PgJob.PostgreSql.PgDumpPath)
             {
                 Assert.Contains("--no-password", command.Arguments);
                 Assert.Contains("--dbname=database with spaces", command.Arguments);
                 Assert.Contains("--username=backup-user", command.Arguments);
                 Assert.Contains("--host=pg.example.com", command.Arguments);
+                Assert.Equal("pg_dump.log", Path.GetFileName(command.ErrorLogPath));
                 await File.WriteAllTextAsync(command.Arguments.Single(a => a.StartsWith("--file=")).Substring(7), "PG dump fixture", token);
             }
             else
             {
                 Assert.Equal("--list", command.Arguments[0]);
+                Assert.Equal("pg_restore.log", Path.GetFileName(command.ErrorLogPath));
                 Assert.True(File.Exists(command.Arguments[1]));
             }
             return 0;
