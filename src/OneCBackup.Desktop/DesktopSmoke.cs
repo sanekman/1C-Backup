@@ -262,7 +262,21 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Итог мастера не показывает защиту и хранение.");
             if (!Control<TextBox>("WizardSummary").Text.Contains(Control<TextBlock>("NextRun").Text))
                 throw new InvalidOperationException("Ближайшие запуски не перенесены в итог мастера.");
+            if (Control<Expander>("ReviewTechnicalDetails").IsExpanded
+                || !Control<TextBlock>("ReviewFormat").Text.Contains("ZIP с паролем")
+                || !Control<TextBlock>("ReviewStorages").Text.Contains("Диск — 7")
+                || !Control<TextBlock>("ReviewStorages").Text.Contains("Диск — 2")
+                || Control<TextBlock>("ReviewTemporary").ToolTip as string != temporaryDirectory
+                || Control<TextBlock>("ReviewSchedule").Text != "Ежедневно · " + Control<TextBox>("DailyAt").Text.Trim())
+                throw new InvalidOperationException("Краткий итог не показывает защиту, лимиты, расписание или временную папку.");
+            AssertEditorContentVisible("ReviewJobName");
+            AssertEditorContentVisible("ReviewTemporary");
             Screenshot("wizard-review-compact");
+            Control<Expander>("ReviewTechnicalDetails").IsExpanded = true;
+            if (!Control<TextBox>("WizardSummary").IsVisible
+                || !Control<TextBox>("WizardSummary").Text.Contains(temporaryDirectory))
+                throw new InvalidOperationException("Полные параметры недоступны в раскрываемом итоге.");
+            Control<Expander>("ReviewTechnicalDetails").IsExpanded = false;
             window.Width = 1100; window.Height = 740;
             Click("PreviousStepButton"); Click("NextStepButton");
             Click("SaveButton");

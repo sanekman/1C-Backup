@@ -292,8 +292,29 @@
 <TextBlock Text="Старые копии удаляются только после создания и проверки новой. 7 копий при одном запуске в день — примерно неделя истории. Компьютер должен быть включён; для фоновых запусков нужен вход пользователя в Windows." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />
 </StackPanel>
         <StackPanel x:Name="ReviewStep" Visibility="Collapsed">
-         <TextBox x:Name="WizardSummary" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="#F8FAFC" Padding="14" />
-         <TextBlock Text="После сохранения создайте первую копию вручную. Для автоматических запусков включите фоновую работу в верхней панели." TextWrapping="Wrap" Margin="0,16,0,0" Foreground="{StaticResource MutedBrush}" />
+         <Border Background="#F8FAFC" Padding="10,8">
+          <StackPanel>
+           <TextBlock x:Name="ReviewJobName" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
+           <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="100" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+            <TextBlock Text="База" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,3" />
+            <TextBlock x:Name="ReviewDatabase" Grid.Column="1" TextTrimming="CharacterEllipsis" Margin="0,0,0,3" />
+            <TextBlock Text="Формат" Grid.Row="1" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,3" />
+            <TextBlock x:Name="ReviewFormat" Grid.Row="1" Grid.Column="1" TextTrimming="CharacterEllipsis" Margin="0,0,0,3" />
+            <TextBlock Text="Хранилища" Grid.Row="2" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,3" />
+            <TextBlock x:Name="ReviewStorages" Grid.Row="2" Grid.Column="1" TextTrimming="CharacterEllipsis" Margin="0,0,0,3" />
+            <TextBlock Text="Расписание" Grid.Row="3" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,3" />
+            <TextBlock x:Name="ReviewSchedule" Grid.Row="3" Grid.Column="1" TextTrimming="CharacterEllipsis" Margin="0,0,0,3" />
+            <TextBlock Text="Врем. папка" Grid.Row="4" Foreground="{StaticResource MutedBrush}" />
+            <TextBlock x:Name="ReviewTemporary" Grid.Row="4" Grid.Column="1" TextTrimming="CharacterEllipsis" />
+           </Grid>
+          </StackPanel>
+         </Border>
+         <Expander x:Name="ReviewTechnicalDetails" Header="Полные пути и параметры" Margin="0,6,0,0">
+          <TextBox x:Name="WizardSummary" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="#F8FAFC" Padding="10" />
+         </Expander>
+         <TextBlock Text="После сохранения проверьте хранилища и создайте первую копию вручную." TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" />
         </StackPanel>
        </StackPanel>
       </ScrollViewer>

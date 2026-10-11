@@ -129,7 +129,7 @@ public partial class MainWindow
             0 => ("Что будем копировать?", "Название поможет найти задание. Для файловой 1С выберите папку базы или файл 1Cv8.1CD."),
             1 => ("Куда сохранять копии?", "Выберите отдельное место хранения. При необходимости включите ZIP и защиту паролем."),
             2 => ("Когда запускать и сколько хранить?", "Время указано в выбранном часовом поясе. Сохраняются только успешные копии."),
-            _ => ("Всё верно?", "Проверьте настройки перед сохранением. Доступ к базе и хранилищу проверяется при создании первой копии.")
+            _ => ("Всё верно?", "Проверьте итог. Полные пути и параметры можно раскрыть ниже.")
         };
         if (!keepError)
         {
@@ -160,6 +160,30 @@ public partial class MainWindow
                 ? Path.Combine(DesktopPaths.DataDirectory, "work") + " (по умолчанию)" : TemporaryFolder.Text.Trim();
             WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nОсновное хранилище: хранить {KeepLast.Text.Trim()} успешных копий";
             WizardSummary.Text += "\n\n" + NextRun.Text;
+            ReviewTechnicalDetails.IsExpanded = false;
+            ReviewJobName.Text = JobName.Text.Trim();
+            ReviewJobName.ToolTip = ReviewJobName.Text;
+            var sourceLabel = Source.Text.Trim();
+            if (Kind.SelectedItem is DatabaseKind.OneCFile)
+            {
+                sourceLabel = Path.GetFileName(Path.TrimEndingDirectorySeparator(sourceLabel));
+                if (string.IsNullOrEmpty(sourceLabel)) sourceLabel = Source.Text.Trim();
+            }
+            ReviewDatabase.Text = type + " · " + sourceLabel;
+            ReviewDatabase.ToolTip = Source.Text.Trim() + connection;
+            ReviewFormat.Text = format + " · " + method;
+            ReviewFormat.ToolTip = ReviewFormat.Text;
+            static string StorageLabel(StorageKind kind, bool tls) => kind switch
+            { StorageKind.Ftp => tls ? "FTPS" : "FTP", StorageKind.NetworkShare => "Сеть", _ => "Диск" };
+            var storageSummaries = new[] { StorageLabel((StorageKind)Storage.SelectedValue, FtpTls.IsChecked == true) + " — " + KeepLast.Text.Trim() }
+                .Concat(additionalDestinations.Select(destination => StorageLabel(destination.StorageKind, destination.Ftp?.UseTls == true)
+                    + " — " + (destination.KeepLast?.ToString(CultureInfo.InvariantCulture) ?? KeepLast.Text.Trim())));
+            ReviewStorages.Text = string.Join("; ", storageSummaries) + " копий";
+            ReviewStorages.ToolTip = Destination.Text.Trim() + ftpAddress + extraDestinations;
+            ReviewSchedule.Text = schedule;
+            ReviewSchedule.ToolTip = schedule + zoneDescription + "\n" + NextRun.Text;
+            ReviewTemporary.Text = temporary;
+            ReviewTemporary.ToolTip = temporary;
         }
         // Realize the scroll content before focusing a field on a newly opened step.
         UpdateLayout();
