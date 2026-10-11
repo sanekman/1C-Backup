@@ -269,7 +269,7 @@ public partial class MainWindow
         }
         SelectedJobSummary.Foreground = (System.Windows.Media.Brush)FindResource("MutedBrush");
         if (Jobs.SelectedItem is not BackupJob job) { SelectedJobSummary.Text = "Выберите задание, чтобы создать копию или изменить настройки."; return; }
-        var latest = historyRuns.FirstOrDefault(run => run.JobId == job.Id);
+        var latest = LatestJobRuns.Runs?.GetValueOrDefault(job.Id);
         var running = activeJobId == job.Id || latest?.Status == BackupRunStatus.Running;
         JobProgress.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         DateTimeOffset? next;
@@ -280,6 +280,8 @@ public partial class MainWindow
             : "По расписанию: " + TimeZoneInfo.ConvertTime(next.Value, TimeZoneInfo.FindSystemTimeZoneById(job.TimeZoneId)).ToString("dd.MM HH:mm", CultureInfo.InvariantCulture)
                 + (backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running || schedulingTask is not null ? "" : " · включите автоматическое копирование");
         var resultText = running ? "Создаётся копия. Дождитесь результата; отмена доступна в программе, которая запустила копирование."
+            : LatestJobRuns.IsLoading ? "Загружается история запусков."
+            : LatestJobRuns.Runs is null ? "История запусков недоступна. Откройте «История запусков» и нажмите «Обновить»."
             : latest is null ? "Первая копия ещё не создана. Нажмите «Создать копию», чтобы проверить настройки."
             : latest.Status switch
             {

@@ -10,7 +10,7 @@ using OneCBackup.Core;
 namespace OneCBackup.Desktop;
 
 /// <summary>Opt-in Windows CI check, isolated from the user's real profile and databases.</summary>
-internal static class DesktopSmoke
+internal static partial class DesktopSmoke
 {
     public static void Finish(string output, bool success, string details)
     {
@@ -706,8 +706,9 @@ internal static class DesktopSmoke
                 || JsonSerializer.Serialize(await guidanceCatalog.ReadAsync()) != persistedCopiesBeforeGuidance
                 || Control<DataGrid>("Copies").Items.Count != visibleCopiesBeforeGuidance)
                 throw new InvalidOperationException("Пояснения истории изменили сохранённые запуски или копии.");
+            await VerifyJobOverviewAsync(window, name => Screenshot(name));
             await VerifyPostgreSqlMonitoringAsync(window);
-            Finish(output, true, "Пояснения истории, переход к текущему заданию по ID, три ближайших запуска, смена дней / часового пояса / режима и итог, компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
+            Finish(output, true, "Последние результаты всех заданий, подсказки, обновление без изменения выбора и компактная таблица, пояснения истории, переход к текущему заданию по ID, три ближайших запуска, смена дней / часового пояса / режима и итог, компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
         }
         catch (Exception ex) { Finish(output, false, ex.ToString()); }
         finally

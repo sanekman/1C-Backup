@@ -627,11 +627,13 @@ public partial class MainWindow : Window
         try
         {
             historyRuns = (await history.ReadAsync()).OrderByDescending(r => r.StartedUtc).ToList();
+            LatestJobRuns = JobRunOverview.From(historyRuns);
             var selectedId = (RunHistory.SelectedItem as BackupRun)?.RunId;
             RunHistory.ItemsSource = historyRuns;
             ApplyHistoryFilter();
             RunHistory.SelectedItem = RunHistory.Items.OfType<BackupRun>().FirstOrDefault(run => run.RunId == selectedId);
         }
+        catch { LatestJobRuns = JobRunOverview.Unavailable; throw; }
         finally { historyRefreshing = false; UpdateRunControls(); }
     }
 

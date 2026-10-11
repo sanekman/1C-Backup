@@ -7,6 +7,7 @@
  WindowStartupLocation="CenterScreen" Background="{StaticResource CanvasBrush}">
  <Window.Resources>
   <local:LocalTimeConverter x:Key="LocalTimeConverter" />
+  <local:JobRunOverviewConverter x:Key="JobRunOverviewConverter" />
   <DataTemplate x:Key="DatabaseKindLabel">
    <TextBlock>
     <TextBlock.Style><Style TargetType="TextBlock">
@@ -107,14 +108,29 @@
    SelectionChanged="Jobs_SelectionChanged" MouseDoubleClick="Jobs_DoubleClick" CanUserAddRows="False">
    <DataGrid.Columns>
     <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" MinWidth="180" />
-    <DataGridTemplateColumn Header="Тип" Width="115">
+    <DataGridTemplateColumn Header="Тип" Width="100">
      <DataGridTemplateColumn.CellTemplate><DataTemplate>
       <ContentControl Content="{Binding Kind}" ContentTemplate="{StaticResource DatabaseKindLabel}" />
      </DataTemplate></DataGridTemplateColumn.CellTemplate>
     </DataGridTemplateColumn>
-    <DataGridTextColumn Header="Расписание" Binding="{Binding ScheduleDescription}" Width="170" />
-    <DataGridTextColumn Header="Копий (осн.)" Binding="{Binding KeepLast}" Width="95" />
-    <DataGridTemplateColumn Header="Авто" Width="65"><DataGridTemplateColumn.CellTemplate><DataTemplate>
+    <DataGridTextColumn Header="Расписание" Binding="{Binding ScheduleDescription}" Width="145">
+     <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding ScheduleDescription}" /></Style></DataGridTextColumn.ElementStyle>
+    </DataGridTextColumn>
+    <DataGridTemplateColumn Header="Последний запуск" Width="150">
+     <DataGridTemplateColumn.CellTemplate><DataTemplate>
+      <ContentControl>
+       <ContentControl.Content><MultiBinding Converter="{StaticResource JobRunOverviewConverter}">
+        <Binding Path="Id" /><Binding Path="LatestJobRuns" RelativeSource="{RelativeSource AncestorType={x:Type local:MainWindow}}" />
+       </MultiBinding></ContentControl.Content>
+       <ContentControl.ContentTemplate><DataTemplate>
+        <TextBlock Text="{Binding Label}" Foreground="{Binding Color}" FontSize="12" TextTrimming="CharacterEllipsis">
+         <TextBlock.ToolTip><ToolTip MaxWidth="520"><TextBlock Text="{Binding Help}" TextWrapping="Wrap" /></ToolTip></TextBlock.ToolTip>
+        </TextBlock>
+       </DataTemplate></ContentControl.ContentTemplate>
+      </ContentControl>
+     </DataTemplate></DataGridTemplateColumn.CellTemplate>
+    </DataGridTemplateColumn>
+    <DataGridTemplateColumn Header="Авто" Width="50"><DataGridTemplateColumn.CellTemplate><DataTemplate>
      <TextBlock ToolTip="Разрешены запуски по расписанию. Для выполнения включите автоматическое копирование.">
       <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="Да" /><Style.Triggers>
        <DataTrigger Binding="{Binding Enabled}" Value="False"><Setter Property="Text" Value="Нет" /></DataTrigger>
