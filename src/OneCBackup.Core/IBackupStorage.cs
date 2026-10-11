@@ -15,6 +15,10 @@ public interface IBackupStorage
     Task<StoredBackup> StoreAsync(string completedBackupPath, BackupJob job,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Reads backup bytes into a caller-owned new stream. The caller verifies length and SHA-256 before publication.</summary>
+    Task CopyToAsync(StoredBackup backup, BackupJob job, Stream destination, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Это хранилище не поддерживает сохранение копии на компьютер.");
+
     /// <summary>Deletes only the exact recorded file in this job's destination.</summary>
     Task DeleteAsync(StoredBackup backup, BackupJob job, CancellationToken cancellationToken = default);
     Task VerifyAsync(StoredBackup backup, BackupJob job, CancellationToken cancellationToken = default);

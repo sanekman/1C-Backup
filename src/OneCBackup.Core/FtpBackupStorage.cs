@@ -14,6 +14,7 @@ public sealed class FtpBackupStorage(NetworkCredential credentials, string verif
         client.Config.DataConnectionType = FtpDataConnectionType.AutoPassive;
         client.Config.DataConnectionEncryption = settings.UseTls;
         client.Config.ValidateAnyCertificate = false;
+        client.Config.DownloadDataType = FtpDataType.Binary;
         return client;
     }
 
@@ -22,6 +23,19 @@ public sealed class FtpBackupStorage(NetworkCredential credentials, string verif
 
     public Task VerifyAsync(StoredBackup backup, BackupJob job, CancellationToken cancellationToken = default) =>
         VerifyOrDeleteAsync(backup, job, delete: false, cancellationToken);
+
+    public async Task CopyToAsync(StoredBackup backup, BackupJob job, Stream destination, CancellationToken cancellationToken = default)
+    {
+        if (job.StorageKind != StorageKind.Ftp || job.Validate().Count != 0)
+            throw new ArgumentException("Некорректное FTP-хранилище.", nameof(job));
+        var remote = StorageAddress.ValidateLocation(job, backup);
+        cancellationToken.ThrowIfCancellationRequested();
+        using var client = CreateClient(job.Ftp!, credentials);
+        await client.Connect(cancellationToken);
+        if (!await client.FileExists(remote, cancellationToken)) throw new FileNotFoundException("FTP-копия не найдена.", remote);
+        if (!await client.DownloadStream(destination, remote, token: cancellationToken))
+            throw new IOException("Не удалось скачать FTP-копию.");
+    }
 
     private async Task VerifyOrDeleteAsync(StoredBackup backup, BackupJob job, bool delete, CancellationToken cancellationToken)
     {

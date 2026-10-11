@@ -368,6 +368,7 @@
       <StackPanel>
        <WrapPanel>
         <Button x:Name="VerifyCopyButton" Content="Проверить целостность" Style="{StaticResource PrimaryButton}" Click="VerifyCopy_Click" IsEnabled="False" Margin="0,0,8,8" />
+        <Button x:Name="ExportCopyButton" Content="Сохранить копию…" Click="ExportCopy_Click" IsEnabled="False" Margin="0,0,8,8" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="ExtractOneCButton" Content="Извлечь 1Cv8.1CD" Click="ExtractOneC_Click" IsEnabled="False" Margin="0,0,8,8" ToolTip="Извлечь файловую базу из проверенного ZIP в новую папку. Доступно для локальных и сетевых копий." />
         <Button x:Name="CancelCopyVerificationButton" Content="Отменить операцию" Click="CancelCopyVerification_Click" IsEnabled="False" Margin="0,0,8,8" />
         <Button x:Name="OpenCopyDirectoryButton" Content="Открыть папку" Click="OpenCopyDirectory_Click" IsEnabled="False" Margin="0,0,0,8" />

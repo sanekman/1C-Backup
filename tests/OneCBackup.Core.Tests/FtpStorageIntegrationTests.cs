@@ -114,6 +114,10 @@ public sealed class FtpStorageIntegrationTests : IDisposable
         Assert.Equal(2, audit.Destinations.Count);
         Assert.All(audit.Destinations, result => Assert.Equal(BackupAuditStatus.Verified, result.Status));
         Assert.Equal(beforeAudit, System.Text.Json.JsonSerializer.Serialize(await catalog.ReadAsync()));
+        var exported = await new BackupCopyExporter(router).ExportAsync(remote, job, Path.Combine(directory, "downloaded-copy.zip"));
+        Assert.Equal(await File.ReadAllBytesAsync(latestLocal.Backup.Location), await File.ReadAllBytesAsync(exported.Path));
+        Assert.Equal(beforeAudit, System.Text.Json.JsonSerializer.Serialize(await catalog.ReadAsync()));
+        Assert.Empty(Directory.GetFiles(directory, ".onec-export-*.partial"));
         Assert.Equal(2, Directory.GetFiles(localDirectory).Length);
         Assert.Single(Directory.GetFiles(Path.Combine(RemoteRoot, remoteDirectory.TrimStart('/'))));
         foreach (var record in records) await new BackupCopyVerifier(router).VerifyAsync(record, job);

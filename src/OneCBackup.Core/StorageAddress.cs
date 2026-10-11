@@ -26,7 +26,8 @@ internal static class StorageAddress
             var remote = Uri.UnescapeDataString(uri.AbsolutePath);
             var prefix = job.DestinationDirectory.TrimEnd('/') + "/";
             if (!remote.StartsWith(prefix, StringComparison.Ordinal) || remote[prefix.Length..].Length == 0 ||
-                remote[prefix.Length..].Contains('/') || remote.Any(char.IsControl))
+                remote[prefix.Length..].Contains('/') || remote[prefix.Length..].Contains('\\')
+                || remote[prefix.Length..] is "." or ".." || remote.Any(char.IsControl))
                 throw new InvalidDataException("Копия находится вне каталога задания.");
             return remote;
         }

@@ -431,6 +431,10 @@ public partial class MainWindow : Window
         RefreshCopiesButton.IsEnabled = ready && !copiesRefreshing;
         VerifyCopyButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null &&
             Copies.SelectedItem is BackupCopyRow selected && jobs.Any(job => job.Id == selected.Record.JobId);
+        ExportCopyButton.IsEnabled = VerifyCopyButton.IsEnabled;
+        ExportCopyButton.ToolTip = !engineAvailable || schedulingTask is not null
+            ? "Остановите автоматическое копирование, чтобы сохранить выбранную копию на компьютер."
+            : "Скачать копию с FTP или скопировать локальный / сетевой файл в выбранную папку. Размер и SHA-256 проверяются; существующие файлы не перезаписываются.";
         ExtractOneCButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null &&
             Copies.SelectedItem is BackupCopyRow extractable && jobs.Any(job => job.Id == extractable.Record.JobId &&
                 CanExtractCopy(extractable.Record, job));

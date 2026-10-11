@@ -40,6 +40,8 @@ public sealed class RoutedBackupStorage(IFtpCredentialStore credentials, string 
         await (await ResolveAsync(job, cancellationToken)).StoreAsync(completedBackupPath, job, cancellationToken);
     public async Task VerifyAsync(StoredBackup backup, BackupJob job, CancellationToken cancellationToken = default) =>
         await (await ResolveAsync(job, cancellationToken)).VerifyAsync(backup, job, cancellationToken);
+    public async Task CopyToAsync(StoredBackup backup, BackupJob job, Stream destination, CancellationToken cancellationToken = default) =>
+        await (await ResolveAsync(job, cancellationToken)).CopyToAsync(backup, job, destination, cancellationToken);
     public async Task DeleteAsync(StoredBackup backup, BackupJob job, CancellationToken cancellationToken = default) =>
         await (await ResolveAsync(job, cancellationToken)).DeleteAsync(backup, job, cancellationToken);
 }

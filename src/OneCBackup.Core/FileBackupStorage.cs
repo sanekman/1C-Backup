@@ -15,6 +15,18 @@ public sealed class FileBackupStorage : IBackupStorage
         return StorageAddress.VerifyFileAsync(path, backup, cancellationToken);
     }
 
+    public async Task CopyToAsync(StoredBackup backup, BackupJob job, Stream destination, CancellationToken cancellationToken = default)
+    {
+        if (job.StorageKind is not (StorageKind.LocalDirectory or StorageKind.NetworkShare))
+            throw new ArgumentException("Неподдерживаемое файловое хранилище.", nameof(job));
+        var path = StorageAddress.ValidateLocation(job, backup);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("Сохранение копии через символическую ссылку запрещено.");
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous);
+        await input.CopyToAsync(destination, cancellationToken);
+    }
+
     public async Task DeleteAsync(StoredBackup backup, BackupJob job, CancellationToken cancellationToken = default)
     {
         if (job.StorageKind is not (StorageKind.LocalDirectory or StorageKind.NetworkShare))
