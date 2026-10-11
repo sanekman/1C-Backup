@@ -54,6 +54,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        AppVersion.Text = ApplicationBuildInfo.Version;
+        AppVersion.ToolTip = ApplicationBuildInfo.SupportText;
+        BuildInfo.Text = ApplicationBuildInfo.SupportText;
         AdditionalStorageList.ItemsSource = additionalDestinations;
         additionalDestinations.CollectionChanged += (_, _) => AdditionalStorageOptions.Header =
             $"Копировать также в другие хранилища ({additionalDestinations.Count})";

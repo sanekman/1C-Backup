@@ -103,6 +103,22 @@ internal static class DesktopSmoke
                     throw new InvalidOperationException("Кнопка мастера выходит за границы окна: " + buttonName);
             }
             Screenshot("first-start");
+            var expectedVersion = Environment.GetEnvironmentVariable("GITHUB_REF_TYPE") == "tag"
+                ? Environment.GetEnvironmentVariable("GITHUB_REF_NAME")![1..] : "0.1.0-dev";
+            if (ApplicationBuildInfo.Version != expectedVersion || Control<TextBlock>("AppVersion").Text != expectedVersion)
+                throw new InvalidOperationException("Версия программы не соответствует сборке: " + ApplicationBuildInfo.Version);
+            var expectedRevision = Environment.GetEnvironmentVariable("GITHUB_SHA");
+            if (expectedRevision is not null && ApplicationBuildInfo.Revision != expectedRevision)
+                throw new InvalidOperationException("Идентификатор сборки не соответствует исходному коду.");
+            Click("AgentNavigation");
+            Click("CopyBuildInfoButton");
+            if (Clipboard.GetText() != ApplicationBuildInfo.SupportText || Control<TextBox>("BuildInfo").Text != Clipboard.GetText()
+                || !Control<TextBlock>("BuildInfoStatus").Text.Contains("скопированы"))
+                throw new InvalidOperationException("Сведения о программе не скопированы полностью.");
+            File.WriteAllText(Path.Combine(output, "build-info.json"), JsonSerializer.Serialize(new
+            { version = ApplicationBuildInfo.Version, revision = ApplicationBuildInfo.Revision, supportText = Clipboard.GetText() }));
+            Screenshot("about-program");
+            Click("JobsNavigation");
             Click("FirstJobButton");
             Click("NextStepButton");
             if (!Control<TextBlock>("WizardError").IsVisible || !Control<StackPanel>("BaseStep").IsVisible)
@@ -510,6 +526,13 @@ internal static class DesktopSmoke
                 else Click(navigation);
                 await Task.Delay(100);
                 Screenshot("compact-" + navigation);
+                if (navigation == "AgentNavigation")
+                {
+                    AssertVisibleFooter("CopyBuildInfoButton");
+                    Click("CopyBuildInfoButton");
+                    if (Clipboard.GetText() != ApplicationBuildInfo.SupportText)
+                        throw new InvalidOperationException("Сведения недоступны в компактном окне.");
+                }
                 if (navigation == "JobsNavigation")
                 {
                     var grid = Control<DataGrid>("Jobs");

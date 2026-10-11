@@ -75,6 +75,9 @@ SQL Server использует Windows-аутентификацию и пров
 временная выгрузка и копии на стороне SQL-сервера этим не шифруются.
 
 НАСТРОЙКИ И ДАННЫЕ
+Версия видна слева под названием программы. В разделе «Настройки» →
+«О программе» нажмите «Скопировать сведения» для сообщения об ошибке:
+копируются только версия, идентификатор сборки, .NET, архитектура и система.
 Настройки, история и журнал копий: %LOCALAPPDATA%\\OneCBackup.
 Логин и пароль FTP: диспетчер учётных данных текущего пользователя Windows.
 Удаление папки программы не удаляет эти данные или резервные копии.
@@ -110,6 +113,18 @@ def main():
         package(publish, artifacts)
 
 
+def distribution_version(publish):
+    versions = []
+    for project in ["OneCBackup.Desktop", "OneCBackup.Agent"]:
+        dependencies = json.loads((publish / f"{project}.deps.json").read_text())
+        versions.append(next(key.split("/", 1)[1] for key in dependencies["libraries"] if key.startswith(project + "/")))
+    if versions[0] != versions[1]:
+        raise RuntimeError("Desktop and agent versions differ")
+    if os.environ.get("GITHUB_REF_TYPE") == "tag" and versions[0] != os.environ["GITHUB_REF_NAME"][1:]:
+        raise RuntimeError("The distribution version does not match the release tag")
+    return versions[0]
+
+
 def package(publish, artifacts):
     required = ["OneCBackup.Desktop.exe", "OneCBackup.Desktop.dll", "OneCBackup.Core.dll",
                 "OneCBackup.Agent.exe", "OneCBackup.Agent.dll", "OneCBackup.Agent.runtimeconfig.json", "OneCBackup.Agent.deps.json",
@@ -126,6 +141,7 @@ def package(publish, artifacts):
     frameworks = {framework["name"] for framework in config["runtimeOptions"].get("includedFrameworks", [])}
     if not {"Microsoft.NETCore.App", "Microsoft.WindowsDesktop.App"}.issubset(frameworks):
         raise RuntimeError("The distribution does not include the .NET and Windows Desktop runtimes")
+    version = distribution_version(publish)
     files = [file for file in publish.rglob("*") if file.is_file() and file.suffix != ".pdb"]
     destination = artifacts / "1C-Backup-windows-x64.zip"
     handle, temporary_name = tempfile.mkstemp(suffix=".zip.tmp", dir=artifacts)
@@ -136,6 +152,7 @@ def package(publish, artifacts):
             for file in sorted(files):
                 archive.write(file, Path("1C-Backup") / file.relative_to(publish))
             archive.writestr("1C-Backup/START-HERE.txt", INSTRUCTIONS.replace("\n", "\r\n").encode("utf-8-sig"))
+            archive.writestr("1C-Backup/VERSION.txt", (version + "\r\n").encode("utf-8"))
         with zipfile.ZipFile(temporary) as archive:
             corrupt = archive.testzip()
             if corrupt:
@@ -147,7 +164,8 @@ def package(publish, artifacts):
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     destination.with_suffix(".zip.sha256").write_text(f"{digest}  {destination.name}\n", encoding="ascii")
     print(f"Distribution: {destination}")
-    print(f"Size: {destination.stat().st_size / (1024 * 1024):.1f} MiB; files: {len(files) + 1}")
+    print(f"Version: {version}")
+    print(f"Size: {destination.stat().st_size / (1024 * 1024):.1f} MiB; files: {len(files) + 2}")
     print(f"SHA256: {digest}")
 
 

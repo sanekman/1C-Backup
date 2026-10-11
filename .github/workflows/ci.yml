@@ -30,6 +30,7 @@ jobs:
       - run: dotnet build OneCBackup.slnx --no-restore -m:1 -nr:false
       - run: dotnet test tests/OneCBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=FtpIntegration'
       - run: python -m unittest discover -s tests/postgresql -v
+      - run: python -m unittest discover -s tests/distribution -v
       - if: runner.os == 'Linux'
         run: |
           python -m pip install -r tests/ftp/requirements.txt
@@ -72,6 +73,21 @@ jobs:
         with:
           python-version: '3.12'
       - run: python tools/build_windows_distribution.py
+      - shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Join-Path $PWD 'artifacts/1C-Backup-windows-x64.zip'))
+          try {
+            $expectedVersion = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.Substring(1) } else { '0.1.0-dev' }
+            foreach ($project in @('OneCBackup.Desktop', 'OneCBackup.Agent', 'OneCBackup.Core')) {
+              $entry = $zip.GetEntry("1C-Backup/$project.dll")
+              $path = Join-Path $PWD "artifacts/$project.version-check.dll"
+              [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $path, $true)
+              $actual = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($path).ProductVersion
+              if ($actual -ne "$expectedVersion+$env:GITHUB_SHA") { throw "Packaged $project has an unexpected version: $actual" }
+              Remove-Item $path
+            }
+          } finally { $zip.Dispose() }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64-distribution
