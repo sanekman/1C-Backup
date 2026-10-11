@@ -16,9 +16,10 @@ public sealed record BackupCopyRow(BackupRecord Record, string JobName)
         >= 1024 => $"{Record.Backup.Length / 1024d:N1} КБ",
         _ => $"{Record.Backup.Length} Б"
     };
-    public string StorageDescription => Record.StorageIdentity.StartsWith("ftp", StringComparison.OrdinalIgnoreCase)
-        ? "FTP / FTPS" : Record.StorageIdentity.StartsWith("NetworkShare:", StringComparison.Ordinal)
-            ? "Сетевая папка" : "Локальный диск";
+    public string StorageCategory => Record.StorageIdentity.StartsWith("ftp", StringComparison.OrdinalIgnoreCase)
+        ? "ftp" : Record.StorageIdentity.StartsWith("NetworkShare:", StringComparison.Ordinal) ? "network" : "local";
+    public string StorageDescription => StorageCategory switch
+    { "ftp" => "FTP / FTPS", "network" => "Сетевая папка", _ => "Локальный диск" };
     public bool CanOpenDirectory => Path.IsPathFullyQualified(Location) &&
         !Location.StartsWith("ftp", StringComparison.OrdinalIgnoreCase);
 }

@@ -290,6 +290,7 @@ public partial class MainWindow
         {
             ShowPage("copies");
             await RefreshCopiesAsync();
+            SelectCopiesForJob(job.Id);
             var latest = Copies.Items.OfType<BackupCopyRow>().FirstOrDefault(row => row.Record.JobId == job.Id);
             Copies.SelectedItem = latest;
             if (latest is not null)

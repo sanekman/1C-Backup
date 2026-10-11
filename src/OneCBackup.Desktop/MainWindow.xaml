@@ -320,13 +320,22 @@
    </Border>
    <Border x:Name="CopiesView" Grid.Row="2" Style="{StaticResource Card}" Visibility="Collapsed">
     <DockPanel>
-     <Border DockPanel.Dock="Top" Padding="16" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
-      <DockPanel>
+     <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+      <StackPanel><DockPanel>
        <Button x:Name="RefreshCopiesButton" Content="Обновить" DockPanel.Dock="Right" Click="RefreshCopies_Click" IsEnabled="False" />
        <TextBlock x:Name="CopiesSummary" Text="Загрузка списка…" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,12,0" />
       </DockPanel>
+      <Grid Margin="0,6,0,0">
+       <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+       <StackPanel Margin="0,0,8,0"><TextBlock Text="Задание" Foreground="{StaticResource MutedBrush}" /><ComboBox x:Name="CopyJobFilter" DisplayMemberPath="Label" SelectedValuePath="Id" SelectionChanged="CopyFilter_Changed" AutomationProperties.Name="Фильтр копий по заданию" /></StackPanel>
+       <StackPanel Grid.Column="1" Margin="0,0,8,0"><TextBlock Text="Хранилище" Foreground="{StaticResource MutedBrush}" /><ComboBox x:Name="CopyStorageFilter" SelectedIndex="0" SelectionChanged="CopyFilter_Changed" AutomationProperties.Name="Фильтр копий по типу хранилища">
+        <ComboBoxItem Content="Все хранилища" Tag="" /><ComboBoxItem Content="Локальный диск" Tag="local" /><ComboBoxItem Content="Сетевая папка" Tag="network" /><ComboBoxItem Content="FTP / FTPS" Tag="ftp" />
+       </ComboBox></StackPanel>
+       <StackPanel Grid.Column="2" Margin="0,0,8,0"><TextBlock Text="Поиск по имени или пути" Foreground="{StaticResource MutedBrush}" /><TextBox x:Name="CopySearch" TextChanged="CopyFilter_Changed" AutomationProperties.Name="Поиск копий по имени задания или пути" /></StackPanel>
+       <Button Grid.Column="3" x:Name="ResetCopyFiltersButton" Content="Сбросить" VerticalAlignment="Bottom" Click="ResetCopyFilters_Click" ToolTip="Показать копии всех заданий и хранилищ" />
+      </Grid></StackPanel>
      </Border>
-     <Border DockPanel.Dock="Bottom" Padding="16" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
+     <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
       <StackPanel>
        <WrapPanel>
         <Button x:Name="VerifyCopyButton" Content="Проверить целостность" Style="{StaticResource PrimaryButton}" Click="VerifyCopy_Click" IsEnabled="False" Margin="0,0,8,8" />
@@ -334,12 +343,17 @@
         <Button x:Name="CancelCopyVerificationButton" Content="Отменить операцию" Click="CancelCopyVerification_Click" IsEnabled="False" Margin="0,0,8,8" />
         <Button x:Name="OpenCopyDirectoryButton" Content="Открыть папку" Click="OpenCopyDirectory_Click" IsEnabled="False" Margin="0,0,0,8" />
        </WrapPanel>
+       <TextBlock x:Name="CopyVerificationStatus" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
+       <Expander x:Name="CopyDetailsPanel" Header="Подробности копии и проверки" Margin="0,4,0,0">
+        <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto"><StackPanel Margin="4,6,4,0">
        <TextBlock Text="Список из журнала успешных копий. Наличие файлов проверяется кнопкой «Проверить целостность». Для проверки остановите планировщик. FTP-копия скачивается полностью; нужны свободное место и доступ к серверу." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" />
-       <TextBlock x:Name="CopyVerificationStatus" TextWrapping="Wrap" Margin="0,8,0,0" />
+       <TextBlock Text="{Binding Text, ElementName=CopyVerificationStatus}" TextWrapping="Wrap" Margin="0,6,0,0" />
        <TextBox x:Name="CopyDetails" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="100" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0" />
+        </StackPanel></ScrollViewer>
+       </Expander>
       </StackPanel>
      </Border>
-     <DataGrid x:Name="Copies" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="Copies_SelectionChanged">
+     <DataGrid x:Name="Copies" RowHeight="30" ColumnHeaderHeight="30" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="Copies_SelectionChanged">
       <DataGrid.Columns>
        <DataGridTextColumn Header="Создана" Binding="{Binding CompletedUtc, Converter={StaticResource LocalTimeConverter}}" Width="140" />
        <DataGridTextColumn Header="Задание" Binding="{Binding JobName}" Width="150" />

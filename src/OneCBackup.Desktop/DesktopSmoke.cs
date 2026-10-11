@@ -221,6 +221,10 @@ internal static class DesktopSmoke
             if (successfulCopies.Length != 2 || successfulCopies[0].Sha256 != successfulCopies[1].Sha256
                 || !Directory.GetFiles(secondaryDirectory).Any())
                 throw new InvalidOperationException("Один и тот же архив не доставлен в оба хранилища.");
+            Control<TextBox>("CopySearch").Text = "no-such-copy-before-navigation";
+            Control<ComboBox>("CopyStorageFilter").SelectedIndex = 3;
+            if (Control<DataGrid>("Copies").Items.Count != 0 || !Control<Button>("ShowLatestCopyButton").IsEnabled)
+                throw new InvalidOperationException("Фильтр каталога заблокировал переход к копии из задания.");
             Click("ShowLatestCopyButton");
             await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Copies").SelectedItem is BackupCopyRow,
                 "Переход к последней копии не выбрал файл.");
@@ -228,7 +232,12 @@ internal static class DesktopSmoke
             var savedJob = (BackupJob)Control<DataGrid>("Jobs").SelectedItem;
             if (selectedCopy.Record.JobId != savedJob.Id || Control<Border>("CopiesView").Visibility != Visibility.Visible)
                 throw new InvalidOperationException("Переход к копии выбрал другое задание.");
+            if (Control<TextBox>("CopySearch").Text.Length != 0 || Control<ComboBox>("CopyStorageFilter").SelectedIndex != 0
+                || Control<ComboBox>("CopyJobFilter").SelectedValue is not Guid scope || scope != savedJob.Id)
+                throw new InvalidOperationException("Переход к последней копии сохранил скрывающие её фильтры.");
+            Control<Expander>("CopyDetailsPanel").IsExpanded = true;
             Screenshot("first-copy-result");
+            Control<Expander>("CopyDetailsPanel").IsExpanded = false;
             Click("JobsNavigation");
             // A locked source must produce a visible failure without creating another copy.
             using (var lockedSource = new FileStream(Path.Combine(source, "1Cv8.1CD"), FileMode.Open, FileAccess.Read, FileShare.None))
@@ -360,6 +369,10 @@ internal static class DesktopSmoke
                 || Directory.GetFiles(secondaryDirectory).Length != 2)
                 throw new InvalidOperationException("Хранилища не сохраняют своё количество файлов.");
             Screenshot("per-storage-retention-result");
+            // Start the two-job scenario with all records visible.
+            Click("CopiesNavigation");
+            await WaitUntil(() => window.SmokeReady, "Каталог не обновился перед копированием задания.");
+            Click("ResetCopyFiltersButton"); Click("JobsNavigation");
             // A copied draft must be independent, while sharing the existing immutable password binding.
             var original = (BackupJob)Control<DataGrid>("Jobs").SelectedItem;
             var originalJson = JsonSerializer.Serialize(original);
@@ -409,6 +422,41 @@ internal static class DesktopSmoke
                 throw new InvalidOperationException("Повторное копирование не предложило уникальное название.");
             Click("CancelEditorButton");
             Screenshot("duplicate-job-saved");
+            // Identical user-facing names must still select one database by its stable identifier.
+            Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(job => job.Id == duplicate.Id);
+            Click("EditJobButton");
+            Control<TextBox>("JobName").Text = original.Name;
+            Click("NextStepButton"); Click("NextStepButton"); Click("NextStepButton"); Click("SaveButton");
+            await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled, "Переименование второй базы не сохранилось.");
+            Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(job => job.Id == original.Id);
+            Click("CopiesNavigation");
+            await WaitUntil(() => window.SmokeReady, "Каталог двух заданий не загрузился.");
+            Control<ComboBox>("CopyJobFilter").SelectedValue = duplicate.Id;
+            if (Control<DataGrid>("Copies").Items.Count != 3
+                || Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Any(row => row.Record.JobId != duplicate.Id)
+                || !Control<ComboBox>("CopyJobFilter").Text.Contains(duplicate.Id.ToString("N")[..8]))
+                throw new InvalidOperationException("Фильтр задания смешал копии двух баз.");
+            Control<TextBox>("CopySearch").Text = "SECOND-COPIES";
+            Control<ComboBox>("CopyStorageFilter").SelectedIndex = 1;
+            if (Control<DataGrid>("Copies").Items.Count != 2)
+                throw new InvalidOperationException("Поиск по пути не выбрал второе хранилище без учёта регистра.");
+            Control<DataGrid>("Copies").SelectedIndex = 0;
+            var filteredCopyId = ((BackupCopyRow)Control<DataGrid>("Copies").SelectedItem).Record.Id;
+            Click("RefreshCopiesButton");
+            await WaitUntil(() => window.SmokeReady, "Отфильтрованный каталог не обновился.");
+            if (Control<DataGrid>("Copies").Items.Count != 2
+                || Control<ComboBox>("CopyJobFilter").SelectedValue is not Guid filterId || filterId != duplicate.Id
+                || (Control<DataGrid>("Copies").SelectedItem as BackupCopyRow)?.Record.Id != filteredCopyId)
+                throw new InvalidOperationException("Обновление потеряло фильтры или выбранную копию.");
+            Screenshot("copies-filtered");
+            Control<ComboBox>("CopyStorageFilter").SelectedIndex = 2;
+            if (Control<DataGrid>("Copies").Items.Count != 0 || Control<DataGrid>("Copies").SelectedItem is not null
+                || Control<Button>("VerifyCopyButton").IsEnabled || !Control<TextBlock>("CopiesSummary").Text.Contains("по выбранным условиям нет"))
+                throw new InvalidOperationException("Пустой фильтр оставил действия над скрытой копией.");
+            Click("ResetCopyFiltersButton");
+            if (Control<DataGrid>("Copies").Items.Count != 8)
+                throw new InvalidOperationException("Сброс фильтров потерял копии.");
+            Control<DataGrid>("Copies").SelectedIndex = 0;
             window.Width = 900; window.Height = 580;
             foreach (var navigation in new[] { "JobsNavigation", "CopiesNavigation", "HistoryNavigation", "AgentNavigation" })
             {
@@ -424,6 +472,15 @@ internal static class DesktopSmoke
                             || row.TranslatePoint(new Point(), grid).Y + row.ActualHeight > grid.ActualHeight + 1)
                             throw new InvalidOperationException("Панели скрыли строки заданий в компактном окне.");
                     }
+                }
+                if (navigation == "CopiesNavigation")
+                {
+                    var grid = Control<DataGrid>("Copies");
+                    window.UpdateLayout();
+                    if (grid.ItemContainerGenerator.ContainerFromIndex(0) is not DataGridRow row
+                        || row.ActualHeight <= 0 || row.TranslatePoint(new Point(), grid).Y < 0
+                        || row.TranslatePoint(new Point(), grid).Y + row.ActualHeight > grid.ActualHeight + 1)
+                        throw new InvalidOperationException("Подробности скрыли таблицу копий в компактном окне.");
                 }
                 Screenshot("compact-" + navigation);
             }

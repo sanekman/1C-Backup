@@ -402,7 +402,7 @@ public partial class MainWindow : Window
         CancelStorageCheckButton.IsEnabled = checkingStorages && copyVerification is { IsCancellationRequested: false };
         CancelRunButton.Visibility = activeRun is null ? Visibility.Collapsed : Visibility.Visible;
         ShowLatestCopyButton.IsEnabled = ready && !copiesRefreshing && Jobs.SelectedItem is BackupJob copyJob
-            && Copies.Items.OfType<BackupCopyRow>().Any(row => row.Record.JobId == copyJob.Id);
+            && copyRows.Any(row => row.Record.JobId == copyJob.Id);
         ShowLatestRunButton.IsEnabled = ready && !historyRefreshing && Jobs.SelectedItem is BackupJob runJob
             && historyRuns.Any(run => run.JobId == runJob.Id);
         JobEditor.IsEnabled = SaveButton.IsEnabled = ready && canSave && idle;
@@ -420,6 +420,7 @@ public partial class MainWindow : Window
             Copies.SelectedItem is BackupCopyRow extractable && jobs.Any(job => job.Id == extractable.Record.JobId &&
                 CanExtractCopy(extractable.Record, job));
         CancelCopyVerificationButton.IsEnabled = copyVerification is { IsCancellationRequested: false };
+        CancelCopyVerificationButton.Visibility = copyVerification is not null && !checkingStorages ? Visibility.Visible : Visibility.Collapsed;
         OpenCopyDirectoryButton.IsEnabled = ready && Copies.SelectedItem is BackupCopyRow { CanOpenDirectory: true };
         StartBackgroundButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null && !editorOpen;
         StopBackgroundButton.IsEnabled = ready && (backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running || schedulingTask is not null && !schedulerStopping);
@@ -727,15 +728,17 @@ public partial class MainWindow : Window
                 new BackupCopyRow(record, jobs.FirstOrDefault(job => job.Id == record.JobId)?.Name
                     ?? $"Задание недоступно ({record.JobId.ToString("N")[..8]})")).ToList();
             var selectedId = (Copies.SelectedItem as BackupCopyRow)?.Record.Id;
+            copyRows = rows;
             Copies.ItemsSource = rows;
-            Copies.SelectedItem = rows.FirstOrDefault(row => row.Record.Id == selectedId);
-            CopiesSummary.Text = rows.Count == 0 ? "Копий пока нет. Создайте первую копию в разделе «Задания»."
-                : $"Зарегистрировано копий: {rows.Count}";
+            UpdateCopyJobChoices();
+            ApplyCopyFilter();
+            Copies.SelectedItem = Copies.Items.OfType<BackupCopyRow>().FirstOrDefault(row => row.Record.Id == selectedId);
         }
         catch (Exception ex)
         {
             if (version != copiesRefreshVersion) return;
             Copies.ItemsSource = null;
+            copyRows = [];
             CopiesSummary.Text = "Не удалось прочитать журнал копий: " + ex.Message;
         }
         finally
@@ -751,6 +754,7 @@ public partial class MainWindow : Window
 
     private void Copies_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (copyVerification is null) CopyVerificationStatus.Text = "";
         CopyDetails.Visibility = Copies.SelectedItem is BackupCopyRow ? Visibility.Visible : Visibility.Collapsed;
         CopyDetails.Text = Copies.SelectedItem is BackupCopyRow row
             ? $"{row.JobName}\n{row.Location}\nРазмер: {row.Record.Backup.Length} байт\nШифрование: {row.EncryptionDescription}\nSHA256: {row.Sha256}" : "";
