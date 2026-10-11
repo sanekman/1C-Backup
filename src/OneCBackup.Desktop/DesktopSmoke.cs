@@ -108,8 +108,12 @@ internal static class DesktopSmoke
                 using var file = File.Create(Path.Combine(output, name + ".png")); encoder.Save(file);
             }
             Click("CopiesNavigation");
-            await WaitUntil(() => Control<DataGrid>("Copies").Items.Count == 1 && window.SmokeReady, "Каталог копий не обновился.");
+            // Select while the asynchronous refresh is pending; the refresh must keep the user's latest selection.
             Control<DataGrid>("Copies").SelectedIndex = 0;
+            var selectedCopyId = (Control<DataGrid>("Copies").SelectedItem as BackupCopyRow)?.Record.Id;
+            await WaitUntil(() => Control<DataGrid>("Copies").Items.Count == 1 && window.SmokeReady, "Каталог копий не обновился.");
+            if (selectedCopyId is null || (Control<DataGrid>("Copies").SelectedItem as BackupCopyRow)?.Record.Id != selectedCopyId)
+                throw new InvalidOperationException("Обновление каталога сбросило выбранную пользователем копию.");
             Click("VerifyCopyButton");
             await WaitUntil(() => Control<TextBlock>("CopyVerificationStatus").Text.StartsWith("Размер и SHA256 совпадают"), "Проверка копии не завершилась.");
             var extractParent = Path.Combine(DesktopPaths.DataDirectory, "extraction");
