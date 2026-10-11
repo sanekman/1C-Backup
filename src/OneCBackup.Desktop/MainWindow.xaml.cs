@@ -987,8 +987,9 @@ public partial class MainWindow : Window
         DaysPanel.Visibility = kind == ScheduleKind.Weekly ? Visibility.Visible : Visibility.Collapsed;
         TimePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         Enabled.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
-        if (Enabled.IsChecked != true) { NextRun.Text = "Автоматические запуски отключены."; return; }
+        SchedulePreviewHint.Visibility = Visibility.Collapsed;
         if (kind == ScheduleKind.Manual) { NextRun.Text = "Запуск только вручную."; return; }
+        if (Enabled.IsChecked != true) { NextRun.Text = "Автоматические запуски отключены. Чтобы увидеть ближайшие запуски, включите «Выполнять задание по расписанию»."; return; }
         if (!TryParseRunTimes(DailyAt.Text, out var times))
         { NextRun.Text = "Укажите от 1 до 48 уникальных времён в формате чч:мм через запятую."; return; }
         try
@@ -997,9 +998,17 @@ public partial class MainWindow : Window
                 TimeZoneId = Zone.Text.Trim(), ScheduleKind = kind, DaysOfWeek = SelectedDays() };
             var errors = job.ValidateSchedule();
             if (errors.Count != 0) { NextRun.Text = string.Join(" ", errors); return; }
-            var next = BackupSchedule.NextRun(job, DateTimeOffset.UtcNow)!.Value;
-            NextRun.Text = "Следующий запуск по расписанию: " + TimeZoneInfo.ConvertTime(next,
-                TimeZoneInfo.FindSystemTimeZoneById(job.TimeZoneId)).ToString("dd.MM.yyyy HH:mm zzz", CultureInfo.InvariantCulture);
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(job.TimeZoneId);
+            var after = DateTimeOffset.UtcNow;
+            var upcoming = new List<string>();
+            for (var index = 0; index < 3; index++)
+            {
+                var next = BackupSchedule.NextRun(job, after)!.Value;
+                upcoming.Add(TimeZoneInfo.ConvertTime(next, zone).ToString("dd.MM.yyyy HH:mm zzz", CultureInfo.InvariantCulture));
+                after = next;
+            }
+            NextRun.Text = "Ближайшие 3 запуска по часовому поясу задания:\n" + string.Join("\n", upcoming);
+            SchedulePreviewHint.Visibility = Visibility.Visible;
         }
         catch (ArgumentException ex) { NextRun.Text = ex.Message.Split(Environment.NewLine)[0]; }
         catch (InvalidOperationException ex) { NextRun.Text = ex.Message; }

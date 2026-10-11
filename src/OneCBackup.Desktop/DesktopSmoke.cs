@@ -1,4 +1,5 @@
 using System.IO;
+using System.Globalization;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -174,7 +175,63 @@ internal static class DesktopSmoke
                 throw new InvalidOperationException("Пароль архива не настроен через интерфейс.");
             Screenshot("wizard-storage");
             Click("NextStepButton");
+            var previewBefore = DateTimeOffset.UtcNow;
             Control<TextBox>("DailyAt").Text = "23:00, 09:00, 13:00";
+            var originalZone = Control<TextBox>("Zone").Text;
+            void CheckUpcoming(TimeSpan offset, DayOfWeek? day, TimeOnly[] times, DateTimeOffset before)
+            {
+                var lines = Control<TextBlock>("NextRun").Text.Split('\n');
+                if (lines.Length != 4 || !lines[0].StartsWith("Ближайшие 3 запуска") || !Control<TextBlock>("SchedulePreviewHint").IsVisible)
+                    throw new InvalidOperationException("Три ближайших запуска не показаны.");
+                var actual = lines.Skip(1).Select(line => DateTimeOffset.ParseExact(line, "dd.MM.yyyy HH:mm zzz", CultureInfo.InvariantCulture)).ToArray();
+                DateTimeOffset[] Expected(DateTimeOffset instant)
+                {
+                    var date = instant.ToOffset(offset).Date;
+                    return Enumerable.Range(0, 22).Select(index => date.AddDays(index))
+                        .Where(value => day is null || value.DayOfWeek == day)
+                        .SelectMany(value => times.Order().Select(time => new DateTimeOffset(value.Add(time.ToTimeSpan()), offset)))
+                        .Where(value => value > instant).Take(3).ToArray();
+                }
+                if (actual.Any(value => value.Offset != offset) || (!actual.SequenceEqual(Expected(before)) && !actual.SequenceEqual(Expected(DateTimeOffset.UtcNow))))
+                    throw new InvalidOperationException("Предпросмотр не соответствует времени, дням или часовому поясу задания.");
+            }
+            Control<TextBox>("Zone").Text = "UTC";
+            CheckUpcoming(TimeSpan.Zero, null, [new(9, 0), new(13, 0), new(23, 0)], previewBefore);
+            Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Weekly;
+            foreach (var name in new[] { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" }) Control<CheckBox>(name).IsChecked = false;
+            if (Control<TextBlock>("NextRun").Text.StartsWith("Ближайшие") || Control<TextBlock>("SchedulePreviewHint").IsVisible)
+                throw new InvalidOperationException("Недельное расписание без дней показывает устаревшие даты.");
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WizardError").IsVisible || !Control<StackPanel>("ScheduleStep").IsVisible)
+                throw new InvalidOperationException("Недельное расписание без дней принято.");
+            Control<TextBox>("DailyAt").Text = "09:00";
+            previewBefore = DateTimeOffset.UtcNow;
+            Control<CheckBox>("Fri").IsChecked = true;
+            CheckUpcoming(TimeSpan.Zero, DayOfWeek.Friday, [new(9, 0)], previewBefore);
+            previewBefore = DateTimeOffset.UtcNow;
+            Control<ComboBox>("TimeZonePicker").SelectedValue = "Russian Standard Time";
+            CheckUpcoming(TimeSpan.FromHours(3), DayOfWeek.Friday, [new(9, 0)], previewBefore);
+            Screenshot("schedule-preview-weekly");
+            Control<TextBox>("Zone").Text = "CI-invalid-time-zone";
+            if (Control<TextBlock>("NextRun").Text.StartsWith("Ближайшие") || Control<TextBlock>("SchedulePreviewHint").IsVisible)
+                throw new InvalidOperationException("Неизвестный часовой пояс показывает устаревшие даты.");
+            Control<TextBox>("Zone").Text = "UTC";
+            Control<TextBox>("DailyAt").Text = "09:00, 09:00";
+            if (Control<TextBlock>("NextRun").Text.StartsWith("Ближайшие") || Control<TextBlock>("SchedulePreviewHint").IsVisible)
+                throw new InvalidOperationException("Повторное время показывает устаревшие даты.");
+            Control<CheckBox>("Enabled").IsChecked = false;
+            if (!Control<TextBlock>("NextRun").Text.Contains("отключены"))
+                throw new InvalidOperationException("Выключенное расписание показывает будущие запуски.");
+            Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Manual;
+            if (Control<TextBlock>("NextRun").Text != "Запуск только вручную." || Control<StackPanel>("TimePanel").IsVisible
+                || Control<StackPanel>("ZonePanel").IsVisible || Control<TextBlock>("SchedulePreviewHint").IsVisible)
+                throw new InvalidOperationException("Ручной режим неверно объясняет запуск.");
+            Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Daily;
+            Control<CheckBox>("Mon").IsChecked = true;
+            Control<CheckBox>("Fri").IsChecked = false;
+            Control<TextBox>("DailyAt").Text = "23:00, 09:00, 13:00";
+            Control<TextBox>("Zone").Text = originalZone;
+            Control<CheckBox>("Enabled").IsChecked = true;
             Control<TextBox>("KeepLast").Text = "0";
             Click("NextStepButton");
             if (!Control<TextBlock>("WizardError").IsVisible || !Control<StackPanel>("ScheduleStep").IsVisible)
@@ -184,10 +241,21 @@ internal static class DesktopSmoke
             window.Width = 900; window.Height = 580;
             AssertVisibleFooter("NextStepButton");
             Screenshot("wizard-compact");
+            Control<TextBlock>("NextRun").BringIntoView();
+            window.UpdateLayout();
+            var preview = Control<TextBlock>("NextRun");
+            var scroll = Control<ScrollViewer>("EditorScroll");
+            var previewPosition = preview.TranslatePoint(new Point(), scroll);
+            if (previewPosition.Y < 0 || previewPosition.Y + preview.ActualHeight > scroll.ActualHeight + 1)
+                throw new InvalidOperationException("Ближайшие запуски недоступны в компактном мастере.");
+            AssertVisibleFooter("NextStepButton");
+            Screenshot("schedule-preview-compact");
             Click("NextStepButton");
             AssertVisibleFooter("SaveButton");
             if (!Control<TextBox>("WizardSummary").Text.Contains("ZIP с паролем") || !Control<TextBox>("WizardSummary").Text.Contains("7 успешных"))
                 throw new InvalidOperationException("Итог мастера не показывает защиту и хранение.");
+            if (!Control<TextBox>("WizardSummary").Text.Contains(Control<TextBlock>("NextRun").Text))
+                throw new InvalidOperationException("Ближайшие запуски не перенесены в итог мастера.");
             Screenshot("wizard-review-compact");
             window.Width = 1100; window.Height = 740;
             Click("PreviousStepButton"); Click("NextStepButton");
@@ -559,7 +627,7 @@ internal static class DesktopSmoke
                 }
             }
             await VerifyPostgreSqlMonitoringAsync(window);
-            Finish(output, true, "Компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
+            Finish(output, true, "Три ближайших запуска, смена дней / часового пояса / режима и итог, компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
         }
         catch (Exception ex) { Finish(output, false, ex.ToString()); }
         finally

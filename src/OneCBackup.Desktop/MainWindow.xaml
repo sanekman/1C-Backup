@@ -256,6 +256,8 @@
    <StackPanel x:Name="ZonePanel"><TextBlock Text="Часовой пояс" /><ComboBox x:Name="TimeZonePicker" DisplayMemberPath="DisplayName" SelectedValuePath="Id" SelectionChanged="TimeZone_Changed" Margin="0,4,0,10" />
    <Expander Header="Технический идентификатор часового пояса" Margin="0,0,0,8"><TextBox x:Name="Zone" TextChanged="Schedule_Changed" /></Expander></StackPanel>
    <TextBlock x:Name="NextRun" TextWrapping="Wrap" Margin="0,0,0,10" />
+   <TextBlock x:Name="SchedulePreviewHint" Text="Это плановое время. Для выполнения должен работать планировщик, компьютер должен быть включён."
+    Visibility="Collapsed" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,10" />
    <TextBlock Text="Хранить последних успешных копий в основном хранилище" /><TextBox x:Name="KeepLast" Text="7" Margin="0,4,0,4" />
    <TextBlock Text="Дополнительные хранилища используют это число, если в их настройках не задано своё." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,10" />
    <CheckBox x:Name="Enabled" Content="Выполнять задание по расписанию" IsChecked="True" Margin="0,0,0,12" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />

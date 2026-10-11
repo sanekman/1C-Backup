@@ -136,14 +136,15 @@ public partial class MainWindow
             WizardError.Visibility = Visibility.Collapsed;
             Status.Text = "Настройка задания. Изменения ещё не сохранены.";
         }
+        if (step is 2 or 3) UpdateSchedulePreview();
         if (step == 3)
         {
             var type = Kind.SelectedItem switch { DatabaseKind.SqlServer => "Microsoft SQL Server", DatabaseKind.PostgreSql => "PostgreSQL", _ => "Файловая 1С" };
             var method = Kind.SelectedItem is DatabaseKind.OneCFile
                 ? OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive ? "ZIP файла базы, без платформы" : "Выгрузка .dt через платформу 1С"
                 : Kind.SelectedItem is DatabaseKind.SqlServer ? "Полная копия .bak" : "Дамп .dump";
-            var schedule = Enabled.IsChecked != true ? "Автоматические запуски отключены"
-                : Schedule.SelectedValue is ScheduleKind.Manual ? "Только вручную"
+            var schedule = Schedule.SelectedValue is ScheduleKind.Manual ? "Только вручную"
+                : Enabled.IsChecked != true ? "Автоматические запуски отключены"
                 : (Schedule.SelectedValue is ScheduleKind.Weekly ? "По дням: " + string.Join(", ", DayControls.Where(day => day.Box.IsChecked == true).Select(day => day.Box.Content)) : "Ежедневно") + " · " + DailyAt.Text.Trim();
             var format = EncryptArchive.IsChecked == true ? "ZIP с паролем (AES-256)"
                 : ArchiveCopies.IsChecked == true || OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive && Kind.SelectedItem is DatabaseKind.OneCFile
@@ -158,6 +159,7 @@ public partial class MainWindow
             var temporary = string.IsNullOrWhiteSpace(TemporaryFolder.Text)
                 ? Path.Combine(DesktopPaths.DataDirectory, "work") + " (по умолчанию)" : TemporaryFolder.Text.Trim();
             WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nОсновное хранилище: хранить {KeepLast.Text.Trim()} успешных копий";
+            WizardSummary.Text += "\n\n" + NextRun.Text;
         }
         // Realize the scroll content before focusing a field on a newly opened step.
         UpdateLayout();
