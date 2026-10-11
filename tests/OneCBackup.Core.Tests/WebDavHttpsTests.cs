@@ -17,7 +17,11 @@ public sealed class WebDavHttpsTests
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("localhost"); request.CertificateExtensions.Add(san.Build());
-        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
+        using var issued = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
+        // Schannel cannot serve TLS with an ephemeral RSA key. Import a temporary default-key-set PFX; disposal releases it.
+        var pfx = issued.Export(X509ContentType.Pfx);
+        using var certificate = X509CertificateLoader.LoadPkcs12(pfx, null, X509KeyStorageFlags.DefaultKeySet);
+        CryptographicOperations.ZeroMemory(pfx);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
