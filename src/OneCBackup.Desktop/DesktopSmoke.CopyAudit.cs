@@ -35,6 +35,10 @@ internal static partial class DesktopSmoke
             var header = Control<Expander>("StorageCheckResults").Header.ToString()!;
             if (!header.Contains(expected) || !Control<TextBox>("StorageCheckDetails").Text.Contains("Нет зарегистрированной копии."))
                 throw new InvalidOperationException("Проверка последних копий потеряла результат или отсутствующее хранилище: " + header);
+            var checks = await new BackupVerificationState(Path.Combine(DesktopPaths.DataDirectory, "verification-state.json")).ReadAsync();
+            var attempted = checks.Where(check => check.JobId == selected.Id && check.Origin == BackupVerificationOrigin.LatestCopies).ToArray();
+            if (attempted.Length != 2 || attempted.Count(check => check.Outcome == BackupVerificationOutcome.Verified) != (expected == "2 из 3" ? 2 : 1))
+                throw new InvalidOperationException("Результат проверки последних копий не сохранён по фактически проверенным файлам.");
         }
         // A busy source is irrelevant: audit must only read existing copies.
         using (var locked = new FileStream(Path.Combine(selected.Source, "1Cv8.1CD"), FileMode.Open, FileAccess.Read, FileShare.None))

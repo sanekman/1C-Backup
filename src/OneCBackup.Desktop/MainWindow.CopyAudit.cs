@@ -40,6 +40,16 @@ public partial class MainWindow
             details.Add("Проверены только последние зарегистрированные копии в текущих хранилищах. Проверка не изменяет файлы, каталог, историю запусков или правила хранения. Совпадение SHA-256 не заменяет пробное восстановление базы.");
             StorageCheckDetails.Text = string.Join("\n\n", details);
             StorageCheckResults.IsExpanded = !all;
+            var attempted = report.Destinations.Where(result => result.Record is not null && result.CheckedUtc is not null)
+                .Select(result => BackupVerificationEntry.Create(result.Record!, result.Status switch
+                { BackupAuditStatus.Verified => BackupVerificationOutcome.Verified,
+                    BackupAuditStatus.Cancelled => BackupVerificationOutcome.Cancelled, _ => BackupVerificationOutcome.Failed },
+                    BackupVerificationOrigin.LatestCopies, result.CheckedUtc!.Value, result.Error)).ToArray();
+            if (attempted.Length > 0)
+            {
+                var warning = await RememberChecksAsync(attempted);
+                if (warning.Length > 0) { StorageCheckDetails.Text += "\n\n" + warning; StorageCheckResults.IsExpanded = true; }
+            }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {

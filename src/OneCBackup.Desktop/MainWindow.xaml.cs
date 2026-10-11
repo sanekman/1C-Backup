@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private readonly BackupRunHistory history = new(Path.Combine(DesktopPaths.DataDirectory, "runs.json"));
     private readonly LocalBackupRunner runner;
     private readonly BackupCatalog catalog;
+    private readonly BackupVerificationState verificationState;
     private readonly RoutedBackupStorage backupStorage;
     private readonly BackupEngineCoordinator engine;
     private readonly LocalAgentControlStore backgroundControl;
@@ -69,6 +70,7 @@ public partial class MainWindow : Window
         backgroundControl = new LocalAgentControlStore(dataDirectory);
         backupStorage = new RoutedBackupStorage(ftpCredentials, Path.Combine(dataDirectory, "ftp-verification"));
         catalog = new BackupCatalog(Path.Combine(dataDirectory, "copies.json"));
+        verificationState = new BackupVerificationState(Path.Combine(dataDirectory, "verification-state.json"));
         runner = new LocalBackupRunner(new DatabaseBackupExecutor(new BackupProcessRunner()),
             new BackupCompletion(backupStorage, catalog),
             history, Path.Combine(dataDirectory, "work"));
@@ -746,10 +748,16 @@ public partial class MainWindow : Window
         try
         {
             var records = await Task.Run(() => catalog.ReadAsync());
+            IReadOnlyList<BackupVerificationEntry> checks = [];
+            string? checkReadError = null;
+            try { checks = await verificationState.ReadAsync(); }
+            catch (Exception ex) { checkReadError = ex.Message; }
             if (version != copiesRefreshVersion) return;
+            copyCheckReadError = checkReadError;
             var rows = records.OrderByDescending(record => record.CompletedUtc).Select(record =>
                 new BackupCopyRow(record, jobs.FirstOrDefault(job => job.Id == record.JobId)?.Name
-                    ?? $"Задание недоступно ({record.JobId.ToString("N")[..8]})")).ToList();
+                    ?? $"Задание недоступно ({record.JobId.ToString("N")[..8]})",
+                    checks.FirstOrDefault(check => check.Matches(record)), copyCheckReadError is not null)).ToList();
             var selectedId = (Copies.SelectedItem as BackupCopyRow)?.Record.Id;
             copyRows = rows;
             Copies.ItemsSource = rows;
@@ -779,8 +787,9 @@ public partial class MainWindow : Window
     {
         if (copyVerification is null) CopyVerificationStatus.Text = "";
         CopyDetails.Visibility = Copies.SelectedItem is BackupCopyRow ? Visibility.Visible : Visibility.Collapsed;
+        SelectedCopyPath.Text = Copies.SelectedItem is BackupCopyRow selectedCopy ? selectedCopy.Location : "";
         CopyDetails.Text = Copies.SelectedItem is BackupCopyRow row
-            ? $"{row.JobName}\n{row.Location}\nРазмер: {row.Record.Backup.Length} байт\nШифрование: {row.EncryptionDescription}\nSHA256: {row.Sha256}" : "";
+            ? $"{row.JobName}\n{row.Location}\nРазмер: {row.Record.Backup.Length} байт\nШифрование: {row.EncryptionDescription}\nSHA256: {row.Sha256}\n\n{row.CheckHelp}" : "";
         UpdateRunControls();
     }
 
@@ -796,16 +805,25 @@ public partial class MainWindow : Window
         copyVerification = cancellation;
         UpdateRunControls();
         CopyVerificationStatus.Text = "Проверяется размер и SHA256: " + row.Location;
+        BackupVerificationOutcome outcome;
+        string? error = null;
         try
         {
             await Task.Run(() => new BackupCopyVerifier(backupStorage).VerifyAsync(row.Record, job, cancellation.Token));
+            outcome = BackupVerificationOutcome.Verified;
             CopyVerificationStatus.Text = "Размер и SHA256 совпадают с журналом: " + row.Location
                 + ". Проверка не заменяет пробное восстановление базы.";
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        { CopyVerificationStatus.Text = "Проверка отменена: " + row.Location; }
+        { outcome = BackupVerificationOutcome.Cancelled; CopyVerificationStatus.Text = "Проверка отменена: " + row.Location; }
         catch (Exception ex)
-        { CopyVerificationStatus.Text = "Проверка не пройдена: " + row.Location + ". " + ex.Message; }
+        { outcome = BackupVerificationOutcome.Failed; error = ex.Message; CopyVerificationStatus.Text = "Проверка не пройдена: " + row.Location + ". " + ex.Message; }
+        try
+        {
+            var message = CopyVerificationStatus.Text;
+            CopyVerificationStatus.Text = message + await RememberChecksAsync([BackupVerificationEntry.Create(row.Record,
+                outcome, BackupVerificationOrigin.Manual, DateTimeOffset.UtcNow, error)]);
+        }
         finally { copyVerification = null; UpdateRunControls(); }
     }
 

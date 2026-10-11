@@ -373,6 +373,7 @@
         <Button x:Name="CancelCopyVerificationButton" Content="Отменить операцию" Click="CancelCopyVerification_Click" IsEnabled="False" Margin="0,0,8,8" />
         <Button x:Name="OpenCopyDirectoryButton" Content="Открыть папку" Click="OpenCopyDirectory_Click" IsEnabled="False" Margin="0,0,0,8" />
        </WrapPanel>
+       <TextBlock x:Name="SelectedCopyPath" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
        <TextBlock x:Name="CopyVerificationStatus" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}">
         <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed" /></Trigger></Style.Triggers></Style></TextBlock.Style>
        </TextBlock>
@@ -380,7 +381,7 @@
         <ScrollViewer x:Name="CopyDetailsScroll" MaxHeight="150" VerticalScrollBarVisibility="Auto"><StackPanel Margin="4,6,4,0">
        <TextBlock Text="{Binding Text, ElementName=CopyVerificationStatus}" TextWrapping="Wrap" />
        <TextBox x:Name="CopyDetails" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Disabled" BorderThickness="0" Padding="0" Background="Transparent" Margin="0,6,0,0" />
-       <TextBlock Text="Список из журнала успешных копий. Наличие файлов проверяется кнопкой «Проверить целостность». Для проверки остановите планировщик. FTP-копия скачивается полностью; нужны свободное место и доступ к серверу." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" Margin="0,6,0,0" />
+       <TextBlock Text="Список из журнала успешных копий. Последняя проверка сохраняется отдельно и показывает результат на указанное время. Наличие файлов сейчас проверяется кнопкой «Проверить целостность». Для проверки остановите планировщик. FTP-копия скачивается полностью; нужны свободное место и доступ к серверу." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" Margin="0,6,0,0" />
         </StackPanel></ScrollViewer>
        </Expander>
       </StackPanel>
@@ -388,11 +389,10 @@
      <DataGrid x:Name="Copies" RowHeight="30" ColumnHeaderHeight="30" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="Copies_SelectionChanged">
       <DataGrid.Columns>
        <DataGridTextColumn Header="Создана" Binding="{Binding CompletedUtc, Converter={StaticResource LocalTimeConverter}}" Width="140" />
-       <DataGridTextColumn Header="Задание" Binding="{Binding JobName}" Width="150" />
-       <DataGridTextColumn Header="Хранилище" Binding="{Binding StorageDescription}" Width="120" />
-       <DataGridTextColumn Header="Размер" Binding="{Binding SizeDescription}" Width="85" />
-       <DataGridTextColumn Header="Расположение" Binding="{Binding Location}" Width="*" MinWidth="180" />
+       <DataGridTemplateColumn Header="Задание" Width="*" MinWidth="125" SortMemberPath="JobName"><DataGridTemplateColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding JobName}" ToolTip="{Binding JobName}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="4,0" /></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+       <DataGridTemplateColumn Header="Хранилище" Width="110" SortMemberPath="StorageCategory"><DataGridTemplateColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding CompactStorage}" ToolTip="{Binding StorageHelp}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="4,0" /></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
        <DataGridTextColumn Header="Защита" Binding="{Binding EncryptionDescription}" Width="100" />
+       <DataGridTemplateColumn Header="Последняя проверка" Width="150"><DataGridTemplateColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding CheckSummary}" Foreground="{Binding CheckColor}" ToolTip="{Binding CheckHelp}" FontSize="12" VerticalAlignment="Center" Margin="4,0" /></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
       </DataGrid.Columns>
      </DataGrid>
     </DockPanel>

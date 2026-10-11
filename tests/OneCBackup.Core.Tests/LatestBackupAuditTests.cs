@@ -40,6 +40,8 @@ public sealed class LatestBackupAuditTests : IDisposable
         var result = await new LatestBackupAudit(storage, catalog).CheckAsync(job);
         Assert.False(result.Cancelled);
         Assert.Equal(new[] { BackupAuditStatus.Verified, BackupAuditStatus.Verified, BackupAuditStatus.Missing }, result.Destinations.Select(r => r.Status));
+        Assert.All(result.Destinations.Take(2), r => Assert.NotNull(r.CheckedUtc));
+        Assert.Null(result.Destinations[2].CheckedUtc);
         Assert.Equal(new[] { latest.Id, second.Id }, storage.Records.Select(r => r.Id));
         Assert.DoesNotContain(old.Id, storage.Records.Select(r => r.Id));
         Assert.Equal(before, await File.ReadAllTextAsync(Path.Combine(root, "catalog.json")));
@@ -96,6 +98,8 @@ public sealed class LatestBackupAuditTests : IDisposable
         Assert.Single(storage.Records);
         Assert.Equal(BackupAuditStatus.Verified, result.Destinations[0].Status);
         Assert.All(result.Destinations.Skip(1), r => Assert.Equal(BackupAuditStatus.Cancelled, r.Status));
+        Assert.NotNull(result.Destinations[0].CheckedUtc);
+        Assert.All(result.Destinations.Skip(1), r => Assert.Null(r.CheckedUtc));
     }
 
     [Fact]
@@ -116,6 +120,8 @@ public sealed class LatestBackupAuditTests : IDisposable
             var result = await task.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.True(result.Cancelled);
             Assert.All(result.Destinations, result => Assert.Equal(BackupAuditStatus.Cancelled, result.Status));
+            Assert.NotNull(result.Destinations[0].CheckedUtc);
+            Assert.All(result.Destinations.Skip(1), result => Assert.Null(result.CheckedUtc));
             Assert.Equal(1, storage.Reads);
             Assert.Equal(before, JsonSerializer.Serialize(await catalog.ReadAsync()));
         }

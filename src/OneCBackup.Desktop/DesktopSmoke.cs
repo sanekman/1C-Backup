@@ -709,6 +709,7 @@ internal static partial class DesktopSmoke
             await VerifyLatestCopiesAuditAsync(window, name => Screenshot(name));
             await VerifyJobOverviewAsync(window, name => Screenshot(name));
             await VerifyCopyExportAsync(window, name => Screenshot(name));
+            await VerifyPersistentChecksAsync(window, name => Screenshot(name));
             await VerifyPostgreSqlMonitoringAsync(window);
             Finish(output, true, "Сохранение выбранной зашифрованной копии с SHA-256, отказ при повреждении и существующем файле, неизменность каталога; проверка последних копий во всех хранилищах без доступа к занятой базе, повреждение и отсутствие копии, неизменность журнала и истории; последние результаты всех заданий, подсказки, обновление без изменения выбора и компактная таблица, пояснения истории, переход к текущему заданию по ID, три ближайших запуска, смена дней / часового пояса / режима и итог, компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
         }

@@ -3,8 +3,24 @@ using OneCBackup.Core;
 
 namespace OneCBackup.Desktop;
 
-public sealed record BackupCopyRow(BackupRecord Record, string JobName)
+public sealed record BackupCopyRow(BackupRecord Record, string JobName,
+    BackupVerificationEntry? Verification = null, bool VerificationUnavailable = false)
 {
+    private BackupVerificationEntry? CurrentCheck => Verification is not null && Verification.Matches(Record) ? Verification : null;
+    public string CheckSummary => VerificationUnavailable ? "Нет данных" : CurrentCheck is not { } check ? "Не проверена"
+        : (check.Outcome switch { BackupVerificationOutcome.Verified => "Успех", BackupVerificationOutcome.Failed => "Ошибка", _ => "Отмена" })
+            + " · " + check.CheckedUtc.ToLocalTime().ToString("dd.MM HH:mm");
+    public string CheckColor => VerificationUnavailable ? "#92400E" : CurrentCheck?.Outcome switch
+    { BackupVerificationOutcome.Verified => "#166534", BackupVerificationOutcome.Failed => "#B91C1C", _ => "#64748B" };
+    public string CheckHelp => VerificationUnavailable ? "Не удалось прочитать сохранённые результаты проверок. Проверить файл можно отдельно."
+        : CurrentCheck is not { } check ? "Эту копию ещё не проверяли кнопками проверки целостности."
+        : $"Последняя проверка: {check.CheckedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss zzz}\n"
+            + (check.Origin == BackupVerificationOrigin.Manual ? "Проверка выбранной копии." : "Проверка последних копий задания.")
+            + "\n" + (check.Outcome == BackupVerificationOutcome.Verified ? "Размер и SHA-256 совпали с каталогом."
+                : check.Outcome == BackupVerificationOutcome.Cancelled ? "Проверка отменена; целостность не подтверждена." : "Проверка не пройдена; подробности: " + check.Error)
+            + "\nЭто результат на указанное время. Он не подтверждает наличие файла сейчас и не заменяет пробное восстановление.";
+    public string CompactStorage => (StorageCategory switch { "ftp" => Location.StartsWith("ftps:", StringComparison.OrdinalIgnoreCase) ? "FTPS" : "FTP", "network" => "Сеть", _ => "Диск" }) + " · " + SizeDescription;
+    public string StorageHelp => StorageDescription + " · " + SizeDescription + "\n" + Location;
     public DateTimeOffset CompletedUtc => Record.CompletedUtc;
     public string Location => Record.Backup.Location;
     public string EncryptionDescription => Record.Backup.ArchivePasswordKey is null ? "Без пароля" : "ZIP AES-256";

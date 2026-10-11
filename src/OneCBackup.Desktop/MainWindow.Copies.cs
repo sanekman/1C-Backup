@@ -9,6 +9,7 @@ public partial class MainWindow
     private sealed record CopyJobChoice(Guid? Id, string Label);
     private List<BackupCopyRow> copyRows = [];
     private bool updatingCopyFilters;
+    private string? copyCheckReadError;
 
     private void CopiesView_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -56,6 +57,8 @@ public partial class MainWindow
         CopiesSummary.Text = copyRows.Count == 0 ? "Копий пока нет. Создайте первую копию в разделе «Задания»."
             : count == 0 ? $"Копий по выбранным условиям нет · Всего: {copyRows.Count}"
             : $"Показано копий: {count} из {copyRows.Count}";
+        if (copyCheckReadError is not null) CopiesSummary.Text += " · Результаты проверок недоступны";
+        CopiesSummary.ToolTip = copyCheckReadError;
         UpdateRunControls();
     }
 
