@@ -13,7 +13,7 @@ namespace OneCBackup.Desktop;
 
 public partial class MainWindow : Window
 {
-    internal bool SmokeReady => ready && !persisting && !copiesRefreshing && activeRun is null && !manualPending && copyVerification is null;
+    internal bool SmokeReady => ready && !persisting && !jobFileTransfer && !copiesRefreshing && activeRun is null && !manualPending && copyVerification is null;
     private readonly JobStore store = new(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"));
     private List<BackupJob> jobs = [];
     private readonly AgentSettingsStore agentSettingsStore = new(Path.Combine(DesktopPaths.DataDirectory, "agent.json"));
@@ -78,7 +78,7 @@ public partial class MainWindow : Window
             Dispatcher.InvokeAsync(() => ExecuteJobAsync(job, token)).Task.Unwrap());
         Closing += (_, e) =>
         {
-            if (!persisting && activeRun is null && schedulingTask is null && !manualPending && copyVerification is null) return;
+            if (!persisting && !jobFileTransfer && activeRun is null && schedulingTask is null && !manualPending && copyVerification is null) return;
             e.Cancel = true;
             Status.Text = checkingStorages ? "Дождитесь завершения проверки хранилищ или нажмите «Отменить проверку» перед закрытием программы."
                 : "Остановите планировщик и дождитесь завершения операции или сохранения настроек перед закрытием программы.";
@@ -390,9 +390,11 @@ public partial class MainWindow : Window
 
     private void UpdateRunControls()
     {
-        var idle = !persisting && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
+        var idle = !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
         var engineAvailable = !backgroundBusy && !backgroundStarting;
         NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle;
+        ImportJobSettingsMenuItem.IsEnabled = NewJobButton.IsEnabled && !editorOpen;
+        ExportJobSettingsMenuItem.IsEnabled = ready && !jobFileTransfer && !persisting && !editorOpen && Jobs.SelectedItem is BackupJob;
         FirstJobButton.Visibility = jobs.Count == 0 && JobSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         EditJobButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
         DuplicateJobButton.IsEnabled = ready && canSave && idle && !editorOpen && Jobs.SelectedItem is BackupJob;

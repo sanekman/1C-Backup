@@ -75,6 +75,12 @@
       <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
        <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+         <Menu Background="Transparent" VerticalAlignment="Center" Margin="0,0,8,0" IsMainMenu="False" ToolTip="Перенос настроек задания через файл">
+          <MenuItem Header="Файл" Padding="8,6">
+           <MenuItem x:Name="ExportJobSettingsMenuItem" Header="Сохранить настройки выбранного задания…" Click="ExportJobSettings_Click" IsEnabled="False" />
+           <MenuItem x:Name="ImportJobSettingsMenuItem" Header="Загрузить настройки из файла…" Click="ImportJobSettings_Click" IsEnabled="False" />
+          </MenuItem>
+         </Menu>
          <Button x:Name="JobScheduleButton" Content="Включить расписание" Click="ToggleJobSchedule_Click" IsEnabled="False" Margin="0,0,8,0" ToolTipService.ShowOnDisabled="True" />
          <Button x:Name="NewJobButton" Content="+ Новое задание" Style="{StaticResource PrimaryButton}" Click="New_Click" IsEnabled="False" />
         </StackPanel>
