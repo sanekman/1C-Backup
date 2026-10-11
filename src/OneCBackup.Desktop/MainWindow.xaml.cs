@@ -391,6 +391,14 @@ public partial class MainWindow : Window
         FirstJobButton.Visibility = jobs.Count == 0 && JobSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         EditJobButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
         DuplicateJobButton.IsEnabled = ready && canSave && idle && !editorOpen && Jobs.SelectedItem is BackupJob;
+        var scheduledJob = Jobs.SelectedItem as BackupJob;
+        JobScheduleButton.IsEnabled = ready && canSave && idle && !editorOpen && scheduledJob is { ScheduleKind: not ScheduleKind.Manual };
+        JobScheduleButton.Content = scheduledJob is { Enabled: true, ScheduleKind: not ScheduleKind.Manual }
+            ? "Выключить расписание" : "Включить расписание";
+        JobScheduleButton.ToolTip = scheduledJob is null ? "Выберите задание в таблице."
+            : scheduledJob.ScheduleKind == ScheduleKind.Manual ? "Это ручное задание. Задайте время на шаге «Расписание» через «Изменить»."
+            : !canSave ? "Изменение настроек недоступно в текущем режиме агента."
+            : "Изменить расписание только выбранного задания. Планировщик учтёт изменение при следующем обновлении заданий. Копии, уже принятые к выполнению, не отменяются. Для выполнения расписания включите автоматическое копирование.";
         PreviousStepButton.IsEnabled = ready && canSave && idle && wizardStep > 0;
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
         JobsSummary.Text = $"Всего: {jobs.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}";

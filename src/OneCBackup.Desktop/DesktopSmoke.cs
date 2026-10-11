@@ -189,12 +189,26 @@ internal static class DesktopSmoke
                 throw new InvalidOperationException("Несколько времён запуска не сохранены через интерфейс.");
             if (Control<Border>("EditorCard").IsVisible || !Control<Border>("JobListCard").IsVisible)
                 throw new InvalidOperationException("Сохранение не вернуло список заданий.");
+            Click("JobScheduleButton");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Jobs").SelectedItem is BackupJob { Enabled: false },
+                "Расписание не выключилось из списка.");
+            var paused = (await new JobStore(Path.Combine(DesktopPaths.DataDirectory, "jobs.json")).LoadAsync()).Single();
+            if (JsonSerializer.Serialize(paused with { Enabled = configured.Enabled }) != JsonSerializer.Serialize(configured)
+                || Control<DataGrid>("Copies").Items.Count != 0 || Control<DataGrid>("RunHistory").Items.Count != 0)
+                throw new InvalidOperationException("Переключение расписания изменило настройки или создало копию.");
+            Screenshot("job-schedule-disabled");
+            Click("JobScheduleButton");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Jobs").SelectedItem is BackupJob { Enabled: true },
+                "Расписание не включилось из списка.");
             Click("EditJobButton");
             Click("NextStepButton"); Click("NextStepButton");
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Manual;
             Click("NextStepButton"); Click("SaveButton");
             await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Jobs").SelectedItem is BackupJob { ScheduleKind: ScheduleKind.Manual }
                 && Control<Button>("RunButton").IsEnabled, "Задание не сохранено.");
+            if (Control<Button>("JobScheduleButton").IsEnabled
+                || !Control<Button>("JobScheduleButton").ToolTip.ToString()!.Contains("ручное"))
+                throw new InvalidOperationException("Ручное задание допускает переключение отсутствующего расписания.");
             using (var lockedSource = new FileStream(Path.Combine(source, "1Cv8.1CD"), FileMode.Open, FileAccess.Read, FileShare.None))
             {
                 Click("CheckStorageButton");
@@ -457,6 +471,34 @@ internal static class DesktopSmoke
             if (Control<DataGrid>("Copies").Items.Count != 8)
                 throw new InvalidOperationException("Сброс фильтров потерял копии.");
             Control<DataGrid>("Copies").SelectedIndex = 0;
+            // Same names must not allow the schedule toggle to update the wrong job.
+            Click("JobsNavigation");
+            Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(job => job.Id == duplicate.Id);
+            Click("EditJobButton"); Click("NextStepButton"); Click("NextStepButton");
+            Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Daily;
+            Control<TextBox>("DailyAt").Text = "09:00, 13:00, 23:00";
+            Control<CheckBox>("Enabled").IsChecked = false;
+            Click("NextStepButton"); Click("SaveButton");
+            await WaitUntil(() => window.SmokeReady && Control<Button>("JobScheduleButton").IsEnabled, "Расписание второй базы не сохранено.");
+            var beforeToggle = (BackupJob)Control<DataGrid>("Jobs").SelectedItem;
+            var runCountBeforeToggle = Control<DataGrid>("RunHistory").Items.Count;
+            Click("JobScheduleButton");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Jobs").SelectedItem is BackupJob { Enabled: true },
+                "Расписание второй базы не включилось.");
+            var savedJobs = await new JobStore(Path.Combine(DesktopPaths.DataDirectory, "jobs.json")).LoadAsync();
+            if (JsonSerializer.Serialize(savedJobs.Single(job => job.Id == original.Id)) != originalJson
+                || JsonSerializer.Serialize(savedJobs.Single(job => job.Id == duplicate.Id) with { Enabled = false }) != JsonSerializer.Serialize(beforeToggle)
+                || !Control<TextBlock>("JobsSummary").Text.Contains("По расписанию: 1")
+                || !Control<TextBlock>("SelectedJobSummary").Text.Contains("включите автоматическое копирование"))
+                throw new InvalidOperationException("Переключение расписания смешало задания или потеряло настройки.");
+            Screenshot("job-schedule-enabled");
+            Click("JobScheduleButton");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Jobs").SelectedItem is BackupJob { Enabled: false },
+                "Расписание второй базы не выключилось.");
+            if (Control<DataGrid>("Copies").Items.Count != 8 || Control<DataGrid>("RunHistory").Items.Count != runCountBeforeToggle
+                || !Control<Button>("RunButton").IsEnabled)
+                throw new InvalidOperationException("Отключение расписания изменило копии, историю или запретило ручной запуск.");
+            Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(job => job.Id == original.Id);
             window.Width = 900; window.Height = 580;
             foreach (var navigation in new[] { "JobsNavigation", "CopiesNavigation", "HistoryNavigation", "AgentNavigation" })
             {

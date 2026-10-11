@@ -72,7 +72,10 @@
      <DockPanel>
       <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
        <DockPanel>
-        <Button x:Name="NewJobButton" Content="+ Новое задание" Style="{StaticResource PrimaryButton}" DockPanel.Dock="Right" Click="New_Click" IsEnabled="False" />
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+         <Button x:Name="JobScheduleButton" Content="Включить расписание" Click="ToggleJobSchedule_Click" IsEnabled="False" Margin="0,0,8,0" ToolTipService.ShowOnDisabled="True" />
+         <Button x:Name="NewJobButton" Content="+ Новое задание" Style="{StaticResource PrimaryButton}" Click="New_Click" IsEnabled="False" />
+        </StackPanel>
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="Мои задания" FontSize="17" FontWeight="SemiBold" /><TextBlock x:Name="JobsSummary" Text="Загрузка…" Foreground="{StaticResource MutedBrush}" Margin="12,0,12,0" VerticalAlignment="Center" /></StackPanel>
        </DockPanel>
       </Border>

@@ -78,6 +78,21 @@ public partial class MainWindow
             EditJob_Click(sender, e);
     }
 
+    private async void ToggleJobSchedule_Click(object sender, RoutedEventArgs e)
+    {
+        if (!JobScheduleButton.IsEnabled || Jobs.SelectedItem is not BackupJob selected) return;
+        var job = jobs.FirstOrDefault(candidate => candidate.Id == selected.Id);
+        if (job is null || job.ScheduleKind == ScheduleKind.Manual) return;
+        var updated = job with { Enabled = !job.Enabled };
+        if (!await PersistAsync(jobs.Select(candidate => candidate.Id == job.Id ? updated : candidate).ToList())) return;
+        Jobs.SelectedItem = updated;
+        Status.Text = updated.Enabled
+            ? backgroundBusy || schedulingTask is not null
+                ? "Расписание выбранного задания включено. Планировщик учтёт изменение при следующем обновлении заданий."
+                : "Расписание выбранного задания включено. Для выполнения включите автоматическое копирование."
+            : "Расписание выбранного задания выключено. Ручное копирование доступно; копии, уже принятые к выполнению, не отменяются.";
+    }
+
     private void CancelEditor_Click(object sender, RoutedEventArgs e)
     {
         if (persisting) return;
