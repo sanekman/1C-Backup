@@ -829,15 +829,17 @@ public partial class MainWindow : Window
         using var cancellation = new CancellationTokenSource();
         copyVerification = cancellation;
         UpdateRunControls();
-        CopyVerificationStatus.Text = "Проверяется размер и SHA256: " + row.Location;
+        CopyVerificationStatus.Text = row.Record.Backup.FileSnapshot is null ? "Проверяется размер и SHA256: " + row.Location
+            : "Проверяется размер и SHA-256 всех архивов файловой цепочки: " + row.Location;
         BackupVerificationOutcome outcome;
         string? error = null;
         try
         {
-            await Task.Run(() => new BackupCopyVerifier(backupStorage).VerifyAsync(row.Record, job, cancellation.Token));
+            var checkedArchives = await Task.Run(() => new BackupPointVerifier(backupStorage, catalog).VerifyAsync(row.Record, job, cancellation.Token));
             outcome = BackupVerificationOutcome.Verified;
-            CopyVerificationStatus.Text = "Размер и SHA256 совпадают с журналом: " + row.Location
-                + ". Проверка не заменяет пробное восстановление базы.";
+            CopyVerificationStatus.Text = row.Record.Backup.FileSnapshot is null
+                ? "Размер и SHA256 совпадают с журналом: " + row.Location + ". Проверка не заменяет пробное восстановление базы."
+                : $"Файловая цепочка проверена: архивов {checkedArchives}, размер и SHA-256 совпадают. Для проверки содержимого используйте «Восстановить файлы…».";
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         { outcome = BackupVerificationOutcome.Cancelled; CopyVerificationStatus.Text = "Проверка отменена: " + row.Location; }

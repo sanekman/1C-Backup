@@ -35,7 +35,7 @@ public sealed class LatestBackupAudit(IBackupStorage storage, BackupCatalog cata
             }
             try
             {
-                await new BackupCopyVerifier(storage).VerifyAsync(record, target, cancellationToken);
+                await new BackupPointVerifier(storage, catalog).VerifyAsync(record, target, cancellationToken);
                 results.Add(new(destination, BackupAuditStatus.Verified, record, null, DateTimeOffset.UtcNow));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

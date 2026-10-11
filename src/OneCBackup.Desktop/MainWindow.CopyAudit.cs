@@ -31,7 +31,9 @@ public partial class MainWindow
                 : $"Проверено последних копий: {passed} из {report.Destinations.Count} — {job.Name}";
             var details = new List<string> { "Задание: " + job.Name };
             details.AddRange(report.Destinations.OrderBy(result => result.Status == BackupAuditStatus.Verified).Select(result =>
-                result.Destination + "\n" + (result.Status == BackupAuditStatus.Verified ? "Размер и SHA-256 совпадают."
+                result.Destination + "\n" + (result.Status == BackupAuditStatus.Verified ? result.Record?.Backup.FileSnapshot is { } snapshot
+                    ? $"Проверены все архивы файловой цепочки: {snapshot.Depth + 1}. Размер и SHA-256 совпадают."
+                    : "Размер и SHA-256 совпадают."
                     : result.Status == BackupAuditStatus.Missing ? "Нет зарегистрированной копии."
                     : result.Status == BackupAuditStatus.Cancelled ? "Отменено или не проверено." : "Ошибка проверки.")
                 + (result.Record is null ? "" : "\nКопия: " + result.Record.Backup.Location

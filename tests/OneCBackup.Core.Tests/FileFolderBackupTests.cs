@@ -307,6 +307,28 @@ public sealed class FileFolderBackupTests : IDisposable
     { public void Report(FileRestoreProgress value) => observe(value); }
 
     [Fact]
+    public async Task PointAndLatestAuditDetectMissingOrCorruptFullBasisEvenWhenIncrementIsIntact()
+    {
+        var file = Path.Combine(Source, "a.txt"); await File.WriteAllTextAsync(file, "before"); var full = await Run();
+        await File.WriteAllTextAsync(file, "after"); var increment = await Run();
+        var verifier = new BackupPointVerifier(storage, catalog);
+        Assert.Equal(2, await verifier.VerifyAsync(increment, Job));
+        var beforeCatalog = JsonSerializer.Serialize(await catalog.ReadAsync()); var beforeRuns = JsonSerializer.Serialize(await history.ReadAsync());
+        var original = await File.ReadAllBytesAsync(full.Backup.Location);
+        await File.WriteAllTextAsync(full.Backup.Location, "corrupt full basis");
+        await new BackupCopyVerifier(storage).VerifyAsync(increment, Job); // The final ZIP alone is still intact.
+        var corrupt = await Assert.ThrowsAsync<IOException>(() => verifier.VerifyAsync(increment, Job));
+        Assert.Contains(full.Backup.Location, corrupt.Message);
+        Assert.Equal(BackupAuditStatus.Failed, (await new LatestBackupAudit(storage, catalog).CheckAsync(Job)).Destinations.Single().Status);
+        File.Delete(full.Backup.Location);
+        await Assert.ThrowsAsync<IOException>(() => verifier.VerifyAsync(increment, Job));
+        Assert.Equal(BackupAuditStatus.Failed, (await new LatestBackupAudit(storage, catalog).CheckAsync(Job)).Destinations.Single().Status);
+        await File.WriteAllBytesAsync(full.Backup.Location, original);
+        Assert.Equal(BackupAuditStatus.Verified, (await new LatestBackupAudit(storage, catalog).CheckAsync(Job)).Destinations.Single().Status);
+        Assert.Equal(beforeCatalog, JsonSerializer.Serialize(await catalog.ReadAsync())); Assert.Equal(beforeRuns, JsonSerializer.Serialize(await history.ReadAsync()));
+    }
+
+    [Fact]
     public async Task RestoreReportsArchivesAndFinalVerificationAndCanCancelBeforePublishing()
     {
         var file = Path.Combine(Source, "a.txt"); await File.WriteAllTextAsync(file, "before"); await Run();

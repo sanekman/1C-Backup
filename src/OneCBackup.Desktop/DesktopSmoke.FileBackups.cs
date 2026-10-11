@@ -82,6 +82,9 @@ internal static partial class DesktopSmoke
             || !Control<Button>("ExportCopyButton").Content.ToString()!.Contains("этот архив"))
             throw new InvalidOperationException("Каталог не объясняет зависимость инкремента от цепочки.");
         screenshot("files-incremental-catalog-compact");
+        Click("VerifyCopyButton"); await WaitUntil(() => window.SmokeReady, "Проверка файловой цепочки не завершилась.");
+        if (!Control<TextBlock>("CopyVerificationStatus").Text.Contains("Файловая цепочка проверена: архивов 2"))
+            throw new InvalidOperationException("Ручная проверка не проверила всю файловую цепочку.");
         var exported = Path.Combine(fixture, "exported-increment.zip");
         window.CopyExportDialogOverride = dialog => { dialog.FileName = exported; return true; };
         try
