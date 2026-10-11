@@ -28,21 +28,22 @@ public partial class MainWindow
             using var cancellation = new CancellationTokenSource();
             copyVerification = cancellation;
             UpdateRunControls();
+            var progress = BeginCopyExportProgress();
             CopyVerificationStatus.Text = "Сохраняется копия с проверкой размера и SHA-256: " + row.Location;
             try
             {
                 var exported = await Task.Run(() => new BackupCopyExporter(backupStorage).ExportAsync(row.Record, job,
-                    dialog.FileName, cancellation.Token));
+                    dialog.FileName, cancellation.Token, progress));
                 CopyVerificationStatus.Text = "Копия сохранена, размер и SHA-256 совпадают: " + exported.Path
                     + (row.Record.Backup.ArchivePasswordKey is not null ? ". Архив остаётся зашифрованным; для распаковки нужен пароль." : "")
                     + ". Проверка не заменяет пробное восстановление базы.";
                 Status.Text = "Копия сохранена: " + exported.Path;
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-            { CopyVerificationStatus.Text = "Сохранение отменено. Готовый файл не создан."; }
-            catch (Exception ex) { CopyVerificationStatus.Text = "Копия не сохранена: " + ex.Message; }
-            finally { copyVerification = null; UpdateRunControls(); }
+            { CopyVerificationStatus.Text = Status.Text = "Сохранение отменено. Готовый файл не создан."; }
+            catch (Exception ex) { CopyVerificationStatus.Text = Status.Text = "Копия не сохранена: " + ex.Message; }
+            finally { EndCopyExportProgress(); copyVerification = null; UpdateRunControls(); }
         }
-        catch (Exception ex) { CopyVerificationStatus.Text = "Копия не сохранена: " + ex.Message; }
+        catch (Exception ex) { CopyVerificationStatus.Text = Status.Text = "Копия не сохранена: " + ex.Message; }
     }
 }

@@ -23,6 +23,17 @@ internal static partial class DesktopSmoke
         var beforeHistory = JsonSerializer.Serialize(await history.ReadAsync());
         var original = await File.ReadAllBytesAsync(row.Location);
         var destination = Path.Combine(DesktopPaths.DataDirectory, "saved-copy.zip");
+        var observedPhases = new HashSet<BackupExportPhase>();
+        window.CopyExportProgressObserved = value =>
+        {
+            var first = observedPhases.Add(value.Phase);
+            if (Control<System.Windows.Controls.Border>("CopyExportProgressPanel").Visibility != Visibility.Visible)
+                throw new InvalidOperationException("Ход сохранения не виден во время операции.");
+            if (value.Phase == BackupExportPhase.Verifying && !Control<TextBlock>("CopyExportProgressLabel").Text.Contains("SHA-256"))
+                throw new InvalidOperationException("Проверка SHA-256 не выделена в отдельный этап.");
+            if (first && value.Phase is BackupExportPhase.Transferring or BackupExportPhase.Verifying)
+                screenshot(value.Phase == BackupExportPhase.Transferring ? "copy-export-progress-transfer" : "copy-export-progress-sha256");
+        };
         async Task Export(string path, string expected)
         {
             var button = Control<Button>("ExportCopyButton");
@@ -36,6 +47,9 @@ internal static partial class DesktopSmoke
         try
         {
             await Export(destination, "Копия сохранена");
+            if (!observedPhases.Contains(BackupExportPhase.Transferring) || !observedPhases.Contains(BackupExportPhase.Verifying)
+                || Control<System.Windows.Controls.Border>("CopyExportProgressPanel").Visibility != Visibility.Collapsed)
+                throw new InvalidOperationException("Передача и SHA-256 не показаны или индикатор остался после завершения.");
             var saved = await File.ReadAllBytesAsync(destination);
             if (!saved.SequenceEqual(original) || !Control<TextBlock>("CopyVerificationStatus").Text.Contains("Архив остаётся зашифрованным"))
                 throw new InvalidOperationException("Сохранение изменило байты зашифрованного архива или потеряло пояснение пароля.");
@@ -52,8 +66,23 @@ internal static partial class DesktopSmoke
                 if (File.Exists(invalid) || Directory.GetFiles(DesktopPaths.DataDirectory, ".onec-export-*.partial").Length != 0)
                     throw new InvalidOperationException("Повреждённая копия опубликована или оставила временный файл.");
                 screenshot("copy-export-corrupt");
+                if (!Control<TextBlock>("Status").Text.Contains("не совпадает с каталогом"))
+                    throw new InvalidOperationException("Нижняя строка оставила прежний успех после повреждённой копии.");
             }
             finally { await File.WriteAllBytesAsync(row.Location, original); }
+            var cancelledFile = Path.Combine(DesktopPaths.DataDirectory, "cancelled-export.zip");
+            window.CopyExportDialogOverride = dialog => { dialog.FileName = cancelledFile; return true; };
+            Control<Button>("ExportCopyButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Control<Button>("CancelCopyVerificationButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitUntil(() => window.SmokeReady, "Отмена сохранения не завершилась.");
+            var cancelled = Control<TextBlock>("Status").Text.Contains("Сохранение отменено");
+            var completedBeforeCancel = Control<TextBlock>("Status").Text.Contains("Копия сохранена");
+            // A tiny file may be atomically published before the cancel click reaches the worker.
+            if ((!cancelled && !completedBeforeCancel) || (cancelled && File.Exists(cancelledFile))
+                || (completedBeforeCancel && (!File.Exists(cancelledFile) || !(await File.ReadAllBytesAsync(cancelledFile)).SequenceEqual(original)))
+                || Directory.GetFiles(DesktopPaths.DataDirectory, ".onec-export-*.partial").Length != 0
+                || Control<System.Windows.Controls.Border>("CopyExportProgressPanel").Visibility != Visibility.Collapsed)
+                throw new InvalidOperationException("Отмена сохранения потеряла результат операции или оставила временный файл / индикатор.");
             window.CopyExportDialogOverride = _ => false;
             Control<Button>("ExportCopyButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             if (!window.SmokeReady) throw new InvalidOperationException("Отмена выбора файла запустила операцию.");
@@ -62,6 +91,6 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Сохранение выбранной копии изменило каталог или историю.");
             screenshot("copy-export-compact");
         }
-        finally { window.CopyExportDialogOverride = null; }
+        finally { window.CopyExportDialogOverride = null; window.CopyExportProgressObserved = null; }
     }
 }

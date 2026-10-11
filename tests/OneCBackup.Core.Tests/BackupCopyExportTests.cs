@@ -24,6 +24,55 @@ public sealed class BackupCopyExportTests : IDisposable
         return await catalog.RegisterAsync(job, stored, DateTimeOffset.UtcNow);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(200000)]
+    public async Task ProgressSeparatesTransferHashAndPublicationWithActualBytes(int size)
+    {
+        var source = Path.Combine(root, "progress.bak");
+        await File.WriteAllBytesAsync(source, RandomNumberGenerator.GetBytes(size));
+        var record = await catalog.RegisterAsync(job, await new FileBackupStorage().StoreAsync(source, job), DateTimeOffset.UtcNow);
+        var destination = Path.Combine(root, "progress-result.bak");
+        var values = new List<BackupExportProgress>();
+        var progress = new Observer(value =>
+        {
+            values.Add(value);
+            Assert.Equal(size, value.TotalBytes);
+            Assert.InRange(value.BytesCompleted, 0, size);
+            Assert.Equal(value.Phase == BackupExportPhase.Completed, File.Exists(destination));
+        });
+        await new BackupCopyExporter(new FileBackupStorage()).ExportAsync(record, job, destination, progress: progress);
+        Assert.Equal(new[] { BackupExportPhase.Preparing, BackupExportPhase.Transferring, BackupExportPhase.Verifying, BackupExportPhase.Publishing,
+            BackupExportPhase.Completed }, values.Select(value => value.Phase).Distinct());
+        foreach (var phase in new[] { BackupExportPhase.Transferring, BackupExportPhase.Verifying })
+        {
+            var bytes = values.Where(value => value.Phase == phase).Select(value => value.BytesCompleted).ToArray();
+            Assert.Equal(0, bytes[0]); Assert.Equal(size, bytes[^1]);
+            Assert.Equal(bytes.Order(), bytes);
+        }
+        Assert.Equal(BackupExportPhase.Completed, values[^1].Phase);
+    }
+
+    [Fact]
+    public async Task CancellationAtHashStageDoesNotReportSuccessOrPublish()
+    {
+        var record = await CopyAsync(); var destination = Path.Combine(root, "cancel-hash.bak");
+        using var cancellation = new CancellationTokenSource();
+        var values = new List<BackupExportProgress>();
+        var progress = new Observer(value =>
+        {
+            values.Add(value);
+            if (value.Phase == BackupExportPhase.Verifying) cancellation.Cancel();
+        });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new BackupCopyExporter(new FileBackupStorage())
+            .ExportAsync(record, job, destination, cancellation.Token, progress));
+        Assert.DoesNotContain(values, value => value.Phase == BackupExportPhase.Completed || value.Phase == BackupExportPhase.Publishing);
+        Assert.False(File.Exists(destination)); Assert.Empty(Directory.GetFiles(root, "*.partial"));
+    }
+
+    private sealed class Observer(Action<BackupExportProgress> observe) : IProgress<BackupExportProgress>
+    { public void Report(BackupExportProgress value) => observe(value); }
+
     [Fact]
     public async Task ExportsExactBytesWithDifferentNameWithoutChangingCatalogOrSource()
     {
