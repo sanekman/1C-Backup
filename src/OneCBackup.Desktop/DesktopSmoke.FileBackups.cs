@@ -11,7 +11,12 @@ internal static partial class DesktopSmoke
     private static async Task VerifyFileBackupsAsync(MainWindow window, Action<string> screenshot)
     {
         T Control<T>(string name) where T : FrameworkElement => (T)window.FindName(name);
-        void Click(string name) => Control<Button>(name).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        void Click(string name)
+        {
+            window.UpdateLayout();
+            Control<Button>(name).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            window.UpdateLayout();
+        }
         var fixture = Path.GetDirectoryName(DesktopPaths.DataDirectory)!;
         var source = Path.Combine(fixture, "ordinary-files"); Directory.CreateDirectory(source);
         Directory.CreateDirectory(Path.Combine(source, "empty"));
@@ -69,9 +74,26 @@ internal static partial class DesktopSmoke
         Click("CopiesNavigation"); await WaitUntil(() => window.SmokeReady, "Каталог файловых копий не загрузился.");
         Control<ComboBox>("CopyJobFilter").SelectedValue = job.Id;
         Control<DataGrid>("Copies").SelectedItem = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Single(row => row.Record.Id == latest.Id);
+        window.UpdateLayout();
         if (!Control<Button>("RestoreFilesButton").IsVisible || !Control<Button>("RestoreFilesButton").IsEnabled
-            || Control<Button>("ExtractOneCButton").IsVisible) throw new InvalidOperationException("Каталог не предлагает восстановление файлов.");
+            || Control<Button>("ExtractOneCButton").IsVisible) throw new InvalidOperationException(
+                $"Каталог не предлагает восстановление файлов: видимость {Control<Button>("RestoreFilesButton").Visibility}, доступ {Control<Button>("RestoreFilesButton").IsEnabled}, видимость извлечения 1С {Control<Button>("ExtractOneCButton").Visibility}.");
+        if (!Control<TextBlock>("SelectedCopyPath").Text.Contains("архивов для восстановления: 2")
+            || !Control<Button>("ExportCopyButton").Content.ToString()!.Contains("этот архив"))
+            throw new InvalidOperationException("Каталог не объясняет зависимость инкремента от цепочки.");
         screenshot("files-incremental-catalog-compact");
+        var exported = Path.Combine(fixture, "exported-increment.zip");
+        window.CopyExportDialogOverride = dialog => { dialog.FileName = exported; return true; };
+        try
+        {
+            Click("ExportCopyButton"); await WaitUntil(() => window.SmokeReady, "Экспорт инкремента не завершился.");
+            var exportedBytes = await File.ReadAllBytesAsync(exported);
+            var originalBytes = await File.ReadAllBytesAsync(latest.Backup.Location);
+            if (!Control<TextBlock>("CopyVerificationStatus").Text.Contains("полной основой (архивов: 2)")
+                || !exportedBytes.SequenceEqual(originalBytes))
+                throw new InvalidOperationException("Экспорт инкремента потерял архив или пояснение о цепочке.");
+        }
+        finally { window.CopyExportDialogOverride = null; }
         var parent = Path.Combine(fixture, "ordinary-restores"); Directory.CreateDirectory(parent);
         await window.RestoreSelectedFilesAsync(parent);
         if (!Control<TextBlock>("CopyVerificationStatus").Text.Contains("Восстановлено файлов: 3; архивов в цепочке: 2"))

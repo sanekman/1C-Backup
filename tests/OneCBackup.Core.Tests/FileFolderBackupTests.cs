@@ -195,6 +195,40 @@ public sealed class FileFolderBackupTests : IDisposable
             ? Task.FromException(new IOException("fixture delete denied")) : inner.DeleteAsync(backup, job, token);
     }
 
+    private sealed class FailOneTarget(string target) : IBackupStorage
+    {
+        private readonly FileBackupStorage inner = new();
+        public bool Failing { get; set; }
+        public Task<StoredBackup> StoreAsync(string path, BackupJob job, CancellationToken token = default) => Failing && job.DestinationDirectory == target
+            ? Task.FromException<StoredBackup>(new IOException("fixture target unavailable")) : inner.StoreAsync(path, job, token);
+        public Task CopyToAsync(StoredBackup backup, BackupJob job, Stream output, CancellationToken token = default) => inner.CopyToAsync(backup, job, output, token);
+        public Task VerifyAsync(StoredBackup backup, BackupJob job, CancellationToken token = default) => inner.VerifyAsync(backup, job, token);
+        public Task DeleteAsync(StoredBackup backup, BackupJob job, CancellationToken token = default) => inner.DeleteAsync(backup, job, token);
+    }
+
+    [Fact]
+    public async Task PartialIncrementDeliveryForcesFreshFullBasisWhenTargetReturns()
+    {
+        var extra = Path.Combine(root, "extra"); var file = Path.Combine(Source, "a.txt"); await File.WriteAllTextAsync(file, "before");
+        var job = Job with { FullBackupEvery = 7, AdditionalDestinations = [new() { DestinationDirectory = extra, KeepLast = 2 }] };
+        var routed = new FailOneTarget(extra);
+        var runner = new LocalBackupRunner(new NoDatabase(), new BackupCompletion(routed, catalog), history, Path.Combine(root, "default-work"));
+        Assert.Equal(BackupRunStatus.Succeeded, (await runner.RunAsync(job)).Status);
+        var extraBasis = (await catalog.ReadAsync()).Single(record => Path.GetDirectoryName(record.Backup.Location) == extra);
+        routed.Failing = true; await File.WriteAllTextAsync(file, "after"); var partial = await runner.RunAsync(job);
+        Assert.Equal(BackupRunStatus.PartiallySucceeded, partial.Status);
+        Assert.Single(partial.Destinations!, result => result.Record is not null);
+        Assert.False(partial.Backup!.FileSnapshot!.IsFull); Assert.True(File.Exists(extraBasis.Backup.Location));
+        Assert.True(Directory.Exists(partial.WorkDirectory));
+        routed.Failing = false; var recovered = await runner.RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, recovered.Status);
+        Assert.All(recovered.Destinations!, destination => Assert.True(destination.Record!.Backup.FileSnapshot!.IsFull));
+        foreach (var destination in recovered.Destinations!)
+        {
+            var restored = await Restorer().RestoreAsync(destination.Record!, job, RestoreParent);
+            Assert.Equal(1, restored.Archives); Assert.Equal("after", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "a.txt")));
+        }
+    }
+
     [Fact]
     public async Task FailedDeletionOfIncrementKeepsItsFullBasis()
     {

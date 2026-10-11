@@ -19,7 +19,8 @@ public partial class MainWindow
             BackupCopyVerifier.GetStorageJob(row.Record, job);
             var name = row.StorageCategory == "ftp" && Uri.TryCreate(row.Location, UriKind.Absolute, out var uri)
                 ? Path.GetFileName(Uri.UnescapeDataString(uri.AbsolutePath)) : Path.GetFileName(row.Location);
-            var dialog = new SaveFileDialog { Title = "Сохранить резервную копию на компьютер", FileName = name,
+            var dialog = new SaveFileDialog { Title = row.Record.Backup.FileSnapshot is { IsFull: false }
+                ? "Сохранить инкрементный архив — для восстановления нужна вся цепочка" : "Сохранить резервную копию на компьютер", FileName = name,
                 Filter = "Все файлы (*.*)|*.*", DefaultExt = Path.GetExtension(name), AddExtension = true, OverwritePrompt = false, CheckPathExists = true };
             var chosen = CopyExportDialogOverride is null ? dialog.ShowDialog(this) : CopyExportDialogOverride(dialog);
             if (chosen != true) return;
@@ -36,7 +37,10 @@ public partial class MainWindow
                     dialog.FileName, cancellation.Token, progress));
                 CopyVerificationStatus.Text = "Копия сохранена, размер и SHA-256 совпадают: " + exported.Path
                     + (row.Record.Backup.ArchivePasswordKey is not null ? ". Архив остаётся зашифрованным; для распаковки нужен пароль." : "")
-                    + ". Проверка не заменяет пробное восстановление базы.";
+                    + (row.Record.Backup.FileSnapshot is { IsFull: false } snapshot
+                        ? $". Это архив изменений. Для восстановления нужна вся цепочка с полной основой (архивов: {snapshot.Depth + 1})."
+                        : row.Record.Backup.FileSnapshot is not null ? ". Проверьте содержимое кнопкой «Восстановить файлы…»."
+                        : ". Проверка не заменяет пробное восстановление базы.");
                 Status.Text = "Копия сохранена: " + exported.Path;
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested)

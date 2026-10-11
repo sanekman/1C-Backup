@@ -460,6 +460,9 @@ public partial class MainWindow : Window
         RestoreFilesButton.Visibility = isFileSnapshot ? Visibility.Visible : Visibility.Collapsed;
         ExtractOneCButton.Visibility = isFileSnapshot ? Visibility.Collapsed : Visibility.Visible;
         RestoreFilesButton.IsEnabled = isFileSnapshot && VerifyCopyButton.IsEnabled;
+        var isIncrement = Copies.SelectedItem is BackupCopyRow { Record.Backup.FileSnapshot.IsFull: false };
+        ExportCopyButton.Content = isIncrement ? "Сохранить этот архив…" : "Сохранить копию…";
+        if (isIncrement) ExportCopyButton.ToolTip += " Это только изменения: для восстановления нужны полная основа и все предшествующие архивы. Кнопка «Восстановить файлы…» собирает цепочку автоматически.";
         CancelCopyVerificationButton.IsEnabled = copyVerification is { IsCancellationRequested: false };
         CancelCopyVerificationButton.Visibility = copyVerification is not null && !checkingStorages ? Visibility.Visible : Visibility.Collapsed;
         OpenCopyDirectoryButton.IsEnabled = ready && Copies.SelectedItem is BackupCopyRow { CanOpenDirectory: true };
@@ -807,7 +810,9 @@ public partial class MainWindow : Window
     {
         if (copyVerification is null) CopyVerificationStatus.Text = "";
         CopyDetails.Visibility = Copies.SelectedItem is BackupCopyRow ? Visibility.Visible : Visibility.Collapsed;
-        SelectedCopyPath.Text = Copies.SelectedItem is BackupCopyRow selectedCopy ? selectedCopy.Location : "";
+        SelectedCopyPath.Text = Copies.SelectedItem is BackupCopyRow selectedCopy ? selectedCopy.Record.Backup.FileSnapshot is { } fileSnapshot
+            ? (fileSnapshot.IsFull ? "Полная копия · 1 архив" : $"Инкрементная копия · архивов для восстановления: {fileSnapshot.Depth + 1}") + " · " + selectedCopy.Location
+            : selectedCopy.Location : "";
         CopyDetails.Text = Copies.SelectedItem is BackupCopyRow row
             ? $"{row.JobName}\n{row.Location}\nРазмер: {row.Record.Backup.Length} байт\nШифрование: {row.EncryptionDescription}\nSHA256: {row.Sha256}\n{FileSnapshotDetails(row.Record.Backup.FileSnapshot)}\n{row.CheckHelp}" : "";
         UpdateRunControls();

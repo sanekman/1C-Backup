@@ -10,7 +10,7 @@ public partial class MainWindow
 {
     private static string FileSnapshotDetails(FileBackupSnapshot? snapshot) => snapshot is null ? "" : snapshot.IsFull
         ? "Файловая копия: полная. Для восстановления достаточно этого архива.\n"
-        : $"Файловая копия: инкрементная. Для восстановления нужны полная основа и все изменения — {snapshot.Depth + 1} архивов в этом хранилище.\n";
+        : $"Файловая копия: инкрементная. Для восстановления нужны полная основа и все изменения в этом хранилище. Архивов в цепочке: {snapshot.Depth + 1}.\n";
     private void FileBackupMode_Changed(object sender, SelectionChangedEventArgs e) => UpdateFileBackupControls();
     private void UpdateFileBackupControls()
     {
