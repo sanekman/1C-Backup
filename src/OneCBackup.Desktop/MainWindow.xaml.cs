@@ -633,14 +633,16 @@ public partial class MainWindow : Window
     private void RunHistory_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         RunDetails.Text = RunHistory.SelectedItem is BackupRun run ?
-            $"Задание: {run.JobName}\nРезультат: {run.StatusDescription}\nНачало: {run.StartedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n"
-            + $"Окончание: {run.FinishedUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}\n"
-            + $"Начало (UTC): {run.StartedUtc:dd.MM.yyyy HH:mm:ss}\n"
-            + $"Окончание (UTC): {run.FinishedUtc?.ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}\n"
-            + $"ID запуска: {run.RunId}\nРабочая папка: {run.WorkDirectory}\n"
-            + (run.Backup is null ? "" : $"Копия: {run.Backup.Location}\nРазмер: {run.Backup.Length} байт\nSHA256: {run.Backup.Sha256}\n")
+            $"Задание: {run.JobName}\nРезультат: {run.StatusDescription}\n"
             + (run.Error is null ? "" : "Ошибка: " + run.Error + "\n")
-            + (run.Warnings?.Count > 0 ? "Предупреждения:\n" + string.Join("\n", run.Warnings) : "")
+            + (run.Warnings?.Count > 0 ? "Предупреждения:\n" + string.Join("\n", run.Warnings) + "\n" : "")
+            + (run.Backup is null ? "" : $"Копия: {run.Backup.Location}\nРазмер: {run.Backup.Length} байт\n")
+            + $"Начало: {run.StartedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n"
+            + $"Окончание: {run.FinishedUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}\n"
+            + $"Рабочая папка: {run.WorkDirectory}\nID запуска: {run.RunId}\n"
+            + (run.Backup is null ? "" : $"SHA256: {run.Backup.Sha256}\n")
+            + $"Начало (UTC): {run.StartedUtc:dd.MM.yyyy HH:mm:ss}\n"
+            + $"Окончание (UTC): {run.FinishedUtc?.ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}"
             : "Выберите запуск в таблице.";
         UpdateRunControls();
     }
