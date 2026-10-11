@@ -108,13 +108,13 @@ public interface IBackupExecutor
 }
 
 /// <summary>Uses the platform's exclusive Designer dump; never copies an open 1CD file.</summary>
-public sealed class OneCBackupExecutor(IBackupProcessRunner processRunner) : IBackupExecutor
+public sealed class OneCBackupExecutor(IBackupProcessRunner processRunner, IArchivePasswordStore? passwords = null) : IBackupExecutor
 {
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
         if (job.Kind != DatabaseKind.OneCFile) throw new NotSupportedException("Этот исполнитель поддерживает файловые базы 1С.");
         if (job.OneCMethod == OneCBackupMethod.FileArchive)
-            return await new OneCFileArchiveExecutor().CreateAsync(job, workDirectory, cancellationToken);
+            return await new OneCFileArchiveExecutor(passwords).CreateAsync(job, workDirectory, cancellationToken);
         if (job.OneCMethod != OneCBackupMethod.PlatformDump)
             throw new InvalidDataException("Неизвестный способ резервного копирования 1С.");
         var settings = job.OneC ?? throw new InvalidOperationException("Укажите путь к платформе 1С в настройках задания.");

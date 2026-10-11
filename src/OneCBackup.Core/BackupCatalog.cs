@@ -65,6 +65,8 @@ public sealed class BackupCatalog(string path)
         if (records.Any(r => r is null || r.Id == Guid.Empty || r.JobId == Guid.Empty ||
             string.IsNullOrWhiteSpace(r.StorageIdentity) || r.Backup is null ||
             string.IsNullOrWhiteSpace(r.Backup.Location) || r.Backup.Length < 0 || r.Backup.Sha256 is null ||
+            (r.Backup.ArchivePasswordKey is not null && (string.IsNullOrWhiteSpace(r.Backup.ArchivePasswordKey)
+                || r.Backup.ArchivePasswordKey.Length > 512 || r.Backup.ArchivePasswordKey.Any(char.IsControl))) ||
             r.Backup.Sha256.Length != 64 || r.Backup.Sha256.Any(c => !Uri.IsHexDigit(c))) ||
             records.Select(r => r.Id).Distinct().Count() != records.Count ||
             records.Select(r => r.Backup.Location).Distinct().Count() != records.Count)

@@ -38,11 +38,15 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
 public sealed record CompletedBackup(BackupRecord Record, RetentionResult Retention);
 
 /// <summary>One coordinator per service: deliver, register success, then apply retention.</summary>
-public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catalog)
+public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catalog, IArchivePasswordStore? passwords = null)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
-    public Task PrepareAsync(BackupJob job, CancellationToken cancellationToken = default) =>
-        storage.PrepareAsync(job, cancellationToken);
+    public async Task PrepareAsync(BackupJob job, CancellationToken cancellationToken = default)
+    {
+        // Refuse before creating a plaintext dump when the password is unavailable.
+        await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, cancellationToken);
+        await storage.PrepareAsync(job, cancellationToken);
+    }
 
     public async Task<CompletedBackup> CompleteAsync(BackupJob job, string completedBackupPath, string stagingDirectory,
         DateTimeOffset completedUtc, CancellationToken cancellationToken = default)
@@ -50,7 +54,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
         await gate.WaitAsync(cancellationToken);
         try
         {
-            var stored = await new BackupDelivery(storage).DeliverAsync(job, completedBackupPath, stagingDirectory, cancellationToken);
+            var stored = await new BackupDelivery(storage, passwords).DeliverAsync(job, completedBackupPath, stagingDirectory, cancellationToken);
             var record = await catalog.RegisterAsync(job, stored, completedUtc, cancellationToken);
             var retention = await new BackupRetention(catalog, storage).ApplyAsync(job, record, cancellationToken);
             return new CompletedBackup(record, retention);

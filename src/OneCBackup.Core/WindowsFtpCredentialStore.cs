@@ -11,13 +11,16 @@ namespace OneCBackup.Core;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
 {
+    private readonly string prefix;
+    public WindowsFtpCredentialStore() : this("FTP") { }
+    internal WindowsFtpCredentialStore(string prefix) => this.prefix = prefix;
     private const uint Generic = 1;
     private const int MaximumBlobSize = 2560;
-    private static string Target(string key)
+    private string Target(string key)
     {
         if (string.IsNullOrWhiteSpace(key) || key.Length > 512 || key.Any(char.IsControl))
             throw new ArgumentException("Идентификатор учётных данных должен содержать от 1 до 512 символов без управляющих символов.");
-        return "OneCBackup/FTP/" + key;
+        return "OneCBackup/" + prefix + "/" + key;
     }
 
     public Task<NetworkCredential> GetAsync(string key, CancellationToken cancellationToken = default)

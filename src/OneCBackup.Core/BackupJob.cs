@@ -24,6 +24,8 @@ public sealed record BackupJob
     public int KeepLast { get; init; } = 7;
     public bool Enabled { get; init; } = true;
     public bool ArchiveCopies { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ArchivePasswordKey { get; init; }
     public OneCSettings? OneC { get; init; }
     public OneCBackupMethod OneCMethod { get; init; } = OneCBackupMethod.PlatformDump;
     public SqlServerBackupSettings? SqlServer { get; init; }
@@ -65,6 +67,13 @@ public sealed record BackupJob
             if (!destination.StartsWith('/') || destination.Contains('\\') ||
                 destination.Any(char.IsControl) || destination.Split('/').Contains(".."))
                 errors.Add("Для FTP укажите абсолютный каталог, например /backups, без переходов '..'.");
+        }
+        if (ArchivePasswordKey is not null)
+        {
+            if (string.IsNullOrWhiteSpace(ArchivePasswordKey) || ArchivePasswordKey.Length > 512 || ArchivePasswordKey.Any(char.IsControl))
+                errors.Add("Укажите корректный идентификатор пароля архива.");
+            if (!ArchiveCopies && !(Kind == DatabaseKind.OneCFile && OneCMethod == OneCBackupMethod.FileArchive))
+                errors.Add("Для шифрования копии включите архивацию в ZIP.");
         }
         if (KeepLast < 1) errors.Add("Нужно сохранять хотя бы одну успешную копию.");
         if (Kind == DatabaseKind.OneCFile)

@@ -14,6 +14,8 @@ public sealed class BackupArchiver
         cancellationToken.ThrowIfCancellationRequested();
         var source = Path.GetFullPath(completedBackupPath);
         if (!File.Exists(source)) throw new FileNotFoundException("Файл резервной копии не найден.", source);
+        if (job.ArchivePasswordKey is not null)
+            throw new InvalidOperationException("Для зашифрованных заданий используйте BackupDelivery с хранилищем паролей.");
         if (!job.ShouldArchiveCopy) return Task.FromResult(source);
         if (job.StorageKind == StorageKind.Ftp)
             throw new ArgumentException("Для FTP используйте BackupDelivery с локальным рабочим каталогом.", nameof(job));
@@ -25,7 +27,7 @@ public sealed class BackupArchiver
 
     /// <summary>Creates and verifies ZIP before publishing it. Existing files are never replaced.</summary>
     public async Task<string> CreateZipAsync(string sourcePath, string archivePath,
-        IProgress<long>? progress = null, CancellationToken cancellationToken = default)
+        IProgress<long>? progress = null, CancellationToken cancellationToken = default, string? password = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var source = Path.GetFullPath(sourcePath);
@@ -38,12 +40,12 @@ public sealed class BackupArchiver
         // On Windows the sharing mode also prevents writers from changing the source.
         await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read,
             81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        return await CreateZipAsync(input, Path.GetFileName(source), destination, progress, cancellationToken);
+        return await CreateZipAsync(input, Path.GetFileName(source), destination, progress, cancellationToken, password);
     }
 
     /// <summary>The caller retains ownership and its file lock until this method completes.</summary>
     public async Task<string> CreateZipAsync(Stream input, string entryName, string archivePath,
-        IProgress<long>? progress = null, CancellationToken cancellationToken = default)
+        IProgress<long>? progress = null, CancellationToken cancellationToken = default, string? password = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!input.CanRead) throw new ArgumentException("Поток должен быть доступен для чтения.", nameof(input));
@@ -51,6 +53,8 @@ public sealed class BackupArchiver
             throw new ArgumentException("Укажите имя файла без пути.", nameof(entryName));
         var destination = Path.GetFullPath(archivePath);
         if (File.Exists(destination)) throw new IOException("Архив с таким именем уже существует.");
+        if (password is not null)
+            return await EncryptedZipArchiver.CreateAsync(input, entryName, destination, password, progress, cancellationToken);
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         var temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
         long bytesCopied = 0;

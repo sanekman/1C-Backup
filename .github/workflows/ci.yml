@@ -46,6 +46,10 @@ jobs:
           }
           Get-Content artifacts/ui/smoke-result.json
           if ($fixtureProcess.ExitCode -ne 0) { throw 'WPF smoke test failed' }
+      - if: runner.os == 'Windows'
+        run: |
+          python -m pip install -r tests/encryption/requirements.txt
+          python tests/encryption/verify_zip.py artifacts/ui/encrypted-fixture.zip
       - if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:

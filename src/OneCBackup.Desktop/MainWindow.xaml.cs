@@ -46,6 +46,7 @@ public partial class MainWindow : Window
     private bool historyRefreshing;
     private List<BackupRun> historyRuns = [];
     private readonly WindowsFtpCredentialStore ftpCredentials = new();
+    private string? archivePasswordKey;
 
     public MainWindow()
     {
@@ -173,7 +174,8 @@ public partial class MainWindow : Window
             Source = Source.Text.Trim(), DestinationDirectory = Destination.Text.Trim(),
             DailyAt = times[0], AdditionalDailyTimes = times.Length > 1 ? times.Skip(1).ToArray() : null,
             TimeZoneId = Zone.Text.Trim(), KeepLast = keep, Enabled = Enabled.IsChecked == true,
-            ArchiveCopies = ArchiveCopies.IsChecked == true, StorageKind = storageKind,
+            ArchiveCopies = ArchiveCopies.IsChecked == true,
+            ArchivePasswordKey = EncryptArchive.IsChecked == true ? archivePasswordKey : null, StorageKind = storageKind,
             ScheduleKind = scheduleKind, DaysOfWeek = SelectedDays(),
             OneC = oneC,
             OneCMethod = oneCMethod,
@@ -186,6 +188,8 @@ public partial class MainWindow : Window
         };
         var errors = job.Validate();
         if (errors.Count > 0) { Status.Text = string.Join(" ", errors); return; }
+        if (EncryptArchive.IsChecked == true && archivePasswordKey is null)
+        { Status.Text = "Сначала задайте пароль архива."; return; }
         var updated = jobs.Where(j => j.Id != job.Id).Append(job).ToList();
         if (await PersistAsync(updated)) { JobSearch.Clear(); Jobs.SelectedItem = job; Status.Text = "Настройки сохранены. Кнопка создания копии использует сохранённое задание."; }
     }
@@ -282,7 +286,10 @@ public partial class MainWindow : Window
         Destination.Text = job.DestinationDirectory;
         DailyAt.Text = string.Join(", ", job.ScheduledTimes.Select(time => time.ToString("HH:mm", CultureInfo.InvariantCulture)));
         KeepLast.Text = job.KeepLast.ToString(); Enabled.IsChecked = job.Enabled;
+        archivePasswordKey = job.ArchivePasswordKey;
+        EncryptArchive.IsChecked = archivePasswordKey is not null;
         ArchiveCopies.IsChecked = job.ArchiveCopies;
+        UpdateArchivePasswordStatus();
         UpdateOneCControls();
         Storage.SelectedValue = job.StorageKind;
         FtpHost.Text = job.Ftp?.Host ?? ""; FtpPort.Text = (job.Ftp?.Port ?? 21).ToString();
@@ -304,7 +311,9 @@ public partial class MainWindow : Window
         PgHost.Text = "localhost"; PgPort.Text = "5432"; PgUsername.Text = "postgres";
         PgDumpPath.Clear(); PgRestorePath.Clear(); PgTimeout.Text = "120";
         DailyAt.Text = "23:00"; KeepLast.Text = "7"; Enabled.IsChecked = true;
+        archivePasswordKey = null; EncryptArchive.IsChecked = false;
         ArchiveCopies.IsChecked = false;
+        UpdateArchivePasswordStatus();
         Storage.SelectedValue = StorageKind.LocalDirectory;
         FtpHost.Clear(); FtpPort.Text = "21"; FtpTls.IsChecked = true; FtpCredentialKey.Clear();
         Schedule.SelectedValue = ScheduleKind.Daily; SetDays(WeekDays.Monday);
@@ -346,6 +355,7 @@ public partial class MainWindow : Window
         AgentModePicker.IsEnabled = SaveAgentSettingsButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null;
         ExternalMonitoringButton.IsEnabled = ready && idle && schedulingTask is null;
         StartScheduleButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
+        ArchivePasswordButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         FtpCredentialsButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         StopScheduleButton.IsEnabled = schedulingTask is not null && !schedulerStopping;
         RefreshCopiesButton.IsEnabled = ready && !copiesRefreshing;
@@ -671,7 +681,7 @@ public partial class MainWindow : Window
     {
         CopyDetails.Visibility = Copies.SelectedItem is BackupCopyRow ? Visibility.Visible : Visibility.Collapsed;
         CopyDetails.Text = Copies.SelectedItem is BackupCopyRow row
-            ? $"{row.JobName}\n{row.Location}\nРазмер: {row.Record.Backup.Length} байт\nSHA256: {row.Sha256}" : "";
+            ? $"{row.JobName}\n{row.Location}\nРазмер: {row.Record.Backup.Length} байт\nШифрование: {row.EncryptionDescription}\nSHA256: {row.Sha256}" : "";
         UpdateRunControls();
     }
 
@@ -709,11 +719,18 @@ public partial class MainWindow : Window
     private async void ExtractOneC_Click(object sender, RoutedEventArgs e)
     {
         if (!ExtractOneCButton.IsEnabled) return;
+        string? passwordOverride = null;
+        if (Copies.SelectedItem is BackupCopyRow { Record.Backup.ArchivePasswordKey: not null })
+        {
+            var passwordDialog = new ArchivePasswordWindow(restoring: true) { Owner = this };
+            if (passwordDialog.ShowDialog() != true) return;
+            passwordOverride = passwordDialog.PasswordOverride;
+        }
         var dialog = new OpenFolderDialog { Title = "Выберите родительский каталог: база будет извлечена в новую папку" };
-        if (dialog.ShowDialog(this) == true) await ExtractSelectedCopyAsync(dialog.FolderName);
+        if (dialog.ShowDialog(this) == true) await ExtractSelectedCopyAsync(dialog.FolderName, passwordOverride);
     }
 
-    internal async Task ExtractSelectedCopyAsync(string parentDirectory)
+    internal async Task ExtractSelectedCopyAsync(string parentDirectory, string? passwordOverride = null)
     {
         if (!ExtractOneCButton.IsEnabled || Copies.SelectedItem is not BackupCopyRow row) return;
         var job = jobs.FirstOrDefault(job => job.Id == row.Record.JobId);
@@ -725,7 +742,7 @@ public partial class MainWindow : Window
         CopyVerificationStatus.Text = "Проверяется архив и извлекается файл базы в новую папку внутри: " + parentDirectory;
         try
         {
-            var extracted = await Task.Run(() => new OneCArchiveExtractor().ExtractAsync(row.Record, job, parentDirectory, cancellation.Token));
+            var extracted = await Task.Run(() => new OneCArchiveExtractor().ExtractAsync(row.Record, job, parentDirectory, cancellation.Token, passwordOverride));
             CopyVerificationStatus.Text = "Файл базы извлечён: " + extracted.Path + ". Добавьте эту папку как отдельную файловую базу в списке 1С и проверьте её работу.";
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -900,6 +917,31 @@ public partial class MainWindow : Window
             FtpPanel.Visibility = Storage.SelectedValue is StorageKind.Ftp ? Visibility.Visible : Visibility.Collapsed;
         if (DestinationBrowseButton is not null)
             DestinationBrowseButton.Visibility = Storage.SelectedValue is StorageKind.Ftp ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void UpdateArchivePasswordStatus()
+    {
+        if (ArchivePasswordStatus is null) return;
+        ArchivePasswordStatus.Text = archivePasswordKey is null ? "Пароль пока не задан." : "Пароль сохранён в хранилище Windows. Смена пароля действует на новые копии.";
+    }
+
+    private void Encryption_Changed(object sender, RoutedEventArgs e)
+    {
+        if (ArchiveCopies is not null && EncryptArchive.IsChecked == true) ArchiveCopies.IsChecked = true;
+        UpdateArchivePasswordStatus();
+    }
+
+    private void ArchivePassword_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ArchivePasswordButton.IsEnabled) return;
+        using var lease = AcquireEngineOrReport();
+        if (lease is null) return;
+        var dialog = new ArchivePasswordWindow { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        archivePasswordKey = dialog.NewKey;
+        EncryptArchive.IsChecked = true;
+        UpdateArchivePasswordStatus();
+        Status.Text = "Новый пароль сохранён в Windows. Сохраните задание, чтобы использовать его для новых копий.";
     }
 
     private void FtpCredentials_Click(object sender, RoutedEventArgs e)

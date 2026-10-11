@@ -7,6 +7,7 @@ public sealed record BackupCopyRow(BackupRecord Record, string JobName)
 {
     public DateTimeOffset CompletedUtc => Record.CompletedUtc;
     public string Location => Record.Backup.Location;
+    public string EncryptionDescription => Record.Backup.ArchivePasswordKey is null ? "Без пароля" : "ZIP AES-256";
     public string Sha256 => Record.Backup.Sha256;
     public string SizeDescription => Record.Backup.Length switch
     {

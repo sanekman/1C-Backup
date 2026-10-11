@@ -30,6 +30,7 @@ internal static class DesktopSmoke
 
     public static async Task RunAsync(string output)
     {
+        string? archiveCredentialKey = null;
         try
         {
             await WaitUntil(() => Application.Current.MainWindow is MainWindow { SmokeReady: true }, "Окно не завершило загрузку.");
@@ -49,9 +50,22 @@ internal static class DesktopSmoke
             Control<TextBox>("Destination").Text = Path.Combine(DesktopPaths.DataDirectory, "copies");
             Control<ComboBox>("OneCMethodPicker").SelectedValue = OneCBackupMethod.FileArchive;
             Control<TextBox>("DailyAt").Text = "23:00, 09:00, 13:00";
+            _ = window.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var passwordDialog = Application.Current.Windows.OfType<ArchivePasswordWindow>().Single();
+                ((PasswordBox)passwordDialog.FindName("Password")).Password = "CI-only-архив-🗝-2026";
+                ((PasswordBox)passwordDialog.FindName("Confirmation")).Password = "CI-only-архив-🗝-2026";
+                ((Button)passwordDialog.FindName("ApplyButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                archiveCredentialKey = passwordDialog.NewKey;
+            }));
+            Click("ArchivePasswordButton");
+            if (Control<CheckBox>("EncryptArchive").IsChecked != true)
+                throw new InvalidOperationException("Пароль архива не настроен через интерфейс.");
             Click("SaveButton");
             await WaitUntil(() => Control<DataGrid>("Jobs").Items.Count == 1 && Control<Button>("RunButton").IsEnabled, "Расписание не сохранено.");
             var configured = (BackupJob)Control<DataGrid>("Jobs").Items[0];
+            if (configured.ArchivePasswordKey is null)
+                throw new InvalidOperationException("Ссылка на пароль архива не сохранена.");
             if (!configured.ScheduledTimes.SequenceEqual(new TimeOnly[] { new(9, 0), new(13, 0), new(23, 0) }))
                 throw new InvalidOperationException("Несколько времён запуска не сохранены через интерфейс.");
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Manual;
@@ -125,10 +139,25 @@ internal static class DesktopSmoke
             if (extracted.Length != 1 || File.ReadAllText(extracted[0]) != File.ReadAllText(Path.Combine(source, "1Cv8.1CD")))
                 throw new InvalidOperationException("База не извлечена из проверенного архива через интерфейс: "
                     + Control<TextBlock>("CopyVerificationStatus").Text);
+            var encryptedRecord = ((BackupCopyRow)Control<DataGrid>("Copies").SelectedItem).Record;
+            if (encryptedRecord.Backup.ArchivePasswordKey is null)
+                throw new InvalidOperationException("Каталог не сохранил ссылку на пароль.");
+            File.Copy(encryptedRecord.Backup.Location, Path.Combine(output, "encrypted-fixture.zip"));
+            if (File.ReadAllText(exportedPath).Contains("CI-only-архив"))
+                throw new InvalidOperationException("Пароль попал в экспорт истории.");
             await VerifyPostgreSqlMonitoringAsync(window);
-            Finish(output, true, "Несколько времён, ZIP, ошибка занятой базы, фильтры и экспорт истории, каталог, SHA256, навигация и импорт SQL-отчёта проверены на Windows.");
+            Finish(output, true, "Несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, фильтры и экспорт истории, каталог, SHA256, навигация и импорт SQL-отчёта проверены на Windows.");
         }
         catch (Exception ex) { Finish(output, false, ex.ToString()); }
+        finally
+        {
+            // Remove only isolated CI password bindings, never the user's credentials.
+            try
+            {
+                if (archiveCredentialKey is not null) new WindowsArchivePasswordStore().Delete(archiveCredentialKey);
+            }
+            catch (Exception) { }
+        }
     }
 
     private static async Task VerifyPostgreSqlMonitoringAsync(MainWindow owner)

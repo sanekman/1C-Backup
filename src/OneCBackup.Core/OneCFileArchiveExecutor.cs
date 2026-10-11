@@ -1,13 +1,14 @@
 namespace OneCBackup.Core;
 
 /// <summary>Archives a closed file database while holding an exclusive source handle.</summary>
-public sealed class OneCFileArchiveExecutor : IBackupExecutor
+public sealed class OneCFileArchiveExecutor(IArchivePasswordStore? passwords = null) : IBackupExecutor
 {
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (job.Kind != DatabaseKind.OneCFile || job.OneCMethod != OneCBackupMethod.FileArchive)
             throw new ArgumentException("Выберите архивацию файла базы 1С.", nameof(job));
+        var password = await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, cancellationToken);
         var source = Path.GetFullPath(job.Source);
         var database = string.Equals(Path.GetFileName(source), "1Cv8.1CD", StringComparison.OrdinalIgnoreCase)
             ? source : Path.Combine(source, "1Cv8.1CD");
@@ -32,7 +33,7 @@ public sealed class OneCFileArchiveExecutor : IBackupExecutor
                 $"{job.Id:N}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.1CD.zip");
             // Do not reopen the path: the exclusive handle remains held during packing and verification.
             return await new BackupArchiver().CreateZipAsync(input, "1Cv8.1CD", archive,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken, password: password);
         }
     }
 }

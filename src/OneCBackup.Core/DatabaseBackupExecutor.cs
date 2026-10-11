@@ -46,11 +46,11 @@ public sealed record PostgreSqlBackupSettings
     }
 }
 
-public sealed class DatabaseBackupExecutor(IBackupProcessRunner processRunner) : IBackupExecutor
+public sealed class DatabaseBackupExecutor(IBackupProcessRunner processRunner, IArchivePasswordStore? passwords = null) : IBackupExecutor
 {
     public Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken) => job.Kind switch
     {
-        DatabaseKind.OneCFile => new OneCBackupExecutor(processRunner).CreateAsync(job, workDirectory, cancellationToken),
+        DatabaseKind.OneCFile => new OneCBackupExecutor(processRunner, passwords).CreateAsync(job, workDirectory, cancellationToken),
         DatabaseKind.SqlServer => new SqlServerBackupExecutor().CreateAsync(job, workDirectory, cancellationToken),
         DatabaseKind.PostgreSql => new PostgreSqlBackupExecutor(processRunner).CreateAsync(job, workDirectory, cancellationToken),
         _ => throw new NotSupportedException("Неизвестный тип базы данных.")
