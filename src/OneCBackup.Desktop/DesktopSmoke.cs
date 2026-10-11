@@ -432,7 +432,8 @@ internal static partial class DesktopSmoke
             if (selectedCopyId is null || (Control<DataGrid>("Copies").SelectedItem as BackupCopyRow)?.Record.Id != selectedCopyId)
                 throw new InvalidOperationException("Обновление каталога сбросило выбранную пользователем копию.");
             Click("VerifyCopyButton");
-            await WaitUntil(() => Control<TextBlock>("CopyVerificationStatus").Text.StartsWith("Размер и SHA256 совпадают"), "Проверка копии не завершилась.");
+            await WaitUntil(() => Control<TextBlock>("CopyVerificationStatus").Text.StartsWith("Размер и SHA256 совпадают")
+                && window.SmokeReady, "Проверка копии и сохранение её результата не завершились.");
             var extractParent = Path.Combine(DesktopPaths.DataDirectory, "extraction");
             Directory.CreateDirectory(extractParent);
             if (!Control<Button>("ExtractOneCButton").IsEnabled)
