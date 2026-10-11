@@ -103,6 +103,15 @@ internal static class DesktopSmoke
                 if (!button.IsVisible || position.Y < 0 || position.Y + button.ActualHeight > window.ActualHeight - 20)
                     throw new InvalidOperationException("Кнопка мастера выходит за границы окна: " + buttonName);
             }
+            void AssertEditorContentVisible(string name)
+            {
+                window.UpdateLayout();
+                var content = Control<FrameworkElement>(name);
+                var scroll = Control<ScrollViewer>("EditorScroll");
+                var position = content.TranslatePoint(new Point(), scroll);
+                if (position.Y < 0 || position.Y + content.ActualHeight > scroll.ActualHeight + 1)
+                    throw new InvalidOperationException("Содержимое не помещается в видимой области мастера: " + name);
+            }
             Screenshot("first-start");
             var expectedVersion = Environment.GetEnvironmentVariable("GITHUB_REF_TYPE") == "tag"
                 ? Environment.GetEnvironmentVariable("GITHUB_REF_NAME")![1..] : "0.1.0-dev";
@@ -211,6 +220,7 @@ internal static class DesktopSmoke
             previewBefore = DateTimeOffset.UtcNow;
             Control<ComboBox>("TimeZonePicker").SelectedValue = "Russian Standard Time";
             CheckUpcoming(TimeSpan.FromHours(3), DayOfWeek.Friday, [new(9, 0)], previewBefore);
+            AssertEditorContentVisible("NextRun");
             Screenshot("schedule-preview-weekly");
             Control<TextBox>("Zone").Text = "CI-invalid-time-zone";
             if (Control<TextBlock>("NextRun").Text.StartsWith("Ближайшие") || Control<TextBlock>("SchedulePreviewHint").IsVisible)
@@ -224,7 +234,8 @@ internal static class DesktopSmoke
                 throw new InvalidOperationException("Выключенное расписание показывает будущие запуски.");
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Manual;
             if (Control<TextBlock>("NextRun").Text != "Запуск только вручную." || Control<StackPanel>("TimePanel").IsVisible
-                || Control<StackPanel>("ZonePanel").IsVisible || Control<TextBlock>("SchedulePreviewHint").IsVisible)
+                || Control<StackPanel>("ZonePanel").IsVisible || Control<Expander>("TechnicalZoneOptions").IsVisible
+                || Control<TextBlock>("SchedulePreviewHint").IsVisible)
                 throw new InvalidOperationException("Ручной режим неверно объясняет запуск.");
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Daily;
             Control<CheckBox>("Mon").IsChecked = true;
@@ -241,13 +252,8 @@ internal static class DesktopSmoke
             window.Width = 900; window.Height = 580;
             AssertVisibleFooter("NextStepButton");
             Screenshot("wizard-compact");
-            Control<TextBlock>("NextRun").BringIntoView();
-            window.UpdateLayout();
-            var preview = Control<TextBlock>("NextRun");
-            var scroll = Control<ScrollViewer>("EditorScroll");
-            var previewPosition = preview.TranslatePoint(new Point(), scroll);
-            if (previewPosition.Y < 0 || previewPosition.Y + preview.ActualHeight > scroll.ActualHeight + 1)
-                throw new InvalidOperationException("Ближайшие запуски недоступны в компактном мастере.");
+            Control<StackPanel>("SchedulePreviewPanel").BringIntoView();
+            AssertEditorContentVisible("SchedulePreviewPanel");
             AssertVisibleFooter("NextStepButton");
             Screenshot("schedule-preview-compact");
             Click("NextStepButton");

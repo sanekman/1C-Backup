@@ -984,6 +984,7 @@ public partial class MainWindow : Window
         if (NextRun is null || Enabled is null || Schedule.SelectedValue is not ScheduleKind kind) return;
         if (TimeZonePicker is not null && TimeZonePicker.SelectedValue as string != Zone.Text.Trim()) TimeZonePicker.SelectedValue = Zone.Text.Trim();
         if (ZonePanel is not null) ZonePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
+        TechnicalZoneOptions.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         DaysPanel.Visibility = kind == ScheduleKind.Weekly ? Visibility.Visible : Visibility.Collapsed;
         TimePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         Enabled.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
