@@ -80,7 +80,7 @@ public partial class MainWindow
 
     private async void ToggleJobSchedule_Click(object sender, RoutedEventArgs e)
     {
-        if (!JobScheduleButton.IsEnabled || Jobs.SelectedItem is not BackupJob selected) return;
+        if (!canSave || persisting || !JobScheduleButton.IsEnabled || Jobs.SelectedItem is not BackupJob selected) return;
         var job = jobs.FirstOrDefault(candidate => candidate.Id == selected.Id);
         if (job is null || job.ScheduleKind == ScheduleKind.Manual) return;
         var updated = job with { Enabled = !job.Enabled };

@@ -396,8 +396,8 @@ public partial class MainWindow : Window
         JobScheduleButton.Content = scheduledJob is { Enabled: true, ScheduleKind: not ScheduleKind.Manual }
             ? "Выключить расписание" : "Включить расписание";
         JobScheduleButton.ToolTip = scheduledJob is null ? "Выберите задание в таблице."
-            : scheduledJob.ScheduleKind == ScheduleKind.Manual ? "Это ручное задание. Задайте время на шаге «Расписание» через «Изменить»."
             : !canSave ? "Изменение настроек недоступно в текущем режиме агента."
+            : scheduledJob.ScheduleKind == ScheduleKind.Manual ? "Это ручное задание. Задайте время на шаге «Расписание» через «Изменить»."
             : "Изменить расписание только выбранного задания. Планировщик учтёт изменение при следующем обновлении заданий. Копии, уже принятые к выполнению, не отменяются. Для выполнения расписания включите автоматическое копирование.";
         PreviousStepButton.IsEnabled = ready && canSave && idle && wizardStep > 0;
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
