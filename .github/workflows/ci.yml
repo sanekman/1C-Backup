@@ -28,7 +28,7 @@ jobs:
           python-version: '3.12'
       - run: dotnet restore OneCBackup.slnx
       - run: dotnet build OneCBackup.slnx --no-restore -m:1 -nr:false
-      - run: dotnet test tests/OneCBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=FtpIntegration'
+      - run: dotnet test tests/OneCBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=FtpIntegration&Category!=NativeSqlIntegration'
       - run: python -m unittest discover -s tests/postgresql -v
       - run: python -m unittest discover -s tests/distribution -v
       - if: runner.os == 'Linux'
@@ -58,8 +58,38 @@ jobs:
           path: artifacts/ui/
           retention-days: 14
 
+  native-sql:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      ONECBACKUP_NATIVE_SQL: '1'
+      ONECBACKUP_TEST_REPOSITORY: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.401
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - shell: pwsh
+        run: |
+          $localDb = Get-ChildItem 'C:\Program Files\Microsoft SQL Server\*\Tools\Binn\SqlLocalDB.exe' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $localDb) { throw 'SQL Server LocalDB is required for native backup and restore verification' }
+          if (-not (Test-Path (Join-Path $env:PGBIN 'pg_dump.exe'))) { throw 'PostgreSQL tools are required for native backup and restore verification' }
+          "ONECBACKUP_TEST_LOCALDB_EXE=$($localDb.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - run: dotnet restore tests/OneCBackup.Core.Tests
+      - run: dotnet build tests/OneCBackup.Core.Tests --no-restore -m:1 -nr:false
+      - run: dotnet test tests/OneCBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category=NativeSqlIntegration' --logger 'trx;LogFileName=native-sql.trx' --results-directory artifacts/native-sql
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-sql-verification
+          path: artifacts/native-sql/*.trx
+          retention-days: 14
+
   package:
-    needs: verify
+    needs: [verify, native-sql]
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:
