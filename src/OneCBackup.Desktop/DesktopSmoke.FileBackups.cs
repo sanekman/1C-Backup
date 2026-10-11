@@ -14,7 +14,9 @@ internal static partial class DesktopSmoke
         void Click(string name)
         {
             window.UpdateLayout();
-            Control<Button>(name).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            var button = Control<Button>(name);
+            if (!button.IsEnabled || !button.IsVisible) throw new InvalidOperationException("Кнопка недоступна: " + name);
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             window.UpdateLayout();
         }
         var fixture = Path.GetDirectoryName(DesktopPaths.DataDirectory)!;
@@ -60,11 +62,13 @@ internal static partial class DesktopSmoke
         Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(item => item.Id == job.Id);
         var catalog = new BackupCatalog(Path.Combine(DesktopPaths.DataDirectory, "copies.json"));
         var history = new BackupRunHistory(Path.Combine(DesktopPaths.DataDirectory, "runs.json"));
+        await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled, "Ручной запуск файлов не готов после остановки агента.");
         Click("RunButton"); await WaitUntil(() => window.SmokeReady, "Полная файловая копия не завершилась.");
         var first = (await catalog.ReadAsync()).Single(record => record.JobId == job.Id);
         if (first.Backup.FileSnapshot?.IsFull != true) throw new InvalidOperationException("Первая копия не полная.");
         await File.WriteAllTextAsync(Path.Combine(source, "change.txt"), "after"); File.Delete(Path.Combine(source, "remove.txt"));
         await File.WriteAllTextAsync(Path.Combine(source, "added.txt"), "added");
+        await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled, "Повторный ручной запуск файлов не готов.");
         Click("RunButton"); await WaitUntil(() => window.SmokeReady, "Инкрементная файловая копия не завершилась.");
         var copies = (await catalog.ReadAsync()).Where(record => record.JobId == job.Id).ToArray();
         var latest = copies.Single(record => record.Backup.FileSnapshot?.Depth == 1);
@@ -74,6 +78,7 @@ internal static partial class DesktopSmoke
         Click("CopiesNavigation"); await WaitUntil(() => window.SmokeReady, "Каталог файловых копий не загрузился.");
         Control<ComboBox>("CopyJobFilter").SelectedValue = job.Id;
         Control<DataGrid>("Copies").SelectedItem = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Single(row => row.Record.Id == latest.Id);
+        await WaitUntil(() => window.SmokeReady && Control<Button>("RestoreFilesButton").IsEnabled, "Копии не готовы к проверке и восстановлению после обновления состояния агента.");
         window.UpdateLayout();
         if (!Control<Button>("RestoreFilesButton").IsVisible || !Control<Button>("RestoreFilesButton").IsEnabled
             || Control<Button>("ExtractOneCButton").IsVisible) throw new InvalidOperationException(
