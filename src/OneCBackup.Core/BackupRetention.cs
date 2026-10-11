@@ -83,7 +83,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
             foreach (var target in job.StorageJobs)
             {
                 var destination = new BackupDestination { StorageKind = target.StorageKind,
-                    DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp }.Description;
+                    DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, KeepLast = target.KeepLast }.Description;
                 BackupRecord? record = null;
                 try
                 {

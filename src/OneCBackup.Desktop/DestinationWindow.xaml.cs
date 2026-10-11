@@ -27,6 +27,7 @@ public partial class DestinationWindow : Window
         };
         credentialKey = initial?.Ftp?.CredentialKey;
         Destination.Text = initial?.DestinationDirectory ?? "";
+        KeepLast.Text = initial?.KeepLast?.ToString() ?? "";
         FtpHost.Text = initial?.Ftp?.Host ?? "";
         FtpPort.Text = (initial?.Ftp?.Port ?? 21).ToString();
         FtpTls.IsChecked = initial?.Ftp?.UseTls ?? true;
@@ -39,7 +40,7 @@ public partial class DestinationWindow : Window
     {
         if (FtpPanel is null || BrowseButton is null || PathHint is null) return;
         var kind = Storage.SelectedValue is StorageKind selected ? selected : StorageKind.LocalDirectory;
-        Height = kind == StorageKind.Ftp ? 540 : 340;
+        Height = kind == StorageKind.Ftp ? 620 : 420;
         FtpPanel.Visibility = kind == StorageKind.Ftp ? Visibility.Visible : Visibility.Collapsed;
         BrowseButton.Visibility = kind == StorageKind.Ftp ? Visibility.Collapsed : Visibility.Visible;
         PathHint.Text = kind switch
@@ -68,10 +69,18 @@ public partial class DestinationWindow : Window
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         var kind = (StorageKind)Storage.SelectedValue;
+        int? keepLast = null;
+        if (!string.IsNullOrWhiteSpace(KeepLast.Text))
+        {
+            if (!int.TryParse(KeepLast.Text.Trim(), out var count) || count < 1)
+            { Status.Text = "Укажите число хранимых копий: минимум 1, или оставьте поле пустым."; KeepLast.Focus(); return; }
+            keepLast = count;
+        }
         var port = 21;
         if (kind == StorageKind.Ftp && !int.TryParse(FtpPort.Text, out port))
         { Status.Text = "Порт FTP должен быть числом от 1 до 65535."; FtpPort.Focus(); return; }
         var destination = new BackupDestination { StorageKind = kind, DestinationDirectory = Destination.Text.Trim(),
+            KeepLast = keepLast,
             Ftp = kind == StorageKind.Ftp ? new FtpSettings { Host = FtpHost.Text.Trim(), Port = port,
                 UseTls = FtpTls.IsChecked == true, CredentialKey = credentialKey ?? "" } : null };
         var errors = destination.ApplyTo(new BackupJob { Name = "Хранилище", Source = "check" }).Validate().ToList();

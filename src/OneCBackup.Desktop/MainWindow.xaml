@@ -103,7 +103,7 @@
      </DataTemplate></DataGridTemplateColumn.CellTemplate>
     </DataGridTemplateColumn>
     <DataGridTextColumn Header="Расписание" Binding="{Binding ScheduleDescription}" Width="170" />
-    <DataGridTextColumn Header="Копий" Binding="{Binding KeepLast}" Width="55" />
+    <DataGridTextColumn Header="Копий (осн.)" Binding="{Binding KeepLast}" Width="95" />
     <DataGridTemplateColumn Header="Авто" Width="65"><DataGridTemplateColumn.CellTemplate><DataTemplate>
      <TextBlock ToolTip="Разрешены запуски по расписанию. Для выполнения включите автоматическое копирование.">
       <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="Да" /><Style.Triggers>
@@ -210,7 +210,7 @@
      TextWrapping="Wrap" Margin="0,0,0,10" />
    </StackPanel>
    <Expander x:Name="AdditionalStorageOptions" Header="Копировать также в другие хранилища (0)" Margin="0,8,0,0"><StackPanel Margin="0,8,0,0">
-    <TextBlock Text="Тот же файл будет отправлен во все хранилища. Число копий применяется отдельно к каждой папке; ошибка доставки не останавливает остальные." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />
+    <TextBlock Text="Тот же файл будет отправлен во все хранилища. Для каждого можно задать своё количество копий; ошибка доставки не останавливает остальные." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />
     <ListBox x:Name="AdditionalStorageList" DisplayMemberPath="Description" MaxHeight="120" Margin="0,0,0,8" SelectionChanged="AdditionalStorage_Changed" />
     <WrapPanel><Button x:Name="AddStorageButton" Content="+ Добавить хранилище" Click="AddStorage_Click" /><Button x:Name="EditStorageButton" Content="Изменить" Click="EditStorage_Click" IsEnabled="False" Margin="8,0,0,0" /><Button x:Name="RemoveStorageButton" Content="Убрать" Click="RemoveStorage_Click" IsEnabled="False" Margin="8,0,0,0" /></WrapPanel>
     <TextBlock Text="Изменения вступят в силу после сохранения задания. Удаление хранилища из списка не удаляет сохранённые файлы." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" />
@@ -246,7 +246,8 @@
    <StackPanel x:Name="ZonePanel"><TextBlock Text="Часовой пояс" /><ComboBox x:Name="TimeZonePicker" DisplayMemberPath="DisplayName" SelectedValuePath="Id" SelectionChanged="TimeZone_Changed" Margin="0,4,0,10" />
    <Expander Header="Технический идентификатор часового пояса" Margin="0,0,0,8"><TextBox x:Name="Zone" TextChanged="Schedule_Changed" /></Expander></StackPanel>
    <TextBlock x:Name="NextRun" TextWrapping="Wrap" Margin="0,0,0,10" />
-   <TextBlock Text="Хранить последних успешных копий" /><TextBox x:Name="KeepLast" Text="7" Margin="0,4,0,10" />
+   <TextBlock Text="Хранить последних успешных копий в основном хранилище" /><TextBox x:Name="KeepLast" Text="7" Margin="0,4,0,4" />
+   <TextBlock Text="Дополнительные хранилища используют это число, если в их настройках не задано своё." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,10" />
    <CheckBox x:Name="Enabled" Content="Выполнять задание по расписанию" IsChecked="True" Margin="0,0,0,12" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
 
 <TextBlock Text="Старые копии удаляются только после создания и проверки новой. 7 копий при одном запуске в день — примерно неделя истории. Компьютер должен быть включён; для фоновых запусков нужен вход пользователя в Windows." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />

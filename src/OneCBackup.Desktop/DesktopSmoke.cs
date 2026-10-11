@@ -54,7 +54,7 @@ internal static class DesktopSmoke
                 var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
                 using var file = File.Create(Path.Combine(output, name + ".png")); encoder.Save(file);
             }
-            void SetAdditionalStorage(string directory, bool edit = false, bool checkRequired = false)
+            void SetAdditionalStorage(string directory, bool edit = false, bool checkRequired = false, int? keepLast = null)
             {
                 Control<Expander>("AdditionalStorageOptions").IsExpanded = true;
                 window.UpdateLayout();
@@ -73,6 +73,19 @@ internal static class DesktopSmoke
                                 throw new InvalidOperationException("Пустое дополнительное хранилище принято.");
                         }
                         ((TextBox)dialog.FindName("Destination")).Text = directory;
+                        var count = (TextBox)dialog.FindName("KeepLast");
+                        if (checkRequired)
+                        {
+                            foreach (var invalid in new[] { "0", "-1", "not-a-number" })
+                            {
+                                count.Text = invalid;
+                                save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                                if (!dialog.IsVisible || !((TextBlock)dialog.FindName("Status")).Text.Contains("минимум 1"))
+                                    throw new InvalidOperationException("Некорректное количество копий принято.");
+                            }
+                        }
+                        count.Text = keepLast?.ToString() ?? "";
+                        count.BringIntoView();
                         Screenshot("additional-storage-dialog", dialog);
                         save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     }
@@ -122,13 +135,13 @@ internal static class DesktopSmoke
             Control<TextBox>("TemporaryFolder").BringIntoView();
             Screenshot("wizard-temporary-folder");
             var secondaryDirectory = Path.Combine(DesktopPaths.DataDirectory, "second-copies");
-            SetAdditionalStorage(secondaryDirectory, checkRequired: true);
+            SetAdditionalStorage(secondaryDirectory, checkRequired: true, keepLast: 2);
             Control<ListBox>("AdditionalStorageList").SelectedIndex = 0;
-            SetAdditionalStorage(Control<TextBox>("Destination").Text, edit: true);
+            SetAdditionalStorage(Control<TextBox>("Destination").Text, edit: true, keepLast: 2);
             Click("NextStepButton");
             if (!Control<TextBlock>("WizardError").Text.Contains("несколько раз") || !Control<StackPanel>("StorageStep").IsVisible)
                 throw new InvalidOperationException("Повторное хранилище не остановило мастер.");
-            SetAdditionalStorage(secondaryDirectory, edit: true);
+            SetAdditionalStorage(secondaryDirectory, edit: true, keepLast: 2);
             Screenshot("wizard-multiple-storage");
             Control<Expander>("ArchiveOptions").IsExpanded = true;
             Control<Button>("ArchivePasswordButton").BringIntoView();
@@ -165,6 +178,9 @@ internal static class DesktopSmoke
             Click("SaveButton");
             await WaitUntil(() => Control<DataGrid>("Jobs").Items.Count == 1 && Control<Button>("RunButton").IsEnabled, "Расписание не сохранено.");
             var configured = (BackupJob)Control<DataGrid>("Jobs").Items[0];
+            if (configured.KeepLast != 7 || configured.AdditionalDestinations![0].KeepLast != 2
+                || !Control<TextBox>("WizardSummary").Text.Contains("копий: 2"))
+                throw new InvalidOperationException("Разные количества копий не сохранены или не показаны в итоге.");
             if (configured.TemporaryDirectory != temporaryDirectory || !Control<TextBox>("WizardSummary").Text.Contains(temporaryDirectory))
                 throw new InvalidOperationException("Временная папка не показана в итоге или не сохранена.");
             if (configured.ArchivePasswordKey is null)
@@ -312,6 +328,13 @@ internal static class DesktopSmoke
             if (Control<DataGrid>("RunHistory").Items.Count != 2 || !Control<TextBox>("RunDetails").Text.Contains("Доставка по хранилищам:"))
                 throw new InvalidOperationException("Частичная ошибка не попала в фильтр проблем или потеряла результаты доставки.");
             Screenshot("multiple-storage-partial-result");
+            Click("JobsNavigation"); Click("RunButton");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Copies").Items.Count == 5,
+                "Отдельное количество копий не применилось после третьей доставки.");
+            if (Directory.GetFiles(Path.Combine(DesktopPaths.DataDirectory, "copies")).Length != 3
+                || Directory.GetFiles(secondaryDirectory).Length != 2)
+                throw new InvalidOperationException("Хранилища не сохраняют своё количество файлов.");
+            Screenshot("per-storage-retention-result");
             window.Width = 900; window.Height = 580;
             foreach (var navigation in new[] { "JobsNavigation", "CopiesNavigation", "HistoryNavigation", "AgentNavigation" })
             { Click(navigation); await Task.Delay(100); Screenshot("compact-" + navigation); }

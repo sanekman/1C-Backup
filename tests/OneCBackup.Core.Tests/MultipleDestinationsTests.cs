@@ -139,6 +139,76 @@ public sealed class MultipleDestinationsTests : IDisposable
     }
 
     [Fact]
+    public async Task DifferentCountsAndInheritedCountsPruneIndependentlyOnlyAfterSuccessfulDelivery()
+    {
+        var second = Job.AdditionalDestinations![0] with { KeepLast = 4 };
+        var third = new BackupDestination { DestinationDirectory = Path.Combine(root, "third") };
+        var job = Job with { KeepLast = 2, AdditionalDestinations = [second, third] };
+        var storage = new Storage();
+        var runner = Runner(new Executor(), storage);
+        for (var index = 0; index < 5; index++)
+            Assert.Equal(BackupRunStatus.Succeeded, (await runner.RunAsync(job)).Status);
+        var records = await Catalog.ReadAsync();
+        Assert.Equal(8, records.Count);
+        Assert.Equal(2, Directory.GetFiles(job.DestinationDirectory).Length);
+        Assert.Equal(4, Directory.GetFiles(second.DestinationDirectory).Length);
+        Assert.Equal(2, Directory.GetFiles(third.DestinationDirectory).Length);
+        var keptSecondary = Directory.GetFiles(second.DestinationDirectory).Order().ToArray();
+        var unrelated = Path.Combine(second.DestinationDirectory, "unregistered.bak");
+        await File.WriteAllTextAsync(unrelated, "keep this");
+
+        job = job with { KeepLast = 1, AdditionalDestinations = [second with { KeepLast = 3 }, third] };
+        storage.FailedDirectory = second.DestinationDirectory;
+        Assert.Equal(BackupRunStatus.PartiallySucceeded, (await runner.RunAsync(job)).Status);
+        Assert.Single(Directory.GetFiles(job.DestinationDirectory));
+        Assert.Single(Directory.GetFiles(third.DestinationDirectory)); // Inherited count follows the job.
+        Assert.All(keptSecondary, file => Assert.True(File.Exists(file))); // Lower limit cannot prune failed delivery.
+        Assert.Equal(6, (await Catalog.ReadAsync()).Count);
+
+        storage.FailedDirectory = null;
+        Assert.Equal(BackupRunStatus.Succeeded, (await runner.RunAsync(job)).Status);
+        Assert.Equal(5, (await Catalog.ReadAsync()).Count);
+        Assert.Single(Directory.GetFiles(job.DestinationDirectory));
+        Assert.Single(Directory.GetFiles(third.DestinationDirectory));
+        Assert.Equal(4, Directory.GetFiles(second.DestinationDirectory).Length); // Three backups and the unrelated file.
+        Assert.Equal("keep this", await File.ReadAllTextAsync(unrelated));
+        foreach (var record in await Catalog.ReadAsync())
+            await new BackupCopyVerifier(new FileBackupStorage()).VerifyAsync(record, job);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task InvalidDestinationCountCannotStartBackupOrDeleteExistingFiles(int count)
+    {
+        var storage = new Storage();
+        var executor = new Executor();
+        var runner = Runner(executor, storage);
+        Assert.Equal(BackupRunStatus.Succeeded, (await runner.RunAsync(Job)).Status);
+        var existing = await Catalog.ReadAsync();
+        var invalid = Job with { AdditionalDestinations = [Job.AdditionalDestinations![0] with { KeepLast = count }] };
+        await Assert.ThrowsAsync<InvalidDataException>(() => runner.RunAsync(invalid));
+        Assert.Equal(1, executor.Count);
+        Assert.Equal(existing, await Catalog.ReadAsync());
+        Assert.All(existing, record => Assert.True(File.Exists(record.Backup.Location)));
+    }
+
+    [Fact]
+    public async Task PerDestinationCountRoundTripsAndOmittedCountKeepsLegacyInheritance()
+    {
+        var store = new JobStore(Path.Combine(root, "jobs.json"));
+        await store.SaveAsync([Job]);
+        var legacy = Assert.Single(await store.LoadAsync());
+        Assert.Null(legacy.AdditionalDestinations![0].KeepLast);
+        Assert.All(legacy.StorageJobs, target => Assert.Equal(legacy.KeepLast, target.KeepLast));
+        var job = Job with { KeepLast = 7, AdditionalDestinations = [Job.AdditionalDestinations![0] with { KeepLast = 30 }] };
+        await store.SaveAsync([job]);
+        var restored = Assert.Single(await store.LoadAsync());
+        Assert.Equal(new[] { 7, 30 }, restored.StorageJobs.Select(target => target.KeepLast));
+        Assert.Empty(restored.Validate());
+    }
+
+    [Fact]
     public async Task LocalSecondaryOfFtpPrimaryCanBeVerifiedAndExtracted()
     {
         var source = Path.Combine(root, "base");
