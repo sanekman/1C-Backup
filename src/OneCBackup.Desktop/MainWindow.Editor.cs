@@ -105,8 +105,14 @@ public partial class MainWindow
             var format = EncryptArchive.IsChecked == true ? "ZIP с паролем (AES-256)"
                 : ArchiveCopies.IsChecked == true || OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive && Kind.SelectedItem is DatabaseKind.OneCFile
                     ? "ZIP без пароля" : "Исходный формат копии";
-            WizardSummary.Text = $"{JobName.Text.Trim()}\n\nБаза: {type}\nИсточник: {Source.Text.Trim()}\nСпособ: {method}\n\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}\nПапка: {Destination.Text.Trim()}\nЗащита: {format}\n\nЗапуск: {schedule}\nЧасовой пояс: {TimeZonePicker.Text}\nХранить: {KeepLast.Text.Trim()} успешных копий";
+            var connection = Kind.SelectedItem is DatabaseKind.SqlServer ? "\nСервер: " + SqlBackupServer.Text.Trim()
+                : Kind.SelectedItem is DatabaseKind.PostgreSql ? "\nСервер: " + PgHost.Text.Trim() + ":" + PgPort.Text.Trim() : "";
+            var ftpAddress = Storage.SelectedValue is StorageKind.Ftp ? "\nFTP-сервер: " + FtpHost.Text.Trim() + ":" + FtpPort.Text.Trim()
+                + (FtpTls.IsChecked == true ? " (FTPS)" : " (без TLS)") : "";
+            WizardSummary.Text = $"{JobName.Text.Trim()}\n\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\n\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}\nЗащита: {format}\n\nЗапуск: {schedule}\nЧасовой пояс: {TimeZonePicker.Text}\nХранить: {KeepLast.Text.Trim()} успешных копий";
         }
+        // Realize the scroll content before focusing a field on a newly opened step.
+        UpdateLayout();
         EditorScroll.ScrollToTop();
     }
 

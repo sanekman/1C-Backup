@@ -41,14 +41,14 @@
     </StackPanel>
     <StackPanel DockPanel.Dock="Bottom" Margin="12,20,8,0">
      <TextBlock Text="Локальное приложение" Foreground="#CBD5E1" FontWeight="SemiBold" />
-     <TextBlock Text="Фоновый агент может выполнять задания после закрытия окна." Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="12" />
+     <TextBlock Text="Расписание может работать после закрытия окна." Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="12" />
     </StackPanel>
     <StackPanel>
      <Button x:Name="JobsNavigation" Content="Задания" Tag="Active" Style="{StaticResource NavigationButton}" Click="JobsNavigation_Click" />
      <Button x:Name="CopiesNavigation" Content="Резервные копии" Style="{StaticResource NavigationButton}" Click="CopiesNavigation_Click" />
      <Button x:Name="HistoryNavigation" Content="История запусков" Style="{StaticResource NavigationButton}" Click="HistoryNavigation_Click" />
-     <Button x:Name="ExternalMonitoringButton" Content="Мониторинг SQL ↗" Style="{StaticResource NavigationButton}" Click="ExternalMonitoring_Click" IsEnabled="False" ToolTip="Настройка источников и проверка внешних резервных копий SQL" />
-     <Button x:Name="AgentNavigation" Content="Настройки агента" Style="{StaticResource NavigationButton}" Click="AgentNavigation_Click" />
+     <Button x:Name="ExternalMonitoringButton" Content="Мониторинг SQL" Style="{StaticResource NavigationButton}" Click="ExternalMonitoring_Click" IsEnabled="False" ToolTip="Настройка источников и проверка внешних резервных копий SQL" />
+     <Button x:Name="AgentNavigation" Content="Настройки" Style="{StaticResource NavigationButton}" Click="AgentNavigation_Click" />
     </StackPanel>
    </DockPanel>
   </Border>
@@ -101,7 +101,14 @@
     </DataGridTemplateColumn>
     <DataGridTextColumn Header="Расписание" Binding="{Binding ScheduleDescription}" Width="170" />
     <DataGridTextColumn Header="Копий" Binding="{Binding KeepLast}" Width="55" />
-    <DataGridCheckBoxColumn Header="Включено" Binding="{Binding Enabled}" Width="75" />
+    <DataGridTemplateColumn Header="Авто" Width="65"><DataGridTemplateColumn.CellTemplate><DataTemplate>
+     <TextBlock ToolTip="Разрешены запуски по расписанию. Для выполнения включите автоматическое копирование.">
+      <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="Да" /><Style.Triggers>
+       <DataTrigger Binding="{Binding Enabled}" Value="False"><Setter Property="Text" Value="Нет" /></DataTrigger>
+       <DataTrigger Binding="{Binding ScheduleKind}" Value="{x:Static core:ScheduleKind.Manual}"><Setter Property="Text" Value="Нет" /></DataTrigger>
+      </Style.Triggers></Style></TextBlock.Style>
+     </TextBlock>
+    </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
    </DataGrid.Columns>
   </DataGrid>
 
@@ -136,6 +143,7 @@
     <Button x:Name="SourceBrowseButton" DockPanel.Dock="Right" Content="Выбрать…" Tag="Source" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
     <TextBox x:Name="Source" />
    </DockPanel>
+   <TextBlock x:Name="OneCSourceHelp" Text="Путь к базе можно посмотреть в окне запуска 1С: выделите базу и нажмите «Изменить»." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
    <StackPanel x:Name="OneCMethodPanel">
     <TextBlock Text="Способ резервного копирования 1С" />
     <ComboBox x:Name="OneCMethodPicker" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="OneCMethod_Changed" Margin="0,4,0,10" />
@@ -219,7 +227,7 @@
    <TextBlock Text="Хранить последних успешных копий" /><TextBox x:Name="KeepLast" Text="7" Margin="0,4,0,10" />
    <CheckBox x:Name="Enabled" Content="Выполнять задание по расписанию" IsChecked="True" Margin="0,0,0,12" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
 
-<TextBlock Text="Старые копии удаляются только после создания и проверки новой. 7 копий при одном запуске в день — примерно неделя истории." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />
+<TextBlock Text="Старые копии удаляются только после создания и проверки новой. 7 копий при одном запуске в день — примерно неделя истории. Компьютер должен быть включён; для фоновых запусков нужен вход пользователя в Windows." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />
 </StackPanel>
         <StackPanel x:Name="ReviewStep" Visibility="Collapsed">
          <TextBox x:Name="WizardSummary" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="#F8FAFC" Padding="14" />
@@ -317,7 +325,7 @@
    <ScrollViewer x:Name="AgentView" Grid.Row="2" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
     <Border Style="{StaticResource Card}" MaxWidth="700" HorizontalAlignment="Left">
    <StackPanel Margin="24">
-    <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="0,16,0,0" Margin="0,20,0,0">
+    <Border>
      <StackPanel>
       <TextBlock Text="Фоновая работа" FontSize="18" FontWeight="SemiBold" />
       <CheckBox x:Name="AgentStartup" Content="Запускать фоновый агент при входе в Windows" Margin="0,12,0,12" />

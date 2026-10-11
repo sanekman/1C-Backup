@@ -237,7 +237,7 @@ public partial class MainWindow : Window
         ApplyJobFilter();
         canSave = agentSettings!.Mode == AgentMode.Standalone;
         JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = canSave;
-        Status.Text = canSave ? "Автономный режим: локальные задания. Пароли в файл настроек не записываются."
+        Status.Text = canSave ? jobs.Count == 0 ? "Начните с первого задания: выберите базу, папку копий и расписание." : "Выберите задание, чтобы создать копию или изменить настройки."
             : "Серверный режим: сохранённые серверные задания доступны только для просмотра. Автоматическая связь ещё не подключена.";
         UpdateRunControls();
         await RefreshCopiesAsync();
@@ -357,6 +357,7 @@ public partial class MainWindow : Window
         ArchiveCopies.IsEnabled = !fileArchive;
         if (fileArchive) ArchiveCopies.IsChecked = true;
         SourceBrowseButton.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
+        if (OneCSourceHelp is not null) OneCSourceHelp.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
         if (SourceLabel is not null) SourceLabel.Text = isOneC ? "Папка базы 1С или файл 1Cv8.1CD" : "Имя базы данных";
     }
 
@@ -566,7 +567,7 @@ public partial class MainWindow : Window
         {
             "history" => ("История запусков", "Результаты запусков и ошибки. Время — на этом компьютере."),
             "copies" => ("Резервные копии", "Зарегистрированные копии всех заданий, расположение файлов и проверка целостности."),
-            "agent" => ("Настройки агента", "Фоновая работа и запуск при входе в Windows."),
+            "agent" => ("Настройки программы", "Фоновая работа и запуск при входе в Windows."),
             _ => ("Задания резервного копирования", "Файловая 1С · Microsoft SQL Server · PostgreSQL")
         };
     }

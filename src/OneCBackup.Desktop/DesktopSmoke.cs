@@ -38,9 +38,11 @@ internal static class DesktopSmoke
             T Control<T>(string name) where T : FrameworkElement => (T)window.FindName(name);
             void Click(string name)
             {
+                window.UpdateLayout();
                 var button = Control<Button>(name);
                 if (!button.IsEnabled || !button.IsVisible) throw new InvalidOperationException("Кнопка недоступна: " + name);
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                window.UpdateLayout();
             }
             void Screenshot(string name)
             {
@@ -196,7 +198,8 @@ internal static class DesktopSmoke
             Click("JobsNavigation"); Click("EditJobButton");
             Control<TextBox>("JobName").Text = "unsaved draft must be discarded";
             Click("CancelEditorButton");
-            if (Control<DataGrid>("Jobs").SelectedItem is not BackupJob { Name: "Тестовая база 1С" })
+            if (Control<DataGrid>("Jobs").SelectedItem is not BackupJob { Name: "Тестовая база 1С" }
+                || Control<TextBox>("JobName").Text != "Тестовая база 1С" || Control<Border>("EditorCard").IsVisible)
                 throw new InvalidOperationException("Отмена мастера изменила сохранённое задание.");
             window.Width = 900; window.Height = 580;
             foreach (var navigation in new[] { "JobsNavigation", "CopiesNavigation", "HistoryNavigation", "AgentNavigation" })
