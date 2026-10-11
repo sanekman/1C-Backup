@@ -39,17 +39,46 @@ internal static class DesktopSmoke
             void Click(string name)
             {
                 var button = Control<Button>(name);
-                if (!button.IsEnabled) throw new InvalidOperationException("Кнопка недоступна: " + name);
+                if (!button.IsEnabled || !button.IsVisible) throw new InvalidOperationException("Кнопка недоступна: " + name);
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             }
+            void Screenshot(string name)
+            {
+                window.UpdateLayout();
+                var bitmap = new RenderTargetBitmap((int)Math.Ceiling(window.ActualWidth), (int)Math.Ceiling(window.ActualHeight),
+                    96, 96, PixelFormats.Pbgra32);
+                bitmap.Render(window);
+                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                using var file = File.Create(Path.Combine(output, name + ".png")); encoder.Save(file);
+            }
+            void AssertVisibleFooter(string buttonName)
+            {
+                window.UpdateLayout();
+                var button = Control<Button>(buttonName);
+                var position = button.TranslatePoint(new Point(), window);
+                if (!button.IsVisible || position.Y < 0 || position.Y + button.ActualHeight > window.ActualHeight - 20)
+                    throw new InvalidOperationException("Кнопка мастера выходит за границы окна: " + buttonName);
+            }
+            Screenshot("first-start");
+            Click("FirstJobButton");
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WizardError").IsVisible || !Control<StackPanel>("BaseStep").IsVisible)
+                throw new InvalidOperationException("Пустое задание не остановлено на первом шаге.");
+            if (Control<ComboBox>("OneCMethodPicker").SelectedValue is not OneCBackupMethod.FileArchive)
+                throw new InvalidOperationException("Первое задание не предлагает копию файла без платформы.");
             var source = Path.Combine(DesktopPaths.DataDirectory, "fixture-base");
             Directory.CreateDirectory(source);
             File.WriteAllText(Path.Combine(source, "1Cv8.1CD"), "CI fixture bytes; not a real 1C database");
             Control<TextBox>("JobName").Text = "Тестовая база 1С";
             Control<TextBox>("Source").Text = source;
-            Control<TextBox>("Destination").Text = Path.Combine(DesktopPaths.DataDirectory, "copies");
             Control<ComboBox>("OneCMethodPicker").SelectedValue = OneCBackupMethod.FileArchive;
-            Control<TextBox>("DailyAt").Text = "23:00, 09:00, 13:00";
+            Screenshot("wizard-base");
+            Click("NextStepButton");
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WizardError").IsVisible || !Control<StackPanel>("StorageStep").IsVisible)
+                throw new InvalidOperationException("Пустая папка копий не остановила мастер.");
+            Control<TextBox>("Destination").Text = Path.Combine(DesktopPaths.DataDirectory, "copies");
+            Control<Expander>("ArchiveOptions").IsExpanded = true;
             _ = window.Dispatcher.BeginInvoke(new Action(() =>
             {
                 var passwordDialog = Application.Current.Windows.OfType<ArchivePasswordWindow>().Single();
@@ -61,6 +90,25 @@ internal static class DesktopSmoke
             Click("ArchivePasswordButton");
             if (Control<CheckBox>("EncryptArchive").IsChecked != true)
                 throw new InvalidOperationException("Пароль архива не настроен через интерфейс.");
+            Screenshot("wizard-storage");
+            Click("NextStepButton");
+            Control<TextBox>("DailyAt").Text = "23:00, 09:00, 13:00";
+            Control<TextBox>("KeepLast").Text = "0";
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WizardError").IsVisible || !Control<StackPanel>("ScheduleStep").IsVisible)
+                throw new InvalidOperationException("Неверное число копий не остановило мастер.");
+            Control<TextBox>("KeepLast").Text = "7";
+            Screenshot("wizard-schedule");
+            window.Width = 900; window.Height = 580;
+            AssertVisibleFooter("NextStepButton");
+            Screenshot("wizard-compact");
+            Click("NextStepButton");
+            AssertVisibleFooter("SaveButton");
+            if (!Control<TextBox>("WizardSummary").Text.Contains("ZIP с паролем") || !Control<TextBox>("WizardSummary").Text.Contains("7 успешных"))
+                throw new InvalidOperationException("Итог мастера не показывает защиту и хранение.");
+            Screenshot("wizard-review-compact");
+            window.Width = 1100; window.Height = 740;
+            Click("PreviousStepButton"); Click("NextStepButton");
             Click("SaveButton");
             await WaitUntil(() => Control<DataGrid>("Jobs").Items.Count == 1 && Control<Button>("RunButton").IsEnabled, "Расписание не сохранено.");
             var configured = (BackupJob)Control<DataGrid>("Jobs").Items[0];
@@ -68,8 +116,12 @@ internal static class DesktopSmoke
                 throw new InvalidOperationException("Ссылка на пароль архива не сохранена.");
             if (!configured.ScheduledTimes.SequenceEqual(new TimeOnly[] { new(9, 0), new(13, 0), new(23, 0) }))
                 throw new InvalidOperationException("Несколько времён запуска не сохранены через интерфейс.");
+            if (Control<Border>("EditorCard").IsVisible || !Control<Border>("JobListCard").IsVisible)
+                throw new InvalidOperationException("Сохранение не вернуло список заданий.");
+            Click("EditJobButton");
+            Click("NextStepButton"); Click("NextStepButton");
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Manual;
-            Click("SaveButton");
+            Click("NextStepButton"); Click("SaveButton");
             await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Jobs").SelectedItem is BackupJob { ScheduleKind: ScheduleKind.Manual }
                 && Control<Button>("RunButton").IsEnabled, "Задание не сохранено.");
             Click("RunButton");
@@ -114,12 +166,7 @@ internal static class DesktopSmoke
             {
                 Click(navigation);
                 await Task.Delay(200);
-                window.UpdateLayout();
-                var bitmap = new RenderTargetBitmap((int)Math.Ceiling(window.ActualWidth), (int)Math.Ceiling(window.ActualHeight),
-                    96, 96, PixelFormats.Pbgra32);
-                bitmap.Render(window);
-                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                using var file = File.Create(Path.Combine(output, name + ".png")); encoder.Save(file);
+                Screenshot(name);
             }
             Click("CopiesNavigation");
             // Select while the asynchronous refresh is pending; the refresh must keep the user's latest selection.
@@ -145,8 +192,17 @@ internal static class DesktopSmoke
             File.Copy(encryptedRecord.Backup.Location, Path.Combine(output, "encrypted-fixture.zip"));
             if (File.ReadAllText(exportedPath).Contains("CI-only-архив"))
                 throw new InvalidOperationException("Пароль попал в экспорт истории.");
+            // Cancelling edits must retain the saved model used by backup execution.
+            Click("JobsNavigation"); Click("EditJobButton");
+            Control<TextBox>("JobName").Text = "unsaved draft must be discarded";
+            Click("CancelEditorButton");
+            if (Control<DataGrid>("Jobs").SelectedItem is not BackupJob { Name: "Тестовая база 1С" })
+                throw new InvalidOperationException("Отмена мастера изменила сохранённое задание.");
+            window.Width = 900; window.Height = 580;
+            foreach (var navigation in new[] { "JobsNavigation", "CopiesNavigation", "HistoryNavigation", "AgentNavigation" })
+            { Click(navigation); await Task.Delay(100); Screenshot("compact-" + navigation); }
             await VerifyPostgreSqlMonitoringAsync(window);
-            Finish(output, true, "Несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, фильтры и экспорт истории, каталог, SHA256, навигация и импорт SQL-отчёта проверены на Windows.");
+            Finish(output, true, "Компактное окно, четыре шага мастера, ошибки полей, отмена редактирования, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, фильтры и экспорт истории, каталог, SHA256, навигация и импорт SQL-отчёта проверены на Windows.");
         }
         catch (Exception ex) { Finish(output, false, ex.ToString()); }
         finally

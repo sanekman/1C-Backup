@@ -96,7 +96,9 @@ public partial class MainWindow : Window
         };
         Schedule.SelectedValue = ScheduleKind.Daily;
         Mon.IsChecked = true;
+        TimeZonePicker.ItemsSource = TimeZoneInfo.GetSystemTimeZones();
         Zone.Text = TimeZoneInfo.Local.Id;
+        TimeZonePicker.SelectedValue = TimeZoneInfo.Local.Id;
         SaveButton.IsEnabled = DeleteButton.IsEnabled = JobEditor.IsEnabled = false;
         Loaded += async (_, _) =>
         {
@@ -134,7 +136,8 @@ public partial class MainWindow : Window
 
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
-        if (!canSave) return;
+        if (!canSave || !editorOpen || wizardStep != 3) return;
+        for (var step = 0; step < 3; step++) if (!ValidateWizardStep(step)) return;
         var scheduleKind = (ScheduleKind)Schedule.SelectedValue;
         TimeOnly[] times = [new(23, 0)];
         if ((scheduleKind != ScheduleKind.Manual && !TryParseRunTimes(DailyAt.Text, out times))
@@ -191,7 +194,11 @@ public partial class MainWindow : Window
         if (EncryptArchive.IsChecked == true && archivePasswordKey is null)
         { Status.Text = "Сначала задайте пароль архива."; return; }
         var updated = jobs.Where(j => j.Id != job.Id).Append(job).ToList();
-        if (await PersistAsync(updated)) { JobSearch.Clear(); Jobs.SelectedItem = job; Status.Text = "Настройки сохранены. Кнопка создания копии использует сохранённое задание."; }
+        if (await PersistAsync(updated))
+        {
+            JobSearch.Clear(); Jobs.SelectedItem = job; CloseEditor();
+            Status.Text = "Задание сохранено. Нажмите «Создать копию», чтобы проверить его. Для расписания включите автоматическое копирование.";
+        }
     }
 
     private async Task<bool> PersistAsync(List<BackupJob> updated)
@@ -270,6 +277,11 @@ public partial class MainWindow : Window
     private void Jobs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (Jobs.SelectedItem is not BackupJob job) { UpdateRunControls(); return; }
+        LoadJobEditor(job);
+    }
+
+    private void LoadJobEditor(BackupJob job)
+    {
         editingId = job.Id; Zone.Text = job.TimeZoneId;
         OneCExecutable.Text = job.OneC?.ExecutablePath ?? "";
         OneCTimeout.Text = (job.OneC?.TimeoutMinutes ?? 120).ToString();
@@ -302,10 +314,12 @@ public partial class MainWindow : Window
 
     private void New_Click(object sender, RoutedEventArgs e)
     {
+        if (!NewJobButton.IsEnabled) return;
+        selectionBeforeEdit = Jobs.SelectedItem as BackupJob;
         JobSearch.Clear();
         Jobs.SelectedItem = null; editingId = null; Zone.Text = TimeZoneInfo.Local.Id;
         JobName.Clear(); Source.Clear(); Destination.Clear(); Kind.SelectedItem = DatabaseKind.OneCFile;
-        OneCMethodPicker.SelectedValue = OneCBackupMethod.PlatformDump;
+        OneCMethodPicker.SelectedValue = OneCBackupMethod.FileArchive;
         OneCExecutable.Clear(); OneCTimeout.Text = "120";
         SqlBackupServer.Clear(); SqlServerDirectory.Clear(); SqlAgentDirectory.Clear(); SqlBackupTimeout.Text = "120";
         PgHost.Text = "localhost"; PgPort.Text = "5432"; PgUsername.Text = "postgres";
@@ -320,6 +334,7 @@ public partial class MainWindow : Window
         UpdateSchedulePreview();
         UpdateOneCControls();
         UpdateRunControls();
+        OpenEditor();
     }
 
     private void Kind_Changed(object sender, SelectionChangedEventArgs e)
@@ -342,19 +357,25 @@ public partial class MainWindow : Window
         ArchiveCopies.IsEnabled = !fileArchive;
         if (fileArchive) ArchiveCopies.IsChecked = true;
         SourceBrowseButton.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
+        if (SourceLabel is not null) SourceLabel.Text = isOneC ? "Папка базы 1С или файл 1Cv8.1CD" : "Имя базы данных";
     }
 
     private void UpdateRunControls()
     {
         var idle = !persisting && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
         var engineAvailable = !backgroundBusy && !backgroundStarting;
-        NewJobButton.IsEnabled = ready && canSave && idle;
+        NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle;
+        FirstJobButton.Visibility = jobs.Count == 0 && JobSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        EditJobButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
+        PreviousStepButton.IsEnabled = ready && canSave && idle && wizardStep > 0;
+        NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
         JobsSummary.Text = $"Всего: {jobs.Count} · Включено: {jobs.Count(job => job.Enabled)}";
-        RunButton.IsEnabled = ready && canSave && idle && engineAvailable && Jobs.SelectedItem is BackupJob;
-        JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = ready && canSave && idle;
+        RunButton.IsEnabled = ready && canSave && idle && engineAvailable && !editorOpen && Jobs.SelectedItem is BackupJob;
+        JobEditor.IsEnabled = SaveButton.IsEnabled = ready && canSave && idle;
+        DeleteButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
         AgentModePicker.IsEnabled = SaveAgentSettingsButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null;
         ExternalMonitoringButton.IsEnabled = ready && idle && schedulingTask is null;
-        StartScheduleButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
+        StartScheduleButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null && !editorOpen;
         ArchivePasswordButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         FtpCredentialsButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         StopScheduleButton.IsEnabled = schedulingTask is not null && !schedulerStopping;
@@ -366,12 +387,18 @@ public partial class MainWindow : Window
                 job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.FileArchive && job.StorageKind != StorageKind.Ftp);
         CancelCopyVerificationButton.IsEnabled = copyVerification is { IsCancellationRequested: false };
         OpenCopyDirectoryButton.IsEnabled = ready && Copies.SelectedItem is BackupCopyRow { CanOpenDirectory: true };
-        StartBackgroundButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
-        StopBackgroundButton.IsEnabled = ready && backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running;
+        StartBackgroundButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null && !editorOpen;
+        StopBackgroundButton.IsEnabled = ready && (backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running || schedulingTask is not null && !schedulerStopping);
+        var automationStarted = backgroundBusy || schedulingTask is not null;
+        StartBackgroundButton.Visibility = automationStarted ? Visibility.Collapsed : Visibility.Visible;
+        StopBackgroundButton.Visibility = automationStarted ? Visibility.Visible : Visibility.Collapsed;
+        ArchivePasswordButton.ToolTip = FtpCredentialsButton.ToolTip = !engineAvailable || schedulingTask is not null
+            ? "Для настройки пароля остановите автоматическое копирование." : null;
         SaveStartupButton.IsEnabled = ready;
         RefreshHistoryButton.IsEnabled = ready && !historyRefreshing;
         ExportHistoryButton.IsEnabled = ready && !historyRefreshing && RunHistory.Items.Count != 0;
         OpenRunDirectoryButton.IsEnabled = ready && RunHistory.SelectedItem is BackupRun;
+        UpdateSelectedJobSummary();
     }
 
     private IDisposable? AcquireEngineOrReport()
@@ -398,12 +425,15 @@ public partial class MainWindow : Window
             var live = backgroundBusy && backgroundState is not null &&
                 DateTimeOffset.UtcNow - backgroundState.UpdatedUtc < TimeSpan.FromSeconds(10) &&
                 backgroundState.Phase is LocalAgentPhase.Running or LocalAgentPhase.Stopping;
-            BackgroundStatus.Text = backgroundStarting ? "Агент запускается…" : live
+            var scheduledCount = jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual);
+            BackgroundStatus.Text = backgroundStarting ? "Автоматическое копирование включается…"
+                : schedulingTask is not null ? "Расписание работает только пока открыто это окно." : live
                 ? backgroundState!.Phase == LocalAgentPhase.Stopping ? "Останавливается текущая операция…"
-                    : "Работает независимо от окна. " + (backgroundState.Error ?? backgroundState.MonitoringError ?? "Можно закрыть приложение.")
+                    : (scheduledCount == 0 ? "Фоновая работа включена, но заданий по расписанию нет. " : $"Работает · заданий по расписанию: {scheduledCount}. ")
+                        + (backgroundState.Error ?? backgroundState.MonitoringError ?? "Можно закрыть окно.")
                 : backgroundBusy ? "Рабочий каталог занят другим исполнителем."
                 : backgroundState?.Phase == LocalAgentPhase.Faulted ? "Агент остановлен с ошибкой: " + backgroundState.Error
-                : "Выключен. Запустите, чтобы выполнять расписание после закрытия окна.";
+                : "Выключено. Включите для запуска заданий по расписанию после закрытия окна.";
             if (backgroundBusy && DateTimeOffset.UtcNow - lastBackgroundRefresh > TimeSpan.FromSeconds(10))
             {
                 lastBackgroundRefresh = DateTimeOffset.UtcNow;
@@ -434,6 +464,7 @@ public partial class MainWindow : Window
 
     private async void StopBackground_Click(object sender, RoutedEventArgs e)
     {
+        if (schedulingTask is not null) { StopSchedule_Click(sender, e); return; }
         if (!StopBackgroundButton.IsEnabled || backgroundState is null) return;
         try
         {
@@ -477,7 +508,7 @@ public partial class MainWindow : Window
             view.Refresh();
         }
         JobsEmptyTitle.Text = query.Length == 0 ? "Добавьте первое задание" : "Задания не найдены";
-        JobsEmptyHint.Text = query.Length == 0 ? "Укажите базу, хранилище и расписание.\nСохранённое задание появится здесь." : "Измените или очистите строку поиска.";
+        JobsEmptyHint.Text = query.Length == 0 ? "Четыре коротких шага: база → хранилище → расписание → проверка." : "Измените или очистите строку поиска.";
         UpdateRunControls();
     }
 
@@ -533,9 +564,9 @@ public partial class MainWindow : Window
         AgentNavigation.Tag = page == "agent" ? "Active" : null;
         (PageTitle.Text, PageDescription.Text) = page switch
         {
-            "history" => ("История запусков", "Результаты операций, созданные копии и ошибки. Время указано в UTC."),
+            "history" => ("История запусков", "Результаты запусков и ошибки. Время — на этом компьютере."),
             "copies" => ("Резервные копии", "Зарегистрированные копии всех заданий, расположение файлов и проверка целостности."),
-            "agent" => ("Настройки агента", "Автономная работа и параметры будущего подключения к серверу управления."),
+            "agent" => ("Настройки агента", "Фоновая работа и запуск при входе в Windows."),
             _ => ("Задания резервного копирования", "Файловая 1С · Microsoft SQL Server · PostgreSQL")
         };
     }
@@ -768,7 +799,7 @@ public partial class MainWindow : Window
 
     private async void Run_Click(object sender, RoutedEventArgs e)
     {
-        if (!canSave || activeRun is not null || copyVerification is not null || Jobs.SelectedItem is not BackupJob job) return;
+        if (!canSave || editorOpen || activeRun is not null || copyVerification is not null || Jobs.SelectedItem is not BackupJob job) return;
         if (job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.PlatformDump && job.OneC is null)
         { Status.Text = "Укажите путь к 1cv8.exe и сохраните задание перед запуском."; return; }
         manualPending = true;
@@ -891,6 +922,8 @@ public partial class MainWindow : Window
     private void UpdateSchedulePreview()
     {
         if (NextRun is null || Enabled is null || Schedule.SelectedValue is not ScheduleKind kind) return;
+        if (TimeZonePicker is not null && TimeZonePicker.SelectedValue as string != Zone.Text.Trim()) TimeZonePicker.SelectedValue = Zone.Text.Trim();
+        if (ZonePanel is not null) ZonePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         DaysPanel.Visibility = kind == ScheduleKind.Weekly ? Visibility.Visible : Visibility.Collapsed;
         TimePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         if (Enabled.IsChecked != true) { NextRun.Text = "Автоматические запуски отключены."; return; }
@@ -922,7 +955,7 @@ public partial class MainWindow : Window
     private void UpdateArchivePasswordStatus()
     {
         if (ArchivePasswordStatus is null) return;
-        ArchivePasswordStatus.Text = archivePasswordKey is null ? "Пароль пока не задан." : "Пароль сохранён в хранилище Windows. Смена пароля действует на новые копии.";
+        ArchivePasswordStatus.Text = archivePasswordKey is null ? "Пароль пока не задан." : "Для задания задан пароль. Смена пароля действует на новые копии.";
     }
 
     private void Encryption_Changed(object sender, RoutedEventArgs e)
@@ -963,6 +996,6 @@ public partial class MainWindow : Window
     {
         if (!canSave || editingId is not Guid id) return;
         if (MessageBox.Show("Удалить настройки задания?", "1C-Backup", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
-        if (await PersistAsync(jobs.Where(j => j.Id != id).ToList())) { New_Click(sender, e); Status.Text = "Задание удалено."; }
+        if (await PersistAsync(jobs.Where(j => j.Id != id).ToList())) { Jobs.SelectedItem = null; editingId = null; CloseEditor(); Status.Text = "Задание удалено. Резервные копии и история сохранены."; }
     }
 }

@@ -22,7 +22,7 @@
    <Setter Property="Foreground" Value="#1E293B" />
    <Setter Property="BorderBrush" Value="#CBD5E1" />
    <Setter Property="BorderThickness" Value="1" />
-   <Setter Property="Padding" Value="14,8" />
+   <Setter Property="Padding" Value="10,6" />
    <Setter Property="Cursor" Value="Hand" />
    <Setter Property="Template">
     <Setter.Value><ControlTemplate TargetType="Button">
@@ -44,13 +44,13 @@
    <Setter Property="BorderBrush" Value="#2563EB" />
   </Style>
   <Style TargetType="TextBox">
-   <Setter Property="Padding" Value="9,7" />
+   <Setter Property="Padding" Value="8,5" />
    <Setter Property="BorderBrush" Value="#CBD5E1" />
    <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
   <Style TargetType="ComboBox">
    <Setter Property="Padding" Value="8,6" />
-   <Setter Property="MinHeight" Value="34" />
+   <Setter Property="MinHeight" Value="30" />
    <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
   <Style TargetType="DataGrid">
@@ -59,8 +59,8 @@
    <Setter Property="GridLinesVisibility" Value="Horizontal" />
    <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource LineBrush}" />
    <Setter Property="HeadersVisibility" Value="Column" />
-   <Setter Property="RowHeight" Value="44" />
-   <Setter Property="ColumnHeaderHeight" Value="44" />
+   <Setter Property="RowHeight" Value="36" />
+   <Setter Property="ColumnHeaderHeight" Value="36" />
    <Setter Property="AlternatingRowBackground" Value="#FAFCFE" />
    <Setter Property="CanUserDeleteRows" Value="False" />
   </Style>
@@ -68,12 +68,12 @@
    <Setter Property="Background" Value="#F8FAFC" />
    <Setter Property="Foreground" Value="#64748B" />
    <Setter Property="FontWeight" Value="SemiBold" />
-   <Setter Property="Padding" Value="12,8" />
+   <Setter Property="Padding" Value="10,6" />
    <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
    <Setter Property="BorderThickness" Value="0,0,0,1" />
   </Style>
   <Style TargetType="DataGridCell">
-   <Setter Property="Padding" Value="12,6" />
+   <Setter Property="Padding" Value="10,6" />
    <Setter Property="BorderThickness" Value="0" />
    <Setter Property="VerticalContentAlignment" Value="Center" />
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="DataGridCell">
