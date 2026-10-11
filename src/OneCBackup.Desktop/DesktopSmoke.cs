@@ -665,6 +665,9 @@ internal static class DesktopSmoke
             Click("HistoryNavigation");
             await WaitUntil(() => window.SmokeReady, "История не готова для проверки пояснений.");
             var persistedRunsBeforeGuidance = JsonSerializer.Serialize(await historyBeforeNavigation.ReadAsync());
+            var guidanceCatalog = new BackupCatalog(Path.Combine(DesktopPaths.DataDirectory, "copies.json"));
+            var persistedCopiesBeforeGuidance = JsonSerializer.Serialize(await guidanceCatalog.ReadAsync());
+            var visibleCopiesBeforeGuidance = Control<DataGrid>("Copies").Items.Count;
             var partialRun = (await historyBeforeNavigation.ReadAsync()).First(run => run.Status == BackupRunStatus.PartiallySucceeded);
             foreach (var (sample, phrase) in new[]
             {
@@ -700,7 +703,8 @@ internal static class DesktopSmoke
             Click("RefreshHistoryButton");
             await WaitUntil(() => window.SmokeReady, "Настоящая история не восстановилась после проверки пояснений.");
             if (JsonSerializer.Serialize(await historyBeforeNavigation.ReadAsync()) != persistedRunsBeforeGuidance
-                || Control<DataGrid>("Copies").Items.Count != 8)
+                || JsonSerializer.Serialize(await guidanceCatalog.ReadAsync()) != persistedCopiesBeforeGuidance
+                || Control<DataGrid>("Copies").Items.Count != visibleCopiesBeforeGuidance)
                 throw new InvalidOperationException("Пояснения истории изменили сохранённые запуски или копии.");
             await VerifyPostgreSqlMonitoringAsync(window);
             Finish(output, true, "Пояснения истории, переход к текущему заданию по ID, три ближайших запуска, смена дней / часового пояса / режима и итог, компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
