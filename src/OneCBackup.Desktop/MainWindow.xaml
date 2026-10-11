@@ -80,6 +80,7 @@
        <StackPanel><WrapPanel>
         <Button x:Name="RunButton" Content="Создать копию" Style="{StaticResource PrimaryButton}" IsEnabled="False" Click="Run_Click" />
         <Button x:Name="EditJobButton" Content="Изменить" Click="EditJob_Click" IsEnabled="False" Margin="8,0,0,0" />
+        <Button x:Name="DuplicateJobButton" Content="На основе…" Click="DuplicateJob_Click" IsEnabled="False" Margin="8,0,0,0" ToolTip="Создать новое задание с настройками выбранного. Автоматические запуски новой копии задания отключены до проверки." />
         <Button x:Name="DeleteButton" Content="Удалить" Click="Delete_Click" IsEnabled="False" Margin="8,0,0,0" />
         <Button x:Name="CancelRunButton" Content="Отменить" Margin="8,0,0,0" IsEnabled="False" Click="CancelRun_Click" />
         <Button x:Name="ShowLatestCopyButton" Content="Последняя копия" Margin="8,0,0,0" IsEnabled="False" Click="ShowLatestCopy_Click" ToolTip="Открыть последнюю сохранённую копию выбранного задания" />

@@ -360,11 +360,60 @@ internal static class DesktopSmoke
                 || Directory.GetFiles(secondaryDirectory).Length != 2)
                 throw new InvalidOperationException("Хранилища не сохраняют своё количество файлов.");
             Screenshot("per-storage-retention-result");
+            // A copied draft must be independent, while sharing the existing immutable password binding.
+            var original = (BackupJob)Control<DataGrid>("Jobs").SelectedItem;
+            var originalJson = JsonSerializer.Serialize(original);
+            Click("DuplicateJobButton");
+            if (Control<TextBox>("JobName").Text != original.Name + " — копия"
+                || Control<CheckBox>("Enabled").IsChecked != false
+                || Control<TextBox>("TemporaryFolder").Text != original.TemporaryDirectory
+                || Control<ListBox>("AdditionalStorageList").Items.Count != 2
+                || Control<Button>("RunButton").IsEnabled)
+                throw new InvalidOperationException("Новое задание потеряло настройки или допускает запуск несохранённого черновика.");
+            Screenshot("duplicate-job-start");
+            Control<TextBox>("TemporaryFolder").Text = "unsaved duplicate folder";
+            Click("CancelEditorButton");
+            if (Control<DataGrid>("Jobs").Items.Count != 1
+                || JsonSerializer.Serialize(Control<DataGrid>("Jobs").SelectedItem as BackupJob) != originalJson
+                || Control<TextBox>("TemporaryFolder").Text != original.TemporaryDirectory)
+                throw new InvalidOperationException("Отмена копирования изменила исходное задание.");
+            Click("DuplicateJobButton");
+            var secondSource = Path.Combine(DesktopPaths.DataDirectory, "second-base");
+            Directory.CreateDirectory(secondSource);
+            File.WriteAllText(Path.Combine(secondSource, "1Cv8.1CD"), "second isolated database fixture");
+            Control<TextBox>("Source").Text = secondSource;
+            Click("NextStepButton"); Click("NextStepButton");
+            Control<TextBox>("KeepLast").Text = "1";
+            Click("NextStepButton");
+            Screenshot("duplicate-job-review");
+            Click("SaveButton");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Jobs").Items.Count == 2 && Control<Button>("RunButton").IsEnabled,
+                "Копия задания не сохранена отдельно.");
+            var duplicate = (BackupJob)Control<DataGrid>("Jobs").SelectedItem;
+            if (duplicate.Id == original.Id || duplicate.Enabled || duplicate.Source != secondSource
+                || JsonSerializer.Serialize(duplicate with { Id = original.Id, Name = original.Name, Source = original.Source,
+                    Enabled = original.Enabled, KeepLast = original.KeepLast }) != originalJson
+                || JsonSerializer.Serialize(Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(job => job.Id == original.Id)) != originalJson)
+                throw new InvalidOperationException("Копия задания потеряла настройки, пароль или изменила оригинал.");
+            // Both jobs use the same folders. Retention of the duplicate must preserve the original's copies.
+            Click("RunButton");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Copies").Items.Count == 7, "Копия задания не доставила защищённый архив.");
+            Click("RunButton");
+            await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Copies").Items.Count == 8, "Хранение копии задания не применилось независимо.");
+            if (Directory.GetFiles(Path.Combine(DesktopPaths.DataDirectory, "copies")).Length != 4
+                || Directory.GetFiles(secondaryDirectory).Length != 4)
+                throw new InvalidOperationException("Копия задания удалила резервные копии исходного задания.");
+            Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(job => job.Id == original.Id);
+            Click("DuplicateJobButton");
+            if (Control<TextBox>("JobName").Text != original.Name + " — копия 2")
+                throw new InvalidOperationException("Повторное копирование не предложило уникальное название.");
+            Click("CancelEditorButton");
+            Screenshot("duplicate-job-saved");
             window.Width = 900; window.Height = 580;
             foreach (var navigation in new[] { "JobsNavigation", "CopiesNavigation", "HistoryNavigation", "AgentNavigation" })
             { Click(navigation); await Task.Delay(100); Screenshot("compact-" + navigation); }
             await VerifyPostgreSqlMonitoringAsync(window);
-            Finish(output, true, "Компактное окно, четыре шага мастера, ошибки полей, отмена редактирования, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, фильтры и экспорт истории, каталог, SHA256, навигация и импорт SQL-отчёта проверены на Windows.");
+            Finish(output, true, "Компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
         }
         catch (Exception ex) { Finish(output, false, ex.ToString()); }
         finally

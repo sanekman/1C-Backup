@@ -390,6 +390,7 @@ public partial class MainWindow : Window
         NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle;
         FirstJobButton.Visibility = jobs.Count == 0 && JobSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         EditJobButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
+        DuplicateJobButton.IsEnabled = ready && canSave && idle && !editorOpen && Jobs.SelectedItem is BackupJob;
         PreviousStepButton.IsEnabled = ready && canSave && idle && wizardStep > 0;
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
         JobsSummary.Text = $"Всего: {jobs.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}";

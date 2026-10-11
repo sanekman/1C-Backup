@@ -54,6 +54,23 @@ public partial class MainWindow
         OpenEditor();
     }
 
+    private void DuplicateJob_Click(object sender, RoutedEventArgs e)
+    {
+        if (!DuplicateJobButton.IsEnabled || Jobs.SelectedItem is not BackupJob job) return;
+        selectionBeforeEdit = job;
+        LoadJobEditor(job);
+        editingId = null;
+        var name = job.Name + " — копия";
+        var suffix = 2;
+        while (jobs.Any(existing => string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase)))
+            name = job.Name + " — копия " + suffix++;
+        JobName.Text = name;
+        Enabled.IsChecked = false;
+        OpenEditor();
+        WizardHint.Text = "Настройки перенесены из «" + job.Name + "». Измените название и источник. Автоматические запуски новой копии задания отключены.";
+        JobName.SelectAll();
+    }
+
     private void Jobs_DoubleClick(object sender, MouseButtonEventArgs e)
     {
         // Ignore headers and unused table space: only a row opens the editor.
