@@ -95,7 +95,7 @@ def check():
         assert marker.read_bytes() == marker_bytes
         assert not (installation / 'OneCBackup.Desktop.exe').exists()
         assert not shortcut.exists()
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_path) as key:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_path, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
             assert winreg.QueryValueEx(key, startup_name)[0] == foreign
             winreg.DeleteValue(key, startup_name)
         # A second install checks removal of this installation's own autostart.

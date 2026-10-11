@@ -273,8 +273,9 @@ internal static partial class DesktopSmoke
             AssertEditorContentVisible("ReviewTemporary");
             Screenshot("wizard-review-compact");
             Control<Expander>("ReviewTechnicalDetails").IsExpanded = true;
-            if (!Control<TextBox>("WizardSummary").IsVisible
-                || !Control<TextBox>("WizardSummary").Text.Contains(temporaryDirectory))
+            window.UpdateLayout();
+            await WaitUntil(() => Control<TextBox>("WizardSummary").IsVisible, "Полные параметры не раскрылись.");
+            if (!Control<TextBox>("WizardSummary").Text.Contains(temporaryDirectory))
                 throw new InvalidOperationException("Полные параметры недоступны в раскрываемом итоге.");
             Control<Expander>("ReviewTechnicalDetails").IsExpanded = false;
             window.Width = 1100; window.Height = 740;
