@@ -133,6 +133,7 @@ public partial class MainWindow
             2 => ("Когда запускать и сколько хранить?", "Время указано в выбранном часовом поясе. Сохраняются только успешные копии."),
             _ => ("Всё верно?", "Проверьте итог. Полные пути и параметры можно раскрыть ниже.")
         };
+        UpdateFileBackupControls();
         if (!keepError)
         {
             WizardError.Visibility = Visibility.Collapsed;

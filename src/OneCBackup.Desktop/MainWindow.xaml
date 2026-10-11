@@ -191,17 +191,20 @@
    </DockPanel>
    <TextBlock x:Name="OneCSourceHelp" Text="Путь к базе можно посмотреть в окне запуска 1С: выделите базу и нажмите «Изменить»." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
    <StackPanel x:Name="FileBackupPanel" Visibility="Collapsed">
-    <TextBlock Text="Способ копирования" />
+    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+    <StackPanel><TextBlock Text="Способ копирования" />
     <ComboBox x:Name="FileBackupModePicker" SelectedValuePath="Tag" SelectedIndex="0" SelectionChanged="FileBackupMode_Changed" Margin="0,4,0,8">
      <ComboBoxItem Content="Полная — все файлы" Tag="{x:Static core:FileBackupMode.Full}" />
-     <ComboBoxItem Content="Инкрементная — изменения с предыдущей копии" Tag="{x:Static core:FileBackupMode.Incremental}" />
-    </ComboBox>
-    <StackPanel x:Name="FileIncrementalOptions" Visibility="Collapsed">
-     <TextBlock Text="Архивов в цепочке (полная копия + изменения)" />
-     <TextBox x:Name="FullBackupEvery" Text="7" Margin="0,4,0,4" />
-     <TextBlock Text="Первая копия полная. После указанного числа архивов начинается новая полная цепочка. Нужные предшествующие архивы сохраняются даже сверх лимита хранилища." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,8" />
-    </StackPanel>
-    <TextBlock Text="Копируются обычные файлы и пустые папки. Закройте программы, изменяющие эти данные: единого снимка открытых файлов здесь нет. Для баз 1С и SQL выбирайте соответствующий тип задания. Ссылки, права доступа и системные атрибуты не переносятся." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,8" />
+     <ComboBoxItem Content="Инкрементная — только изменения" Tag="{x:Static core:FileBackupMode.Incremental}" />
+    </ComboBox></StackPanel>
+    <StackPanel x:Name="FileIncrementalOptions" Grid.Column="1" Width="170" Margin="12,0,0,0" Visibility="Collapsed">
+     <TextBlock Text="Архивов в цепочке" />
+     <TextBox x:Name="FullBackupEvery" Text="7" Margin="0,4,0,8" ToolTip="Полная основа плюс инкрементные архивы, от 1 до 365. Например, 7: полная и до 6 изменений, затем новая полная." />
+    </StackPanel></Grid>
+    <TextBlock Text="Перед копированием закройте программы, изменяющие эти файлы." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,6" />
+    <Expander Header="Как работает копирование" Margin="0,0,0,8">
+     <TextBlock Text="Первая инкрементная копия всегда полная. Число архивов включает полную основу; затем начинается новая полная цепочка. Нужные предшествующие архивы сохраняются даже сверх лимита хранилища. Копируются обычные файлы и пустые папки, без единого снимка открытых файлов. Для баз 1С и SQL выбирайте соответствующий тип задания. Ссылки, права доступа и системные атрибуты не переносятся." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,6,0,0" />
+    </Expander>
    </StackPanel>
    <StackPanel x:Name="OneCMethodPanel">
     <TextBlock Text="Способ резервного копирования 1С" />

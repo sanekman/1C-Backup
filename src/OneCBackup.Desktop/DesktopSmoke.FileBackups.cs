@@ -29,6 +29,13 @@ internal static partial class DesktopSmoke
             throw new InvalidOperationException("Мастер принял нулевую длину инкрементной цепочки.");
         Control<TextBox>("FullBackupEvery").Text = "3";
         window.Width = 900; window.Height = 580; window.UpdateLayout();
+        foreach (var name in new[] { "FileBackupModePicker", "FullBackupEvery" })
+        {
+            var element = Control<FrameworkElement>(name); var scroll = Control<ScrollViewer>("EditorScroll");
+            var point = element.TranslatePoint(new Point(), scroll);
+            if (!element.IsVisible || point.Y < 0 || point.Y + element.ActualHeight > scroll.ActualHeight + 1)
+                throw new InvalidOperationException("Файловый режим не виден без прокрутки в компактном мастере: " + name);
+        }
         screenshot("files-incremental-source-compact");
         Click("NextStepButton");
         Control<TextBox>("Destination").Text = Path.Combine(fixture, "ordinary-copies");
