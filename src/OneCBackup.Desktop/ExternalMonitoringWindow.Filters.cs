@@ -7,6 +7,8 @@ namespace OneCBackup.Desktop;
 
 public partial class ExternalMonitoringWindow
 {
+    private sealed record MonitorSourceChoice(ExternalBackupMonitor Monitor, string Label);
+    private ExternalBackupMonitor? SelectedMonitor => (Sources.SelectedItem as MonitorSourceChoice)?.Monitor;
     private sealed record ReportSourceChoice(Guid? Id, string Label);
     private List<ExternalBackupReport> reports = [];
     private bool updatingReportFilters;
@@ -31,7 +33,17 @@ public partial class ExternalMonitoringWindow
     {
         var idle = ready && !busy && !lifetime.IsCancellationRequested;
         Sources.IsEnabled = NewMonitorButton.IsEnabled = idle;
-        CollectMonitorButton.IsEnabled = DeleteMonitorButton.IsEnabled = idle && Sources.SelectedItem is ExternalBackupMonitor;
+        CollectMonitorButton.IsEnabled = DeleteMonitorButton.IsEnabled = idle && SelectedMonitor is not null;
+    }
+
+    private void BindMonitorSources(Guid? selectedId)
+    {
+        var duplicates = monitors.GroupBy(monitor => monitor.Name, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1).Select(group => group.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var choices = monitors.Select(monitor => new MonitorSourceChoice(monitor,
+            duplicates.Contains(monitor.Name) ? monitor.Id.ToString("N")[..8] + " · " + monitor.Name : monitor.Name)).ToList();
+        Sources.ItemsSource = choices;
+        Sources.SelectedItem = choices.FirstOrDefault(choice => choice.Monitor.Id == selectedId);
     }
 
     private string MonitorLabel(Guid id) => monitors.FirstOrDefault(monitor => monitor.Id == id)?.Name

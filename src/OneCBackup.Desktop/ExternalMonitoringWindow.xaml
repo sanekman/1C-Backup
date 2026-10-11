@@ -7,7 +7,7 @@
   <TextBlock DockPanel.Dock="Top" Text="Мониторинг внешних резервных копий" FontSize="22" Margin="0,0,0,12" />
   <TextBlock x:Name="Status" DockPanel.Dock="Bottom" TextWrapping="Wrap" Margin="0,12,0,0" />
   <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-   <ComboBox x:Name="Sources" Width="240" DisplayMemberPath="Name" SelectionChanged="Source_Changed" Margin="0,0,8,4" AutomationProperties.Name="Источник для настройки и ручного опроса" />
+   <ComboBox x:Name="Sources" Width="240" DisplayMemberPath="Label" SelectedValuePath="Monitor" SelectionChanged="Source_Changed" Margin="0,0,8,4" AutomationProperties.Name="Источник для настройки и ручного опроса" />
    <Button x:Name="CollectMonitorButton" Content="Проверить источник" Click="Collect_Click" IsEnabled="False" Margin="0,0,8,4" />
    <Button x:Name="NewMonitorButton" Content="Новый источник" Click="New_Click" IsEnabled="False" Margin="0,0,0,4" />
    <Button x:Name="RefreshReportsButton" Content="Обновить историю" Click="Refresh_Click" Margin="8,0,0,4" />
@@ -76,7 +76,7 @@
   <DataGrid x:Name="Reports" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="Report_Changed" RowHeight="30" ColumnHeaderHeight="30">
    <DataGrid.Columns>
     <DataGridTextColumn Header="База" Binding="{Binding Observation.DatabaseName}" Width="*" MinWidth="120"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding Observation.DatabaseName}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
-    <DataGridTextColumn Header="Окончание у источника" Binding="{Binding Observation.FinishedAt, StringFormat=dd.MM.yyyy HH:mm}" Width="150"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding Observation.TimeZoneId}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
+    <DataGridTextColumn Header="Окончание" Binding="{Binding Observation.FinishedAt, StringFormat=dd.MM.yyyy HH:mm}" Width="150"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding Observation.TimeZoneId}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
     <DataGridTextColumn Header="Тип" Binding="{Binding Observation.BackupType}" Width="85"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding Observation.BackupType}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
     <DataGridTextColumn Header="Результат" Binding="{Binding Observation.OutcomeDescription}" Width="90"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#166534" /><Style.Triggers><DataTrigger Binding="{Binding Observation.Outcome}" Value="{x:Static core:ExternalBackupOutcome.Failed}"><Setter Property="Foreground" Value="#B91C1C" /></DataTrigger></Style.Triggers></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
     <DataGridTextColumn Header="Отправка" Binding="{Binding DeliveryDescription}" Width="130"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding DeliveryDescription}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>

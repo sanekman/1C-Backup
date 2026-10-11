@@ -48,8 +48,7 @@ public partial class ExternalMonitoringWindow : Window
             try
             {
                 monitors = (await store.LoadAsync(lifetime.Token)).ToList();
-                Sources.ItemsSource = monitors;
-                if (monitors.Count > 0) Sources.SelectedIndex = 0;
+                BindMonitorSources(monitors.FirstOrDefault()?.Id);
                 SourceSettings.IsExpanded = monitors.Count == 0;
                 await RefreshAsync();
                 ready = true; Editor.IsEnabled = true;
@@ -114,7 +113,7 @@ public partial class ExternalMonitoringWindow : Window
     {
         if (DeleteMonitorButton is null) return;
         UpdateMonitorControls();
-        if (Sources.SelectedItem is not ExternalBackupMonitor monitor) return;
+        if (SelectedMonitor is not { } monitor) return;
         editingId = monitor.Id; MonitorName.Text = monitor.Name; SourceKind.SelectedValue = monitor.Kind;
         SqlServer.Text = monitor.SqlServer; Database.Text = monitor.DatabaseName; Zone.Text = monitor.TimeZoneId;
         Days.Text = monitor.LookbackDays.ToString(); ReportDirectory.Text = monitor.ReportDirectory;
@@ -153,7 +152,7 @@ public partial class ExternalMonitoringWindow : Window
             monitor.Validate();
             var updated = monitors.Where(m => m.Id != monitor.Id).Append(monitor).ToList();
             await store.SaveAsync(updated, lifetime.Token);
-            monitors = updated; Sources.ItemsSource = monitors; Sources.SelectedItem = monitor;
+            monitors = updated; BindMonitorSources(monitor.Id);
             UpdateReportSourceChoices(); ApplyReportFilter(); SourceSettings.IsExpanded = false;
             Status.Text = "Источник сохранён. Проверка использует сохранённые настройки.";
         }
@@ -163,7 +162,7 @@ public partial class ExternalMonitoringWindow : Window
 
     private async void Collect_Click(object sender, RoutedEventArgs e)
     {
-        if (!ready || busy || Sources.SelectedItem is not ExternalBackupMonitor monitor) return;
+        if (!ready || busy || SelectedMonitor is not { } monitor) return;
         busy = true; Editor.IsEnabled = false; Status.Text = "Чтение сведений о внешних копиях…";
         UpdateMonitorControls();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
@@ -203,7 +202,7 @@ public partial class ExternalMonitoringWindow : Window
 
     private async void Delete_Click(object sender, RoutedEventArgs e)
     {
-        if (!ready || busy || Sources.SelectedItem is not ExternalBackupMonitor monitor) return;
+        if (!ready || busy || SelectedMonitor is not { } monitor) return;
         if (MessageBox.Show(this, $"Удалить источник «{monitor.Name}»? Сохранённые наблюдения и внешние файлы резервных копий останутся.",
             "Удаление источника", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
         busy = true; Editor.IsEnabled = false;
@@ -212,7 +211,7 @@ public partial class ExternalMonitoringWindow : Window
         {
             var updated = monitors.Where(source => source.Id != monitor.Id).ToList();
             await store.SaveAsync(updated, lifetime.Token);
-            monitors = updated; Sources.ItemsSource = monitors;
+            monitors = updated; BindMonitorSources(null);
             ClearMonitorEditor();
             UpdateReportSourceChoices(); ApplyReportFilter();
             SourceSettings.IsExpanded = monitors.Count == 0;

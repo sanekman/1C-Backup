@@ -13,14 +13,18 @@ internal static partial class DesktopSmoke
     {
         T Control<T>(string name) where T : FrameworkElement => (T)window.FindName(name);
         void Click(string name) => Control<Button>(name).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        var first = (ExternalBackupMonitor)Control<ComboBox>("Sources").SelectedItem;
+        var first = (ExternalBackupMonitor)Control<ComboBox>("Sources").SelectedValue;
         Click("NewMonitorButton");
         Control<TextBox>("MonitorName").Text = first.Name;
         Control<TextBox>("ReportDirectory").Text = first.ReportDirectory;
         Control<CheckBox>("MonitorEnabled").IsChecked = false;
         Click("SaveMonitorButton");
         await WaitUntil(() => window.SmokeReady && Control<ComboBox>("Sources").Items.Count == 2, "Второй источник не сохранился.");
-        var second = (ExternalBackupMonitor)Control<ComboBox>("Sources").SelectedItem;
+        var second = (ExternalBackupMonitor)Control<ComboBox>("Sources").SelectedValue;
+        window.UpdateLayout();
+        var sourceText = FindDescendant<TextBlock>(Control<ComboBox>("Sources"));
+        if (sourceText is null || !sourceText.Text.StartsWith(second.Id.ToString("N")[..8]))
+            throw new InvalidOperationException("Список ручного опроса не различает одинаково названные источники.");
         var outbox = new ExternalBackupOutbox(Path.Combine(DesktopPaths.DataDirectory, "external-backups.json"));
         var failure = observation with { SourceKey = "ci-pg-failure", Outcome = ExternalBackupOutcome.Failed,
             Evidence = "PostgreSqlScriptFailure", Error = "Нет свободного места", SizeBytes = null };
