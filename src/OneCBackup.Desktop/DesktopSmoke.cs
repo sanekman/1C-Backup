@@ -710,7 +710,7 @@ internal static partial class DesktopSmoke
             await VerifyJobOverviewAsync(window, name => Screenshot(name));
             await VerifyCopyExportAsync(window, name => Screenshot(name));
             await VerifyPersistentChecksAsync(window, name => Screenshot(name));
-            await VerifyPostgreSqlMonitoringAsync(window);
+            await VerifyPostgreSqlMonitoringAsync(window, (name, target) => Screenshot(name, target));
             Finish(output, true, "Сохранение выбранной зашифрованной копии с SHA-256, отказ при повреждении и существующем файле, неизменность каталога; проверка последних копий во всех хранилищах без доступа к занятой базе, повреждение и отсутствие копии, неизменность журнала и истории; последние результаты всех заданий, подсказки, обновление без изменения выбора и компактная таблица, пояснения истории, переход к текущему заданию по ID, три ближайших запуска, смена дней / часового пояса / режима и итог, компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");
         }
         catch (Exception ex) { Finish(output, false, ex.ToString()); }
@@ -725,7 +725,7 @@ internal static partial class DesktopSmoke
         }
     }
 
-    private static async Task VerifyPostgreSqlMonitoringAsync(MainWindow owner)
+    private static async Task VerifyPostgreSqlMonitoringAsync(MainWindow owner, Action<string, Window> screenshot)
     {
         var directory = Path.Combine(DesktopPaths.DataDirectory, "sql-reports");
         Directory.CreateDirectory(directory);
@@ -759,6 +759,7 @@ internal static partial class DesktopSmoke
             await WaitUntil(() => monitorWindow.SmokeReady, "Повторная проверка SQL не завершилась.");
             if (Control<DataGrid>("Reports").Items.Count != 1)
                 throw new InvalidOperationException("Мониторинг дублирует внешний отчёт.");
+            await VerifyMonitoringFiltersAsync(monitorWindow, settings, observation, screenshot);
         }
         finally { monitorWindow.Close(); }
     }

@@ -9,13 +9,14 @@ namespace OneCBackup.Desktop;
 
 public partial class ExternalMonitoringWindow : Window
 {
-    internal bool SmokeReady => ready && !busy;
+    internal bool SmokeReady => ready && !busy && !refreshing;
     private readonly ExternalBackupMonitorStore store;
     private readonly ExternalBackupOutbox outbox;
     private readonly ExternalBackupPollingStatusStore pollingStatus;
     private readonly BackupEngineCoordinator engine;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(10) };
     private bool refreshing;
+    private int refreshVersion;
     private readonly AgentSettings settings;
     private List<ExternalBackupMonitor> monitors = [];
     private Guid? editingId;
@@ -41,14 +42,18 @@ public partial class ExternalMonitoringWindow : Window
         SourceKind.SelectedValue = ExternalBackupSourceKind.SqlServerHistory;
         Zone.Text = TimeZoneInfo.Local.Id;
         Editor.IsEnabled = false;
+        Sources.IsEnabled = false;
         Loaded += async (_, _) =>
         {
             try
             {
                 monitors = (await store.LoadAsync(lifetime.Token)).ToList();
                 Sources.ItemsSource = monitors;
+                if (monitors.Count > 0) Sources.SelectedIndex = 0;
+                SourceSettings.IsExpanded = monitors.Count == 0;
                 await RefreshAsync();
                 ready = true; Editor.IsEnabled = true;
+                UpdateMonitorControls();
                 Status.Text = "Фоновый агент опрашивает включённые источники автоматически. Для ручной проверки остановите агент.";
                 timer.Start();
             }
@@ -66,9 +71,24 @@ public partial class ExternalMonitoringWindow : Window
 
     private async Task RefreshAsync()
     {
-        Reports.ItemsSource = (await outbox.ReadAsync(lifetime.Token))
+        var version = ++refreshVersion;
+        var nextReports = (await outbox.ReadAsync(lifetime.Token))
             .Where(r => r.AgentId == settings.AgentId).OrderByDescending(r => r.ObservedUtc).ToList();
-        PollStatuses.ItemsSource = (await pollingStatus.ReadAsync(lifetime.Token)).OrderByDescending(p => p.PolledUtc).ToList();
+        var nextPolls = (await pollingStatus.ReadAsync(lifetime.Token)).OrderByDescending(p => p.PolledUtc).ToList();
+        if (version != refreshVersion) return;
+        var selectedId = (Reports.SelectedItem as ExternalBackupReport)?.ReportId;
+        var selectedPoll = (PollStatuses.SelectedItem as ExternalBackupPollResult)?.MonitorId;
+        var sorting = Reports.ItemsSource is null ? [] : System.Windows.Data.CollectionViewSource
+            .GetDefaultView(Reports.ItemsSource).SortDescriptions.ToArray();
+        reports = nextReports;
+        Reports.ItemsSource = reports;
+        UpdateReportSourceChoices();
+        ApplyReportFilter();
+        var view = System.Windows.Data.CollectionViewSource.GetDefaultView(Reports.ItemsSource);
+        foreach (var sort in sorting) view.SortDescriptions.Add(sort);
+        Reports.SelectedItem = Reports.Items.OfType<ExternalBackupReport>().FirstOrDefault(report => report.ReportId == selectedId);
+        PollStatuses.ItemsSource = nextPolls;
+        PollStatuses.SelectedItem = nextPolls.FirstOrDefault(poll => poll.MonitorId == selectedPoll);
     }
 
     private async Task RefreshSafelyAsync()
@@ -92,7 +112,8 @@ public partial class ExternalMonitoringWindow : Window
 
     private void Source_Changed(object sender, SelectionChangedEventArgs e)
     {
-        DeleteMonitorButton.IsEnabled = Sources.SelectedItem is ExternalBackupMonitor;
+        if (DeleteMonitorButton is null) return;
+        UpdateMonitorControls();
         if (Sources.SelectedItem is not ExternalBackupMonitor monitor) return;
         editingId = monitor.Id; MonitorName.Text = monitor.Name; SourceKind.SelectedValue = monitor.Kind;
         SqlServer.Text = monitor.SqlServer; Database.Text = monitor.DatabaseName; Zone.Text = monitor.TimeZoneId;
@@ -101,6 +122,13 @@ public partial class ExternalMonitoringWindow : Window
     }
 
     private void New_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ready || busy) return;
+        SourceSettings.IsExpanded = true;
+        ClearMonitorEditor();
+    }
+
+    private void ClearMonitorEditor()
     {
         editingId = null; Sources.SelectedItem = null; MonitorName.Clear(); SqlServer.Clear(); Database.Clear();
         ReportDirectory.Clear(); Zone.Text = TimeZoneInfo.Local.Id; Days.Text = "30";
@@ -111,6 +139,7 @@ public partial class ExternalMonitoringWindow : Window
     {
         if (!ready || busy) return;
         busy = true; Editor.IsEnabled = false;
+        UpdateMonitorControls();
         try
         {
             var monitor = new ExternalBackupMonitor
@@ -125,18 +154,20 @@ public partial class ExternalMonitoringWindow : Window
             var updated = monitors.Where(m => m.Id != monitor.Id).Append(monitor).ToList();
             await store.SaveAsync(updated, lifetime.Token);
             monitors = updated; Sources.ItemsSource = monitors; Sources.SelectedItem = monitor;
+            UpdateReportSourceChoices(); ApplyReportFilter(); SourceSettings.IsExpanded = false;
             Status.Text = "Источник сохранён. Проверка использует сохранённые настройки.";
         }
         catch (Exception ex) { Status.Text = "Не удалось сохранить: " + ex.Message; }
-        finally { busy = false; Editor.IsEnabled = !lifetime.IsCancellationRequested; }
+        finally { busy = false; Editor.IsEnabled = !lifetime.IsCancellationRequested; UpdateMonitorControls(); }
     }
 
     private async void Collect_Click(object sender, RoutedEventArgs e)
     {
         if (!ready || busy || Sources.SelectedItem is not ExternalBackupMonitor monitor) return;
         busy = true; Editor.IsEnabled = false; Status.Text = "Чтение сведений о внешних копиях…";
+        UpdateMonitorControls();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
-        collectionCancellation = cancellation; CancelCollectButton.IsEnabled = true;
+        collectionCancellation = cancellation; CancelCollectButton.IsEnabled = true; CancelCollectButton.Visibility = Visibility.Visible;
         try
         {
             using var lease = engine.Acquire();
@@ -151,8 +182,9 @@ public partial class ExternalMonitoringWindow : Window
         catch (Exception ex) { Status.Text = "Ошибка проверки. Прежняя история сохранена: " + ex.Message; }
         finally
         {
-            collectionCancellation = null; CancelCollectButton.IsEnabled = false;
+            collectionCancellation = null; CancelCollectButton.IsEnabled = false; CancelCollectButton.Visibility = Visibility.Collapsed;
             busy = false; Editor.IsEnabled = !lifetime.IsCancellationRequested;
+            UpdateMonitorControls();
         }
     }
 
@@ -175,16 +207,19 @@ public partial class ExternalMonitoringWindow : Window
         if (MessageBox.Show(this, $"Удалить источник «{monitor.Name}»? Сохранённые наблюдения и внешние файлы резервных копий останутся.",
             "Удаление источника", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
         busy = true; Editor.IsEnabled = false;
+        UpdateMonitorControls();
         try
         {
             var updated = monitors.Where(source => source.Id != monitor.Id).ToList();
             await store.SaveAsync(updated, lifetime.Token);
             monitors = updated; Sources.ItemsSource = monitors;
-            New_Click(sender, e);
+            ClearMonitorEditor();
+            UpdateReportSourceChoices(); ApplyReportFilter();
+            SourceSettings.IsExpanded = monitors.Count == 0;
             Status.Text = "Источник удалён. Уже начавшийся фоновый опрос может завершиться; новые опросы этого источника прекращаются.";
         }
         catch (Exception ex) { Status.Text = "Не удалось удалить источник: " + ex.Message; }
-        finally { busy = false; Editor.IsEnabled = !lifetime.IsCancellationRequested; }
+        finally { busy = false; Editor.IsEnabled = !lifetime.IsCancellationRequested; UpdateMonitorControls(); }
     }
 
     private void Report_Changed(object sender, SelectionChangedEventArgs e)
@@ -192,11 +227,14 @@ public partial class ExternalMonitoringWindow : Window
         if (Reports.SelectedItem is not ExternalBackupReport report)
         { ReportDetails.Text = "Выберите наблюдение в таблице."; return; }
         var observation = report.Observation;
-        ReportDetails.Text = $"База: {observation.DatabaseName}\nЭкземпляр: {observation.Instance}\nРезультат: {observation.OutcomeDescription}\n"
+        ReportDetails.Text = $"Источник: {MonitorLabel(report.MonitorId)}\nБаза: {observation.DatabaseName}\nЭкземпляр: {observation.Instance}\nРезультат: {observation.OutcomeDescription}\n"
             + $"Тип копии: {observation.BackupType}\nНачало: {observation.StartedAt:dd.MM.yyyy HH:mm:ss}\n"
             + $"Окончание: {observation.FinishedAt:dd.MM.yyyy HH:mm:ss}\nЧасовой пояс источника: {observation.TimeZoneId}\n"
             + $"Размер: {observation.SizeBytes?.ToString() ?? "не указан"} байт\nПути: {observation.LocationDescription}\n"
             + $"Основание результата: {observation.EvidenceDescription}\nОтправка: {report.DeliveryDescription}\n"
-            + $"ID наблюдения: {report.ReportId}\n" + (observation.Error is null ? "" : "Ошибка: " + observation.Error);
+            + $"Получено агентом: {report.ObservedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss zzz}\n"
+            + (report.DeliveredUtc is null ? "" : $"Отправлено: {report.DeliveredUtc.Value.ToLocalTime():dd.MM.yyyy HH:mm:ss zzz}\n")
+            + $"ID источника: {report.MonitorId}\nID наблюдения: {report.ReportId}\n" + (observation.Error is null ? "" : "Ошибка: " + observation.Error)
+            + "\nЗавершение команды не подтверждает наличие файла сейчас или возможность восстановления базы.";
     }
 }

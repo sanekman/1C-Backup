@@ -29,7 +29,7 @@ public partial class MainWindow
             copyVerification = cancellation;
             UpdateRunControls();
             var progress = BeginCopyExportProgress();
-            CopyVerificationStatus.Text = "Сохраняется копия с проверкой размера и SHA-256: " + row.Location;
+            CopyVerificationStatus.Text = Status.Text = "Сохраняется копия с проверкой размера и SHA-256: " + row.Location;
             try
             {
                 var exported = await Task.Run(() => new BackupCopyExporter(backupStorage).ExportAsync(row.Record, job,
