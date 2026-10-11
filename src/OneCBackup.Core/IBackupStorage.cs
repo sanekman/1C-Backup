@@ -4,6 +4,8 @@ public sealed record StoredBackup(string Location, long Length, string Sha256)
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? ArchivePasswordKey { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public FileBackupSnapshot? FileSnapshot { get; init; }
 }
 
 /// <summary>Stores a stable completed file; success means the stored bytes were verified.

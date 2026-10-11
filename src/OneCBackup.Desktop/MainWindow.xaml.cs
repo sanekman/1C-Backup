@@ -196,6 +196,8 @@ public partial class MainWindow : Window
             DailyAt = times[0], AdditionalDailyTimes = times.Length > 1 ? times.Skip(1).ToArray() : null,
             TimeZoneId = Zone.Text.Trim(), KeepLast = keep, Enabled = Enabled.IsChecked == true,
             ArchiveCopies = ArchiveCopies.IsChecked == true,
+            FileBackupMode = FileBackupModePicker.SelectedValue is FileBackupMode mode ? mode : FileBackupMode.Full,
+            FullBackupEvery = int.TryParse(FullBackupEvery.Text, out var every) && every is >= 1 and <= 365 ? every : 7,
             ArchivePasswordKey = EncryptArchive.IsChecked == true ? archivePasswordKey : null, StorageKind = storageKind,
             ScheduleKind = scheduleKind, DaysOfWeek = SelectedDays(),
             OneC = oneC,
@@ -316,6 +318,8 @@ public partial class MainWindow : Window
         PgTimeout.Text = (job.PostgreSql?.TimeoutMinutes ?? 120).ToString();
         JobName.Text = job.Name; Kind.SelectedItem = job.Kind; Source.Text = job.Source;
         OneCMethodPicker.SelectedValue = job.OneCMethod;
+        FileBackupModePicker.SelectedValue = job.FileBackupMode;
+        FullBackupEvery.Text = job.FullBackupEvery.ToString(CultureInfo.InvariantCulture);
         Destination.Text = job.DestinationDirectory;
         TemporaryFolder.Text = job.TemporaryDirectory ?? "";
         additionalDestinations.Clear();
@@ -344,6 +348,7 @@ public partial class MainWindow : Window
         Jobs.SelectedItem = null; editingId = null; Zone.Text = TimeZoneInfo.Local.Id;
         JobName.Clear(); Source.Clear(); Destination.Clear(); Kind.SelectedItem = DatabaseKind.OneCFile;
         TemporaryFolder.Clear();
+        FileBackupModePicker.SelectedValue = FileBackupMode.Full; FullBackupEvery.Text = "7";
         additionalDestinations.Clear();
         OneCMethodPicker.SelectedValue = OneCBackupMethod.FileArchive;
         OneCExecutable.Clear(); OneCTimeout.Text = "120";
@@ -374,6 +379,7 @@ public partial class MainWindow : Window
     {
         if (OneCPanel is null || OneCMethodPanel is null || ArchiveCopies is null) return;
         var isOneC = Kind.SelectedItem is DatabaseKind.OneCFile;
+        var isFiles = Kind.SelectedItem is DatabaseKind.FilesAndFolders;
         var fileArchive = isOneC && OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive;
         OneCMethodPanel.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
         OneCPanel.Visibility = isOneC && !fileArchive ? Visibility.Visible : Visibility.Collapsed;
@@ -381,11 +387,15 @@ public partial class MainWindow : Window
         if (SqlTemporaryHint is not null) SqlTemporaryHint.Visibility = SqlBackupPanel.Visibility;
         PostgresBackupPanel.Visibility = Kind.SelectedItem is DatabaseKind.PostgreSql ? Visibility.Visible : Visibility.Collapsed;
         FileArchiveHint.Visibility = fileArchive ? Visibility.Visible : Visibility.Collapsed;
-        ArchiveCopies.IsEnabled = !fileArchive;
-        if (fileArchive) ArchiveCopies.IsChecked = true;
-        SourceBrowseButton.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
+        ArchiveCopies.IsEnabled = !fileArchive && !isFiles;
+        if (fileArchive || isFiles) ArchiveCopies.IsChecked = true;
+        SourceBrowseButton.Visibility = isOneC || isFiles ? Visibility.Visible : Visibility.Collapsed;
+        SourceBrowseButton.Content = isFiles ? "Папка…" : "Выбрать…";
+        SourceFileBrowseButton.Visibility = isFiles ? Visibility.Visible : Visibility.Collapsed;
+        FileBackupPanel.Visibility = isFiles ? Visibility.Visible : Visibility.Collapsed;
+        UpdateFileBackupControls();
         if (OneCSourceHelp is not null) OneCSourceHelp.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
-        if (SourceLabel is not null) SourceLabel.Text = isOneC ? "Папка базы 1С или файл 1Cv8.1CD" : "Имя базы данных";
+        if (SourceLabel is not null) SourceLabel.Text = isFiles ? "Исходный файл или папка" : isOneC ? "Папка базы 1С или файл 1Cv8.1CD" : "Имя базы данных";
     }
 
     private void UpdateRunControls()
@@ -446,6 +456,10 @@ public partial class MainWindow : Window
         ExtractOneCButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null &&
             Copies.SelectedItem is BackupCopyRow extractable && jobs.Any(job => job.Id == extractable.Record.JobId &&
                 CanExtractCopy(extractable.Record, job));
+        var isFileSnapshot = Copies.SelectedItem is BackupCopyRow fileCopy && fileCopy.Record.Backup.FileSnapshot is not null;
+        RestoreFilesButton.Visibility = isFileSnapshot ? Visibility.Visible : Visibility.Collapsed;
+        ExtractOneCButton.Visibility = isFileSnapshot ? Visibility.Collapsed : Visibility.Visible;
+        RestoreFilesButton.IsEnabled = isFileSnapshot && VerifyCopyButton.IsEnabled;
         CancelCopyVerificationButton.IsEnabled = copyVerification is { IsCancellationRequested: false };
         CancelCopyVerificationButton.Visibility = copyVerification is not null && !checkingStorages ? Visibility.Visible : Visibility.Collapsed;
         OpenCopyDirectoryButton.IsEnabled = ready && Copies.SelectedItem is BackupCopyRow { CanOpenDirectory: true };
@@ -580,7 +594,7 @@ public partial class MainWindow : Window
         if (sender is not Button { Tag: string target }) return;
         var field = target switch
         {
-            "Source" => Source, "Destination" => Destination, "OneCExecutable" => OneCExecutable,
+            "Source" or "SourceFile" => Source, "Destination" => Destination, "OneCExecutable" => OneCExecutable,
             "TemporaryFolder" => TemporaryFolder,
             "SqlAgentDirectory" => SqlAgentDirectory, "PgDumpPath" => PgDumpPath, "PgRestorePath" => PgRestorePath,
             _ => null
@@ -588,13 +602,13 @@ public partial class MainWindow : Window
         if (field is null) return;
         try
         {
-            var fileSource = target == "Source" && OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive;
-            if (fileSource || target is "OneCExecutable" or "PgDumpPath" or "PgRestorePath")
+            var fileSource = target == "Source" && Kind.SelectedItem is DatabaseKind.OneCFile && OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive;
+            if (fileSource || target is "SourceFile" or "OneCExecutable" or "PgDumpPath" or "PgRestorePath")
             {
                 var dialog = new OpenFileDialog
                 {
-                    Title = fileSource ? "Выберите файл базы 1Cv8.1CD" : "Выберите исполняемый файл",
-                    Filter = fileSource ? "Файл базы 1С (1Cv8.1CD)|1Cv8.1CD" : "Программы (*.exe)|*.exe",
+                    Title = target == "SourceFile" ? "Выберите файл для копирования" : fileSource ? "Выберите файл базы 1Cv8.1CD" : "Выберите исполняемый файл",
+                    Filter = target == "SourceFile" ? "Все файлы|*.*" : fileSource ? "Файл базы 1С (1Cv8.1CD)|1Cv8.1CD" : "Программы (*.exe)|*.exe",
                     CheckFileExists = true,
                     Multiselect = false
                 };
@@ -631,7 +645,7 @@ public partial class MainWindow : Window
             "history" => ("История запусков", "Результаты запусков и ошибки. Время — на этом компьютере."),
             "copies" => ("Резервные копии", "Зарегистрированные копии всех заданий, расположение файлов и проверка целостности."),
             "agent" => ("Настройки программы", "Фоновая работа и запуск при входе в Windows."),
-            _ => ("Задания резервного копирования", "Файловая 1С · Microsoft SQL Server · PostgreSQL")
+            _ => ("Задания резервного копирования", "Файлы и папки · 1С · SQL Server · PostgreSQL")
         };
     }
 
@@ -795,7 +809,7 @@ public partial class MainWindow : Window
         CopyDetails.Visibility = Copies.SelectedItem is BackupCopyRow ? Visibility.Visible : Visibility.Collapsed;
         SelectedCopyPath.Text = Copies.SelectedItem is BackupCopyRow selectedCopy ? selectedCopy.Location : "";
         CopyDetails.Text = Copies.SelectedItem is BackupCopyRow row
-            ? $"{row.JobName}\n{row.Location}\nРазмер: {row.Record.Backup.Length} байт\nШифрование: {row.EncryptionDescription}\nSHA256: {row.Sha256}\n\n{row.CheckHelp}" : "";
+            ? $"{row.JobName}\n{row.Location}\nРазмер: {row.Record.Backup.Length} байт\nШифрование: {row.EncryptionDescription}\nSHA256: {row.Sha256}\n{FileSnapshotDetails(row.Record.Backup.FileSnapshot)}\n{row.CheckHelp}" : "";
         UpdateRunControls();
     }
 

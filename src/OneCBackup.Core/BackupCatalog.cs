@@ -71,6 +71,10 @@ public sealed class BackupCatalog(string path)
             records.Select(r => r.Id).Distinct().Count() != records.Count ||
             records.Select(r => r.Backup.Location).Distinct().Count() != records.Count)
             throw new InvalidDataException("Журнал копий содержит некорректные или повторяющиеся записи.");
+        foreach (var record in records) record.Backup.FileSnapshot?.Validate();
+        if (records.Where(record => record.Backup.FileSnapshot is not null)
+            .GroupBy(record => (record.JobId, record.StorageIdentity, record.Backup.FileSnapshot!.SnapshotId)).Any(group => group.Count() > 1))
+            throw new InvalidDataException("Журнал содержит повторяющиеся файловые снимки в одном хранилище.");
     }
 
     private async Task SaveCoreAsync(List<BackupRecord> records, CancellationToken cancellationToken)

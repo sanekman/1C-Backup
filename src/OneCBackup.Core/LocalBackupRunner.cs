@@ -22,7 +22,14 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             {
                 Directory.CreateDirectory(work);
                 await completion.PrepareAsync(job, cancellationToken);
-                var dump = await executor.CreateAsync(job, work, cancellationToken);
+                var fileSnapshots = new FileBackupSnapshotStore(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(workRoot))!, "file-snapshots"));
+                var selectedExecutor = job.Kind == DatabaseKind.FilesAndFolders
+                    ? new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords) : executor;
+                var dump = await selectedExecutor.CreateAsync(job, work, cancellationToken);
+                FileBackupManifest? fileManifest = null;
+                if (job.Kind == DatabaseKind.FilesAndFolders)
+                    fileManifest = await FileBackupZip.ReadManifestAsync(dump,
+                        await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, completion.Passwords, cancellationToken), cancellationToken);
                 var warnings = new List<string>();
                 if (job.AdditionalDestinations?.Count > 0)
                 {
@@ -46,7 +53,13 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                     var completed = await completion.CompleteAsync(job, dump, Path.Combine(work, "archive"),
                         DateTimeOffset.UtcNow, cancellationToken);
                     warnings.AddRange(completed.Retention.Failures.Select(f => "Очистка: " + f.Error.Message));
+                    warnings.AddRange(completed.Retention.Warnings);
                     run = run with { Status = BackupRunStatus.Succeeded, Backup = completed.Record.Backup };
+                }
+                if (fileManifest is not null && run.Backup is not null)
+                {
+                    try { await fileSnapshots.SaveAsync(job.Id, fileManifest, CancellationToken.None); }
+                    catch (Exception ex) { warnings.Add("Индекс инкрементной копии не сохранён; следующая копия будет полной: " + ex.Message); }
                 }
                 // Own working files are removed only after verified delivery and registration.
                 if (run.Status == BackupRunStatus.Succeeded)

@@ -1,7 +1,10 @@
 namespace OneCBackup.Core;
 
 public sealed record RetentionFailure(Guid BackupId, Exception Error);
-public sealed record RetentionResult(IReadOnlyList<Guid> Deleted, IReadOnlyList<RetentionFailure> Failures);
+public sealed record RetentionResult(IReadOnlyList<Guid> Deleted, IReadOnlyList<RetentionFailure> Failures)
+{
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+}
 
 public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storage)
 {
@@ -19,8 +22,14 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
             .Take(job.KeepLast - 1).Select(r => r.Id).Append(newest.Id).ToHashSet();
         var deleted = new List<Guid>();
         var failures = new List<RetentionFailure>();
-        foreach (var record in owned.Where(r => !keep.Contains(r.Id)).OrderBy(r => r.CompletedUtc))
+        // Keep the complete ancestry of every retained snapshot before deleting anything.
+        foreach (var record in owned.Where(record => keep.Contains(record.Id) && record.Backup.FileSnapshot is not null).ToArray())
+            foreach (var ancestor in FileBackupChains.Resolve(record, owned)) keep.Add(ancestor.Id);
+        var warnings = keep.Count > job.KeepLast && owned.Any(record => record.Backup.FileSnapshot is not null)
+            ? new[] { $"Для восстановления сохранена вся инкрементная цепочка: {keep.Count} архивов при лимите {job.KeepLast}. Старую цепочку можно удалить после следующей полной копии." } : [];
+        foreach (var record in owned.Where(r => !keep.Contains(r.Id)).OrderByDescending(r => r.Backup.FileSnapshot?.Depth ?? 0).ThenBy(r => r.CompletedUtc))
         {
+            if (keep.Contains(record.Id)) continue;
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
@@ -29,9 +38,14 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
                 deleted.Add(record.Id);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (Exception ex) { failures.Add(new RetentionFailure(record.Id, ex)); }
+            catch (Exception ex)
+            {
+                failures.Add(new RetentionFailure(record.Id, ex));
+                if (record.Backup.FileSnapshot is not null)
+                    foreach (var ancestor in FileBackupChains.Resolve(record, owned)) keep.Add(ancestor.Id);
+            }
         }
-        return new RetentionResult(deleted, failures);
+        return new RetentionResult(deleted, failures) { Warnings = warnings };
     }
 }
 
@@ -43,6 +57,8 @@ public sealed record MultipleBackupCompletion(IReadOnlyList<DestinationResult> D
 /// <summary>One coordinator per service: deliver, register success, then apply retention.</summary>
 public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catalog, IArchivePasswordStore? passwords = null)
 {
+    internal BackupCatalog Catalog => catalog;
+    internal IArchivePasswordStore? Passwords => passwords;
     private readonly SemaphoreSlim gate = new(1, 1);
     public async Task PrepareAsync(BackupJob job, CancellationToken cancellationToken = default)
     {
@@ -98,12 +114,12 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                     cancellationToken.ThrowIfCancellationRequested();
                     await storage.PrepareAsync(target, cancellationToken);
                     var stored = (await storage.StoreAsync(prepared.Path, target, cancellationToken))
-                        with { ArchivePasswordKey = job.ArchivePasswordKey };
+                        with { ArchivePasswordKey = job.ArchivePasswordKey, FileSnapshot = prepared.FileSnapshot };
                     // A delivered file must enter the ledger even if cancellation was requested meanwhile.
                     record = await catalog.RegisterAsync(target, stored, completedUtc, CancellationToken.None);
                     var retention = await new BackupRetention(catalog, storage).ApplyAsync(target, record, cancellationToken);
                     return (new DestinationResult(destination, record, null,
-                        retention.Failures.Select(f => "Очистка: " + f.Error.Message).ToArray()), false);
+                        retention.Failures.Select(f => "Очистка: " + f.Error.Message).Concat(retention.Warnings).ToArray()), false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {

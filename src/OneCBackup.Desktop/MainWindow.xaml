@@ -16,6 +16,7 @@
       <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.OneCFile}"><Setter Property="Text" Value="Файловая 1С" /></DataTrigger>
       <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.SqlServer}"><Setter Property="Text" Value="SQL Server" /></DataTrigger>
       <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.PostgreSql}"><Setter Property="Text" Value="PostgreSQL" /></DataTrigger>
+      <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.FilesAndFolders}"><Setter Property="Text" Value="Файлы и папки" /></DataTrigger>
      </Style.Triggers>
     </Style></TextBlock.Style>
    </TextBlock>
@@ -58,7 +59,7 @@
    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
    <StackPanel Margin="0,0,0,8">
     <TextBlock x:Name="PageTitle" Text="Задания резервного копирования" FontSize="22" FontWeight="SemiBold" />
-    <TextBlock x:Name="PageDescription" Text="Файловая 1С · Microsoft SQL Server · PostgreSQL" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,0" />
+    <TextBlock x:Name="PageDescription" Text="Файлы и папки · 1С · SQL Server · PostgreSQL" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,0" />
    </StackPanel>
    <Border Grid.Row="1" Style="{StaticResource Card}" Padding="8" Margin="0,0,0,8">
     <DockPanel>
@@ -169,7 +170,7 @@
       <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
       <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="18,12">
        <StackPanel><TextBlock x:Name="EditorTitle" Text="Новое задание" FontSize="18" FontWeight="SemiBold" />
-        <TextBlock x:Name="WizardProgress" Text="1. База  →  2. Хранилище  →  3. Расписание  →  4. Проверка" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}" />
+        <TextBlock x:Name="WizardProgress" Text="1. Источник  →  2. Хранилище  →  3. Расписание  →  4. Проверка" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}" />
        </StackPanel>
       </Border>
       <ScrollViewer x:Name="EditorScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -181,13 +182,27 @@
      TextWrapping="Wrap" Margin="0,0,0,12" Background="#FFFBEB" Foreground="#92400E" Padding="8" />
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="14" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
     <StackPanel><TextBlock Text="Название" /><TextBox x:Name="JobName" Margin="0,4,0,10" /></StackPanel>
-    <StackPanel Grid.Column="2"><TextBlock Text="Тип базы" /><ComboBox x:Name="Kind" Margin="0,4,0,10" ItemTemplate="{StaticResource DatabaseKindLabel}" SelectionChanged="Kind_Changed" /></StackPanel>
+    <StackPanel Grid.Column="2"><TextBlock Text="Что копировать" /><ComboBox x:Name="Kind" Margin="0,4,0,10" ItemTemplate="{StaticResource DatabaseKindLabel}" SelectionChanged="Kind_Changed" /></StackPanel>
    </Grid>
    <TextBlock x:Name="SourceLabel" Text="Папка базы 1С" TextWrapping="Wrap" /><DockPanel Margin="0,4,0,10">
+    <Button x:Name="SourceFileBrowseButton" DockPanel.Dock="Right" Content="Файл…" Tag="SourceFile" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" Visibility="Collapsed" />
     <Button x:Name="SourceBrowseButton" DockPanel.Dock="Right" Content="Выбрать…" Tag="Source" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
     <TextBox x:Name="Source" />
    </DockPanel>
    <TextBlock x:Name="OneCSourceHelp" Text="Путь к базе можно посмотреть в окне запуска 1С: выделите базу и нажмите «Изменить»." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
+   <StackPanel x:Name="FileBackupPanel" Visibility="Collapsed">
+    <TextBlock Text="Способ копирования" />
+    <ComboBox x:Name="FileBackupModePicker" SelectedValuePath="Tag" SelectedIndex="0" SelectionChanged="FileBackupMode_Changed" Margin="0,4,0,8">
+     <ComboBoxItem Content="Полная — все файлы" Tag="{x:Static core:FileBackupMode.Full}" />
+     <ComboBoxItem Content="Инкрементная — изменения с предыдущей копии" Tag="{x:Static core:FileBackupMode.Incremental}" />
+    </ComboBox>
+    <StackPanel x:Name="FileIncrementalOptions" Visibility="Collapsed">
+     <TextBlock Text="Архивов в цепочке (полная копия + изменения)" />
+     <TextBox x:Name="FullBackupEvery" Text="7" Margin="0,4,0,4" />
+     <TextBlock Text="Первая копия полная. После указанного числа архивов начинается новая полная цепочка. Нужные предшествующие архивы сохраняются даже сверх лимита хранилища." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,8" />
+    </StackPanel>
+    <TextBlock Text="Копируются обычные файлы и пустые папки. Закройте программы, изменяющие эти данные: единого снимка открытых файлов здесь нет. Для баз 1С и SQL выбирайте соответствующий тип задания. Ссылки, права доступа и системные атрибуты не переносятся." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,8" />
+   </StackPanel>
    <StackPanel x:Name="OneCMethodPanel">
     <TextBlock Text="Способ резервного копирования 1С" />
     <ComboBox x:Name="OneCMethodPicker" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="OneCMethod_Changed" Margin="0,4,0,10" />
@@ -235,7 +250,7 @@
     <Button x:Name="DestinationBrowseButton" DockPanel.Dock="Right" Content="Выбрать…" Tag="Destination" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
     <TextBox x:Name="Destination" />
    </DockPanel>
-   <TextBlock Text="Копии лучше хранить на другом диске или компьютере, отдельно от базы." TextWrapping="Wrap" Margin="0,0,0,10" />
+   <TextBlock Text="Копии лучше хранить на другом диске или компьютере, отдельно от исходных данных." TextWrapping="Wrap" Margin="0,0,0,10" />
    <StackPanel x:Name="FtpPanel" Visibility="Collapsed">
     <TextBlock Text="FTP-сервер (без ftp://)" /><TextBox x:Name="FtpHost" Margin="0,4,0,10" />
     <TextBlock Text="Порт" /><TextBox x:Name="FtpPort" Text="21" Margin="0,4,0,10" />
@@ -299,7 +314,7 @@
            <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="100" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-            <TextBlock Text="База" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,3" />
+            <TextBlock Text="Источник" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,3" />
             <TextBlock x:Name="ReviewDatabase" Grid.Column="1" TextTrimming="CharacterEllipsis" Margin="0,0,0,3" />
             <TextBlock Text="Формат" Grid.Row="1" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,3" />
             <TextBlock x:Name="ReviewFormat" Grid.Row="1" Grid.Column="1" TextTrimming="CharacterEllipsis" Margin="0,0,0,3" />
@@ -398,6 +413,7 @@
         <Button x:Name="VerifyCopyButton" Content="Проверить целостность" Style="{StaticResource PrimaryButton}" Click="VerifyCopy_Click" IsEnabled="False" Margin="0,0,8,8" />
         <Button x:Name="ExportCopyButton" Content="Сохранить копию…" Click="ExportCopy_Click" IsEnabled="False" Margin="0,0,8,8" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="ExtractOneCButton" Content="Извлечь 1Cv8.1CD" Click="ExtractOneC_Click" IsEnabled="False" Margin="0,0,8,8" ToolTip="Извлечь файловую базу из проверенного ZIP в новую папку. Доступно для локальных и сетевых копий." />
+        <Button x:Name="RestoreFilesButton" Content="Восстановить файлы…" Click="RestoreFiles_Click" IsEnabled="False" Visibility="Collapsed" Margin="0,0,8,8" ToolTip="Восстановить выбранную полную или инкрементную копию в новую папку. Нужна вся цепочка в этом хранилище." />
         <Button x:Name="CancelCopyVerificationButton" Content="Отменить операцию" Click="CancelCopyVerification_Click" IsEnabled="False" Margin="0,0,8,8" />
         <Button x:Name="OpenCopyDirectoryButton" Content="Открыть папку" Click="OpenCopyDirectory_Click" IsEnabled="False" Margin="0,0,0,8" />
        </WrapPanel>

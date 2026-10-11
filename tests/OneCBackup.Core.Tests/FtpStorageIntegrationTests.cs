@@ -45,6 +45,31 @@ public sealed class FtpStorageIntegrationTests : IDisposable
     public FtpStorageIntegrationTests() => Directory.CreateDirectory(directory);
 
     [FtpFact]
+    public async Task FileIncrementalChainOnFtpRestoresChangesAndKeepsFullBasisBeyondLimit()
+    {
+        var source = Path.Combine(directory, "files"); Directory.CreateDirectory(source);
+        await File.WriteAllTextAsync(Path.Combine(source, "stable.txt"), "stable");
+        await File.WriteAllTextAsync(Path.Combine(source, "changed.txt"), "before");
+        var job = Job with { Kind = DatabaseKind.FilesAndFolders, Source = source, FileBackupMode = FileBackupMode.Incremental,
+            FullBackupEvery = 7, KeepLast = 1, ScheduleKind = ScheduleKind.Manual,
+            TemporaryDirectory = Path.Combine(directory, "hdd-work") };
+        var catalog = new BackupCatalog(Path.Combine(directory, "file-copies.json"));
+        var storage = Storage(); var runner = new LocalBackupRunner(new OneCFileArchiveExecutor(), new BackupCompletion(storage, catalog),
+            new BackupRunHistory(Path.Combine(directory, "file-runs.json")), Path.Combine(directory, "default-work"));
+        var full = await runner.RunAsync(job); Assert.True(full.Status == BackupRunStatus.Succeeded, full.Error);
+        await File.WriteAllTextAsync(Path.Combine(source, "changed.txt"), "after");
+        var incremental = await runner.RunAsync(job); Assert.True(incremental.Status == BackupRunStatus.Succeeded, incremental.Error);
+        var records = await catalog.ReadAsync(); Assert.Equal(2, records.Count);
+        var selected = records.Single(record => !record.Backup.FileSnapshot!.IsFull);
+        var parent = Path.Combine(directory, "restore"); Directory.CreateDirectory(parent);
+        var restored = await new FileBackupRestorer(storage, catalog, Path.Combine(directory, "default-work"))
+            .RestoreAsync(selected, job, parent);
+        Assert.Equal(2, restored.Archives); Assert.Equal("after", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "changed.txt")));
+        Assert.Equal("stable", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "stable.txt")));
+        Assert.Equal(2, (await catalog.ReadAsync()).Count);
+    }
+
+    [FtpFact]
     public async Task LocalRunnerAndScheduleDeliverFileDatabaseArchiveWithRoutedCredentialsAndRetention()
     {
         var source = Path.Combine(directory, "database");

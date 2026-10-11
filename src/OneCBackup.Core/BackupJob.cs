@@ -2,8 +2,9 @@ using System.Text.Json.Serialization;
 
 namespace OneCBackup.Core;
 
-public enum DatabaseKind { OneCFile, SqlServer, PostgreSql }
+public enum DatabaseKind { OneCFile, SqlServer, PostgreSql, FilesAndFolders }
 public enum OneCBackupMethod { PlatformDump, FileArchive }
+public enum FileBackupMode { Full, Incremental }
 
 // Credentials belong in the Windows credential store, never in this document.
 public sealed record BackupJob
@@ -38,9 +39,11 @@ public sealed record BackupJob
     public OneCBackupMethod OneCMethod { get; init; } = OneCBackupMethod.PlatformDump;
     public SqlServerBackupSettings? SqlServer { get; init; }
     public PostgreSqlBackupSettings? PostgreSql { get; init; }
+    public FileBackupMode FileBackupMode { get; init; } = FileBackupMode.Full;
+    public int FullBackupEvery { get; init; } = 7;
 
     [JsonIgnore]
-    public bool ShouldArchiveCopy => ArchiveCopies &&
+    public bool ShouldArchiveCopy => ArchiveCopies && Kind != DatabaseKind.FilesAndFolders &&
         !(Kind == DatabaseKind.OneCFile && OneCMethod == OneCBackupMethod.FileArchive);
 
     [JsonIgnore]
@@ -61,6 +64,10 @@ public sealed record BackupJob
         if (Id == Guid.Empty) errors.Add("Не указан идентификатор задания.");
         if (string.IsNullOrWhiteSpace(Name)) errors.Add("Укажите название задания.");
         if (!Enum.IsDefined(Kind)) errors.Add("Неизвестный тип базы данных.");
+        if (!Enum.IsDefined(FileBackupMode)) errors.Add("Неизвестный способ копирования файлов.");
+        if (FullBackupEvery is < 1 or > 365) errors.Add("Полная копия должна создаваться не реже каждой 365-й копии и не чаще каждой первой.");
+        if (Kind == DatabaseKind.FilesAndFolders && !Path.IsPathFullyQualified(Source ?? ""))
+            errors.Add("Укажите полный путь к файлу или папке.");
         if (string.IsNullOrWhiteSpace(Source)) errors.Add("Укажите источник базы данных.");
         if (TemporaryDirectory is not null && (string.IsNullOrWhiteSpace(TemporaryDirectory)
             || !Path.IsPathFullyQualified(TemporaryDirectory) || TemporaryDirectory.Any(char.IsControl)))
@@ -110,7 +117,7 @@ public sealed record BackupJob
         {
             if (string.IsNullOrWhiteSpace(ArchivePasswordKey) || ArchivePasswordKey.Length > 512 || ArchivePasswordKey.Any(char.IsControl))
                 errors.Add("Укажите корректный идентификатор пароля архива.");
-            if (!ArchiveCopies && !(Kind == DatabaseKind.OneCFile && OneCMethod == OneCBackupMethod.FileArchive))
+            if (!ArchiveCopies && Kind != DatabaseKind.FilesAndFolders && !(Kind == DatabaseKind.OneCFile && OneCMethod == OneCBackupMethod.FileArchive))
                 errors.Add("Для шифрования копии включите архивацию в ZIP.");
         }
         if (KeepLast < 1) errors.Add("Нужно сохранять хотя бы одну успешную копию.");

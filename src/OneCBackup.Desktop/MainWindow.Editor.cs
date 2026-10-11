@@ -124,11 +124,11 @@ public partial class MainWindow
         SaveButton.Visibility = step == 3 ? Visibility.Visible : Visibility.Collapsed;
         JobEditor.Margin = step == 3 ? new Thickness(20, 8, 20, 8) : new Thickness(20, 16, 20, 16);
         WizardHint.Margin = new Thickness(0, 6, 0, step == 3 ? 8 : 16);
-        var labels = new[] { "База", "Хранилище", "Расписание", "Проверка" };
+        var labels = new[] { "Источник", "Хранилище", "Расписание", "Проверка" };
         WizardProgress.Text = $"Шаг {step + 1} из 4 · " + string.Join("  →  ", labels.Select((label, index) => index == step ? "[" + label + "]" : label));
         (WizardHeading.Text, WizardHint.Text) = step switch
         {
-            0 => ("Что будем копировать?", "Название поможет найти задание. Для файловой 1С выберите папку базы или файл 1Cv8.1CD."),
+            0 => ("Что будем копировать?", "Название поможет найти задание. Выберите источник и способ копирования."),
             1 => ("Куда сохранять копии?", "Выберите отдельное место хранения. При необходимости включите ZIP и защиту паролем."),
             2 => ("Когда запускать и сколько хранить?", "Время указано в выбранном часовом поясе. Сохраняются только успешные копии."),
             _ => ("Всё верно?", "Проверьте итог. Полные пути и параметры можно раскрыть ниже.")
@@ -141,10 +141,12 @@ public partial class MainWindow
         if (step is 2 or 3) UpdateSchedulePreview();
         if (step == 3)
         {
-            var type = Kind.SelectedItem switch { DatabaseKind.SqlServer => "Microsoft SQL Server", DatabaseKind.PostgreSql => "PostgreSQL", _ => "Файловая 1С" };
+            var type = Kind.SelectedItem switch { DatabaseKind.SqlServer => "Microsoft SQL Server", DatabaseKind.PostgreSql => "PostgreSQL", DatabaseKind.FilesAndFolders => "Файлы и папки", _ => "Файловая 1С" };
             var method = Kind.SelectedItem is DatabaseKind.OneCFile
                 ? OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive ? "ZIP файла базы, без платформы" : "Выгрузка .dt через платформу 1С"
-                : Kind.SelectedItem is DatabaseKind.SqlServer ? "Полная копия .bak" : "Дамп .dump";
+                : Kind.SelectedItem is DatabaseKind.FilesAndFolders
+                    ? FileBackupModePicker.SelectedValue is FileBackupMode.Incremental ? "Инкрементная, первая копия полная" : "Полная файловая копия"
+                    : Kind.SelectedItem is DatabaseKind.SqlServer ? "Полная копия .bak" : "Дамп .dump";
             var schedule = Schedule.SelectedValue is ScheduleKind.Manual ? "Только вручную"
                 : Enabled.IsChecked != true ? "Автоматические запуски отключены"
                 : (Schedule.SelectedValue is ScheduleKind.Weekly ? "По дням: " + string.Join(", ", DayControls.Where(day => day.Box.IsChecked == true).Select(day => day.Box.Content)) : "Ежедневно") + " · " + DailyAt.Text.Trim();
@@ -162,11 +164,13 @@ public partial class MainWindow
                 ? Path.Combine(DesktopPaths.DataDirectory, "work") + " (по умолчанию)" : TemporaryFolder.Text.Trim();
             WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nОсновное хранилище: хранить {KeepLast.Text.Trim()} успешных копий";
             WizardSummary.Text += "\n\n" + NextRun.Text;
+            if (Kind.SelectedItem is DatabaseKind.FilesAndFolders && FileBackupModePicker.SelectedValue is FileBackupMode.Incremental)
+                WizardSummary.Text += "\nВ цепочке не более " + FullBackupEvery.Text.Trim() + " архивов. Нужные предшествующие архивы сохраняются сверх лимита хранилища.";
             ReviewTechnicalDetails.IsExpanded = false;
             ReviewJobName.Text = JobName.Text.Trim();
             ReviewJobName.ToolTip = ReviewJobName.Text;
             var sourceLabel = Source.Text.Trim();
-            if (Kind.SelectedItem is DatabaseKind.OneCFile)
+            if (Kind.SelectedItem is DatabaseKind.OneCFile or DatabaseKind.FilesAndFolders)
             {
                 sourceLabel = Path.GetFileName(Path.TrimEndingDirectorySeparator(sourceLabel));
                 if (string.IsNullOrEmpty(sourceLabel)) sourceLabel = Source.Text.Trim();
@@ -176,6 +180,7 @@ public partial class MainWindow
             var shortMethod = Kind.SelectedItem switch
             {
                 DatabaseKind.SqlServer => "SQL .bak", DatabaseKind.PostgreSql => "PG .dump",
+                DatabaseKind.FilesAndFolders => FileBackupModePicker.SelectedValue is FileBackupMode.Incremental ? "Инкрементная, первая полная" : "Полная",
                 _ => OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive ? "1Cv8.1CD, без платформы" : "Выгрузка .dt"
             };
             ReviewFormat.Text = format + " · " + shortMethod;
@@ -215,7 +220,15 @@ public partial class MainWindow
         if (step == 0)
         {
             if (string.IsNullOrWhiteSpace(JobName.Text)) return RejectWizard("Введите название, например «Бухгалтерия».", 0, JobName);
-            if (string.IsNullOrWhiteSpace(Source.Text)) return RejectWizard("Выберите папку базы 1С или введите имя базы SQL.", 0, Source);
+            if (string.IsNullOrWhiteSpace(Source.Text)) return RejectWizard(Kind.SelectedItem is DatabaseKind.FilesAndFolders
+                ? "Выберите исходный файл или папку." : "Выберите папку базы 1С или введите имя базы SQL.", 0, Source);
+            if (Kind.SelectedItem is DatabaseKind.FilesAndFolders)
+            {
+                if (!Path.IsPathFullyQualified(Source.Text.Trim())) return RejectWizard("Выберите файл или папку либо укажите полный путь.", 0, Source);
+                if (FileBackupModePicker.SelectedValue is FileBackupMode.Incremental
+                    && (!int.TryParse(FullBackupEvery.Text, out var every) || every is < 1 or > 365))
+                    return RejectWizard("Укажите от 1 до 365 архивов в инкрементной цепочке.", 0, FullBackupEvery);
+            }
             if (Kind.SelectedItem is DatabaseKind.OneCFile && OneCMethodPicker.SelectedValue is OneCBackupMethod.PlatformDump)
             {
                 if (string.IsNullOrWhiteSpace(OneCExecutable.Text)) return RejectWizard("Для выгрузки .dt выберите программу 1С (1cv8.exe). Для ZIP файла базы платформа не нужна.", 0, OneCExecutable);

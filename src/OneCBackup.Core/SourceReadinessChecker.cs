@@ -23,6 +23,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
                 DatabaseKind.OneCFile => CheckFile(job, timeout.Token),
                 DatabaseKind.SqlServer => await CheckSqlAsync(job, timeout.Token),
                 DatabaseKind.PostgreSql => await CheckPostgreSqlAsync(job, timeout.Token),
+                DatabaseKind.FilesAndFolders => CheckFiles(job, timeout.Token),
                 _ => throw new NotSupportedException("Неизвестный тип базы.")
             };
         }
@@ -32,6 +33,19 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         { return new(false, "Время проверки источника превысило 30 секунд. Проверьте подключение и доступ."); }
         catch (Exception ex)
         { return new(false, ex.Message); }
+    }
+
+    private static SourceCheckReport CheckFiles(BackupJob job, CancellationToken token)
+    {
+        var source = Path.GetFullPath(job.Source); var isFile = File.Exists(source);
+        if (!isFile && !Directory.Exists(source)) throw new FileNotFoundException("Не найден исходный файл или папка.");
+        var scan = FileBackupPaths.Scan(source, isFile, token);
+        foreach (var file in scan.Files)
+        {
+            token.ThrowIfCancellationRequested();
+            using var input = new FileStream(file.FullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+        return new(true, $"Доступ на чтение проверен: {scan.Files.Count} файлов, {scan.Directories.Count} папок. Копия не создавалась; источник должен оставаться без изменений во время копирования.");
     }
 
     private static SourceCheckReport CheckFile(BackupJob job, CancellationToken token)

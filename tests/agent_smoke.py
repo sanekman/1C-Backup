@@ -78,6 +78,36 @@ def main():
             assert json.loads((data / "local-agent.json").read_text())["Phase"] == "Stopped"
             assert (source / "1Cv8.1CD").read_bytes() == content
             print("PASS: scheduled ZIP content, duplicate-owner rejection, terminal history and graceful stop.", flush=True)
+            files = data / "ordinary-source"
+            files.mkdir()
+            (files / "stable.txt").write_text("unchanged")
+            (files / "changed.txt").write_text("before")
+            (files / "removed.txt").write_text("remove after full")
+            file_job = dict(jobs[0], Id=str(uuid.uuid4()), Name="Files agent smoke", Kind="FilesAndFolders",
+                            Source=str(files), DestinationDirectory=str(data / "ordinary-copies"),
+                            ScheduleKind="Manual", FileBackupMode="Incremental", FullBackupEvery=2, Enabled=False)
+            (data / "jobs.json").write_text(json.dumps([*jobs, file_job]))
+            def run_files():
+                result = subprocess.run(base + ["--run-job", file_job["Id"]], capture_output=True, text=True, timeout=30)
+                assert result.returncode == 0, result.stderr + result.stdout
+                return [record for record in json.loads((data / "copies.json").read_text()) if record["JobId"] == file_job["Id"]]
+            first = run_files()
+            assert len(first) == 1 and first[0]["Backup"]["FileSnapshot"]["IsFull"]
+            (files / "changed.txt").write_text("after")
+            (files / "removed.txt").unlink()
+            second = run_files()
+            assert len(second) == 2, "Retention removed the incremental basis"
+            increment = next(record for record in second if record["Backup"]["FileSnapshot"]["Depth"] == 1)
+            with zipfile.ZipFile(increment["Backup"]["Location"]) as archive:
+                assert "data/stable.txt" not in archive.namelist()
+                assert archive.read("data/changed.txt") == b"after"
+                manifest = json.loads(archive.read("onec-backup-manifest.json"))
+                assert manifest["DeletedFiles"] == ["removed.txt"]
+            third = run_files()
+            assert len(third) == 1 and third[0]["Backup"]["FileSnapshot"]["IsFull"]
+            assert not any(Path(record["Backup"]["Location"]).exists() for record in second)
+            assert (files / "stable.txt").read_text() == "unchanged" and marker.read_text() == "keep unrelated files"
+            print("PASS: actual agent full/incremental file jobs, changed/deleted index and safe chain rotation.", flush=True)
         finally:
             if process.poll() is None:
                 subprocess.run(base + ["--stop"], capture_output=True, timeout=10)

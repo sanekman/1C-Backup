@@ -1,0 +1,82 @@
+using System.IO;
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
+using OneCBackup.Core;
+
+namespace OneCBackup.Desktop;
+
+internal static partial class DesktopSmoke
+{
+    private static async Task VerifyFileBackupsAsync(MainWindow window, Action<string> screenshot)
+    {
+        T Control<T>(string name) where T : FrameworkElement => (T)window.FindName(name);
+        void Click(string name) => Control<Button>(name).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var fixture = Path.GetDirectoryName(DesktopPaths.DataDirectory)!;
+        var source = Path.Combine(fixture, "ordinary-files"); Directory.CreateDirectory(source);
+        Directory.CreateDirectory(Path.Combine(source, "empty"));
+        await File.WriteAllTextAsync(Path.Combine(source, "stable.txt"), "unchanged");
+        await File.WriteAllTextAsync(Path.Combine(source, "change.txt"), "before");
+        await File.WriteAllTextAsync(Path.Combine(source, "remove.txt"), "removed");
+        Click("JobsNavigation"); Click("NewJobButton");
+        Control<TextBox>("JobName").Text = "Документы — инкрементная копия";
+        Control<ComboBox>("Kind").SelectedItem = DatabaseKind.FilesAndFolders;
+        Control<TextBox>("Source").Text = source;
+        Control<ComboBox>("FileBackupModePicker").SelectedValue = FileBackupMode.Incremental;
+        Control<TextBox>("FullBackupEvery").Text = "0";
+        Click("NextStepButton");
+        if (!Control<StackPanel>("BaseStep").IsVisible || !Control<TextBlock>("WizardError").IsVisible)
+            throw new InvalidOperationException("Мастер принял нулевую длину инкрементной цепочки.");
+        Control<TextBox>("FullBackupEvery").Text = "3";
+        window.Width = 900; window.Height = 580; window.UpdateLayout();
+        screenshot("files-incremental-source-compact");
+        Click("NextStepButton");
+        Control<TextBox>("Destination").Text = Path.Combine(fixture, "ordinary-copies");
+        Control<TextBox>("TemporaryFolder").Text = Path.Combine(fixture, "ordinary-HDD-work");
+        Click("NextStepButton");
+        Control<TextBox>("KeepLast").Text = "1"; Control<CheckBox>("Enabled").IsChecked = false;
+        Click("NextStepButton");
+        if (!Control<TextBlock>("WizardSummary").Text.Contains("Инкремент") || !Control<TextBlock>("WizardSummary").Text.Contains("3"))
+            throw new InvalidOperationException("Итог мастера потерял файловый режим и длину цепочки.");
+        screenshot("files-incremental-review-compact");
+        Click("SaveButton");
+        await WaitUntil(() => window.SmokeReady && Control<Border>("JobListCard").IsVisible, "Файловое задание не сохранено.");
+        var store = new JobStore(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"));
+        var job = (await store.LoadAsync()).Single(job => job.Name == "Документы — инкрементная копия");
+        if (job.Kind != DatabaseKind.FilesAndFolders || job.FileBackupMode != FileBackupMode.Incremental || job.FullBackupEvery != 3)
+            throw new InvalidOperationException("Файловые настройки потеряны при сохранении.");
+        Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(item => item.Id == job.Id);
+        var catalog = new BackupCatalog(Path.Combine(DesktopPaths.DataDirectory, "copies.json"));
+        var history = new BackupRunHistory(Path.Combine(DesktopPaths.DataDirectory, "runs.json"));
+        Click("RunButton"); await WaitUntil(() => window.SmokeReady, "Полная файловая копия не завершилась.");
+        var first = (await catalog.ReadAsync()).Single(record => record.JobId == job.Id);
+        if (first.Backup.FileSnapshot?.IsFull != true) throw new InvalidOperationException("Первая копия не полная.");
+        await File.WriteAllTextAsync(Path.Combine(source, "change.txt"), "after"); File.Delete(Path.Combine(source, "remove.txt"));
+        await File.WriteAllTextAsync(Path.Combine(source, "added.txt"), "added");
+        Click("RunButton"); await WaitUntil(() => window.SmokeReady, "Инкрементная файловая копия не завершилась.");
+        var copies = (await catalog.ReadAsync()).Where(record => record.JobId == job.Id).ToArray();
+        var latest = copies.Single(record => record.Backup.FileSnapshot?.Depth == 1);
+        if (copies.Length != 2 || latest.Backup.FileSnapshot!.ParentSnapshotId != first.Backup.FileSnapshot!.SnapshotId)
+            throw new InvalidOperationException("Лимит хранения удалил основу файловой цепочки.");
+        var beforeCatalog = JsonSerializer.Serialize(await catalog.ReadAsync()); var beforeHistory = JsonSerializer.Serialize(await history.ReadAsync());
+        Click("CopiesNavigation"); await WaitUntil(() => window.SmokeReady, "Каталог файловых копий не загрузился.");
+        Control<ComboBox>("CopyJobFilter").SelectedValue = job.Id;
+        Control<DataGrid>("Copies").SelectedItem = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Single(row => row.Record.Id == latest.Id);
+        if (!Control<Button>("RestoreFilesButton").IsVisible || !Control<Button>("RestoreFilesButton").IsEnabled
+            || Control<Button>("ExtractOneCButton").IsVisible) throw new InvalidOperationException("Каталог не предлагает восстановление файлов.");
+        screenshot("files-incremental-catalog-compact");
+        var parent = Path.Combine(fixture, "ordinary-restores"); Directory.CreateDirectory(parent);
+        await window.RestoreSelectedFilesAsync(parent);
+        if (!Control<TextBlock>("CopyVerificationStatus").Text.Contains("Восстановлено файлов: 3; архивов в цепочке: 2"))
+            throw new InvalidOperationException(Control<TextBlock>("CopyVerificationStatus").Text);
+        var restored = Directory.GetDirectories(parent).Single();
+        if (await File.ReadAllTextAsync(Path.Combine(restored, "stable.txt")) != "unchanged"
+            || await File.ReadAllTextAsync(Path.Combine(restored, "change.txt")) != "after"
+            || await File.ReadAllTextAsync(Path.Combine(restored, "added.txt")) != "added"
+            || File.Exists(Path.Combine(restored, "remove.txt")) || !Directory.Exists(Path.Combine(restored, "empty"))
+            || beforeCatalog != JsonSerializer.Serialize(await catalog.ReadAsync()) || beforeHistory != JsonSerializer.Serialize(await history.ReadAsync()))
+            throw new InvalidOperationException("Восстановленная цепочка или неизменность журнала не подтверждены.");
+        screenshot("files-incremental-restored-compact");
+        window.Width = 1100; window.Height = 740;
+    }
+}
