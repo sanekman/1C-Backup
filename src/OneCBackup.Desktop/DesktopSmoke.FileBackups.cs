@@ -36,7 +36,7 @@ internal static partial class DesktopSmoke
         Click("NextStepButton");
         Control<TextBox>("KeepLast").Text = "1"; Control<CheckBox>("Enabled").IsChecked = false;
         Click("NextStepButton");
-        if (!Control<TextBlock>("WizardSummary").Text.Contains("Инкремент") || !Control<TextBlock>("WizardSummary").Text.Contains("3"))
+        if (!Control<TextBox>("WizardSummary").Text.Contains("Инкремент") || !Control<TextBox>("WizardSummary").Text.Contains("3"))
             throw new InvalidOperationException("Итог мастера потерял файловый режим и длину цепочки.");
         screenshot("files-incremental-review-compact");
         Click("SaveButton");
