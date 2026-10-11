@@ -461,6 +461,7 @@ internal static class DesktopSmoke
             foreach (var navigation in new[] { "JobsNavigation", "CopiesNavigation", "HistoryNavigation", "AgentNavigation" })
             {
                 Click(navigation); await Task.Delay(100);
+                Screenshot("compact-" + navigation);
                 if (navigation == "JobsNavigation")
                 {
                     var grid = Control<DataGrid>("Jobs");
@@ -475,14 +476,16 @@ internal static class DesktopSmoke
                 }
                 if (navigation == "CopiesNavigation")
                 {
+                    Control<Expander>("CopyDetailsPanel").IsExpanded = true;
                     var grid = Control<DataGrid>("Copies");
                     window.UpdateLayout();
+                    Screenshot("compact-copies-expanded");
                     if (grid.ItemContainerGenerator.ContainerFromIndex(0) is not DataGridRow row
                         || row.ActualHeight <= 0 || row.TranslatePoint(new Point(), grid).Y < 0
                         || row.TranslatePoint(new Point(), grid).Y + row.ActualHeight > grid.ActualHeight + 1)
                         throw new InvalidOperationException("Подробности скрыли таблицу копий в компактном окне.");
+                    Control<Expander>("CopyDetailsPanel").IsExpanded = false;
                 }
-                Screenshot("compact-" + navigation);
             }
             await VerifyPostgreSqlMonitoringAsync(window);
             Finish(output, true, "Компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");

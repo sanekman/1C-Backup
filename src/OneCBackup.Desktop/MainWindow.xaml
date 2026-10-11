@@ -73,7 +73,7 @@
       <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
        <DockPanel>
         <Button x:Name="NewJobButton" Content="+ Новое задание" Style="{StaticResource PrimaryButton}" DockPanel.Dock="Right" Click="New_Click" IsEnabled="False" />
-        <StackPanel VerticalAlignment="Center"><TextBlock Text="Мои задания" FontSize="17" FontWeight="SemiBold" /><TextBlock x:Name="JobsSummary" Text="Загрузка…" Foreground="{StaticResource MutedBrush}" Margin="0,4,12,0" /></StackPanel>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="Мои задания" FontSize="17" FontWeight="SemiBold" /><TextBlock x:Name="JobsSummary" Text="Загрузка…" Foreground="{StaticResource MutedBrush}" Margin="12,0,12,0" VerticalAlignment="Center" /></StackPanel>
        </DockPanel>
       </Border>
       <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
@@ -96,7 +96,7 @@
       </StackPanel></Border>
       <Grid>
        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-       <DockPanel Margin="12,6"><TextBlock Text="Поиск" Foreground="{StaticResource MutedBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
+       <DockPanel Margin="12,4"><TextBlock Text="Поиск" Foreground="{StaticResource MutedBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
         <TextBox x:Name="JobSearch" TextChanged="JobSearch_TextChanged" ToolTip="Поиск по названию задания или источнику" AutomationProperties.Name="Поиск по названию задания или источнику" />
        </DockPanel>
   <DataGrid Grid.Row="1" x:Name="Jobs" RowHeight="30" ColumnHeaderHeight="30" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
@@ -318,7 +318,7 @@
    </DataGrid>
    </DockPanel>
    </Border>
-   <Border x:Name="CopiesView" Grid.Row="2" Style="{StaticResource Card}" Visibility="Collapsed">
+   <Border x:Name="CopiesView" Grid.Row="2" Style="{StaticResource Card}" Visibility="Collapsed" SizeChanged="CopiesView_SizeChanged">
     <DockPanel>
      <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
       <StackPanel><DockPanel>
@@ -345,10 +345,10 @@
        </WrapPanel>
        <TextBlock x:Name="CopyVerificationStatus" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
        <Expander x:Name="CopyDetailsPanel" Header="Подробности копии и проверки" Margin="0,4,0,0">
-        <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto"><StackPanel Margin="4,6,4,0">
-       <TextBlock Text="Список из журнала успешных копий. Наличие файлов проверяется кнопкой «Проверить целостность». Для проверки остановите планировщик. FTP-копия скачивается полностью; нужны свободное место и доступ к серверу." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" />
-       <TextBlock Text="{Binding Text, ElementName=CopyVerificationStatus}" TextWrapping="Wrap" Margin="0,6,0,0" />
-       <TextBox x:Name="CopyDetails" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="100" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0" />
+        <ScrollViewer x:Name="CopyDetailsScroll" MaxHeight="150" VerticalScrollBarVisibility="Auto"><StackPanel Margin="4,6,4,0">
+       <TextBlock Text="{Binding Text, ElementName=CopyVerificationStatus}" TextWrapping="Wrap" />
+       <TextBox x:Name="CopyDetails" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="100" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0" />
+       <TextBlock Text="Список из журнала успешных копий. Наличие файлов проверяется кнопкой «Проверить целостность». Для проверки остановите планировщик. FTP-копия скачивается полностью; нужны свободное место и доступ к серверу." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" Margin="0,6,0,0" />
         </StackPanel></ScrollViewer>
        </Expander>
       </StackPanel>

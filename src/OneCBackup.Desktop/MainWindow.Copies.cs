@@ -10,6 +10,11 @@ public partial class MainWindow
     private List<BackupCopyRow> copyRows = [];
     private bool updatingCopyFilters;
 
+    private void CopiesView_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (CopyDetailsScroll is not null) CopyDetailsScroll.MaxHeight = ActualHeight < 650 ? 60 : 150;
+    }
+
     private void UpdateCopyJobChoices()
     {
         var selectedId = (CopyJobFilter.SelectedItem as CopyJobChoice)?.Id;
