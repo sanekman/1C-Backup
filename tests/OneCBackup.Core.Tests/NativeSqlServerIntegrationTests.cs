@@ -47,6 +47,13 @@ public sealed class NativeSqlServerIntegrationTests
                 DestinationDirectory = Path.Combine(root, "copies"), TemporaryDirectory = Path.Combine(root, "work"),
                 KeepLast = 1, ScheduleKind = ScheduleKind.Manual, Enabled = false,
                 SqlServer = new() { Server = server, ServerBackupDirectory = stage, AgentReadDirectory = stage, TimeoutMinutes = 2 } };
+            var sourceChecker = new SourceReadinessChecker(new BackupProcessRunner(), Path.Combine(root, "unused-work"), target =>
+            {
+                Assert.Equal(server, target.SqlServer!.Server); return Connection();
+            });
+            var ready = await sourceChecker.CheckAsync(job); Assert.True(ready.Succeeded, ready.Details);
+            Assert.False((await sourceChecker.CheckAsync(job with { Source = "missing_fixture_database" })).Succeeded);
+            Assert.Empty(Directory.GetFiles(stage)); Assert.Empty(await history.ReadAsync()); Assert.Empty(await catalog.ReadAsync());
             var runner = new LocalBackupRunner(new SqlServerBackupExecutor(target =>
             {
                 Assert.Equal(server, target.SqlServer!.Server); return Connection();

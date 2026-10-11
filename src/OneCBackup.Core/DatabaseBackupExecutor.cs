@@ -59,6 +59,13 @@ public sealed class DatabaseBackupExecutor(IBackupProcessRunner processRunner, I
 
 public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? connectionFactory = null) : IBackupExecutor
 {
+    internal static DbConnection CreateConnection(BackupJob job) => new SqlConnection(new SqlConnectionStringBuilder
+    {
+        DataSource = job.SqlServer!.Server, InitialCatalog = "master", IntegratedSecurity = true,
+        Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = false, ConnectTimeout = 15,
+        ApplicationName = "1C-Backup"
+    }.ConnectionString);
+
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
         if (job.Kind != DatabaseKind.SqlServer) throw new ArgumentException("Нужно задание SQL Server.");
@@ -77,12 +84,7 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
         timeout.CancelAfter(TimeSpan.FromMinutes(settings.TimeoutMinutes));
         try
         {
-            await using var connection = connectionFactory?.Invoke(job) ?? new SqlConnection(new SqlConnectionStringBuilder
-            {
-                DataSource = settings.Server, InitialCatalog = "master", IntegratedSecurity = true,
-                Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = false, ConnectTimeout = 15,
-                ApplicationName = "1C-Backup"
-            }.ConnectionString);
+            await using var connection = connectionFactory?.Invoke(job) ?? CreateConnection(job);
             await connection.OpenAsync(timeout.Token);
             await using (var backup = connection.CreateCommand())
             {

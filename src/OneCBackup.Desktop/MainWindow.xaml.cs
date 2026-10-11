@@ -411,6 +411,10 @@ public partial class MainWindow : Window
         JobsSummary.Text = $"Всего: {jobs.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}";
         RunButton.IsEnabled = ready && canSave && idle && engineAvailable && !editorOpen && Jobs.SelectedItem is BackupJob;
         CheckStorageButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
+        CheckSourceButton.IsEnabled = CheckStorageButton.IsEnabled;
+        CheckSourceButton.ToolTip = !engineAvailable || schedulingTask is not null
+            ? "Остановите автоматическое копирование, чтобы проверить источник."
+            : "Проверить файл базы или SQL-подключение без создания резервной копии. Для PostgreSQL нужен psql рядом с pg_dump.";
         CheckStorageButton.ToolTip = !engineAvailable || schedulingTask is not null
             ? "Остановите автоматическое копирование, чтобы проверить хранилища." : "Проверить временную папку и запись, чтение и удаление тестового файла во всех хранилищах";
         CheckLatestCopiesButton.IsEnabled = CheckStorageButton.IsEnabled;

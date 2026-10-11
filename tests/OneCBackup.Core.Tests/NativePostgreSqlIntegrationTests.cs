@@ -69,6 +69,11 @@ public sealed class NativePostgreSqlIntegrationTests
                 ScheduleKind = ScheduleKind.Manual, Enabled = false, ArchiveCopies = true, ArchivePasswordKey = "fixture-archive",
                 PostgreSql = new() { Host = "127.0.0.1", Port = port, Username = user,
                     PgDumpPath = Tool("pg_dump"), PgRestorePath = Tool("pg_restore"), TimeoutMinutes = 2 } };
+            var sourceChecker = new SourceReadinessChecker(new BackupProcessRunner(), Path.Combine(root, "unused-work"));
+            var ready = await sourceChecker.CheckAsync(job); Assert.True(ready.Succeeded, ready.Details);
+            Assert.False((await sourceChecker.CheckAsync(job with { Source = "missing_fixture_database" })).Succeeded);
+            Assert.Empty(await history.ReadAsync()); Assert.Empty(await catalog.ReadAsync());
+            Assert.Empty(Directory.GetFileSystemEntries(job.TemporaryDirectory!));
             var runner = new LocalBackupRunner(new PostgreSqlBackupExecutor(new BackupProcessRunner()),
                 new BackupCompletion(storage, catalog, passwordStore), history, Path.Combine(root, "unused-work"));
             var first = await runner.RunAsync(job); Assert.True(first.Status == BackupRunStatus.Succeeded, first.Error);
