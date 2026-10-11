@@ -222,7 +222,7 @@ public partial class MainWindow
         {
             if (string.IsNullOrWhiteSpace(JobName.Text)) return RejectWizard("Введите название, например «Бухгалтерия».", 0, JobName);
             if (string.IsNullOrWhiteSpace(Source.Text)) return RejectWizard(Kind.SelectedItem is DatabaseKind.FilesAndFolders
-                ? "Выберите исходный файл или папку." : "Выберите папку базы 1С или введите имя базы SQL.", 0, Source);
+                ? "Выберите исходный файл или папку." : Kind.SelectedItem is DatabaseKind.WebDav ? "Укажите HTTPS-адрес папки WebDAV." : "Выберите папку базы 1С или введите имя базы SQL.", 0, Source);
             if (Kind.SelectedItem is DatabaseKind.FilesAndFolders)
             {
                 if (!Path.IsPathFullyQualified(Source.Text.Trim())) return RejectWizard("Выберите файл или папку либо укажите полный путь.", 0, Source);
