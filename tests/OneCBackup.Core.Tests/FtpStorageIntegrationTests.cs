@@ -94,6 +94,7 @@ public sealed class FtpStorageIntegrationTests : IDisposable
             new BackupRunHistory(Path.Combine(directory, "multi-runs.json")), Path.Combine(directory, "work"));
         for (var index = 0; index < 3; index++)
         {
+            await File.WriteAllTextAsync(Path.Combine(source, "1Cv8.1CD"), "multi-destination fixture " + index);
             var run = await runner.RunAsync(job);
             Assert.Equal(BackupRunStatus.Succeeded, run.Status);
             Assert.Equal(temporary, Path.GetDirectoryName(run.WorkDirectory));
@@ -102,7 +103,11 @@ public sealed class FtpStorageIntegrationTests : IDisposable
         }
         var records = await catalog.ReadAsync();
         Assert.Equal(3, records.Count);
-        Assert.Single(records.Select(record => record.Backup.Sha256).Distinct());
+        var latestLocal = records.Where(record => Path.GetDirectoryName(record.Backup.Location) == localDirectory)
+            .MaxBy(record => record.CompletedUtc)!;
+        var remote = Assert.Single(records, record => record.Backup.Location.StartsWith("ftp", StringComparison.Ordinal));
+        Assert.Equal(remote.Backup.Sha256, latestLocal.Backup.Sha256);
+        Assert.Equal(2, records.Select(record => record.Backup.Sha256).Distinct().Count());
         Assert.Equal(2, Directory.GetFiles(localDirectory).Length);
         Assert.Single(Directory.GetFiles(Path.Combine(RemoteRoot, remoteDirectory.TrimStart('/'))));
         foreach (var record in records) await new BackupCopyVerifier(router).VerifyAsync(record, job);
