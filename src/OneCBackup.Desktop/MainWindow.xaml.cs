@@ -351,6 +351,9 @@ public partial class MainWindow : Window
         RefreshCopiesButton.IsEnabled = ready && !copiesRefreshing;
         VerifyCopyButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null &&
             Copies.SelectedItem is BackupCopyRow selected && jobs.Any(job => job.Id == selected.Record.JobId);
+        ExtractOneCButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null &&
+            Copies.SelectedItem is BackupCopyRow extractable && jobs.Any(job => job.Id == extractable.Record.JobId &&
+                job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.FileArchive && job.StorageKind != StorageKind.Ftp);
         CancelCopyVerificationButton.IsEnabled = copyVerification is { IsCancellationRequested: false };
         OpenCopyDirectoryButton.IsEnabled = ready && Copies.SelectedItem is BackupCopyRow { CanOpenDirectory: true };
         StartBackgroundButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
@@ -701,6 +704,34 @@ public partial class MainWindow : Window
     {
         copyVerification?.Cancel();
         UpdateRunControls();
+    }
+
+    private async void ExtractOneC_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ExtractOneCButton.IsEnabled) return;
+        var dialog = new OpenFolderDialog { Title = "Выберите родительский каталог: база будет извлечена в новую папку" };
+        if (dialog.ShowDialog(this) == true) await ExtractSelectedCopyAsync(dialog.FolderName);
+    }
+
+    internal async Task ExtractSelectedCopyAsync(string parentDirectory)
+    {
+        if (!ExtractOneCButton.IsEnabled || Copies.SelectedItem is not BackupCopyRow row) return;
+        var job = jobs.FirstOrDefault(job => job.Id == row.Record.JobId);
+        if (job is null) return;
+        using var lease = AcquireEngineOrReport();
+        if (lease is null) { CopyVerificationStatus.Text = Status.Text; return; }
+        using var cancellation = new CancellationTokenSource();
+        copyVerification = cancellation; UpdateRunControls();
+        CopyVerificationStatus.Text = "Проверяется архив и извлекается файл базы в новую папку внутри: " + parentDirectory;
+        try
+        {
+            var extracted = await Task.Run(() => new OneCArchiveExtractor().ExtractAsync(row.Record, job, parentDirectory, cancellation.Token));
+            CopyVerificationStatus.Text = "Файл базы извлечён: " + extracted.Path + ". Добавьте эту папку как отдельную файловую базу в списке 1С и проверьте её работу.";
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        { CopyVerificationStatus.Text = "Извлечение отменено. Исходный архив сохранён."; }
+        catch (Exception ex) { CopyVerificationStatus.Text = "Не удалось извлечь базу: " + ex.Message; }
+        finally { copyVerification = null; UpdateRunControls(); }
     }
 
     private async void OpenCopyDirectory_Click(object sender, RoutedEventArgs e)

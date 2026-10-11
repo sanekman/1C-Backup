@@ -112,6 +112,12 @@ internal static class DesktopSmoke
             Control<DataGrid>("Copies").SelectedIndex = 0;
             Click("VerifyCopyButton");
             await WaitUntil(() => Control<TextBlock>("CopyVerificationStatus").Text.StartsWith("Размер и SHA256 совпадают"), "Проверка копии не завершилась.");
+            var extractParent = Path.Combine(DesktopPaths.DataDirectory, "extraction");
+            Directory.CreateDirectory(extractParent);
+            await window.ExtractSelectedCopyAsync(extractParent);
+            var extracted = Directory.GetFiles(extractParent, "1Cv8.1CD", SearchOption.AllDirectories);
+            if (extracted.Length != 1 || File.ReadAllText(extracted[0]) != File.ReadAllText(Path.Combine(source, "1Cv8.1CD")))
+                throw new InvalidOperationException("База не извлечена из проверенного архива через интерфейс.");
             await VerifyPostgreSqlMonitoringAsync(window);
             Finish(output, true, "Несколько времён, ZIP, ошибка занятой базы, фильтры и экспорт истории, каталог, SHA256, навигация и импорт SQL-отчёта проверены на Windows.");
         }
