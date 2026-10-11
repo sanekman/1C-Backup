@@ -399,7 +399,7 @@ public partial class MainWindow : Window
         SourceBrowseButton.Content = isFiles ? "Папка…" : "Выбрать…";
         SourceFileBrowseButton.Visibility = isLocalFiles ? Visibility.Visible : Visibility.Collapsed;
         FileBackupPanel.Visibility = isFiles ? Visibility.Visible : Visibility.Collapsed;
-        WebDavPanel.Visibility = isWebDav ? Visibility.Visible : Visibility.Collapsed;
+        WebDavPanel.Visibility = WebDavOptionsPanel.Visibility = WebDavCredentialsButton.Visibility = isWebDav ? Visibility.Visible : Visibility.Collapsed;
         FileSourceConsistencyHint.Text = isWebDav ? "Копируются файлы выбранной папки, без единого снимка сервера. Избегайте изменений во время копирования." : "Перед копированием закройте программы, изменяющие эти файлы.";
         UpdateFileBackupControls();
         if (OneCSourceHelp is not null) OneCSourceHelp.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;

@@ -45,6 +45,7 @@ internal static partial class DesktopSmoke
             Control<ComboBox>("FileBackupModePicker").SelectedValue = FileBackupMode.Incremental;
             Control<TextBox>("FullBackupEvery").Text = "7";
             window.Width = 900; window.Height = 580; window.UpdateLayout();
+            screenshot("webdav-source-layout");
             foreach (var name in new[] { "Source", "WebDavCredentialsButton", "FileBackupModePicker", "FullBackupEvery" })
             {
                 var element = Control<FrameworkElement>(name); var scroll = Control<ScrollViewer>("EditorScroll");

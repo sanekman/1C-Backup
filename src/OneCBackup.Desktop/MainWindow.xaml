@@ -188,17 +188,13 @@
    <TextBlock x:Name="SourceLabel" Text="Папка базы 1С" TextWrapping="Wrap" /><DockPanel Margin="0,4,0,10">
     <Button x:Name="SourceFileBrowseButton" DockPanel.Dock="Right" Content="Файл…" Tag="SourceFile" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" Visibility="Collapsed" />
     <Button x:Name="SourceBrowseButton" DockPanel.Dock="Right" Content="Выбрать…" Tag="Source" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
+    <Button DockPanel.Dock="Right" x:Name="WebDavCredentialsButton" Content="Логин и пароль…" Click="WebDavCredentials_Click" Padding="10,5" Margin="6,0,0,0" Visibility="Collapsed" />
     <TextBox x:Name="Source" />
    </DockPanel>
    <TextBlock x:Name="OneCSourceHelp" Text="Путь к базе можно посмотреть в окне запуска 1С: выделите базу и нажмите «Изменить»." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
    <StackPanel x:Name="WebDavPanel" Visibility="Collapsed">
-    <DockPanel Margin="0,0,0,6"><Button DockPanel.Dock="Right" x:Name="WebDavCredentialsButton" Content="Логин и пароль…" Click="WebDavCredentials_Click" Padding="10,5" Margin="8,0,0,0" />
-     <TextBlock x:Name="WebDavCredentialStatus" Text="Подключение ещё не настроено" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
-    </DockPanel>
-    <Expander Header="Адрес подключения и время ожидания" Margin="0,0,0,6"><StackPanel>
-     <TextBlock Text="Укажите конечный HTTPS-адрес нужной папки WebDAV, например https://cloud.example/remote.php/dav/files/user/Documents/. Используйте пароль приложения с доступом на чтение. Перенаправления не поддерживаются." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,6" />
-     <TextBlock Text="Ограничение времени копирования, минут" /><TextBox x:Name="WebDavTimeout" Text="120" Width="100" HorizontalAlignment="Left" Margin="0,4,0,6" />
-    </StackPanel></Expander>
+    <TextBlock x:Name="WebDavCredentialStatus" Text="Подключение ещё не настроено" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6" />
+
    </StackPanel>
    <StackPanel x:Name="FileBackupPanel" Visibility="Collapsed">
     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -216,6 +212,10 @@
      <TextBlock Text="Первая инкрементная копия всегда полная. Число архивов включает полную основу; затем начинается новая полная цепочка. Нужные предшествующие архивы сохраняются даже сверх лимита хранилища. Копируются обычные файлы и пустые папки, без единого снимка открытых файлов. Для баз 1С и SQL выбирайте соответствующий тип задания. Ссылки, права доступа и системные атрибуты не переносятся." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,6,0,0" />
     </Expander>
    </StackPanel>
+    <Expander x:Name="WebDavOptionsPanel" Visibility="Collapsed" Header="Адрес подключения и время ожидания" Margin="0,0,0,6"><StackPanel>
+     <TextBlock Text="Укажите конечный HTTPS-адрес нужной папки WebDAV, например https://cloud.example/remote.php/dav/files/user/Documents/. Используйте пароль приложения с доступом на чтение. Перенаправления не поддерживаются." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,6" />
+     <TextBlock Text="Ограничение времени копирования, минут" /><TextBox x:Name="WebDavTimeout" Text="120" Width="100" HorizontalAlignment="Left" Margin="0,4,0,6" />
+    </StackPanel></Expander>
    <StackPanel x:Name="OneCMethodPanel">
     <TextBlock Text="Способ резервного копирования 1С" />
     <ComboBox x:Name="OneCMethodPicker" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="OneCMethod_Changed" Margin="0,4,0,10" />
