@@ -53,6 +53,8 @@ public sealed class BackupRunHistory(string path)
         {
             var runs = await ReadCoreAsync(cancellationToken);
             if (!runs.Any(r => r.Status == BackupRunStatus.Running)) return;
+            foreach (var interrupted in runs.Where(run => run.Status == BackupRunStatus.Running))
+                DiagnosticLog.Current.Write(DiagnosticEvent.RunInterrupted, DiagnosticLevel.Warning, jobId: interrupted.JobId, runId: interrupted.RunId);
             runs = runs.Select(r => r.Status == BackupRunStatus.Running
                 ? r with { Status = BackupRunStatus.Interrupted, FinishedUtc = DateTimeOffset.UtcNow,
                     Error = "Предыдущее исполнение не завершилось. Проверьте рабочий каталог и журнал платформы." } : r).ToList();

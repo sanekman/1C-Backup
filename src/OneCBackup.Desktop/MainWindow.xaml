@@ -469,6 +469,14 @@
      <TextBlock Text="Только версия, сборка и система. Настройки баз и пароли не копируются." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" />
      <TextBlock x:Name="BuildInfoStatus" TextWrapping="Wrap" Margin="0,6,0,0" />
     </StackPanel>
+    <StackPanel Margin="0,0,0,18">
+     <TextBlock Text="Диагностика" FontSize="18" FontWeight="SemiBold" />
+     <TextBlock Text="Возникла проблема? Сохраните ZIP и отправьте его для анализа вместе с примерным временем ошибки." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,10" />
+     <WrapPanel><Button x:Name="ExportDiagnosticsButton" Content="Сохранить диагностику…" Click="ExportDiagnostics_Click" Margin="0,0,8,6" />
+      <Button x:Name="OpenLogsButton" Content="Открыть папку логов" Click="OpenLogs_Click" Margin="0,0,0,6" /></WrapPanel>
+     <TextBlock Text="Логи окна и агента: до 14 дней и 50 МБ. В ZIP нет паролей, настроек подключения, исходных файлов и копий. Отправка выполняется вами вручную." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" />
+     <TextBlock x:Name="DiagnosticsStatus" TextWrapping="Wrap" Margin="0,6,0,0" />
+    </StackPanel>
     <Border>
      <StackPanel>
       <TextBlock Text="Фоновая работа" FontSize="18" FontWeight="SemiBold" />

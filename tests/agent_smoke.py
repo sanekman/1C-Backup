@@ -108,6 +108,16 @@ def main():
             assert not any(Path(record["Backup"]["Location"]).exists() for record in second)
             assert (files / "stable.txt").read_text() == "unchanged" and marker.read_text() == "keep unrelated files"
             print("PASS: actual agent full/incremental file jobs, changed/deleted index and safe chain rotation.", flush=True)
+            log_files = list((data / "logs").glob("Agent-*.jsonl"))
+            assert log_files, "Agent did not create diagnostic logs"
+            diagnostic = [json.loads(line) for path in log_files for line in path.read_text(encoding="utf-8").splitlines()]
+            assert any(event["Event"] == "RunStarted" for event in diagnostic)
+            assert any(event["Event"] == "RunFinished" and event["Outcome"] == "Succeeded" for event in diagnostic)
+            assert all(event["Component"] == "Agent" for event in diagnostic)
+            before_files = set(log_files)
+            subprocess.run(base + ["--status"], check=True, capture_output=True, timeout=10)
+            assert set((data / "logs").glob("Agent-*.jsonl")) == before_files, "Status polling created process logs"
+            print("PASS: persistent agent diagnostics, correlated backup stages and no log files from status polling.", flush=True)
         finally:
             if process.poll() is None:
                 subprocess.run(base + ["--stop"], capture_output=True, timeout=10)

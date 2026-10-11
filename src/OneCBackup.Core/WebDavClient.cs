@@ -48,10 +48,15 @@ public sealed class WebDavClient : IDisposable
     {
         HttpResponseMessage response;
         try { response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); }
-        catch (HttpRequestException) { throw new IOException("Не удалось подключиться к WebDAV. Проверьте сеть, адрес и сертификат HTTPS."); }
+        catch (HttpRequestException ex)
+        {
+            DiagnosticLog.Current.Write(DiagnosticEvent.WebDavRequestFailed, DiagnosticLevel.Error, ex);
+            throw new IOException("Не удалось подключиться к WebDAV. Проверьте сеть, адрес и сертификат HTTPS.");
+        }
         if (!response.IsSuccessStatusCode)
         {
             var code = (int)response.StatusCode; response.Dispose();
+            DiagnosticLog.Current.Write(DiagnosticEvent.WebDavRequestFailed, DiagnosticLevel.Error, values: new(Code: code));
             throw new IOException(code switch
             {
                 401 or 403 => "WebDAV отказал в доступе. Проверьте логин, пароль приложения и права чтения.",

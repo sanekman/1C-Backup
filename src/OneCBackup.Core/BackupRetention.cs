@@ -12,6 +12,7 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
         CancellationToken cancellationToken = default)
     {
         if (job.KeepLast < 1) throw new ArgumentException("Нужно сохранять хотя бы одну копию.", nameof(job));
+        DiagnosticLog.Current.Write(DiagnosticEvent.RetentionStarted, jobId: job.Id, storageKind: job.StorageKind, values: new(Count: job.KeepLast));
         var identity = StorageAddress.Identity(job);
         var records = await catalog.ReadAsync(cancellationToken);
         if (newest.JobId != job.Id || newest.StorageIdentity != identity || !records.Contains(newest))
@@ -40,11 +41,13 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
+                DiagnosticLog.Current.Write(DiagnosticEvent.RetentionFailed, DiagnosticLevel.Warning, ex, jobId: job.Id, storageKind: job.StorageKind);
                 failures.Add(new RetentionFailure(record.Id, ex));
                 if (record.Backup.FileSnapshot is not null)
                     foreach (var ancestor in FileBackupChains.Resolve(record, owned)) keep.Add(ancestor.Id);
             }
         }
+        DiagnosticLog.Current.Write(DiagnosticEvent.RetentionCompleted, jobId: job.Id, storageKind: job.StorageKind, values: new(Count: deleted.Count, Code: failures.Count));
         return new RetentionResult(deleted, failures) { Warnings = warnings };
     }
 }
@@ -76,8 +79,11 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
         await gate.WaitAsync(cancellationToken);
         try
         {
+            DiagnosticLog.Current.Write(DiagnosticEvent.DestinationDeliveryStarted, jobId: job.Id, storageKind: job.StorageKind, destinationIndex: 1);
             var stored = await new BackupDelivery(storage, passwords).DeliverAsync(job, completedBackupPath, stagingDirectory, cancellationToken);
+            DiagnosticLog.Current.Write(DiagnosticEvent.DestinationStored, jobId: job.Id, storageKind: job.StorageKind, destinationIndex: 1, values: new(Bytes: stored.Length));
             var record = await catalog.RegisterAsync(job, stored, completedUtc, cancellationToken);
+            DiagnosticLog.Current.Write(DiagnosticEvent.DestinationRegistered, jobId: job.Id, storageKind: job.StorageKind, destinationIndex: 1);
             var retention = await new BackupRetention(catalog, storage).ApplyAsync(job, record, cancellationToken);
             return new CompletedBackup(record, retention);
         }
@@ -96,12 +102,12 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                 completedBackupPath, stagingDirectory, cancellationToken);
             // Keep the prepared archive alive until every active delivery has finished cleanup.
             using var deliveries = new SemaphoreSlim(3, 3);
-            var tasks = job.StorageJobs.Select(DeliverToAsync).ToArray();
+            var tasks = job.StorageJobs.Select((target, index) => DeliverToAsync(target, index + 1)).ToArray();
             var outcomes = await Task.WhenAll(tasks);
             var results = outcomes.Select(outcome => outcome.Result).ToArray();
             return new MultipleBackupCompletion(results, outcomes.Any(outcome => outcome.Cancelled));
 
-            async Task<(DestinationResult Result, bool Cancelled)> DeliverToAsync(BackupJob target)
+            async Task<(DestinationResult Result, bool Cancelled)> DeliverToAsync(BackupJob target, int index)
             {
                 var destination = new BackupDestination { StorageKind = target.StorageKind,
                     DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, KeepLast = target.KeepLast }.Description;
@@ -112,11 +118,14 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                     await deliveries.WaitAsync(cancellationToken);
                     acquired = true;
                     cancellationToken.ThrowIfCancellationRequested();
+                    DiagnosticLog.Current.Write(DiagnosticEvent.DestinationDeliveryStarted, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
                     await storage.PrepareAsync(target, cancellationToken);
                     var stored = (await storage.StoreAsync(prepared.Path, target, cancellationToken))
                         with { ArchivePasswordKey = job.ArchivePasswordKey, FileSnapshot = prepared.FileSnapshot };
                     // A delivered file must enter the ledger even if cancellation was requested meanwhile.
+                    DiagnosticLog.Current.Write(DiagnosticEvent.DestinationStored, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index, values: new(Bytes: stored.Length));
                     record = await catalog.RegisterAsync(target, stored, completedUtc, CancellationToken.None);
+                    DiagnosticLog.Current.Write(DiagnosticEvent.DestinationRegistered, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
                     var retention = await new BackupRetention(catalog, storage).ApplyAsync(target, record, cancellationToken);
                     return (new DestinationResult(destination, record, null,
                         retention.Failures.Select(f => "Очистка: " + f.Error.Message).Concat(retention.Warnings).ToArray()), false);
@@ -128,6 +137,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                 }
                 catch (Exception ex)
                 {
+                    DiagnosticLog.Current.Write(DiagnosticEvent.DestinationFailed, DiagnosticLevel.Error, ex, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
                     var error = ex is IOException && target.StorageKind != StorageKind.Ftp && File.Exists(target.DestinationDirectory)
                         ? "Вместо папки копий указан файл. Выберите другую папку в настройках хранилища." : ex.Message;
                     return (new DestinationResult(destination, record, record is null ? error : null,

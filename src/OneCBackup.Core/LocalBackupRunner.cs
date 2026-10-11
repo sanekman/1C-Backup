@@ -2,7 +2,7 @@ namespace OneCBackup.Core;
 
 /// <summary>Serializes runs and records failures before returning them to the desktop or service.</summary>
 public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion completion,
-    BackupRunHistory history, string workRoot, Func<BackupJob, WebDavClient>? webDavClientFactory = null)
+    BackupRunHistory history, string workRoot, Func<BackupJob, WebDavClient>? webDavClientFactory = null, DiagnosticLog? diagnosticLog = null)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -14,14 +14,21 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
         try
         {
             var id = Guid.NewGuid();
+            var log = diagnosticLog ?? DiagnosticLog.Current;
+            using var diagnosticScope = DiagnosticLog.Use(log, job.Id, id, job.Kind);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            log.Write(DiagnosticEvent.RunStarted, values: new(Count: job.StorageJobs.Count));
             var work = Path.Combine(Path.GetFullPath(job.TemporaryDirectory ?? workRoot), id.ToString("N"));
             var run = new BackupRun(id, job.Id, job.Name, DateTimeOffset.UtcNow, null, BackupRunStatus.Running, work);
             // A corrupt or unwritable history prevents starting an untracked operation.
-            await history.SaveAsync(run, cancellationToken);
+            try { await history.SaveAsync(run, cancellationToken); }
+            catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }
             try
             {
                 Directory.CreateDirectory(work);
+                log.Write(DiagnosticEvent.SourcePreparationStarted);
                 await completion.PrepareAsync(job, cancellationToken);
+                log.Write(DiagnosticEvent.SourcePreparationCompleted);
                 var fileSnapshots = new FileBackupSnapshotStore(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(workRoot))!, "file-snapshots"));
                 IBackupExecutor selectedExecutor = job.Kind switch
                 {
@@ -29,11 +36,14 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                     DatabaseKind.WebDav => new WebDavBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, webDavClientFactory),
                     _ => executor
                 };
+                log.Write(DiagnosticEvent.BackupCreationStarted);
                 var dump = await selectedExecutor.CreateAsync(job, work, cancellationToken);
+                log.Write(DiagnosticEvent.BackupCreationCompleted, values: new(Bytes: new FileInfo(dump).Length));
                 FileBackupManifest? fileManifest = null;
                 if (job.IsFileSnapshot)
                     fileManifest = await FileBackupZip.ReadManifestAsync(dump,
                         await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, completion.Passwords, cancellationToken), cancellationToken);
+                log.Write(DiagnosticEvent.BackupDeliveryStarted);
                 var warnings = new List<string>();
                 if (job.AdditionalDestinations?.Count > 0)
                 {
@@ -63,24 +73,27 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 if (fileManifest is not null && run.Backup is not null)
                 {
                     try { await fileSnapshots.SaveAsync(job.Id, fileManifest, CancellationToken.None); }
-                    catch (Exception ex) { warnings.Add("Индекс инкрементной копии не сохранён; следующая копия будет полной: " + ex.Message); }
+                    catch (Exception ex) { log.Write(DiagnosticEvent.SnapshotCacheFailed, DiagnosticLevel.Warning, ex); warnings.Add("Индекс инкрементной копии не сохранён; следующая копия будет полной: " + ex.Message); }
                 }
                 // Own working files are removed only after verified delivery and registration.
                 if (run.Status == BackupRunStatus.Succeeded)
                 {
                     try { Directory.Delete(work, recursive: true); }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    { warnings.Add("Не удалось удалить рабочие файлы: " + ex.Message); }
+                    { log.Write(DiagnosticEvent.WorkCleanupFailed, DiagnosticLevel.Warning, ex); warnings.Add("Не удалось удалить рабочие файлы: " + ex.Message); }
                 }
                 run = run with { Warnings = warnings };
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            { run = run with { Status = BackupRunStatus.Cancelled, Error = "Операция отменена. Рабочие файлы сохранены." }; }
+            { log.Write(DiagnosticEvent.RunCancelled); run = run with { Status = BackupRunStatus.Cancelled, Error = "Операция отменена. Рабочие файлы сохранены." }; }
             catch (Exception ex)
-            { run = run with { Status = BackupRunStatus.Failed, Error = ex.Message }; }
+            { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); run = run with { Status = BackupRunStatus.Failed, Error = ex.Message }; }
             run = run with { FinishedUtc = DateTimeOffset.UtcNow };
             // Cancellation must not discard the terminal report.
-            await history.SaveAsync(run, CancellationToken.None);
+            try { await history.SaveAsync(run, CancellationToken.None); }
+            catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }
+            log.Write(DiagnosticEvent.RunFinished, run.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded ? DiagnosticLevel.Error : DiagnosticLevel.Info,
+                outcome: run.Status, values: new(Count: run.Warnings?.Count ?? 0, Bytes: run.Backup?.Length, Milliseconds: clock.ElapsedMilliseconds));
             return run;
         }
         finally { gate.Release(); }

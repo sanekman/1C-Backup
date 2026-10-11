@@ -12,6 +12,7 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
     public async Task<RestoredFileBackup> RestoreAsync(BackupRecord selected, BackupJob job, string parentDirectory,
         CancellationToken cancellationToken = default, string? passwordOverride = null, IProgress<FileRestoreProgress>? progress = null)
     {
+        DiagnosticLog.Current.Write(DiagnosticEvent.FileRestoreStarted, jobId: job.Id, sourceKind: job.Kind);
         cancellationToken.ThrowIfCancellationRequested();
         if (selected.Backup.FileSnapshot is null) throw new InvalidDataException("Выбранная копия не является файловым снимком.");
         BackupCopyVerifier.GetStorageJob(selected, job);
@@ -110,8 +111,13 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
             cancellationToken.ThrowIfCancellationRequested();
             Directory.Move(stage, result); ownsStage = false;
             reporter.Report(FileRestorePhase.Completed, chain.Count, chain.Count, 1, 1, true);
+            DiagnosticLog.Current.Write(DiagnosticEvent.FileRestoreCompleted, jobId: job.Id, sourceKind: job.Kind, values: new(Count: final.Files.Count, Code: chain.Count));
             return new(result, final.Files.Count, chain.Count, final.SnapshotId);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        { DiagnosticLog.Current.Write(DiagnosticEvent.FileRestoreCancelled, jobId: job.Id); throw; }
+        catch (Exception ex)
+        { DiagnosticLog.Current.Write(DiagnosticEvent.FileRestoreFailed, DiagnosticLevel.Error, ex, jobId: job.Id); throw; }
         finally
         {
             if (ownsStage) Directory.Delete(stage, recursive: true);

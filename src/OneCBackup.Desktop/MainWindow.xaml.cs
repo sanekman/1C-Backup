@@ -134,13 +134,13 @@ public partial class MainWindow : Window
                 ExternalMonitoringButton.IsEnabled = true;
                 ready = true;
                 try { AgentStartup.IsChecked = CurrentUserAgentStartup.IsEnabled(); }
-                catch (Exception ex) { StartupStatus.Text = "Не удалось прочитать автозапуск: " + ex.Message; }
+                catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); StartupStatus.Text = "Не удалось прочитать автозапуск: " + ex.Message; }
                 await RefreshBackgroundStateAsync();
                 backgroundTimer.Start();
                 UpdateRunControls();
             }
             catch (Exception ex)
-            {
+            { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
                 canSave = false;
                 JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = RunButton.IsEnabled = false;
                 Status.Text = "Не удалось прочитать настройки. Сохранение отключено, чтобы не затереть файл: " + ex.Message;
@@ -236,7 +236,7 @@ public partial class MainWindow : Window
             await RefreshCopiesAsync();
             return true;
         }
-        catch (Exception ex) { Status.Text = "Не удалось сохранить: " + ex.Message; return false; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось сохранить: " + ex.Message; return false; }
         finally
         {
             persisting = false;
@@ -291,7 +291,7 @@ public partial class MainWindow : Window
             agentSettings = updated;
             await LoadEffectiveJobsAsync();
         }
-        catch (Exception ex) { Status.Text = "Не удалось применить настройки агента: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось применить настройки агента: " + ex.Message; }
         finally { UpdateRunControls(); }
     }
 
@@ -408,6 +408,7 @@ public partial class MainWindow : Window
 
     private void UpdateRunControls()
     {
+        if (ExportDiagnosticsButton is not null) ExportDiagnosticsButton.IsEnabled = ready && !jobFileTransfer;
         var idle = !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
         var engineAvailable = !backgroundBusy && !backgroundStarting;
         NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle;
@@ -492,7 +493,7 @@ public partial class MainWindow : Window
     private IDisposable? AcquireEngineOrReport()
     {
         try { return engine.Acquire(); }
-        catch (Exception ex) { Status.Text = "Исполнение недоступно: " + ex.Message; return null; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Исполнение недоступно: " + ex.Message; return null; }
     }
 
     private async Task RefreshBackgroundStateAsync()
@@ -528,7 +529,7 @@ public partial class MainWindow : Window
                 await RefreshHistoryAsync(); await RefreshCopiesAsync();
             }
         }
-        catch (Exception ex) { BackgroundStatus.Text = "Не удалось проверить состояние агента: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); BackgroundStatus.Text = "Не удалось проверить состояние агента: " + ex.Message; }
         finally { refreshingBackground = false; UpdateRunControls(); }
     }
 
@@ -547,7 +548,7 @@ public partial class MainWindow : Window
             launchedAgent = Process.Start(start) ?? throw new InvalidOperationException("Не удалось создать процесс агента.");
             await RefreshBackgroundStateAsync();
         }
-        catch (Exception ex) { backgroundStarting = false; Status.Text = "Не удалось запустить агент: " + ex.Message; UpdateRunControls(); }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); backgroundStarting = false; Status.Text = "Не удалось запустить агент: " + ex.Message; UpdateRunControls(); }
     }
 
     private async void StopBackground_Click(object sender, RoutedEventArgs e)
@@ -560,7 +561,7 @@ public partial class MainWindow : Window
             BackgroundStatus.Text = "Запрошена остановка агента. Дождитесь завершения операции.";
             StopBackgroundButton.IsEnabled = false;
         }
-        catch (Exception ex) { Status.Text = "Не удалось остановить агент: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось остановить агент: " + ex.Message; }
     }
 
     private void SaveStartup_Click(object sender, RoutedEventArgs e)
@@ -574,7 +575,7 @@ public partial class MainWindow : Window
             StartupStatus.Text = AgentStartup.IsChecked == true ? "Агент будет запускаться при входе текущего пользователя в Windows. После переноса папки программы сохраните настройку заново."
                 : "Автозапуск выключен. Уже работающий агент можно остановить кнопкой «Остановить агент».";
         }
-        catch (Exception ex) { StartupStatus.Text = "Не удалось изменить автозапуск: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); StartupStatus.Text = "Не удалось изменить автозапуск: " + ex.Message; }
     }
 
     private void JobsNavigation_Click(object sender, RoutedEventArgs e) => ShowPage("jobs");
@@ -631,7 +632,7 @@ public partial class MainWindow : Window
                 if (dialog.ShowDialog(this) == true) field.Text = dialog.FolderName;
             }
         }
-        catch (Exception ex) { Status.Text = "Не удалось выбрать путь: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось выбрать путь: " + ex.Message; }
     }
     private void HistoryNavigation_Click(object sender, RoutedEventArgs e) => ShowPage("history");
     private async void CopiesNavigation_Click(object sender, RoutedEventArgs e)
@@ -708,7 +709,7 @@ public partial class MainWindow : Window
     private async void RefreshHistory_Click(object sender, RoutedEventArgs e)
     {
         try { if (ready) await RefreshHistoryAsync(); }
-        catch (Exception ex) { Status.Text = "Не удалось обновить историю: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось обновить историю: " + ex.Message; }
     }
 
     private void RunHistory_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -754,7 +755,7 @@ public partial class MainWindow : Window
             FileName = $"1C-Backup-history-{DateTime.Now:yyyyMMdd-HHmmss}.json", DefaultExt = ".json", AddExtension = true };
         if (dialog.ShowDialog(this) != true) return;
         try { await ExportHistoryAsync(dialog.FileName); Status.Text = "История экспортирована: " + dialog.FileName; }
-        catch (Exception ex) { Status.Text = "Не удалось экспортировать историю: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось экспортировать историю: " + ex.Message; }
     }
 
     private async void OpenRunDirectory_Click(object sender, RoutedEventArgs e)
@@ -768,7 +769,7 @@ public partial class MainWindow : Window
             start.ArgumentList.Add(run.WorkDirectory);
             Process.Start(start)?.Dispose();
         }
-        catch (Exception ex) { Status.Text = "Не удалось открыть рабочую папку: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось открыть рабочую папку: " + ex.Message; }
     }
 
     private async Task RefreshCopiesAsync()
@@ -782,7 +783,7 @@ public partial class MainWindow : Window
             IReadOnlyList<BackupVerificationEntry> checks = [];
             string? checkReadError = null;
             try { checks = await verificationState.ReadAsync(); }
-            catch (Exception ex) { checkReadError = ex.Message; }
+            catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); checkReadError = ex.Message; }
             if (version != copiesRefreshVersion) return;
             copyCheckReadError = checkReadError;
             var rows = records.OrderByDescending(record => record.CompletedUtc).Select(record =>
@@ -797,7 +798,7 @@ public partial class MainWindow : Window
             Copies.SelectedItem = Copies.Items.OfType<BackupCopyRow>().FirstOrDefault(row => row.Record.Id == selectedId);
         }
         catch (Exception ex)
-        {
+        { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
             if (version != copiesRefreshVersion) return;
             Copies.ItemsSource = null;
             copyRows = [];
@@ -852,7 +853,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         { outcome = BackupVerificationOutcome.Cancelled; CopyVerificationStatus.Text = "Проверка отменена: " + row.Location; }
         catch (Exception ex)
-        { outcome = BackupVerificationOutcome.Failed; error = ex.Message; CopyVerificationStatus.Text = "Проверка не пройдена: " + row.Location + ". " + ex.Message; }
+        { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); outcome = BackupVerificationOutcome.Failed; error = ex.Message; CopyVerificationStatus.Text = "Проверка не пройдена: " + row.Location + ". " + ex.Message; }
         try
         {
             var message = CopyVerificationStatus.Text;
@@ -903,7 +904,7 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         { CopyVerificationStatus.Text = "Извлечение отменено. Исходный архив сохранён."; }
-        catch (Exception ex) { CopyVerificationStatus.Text = "Не удалось извлечь базу: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); CopyVerificationStatus.Text = "Не удалось извлечь базу: " + ex.Message; }
         finally { copyVerification = null; UpdateRunControls(); }
     }
 
@@ -919,7 +920,7 @@ public partial class MainWindow : Window
             start.ArgumentList.Add(directory);
             Process.Start(start)?.Dispose();
         }
-        catch (Exception ex) { CopyVerificationStatus.Text = "Не удалось открыть папку: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); CopyVerificationStatus.Text = "Не удалось открыть папку: " + ex.Message; }
     }
 
     private async void Run_Click(object sender, RoutedEventArgs e)
@@ -930,7 +931,7 @@ public partial class MainWindow : Window
         manualPending = true;
         UpdateRunControls();
         try { await dispatcher.ExecuteAsync(job); }
-        catch (Exception ex) { Status.Text = "Не удалось запустить задание: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось запустить задание: " + ex.Message; }
         finally { manualPending = false; UpdateRunControls(); }
     }
 
@@ -951,7 +952,7 @@ public partial class MainWindow : Window
             await RefreshHistoryAsync();
             await RefreshCopiesAsync();
         }
-        catch (Exception ex) { Status.Text = "Не удалось выполнить или записать результат: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось выполнить или записать результат: " + ex.Message; }
         finally
         {
             activeRun.Dispose(); activeRun = null;
@@ -985,7 +986,7 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) when (schedulerCancellation.IsCancellationRequested)
         { SchedulerStatus.Text = "Планировщик остановлен."; }
-        catch (Exception ex) { SchedulerStatus.Text = "Планировщик остановлен с ошибкой: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); SchedulerStatus.Text = "Планировщик остановлен с ошибкой: " + ex.Message; }
         finally
         {
             schedulerCancellation.Dispose(); schedulerCancellation = null;

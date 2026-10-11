@@ -6,6 +6,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
     public async Task<int> RunAsync(Guid? runJobId = null, TimeSpan? pollInterval = null,
         Func<BackupRun, Task>? report = null, CancellationToken cancellationToken = default)
     {
+        DiagnosticLog.Current.Write(DiagnosticEvent.AgentStarted);
         using var lease = new BackupEngineCoordinator(directory).Acquire();
         var settings = await new AgentSettingsStore(Path.Combine(directory, "agent.json")).LoadAsync(cancellationToken);
         if (settings.Mode != AgentMode.Standalone)
@@ -42,6 +43,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                 if (await control.StopRequestedAsync(state.SessionId, lifetime.Token))
                 {
                     await control.WriteAsync(state with { Phase = LocalAgentPhase.Stopping, UpdatedUtc = DateTimeOffset.UtcNow }, CancellationToken.None);
+                    DiagnosticLog.Current.Write(DiagnosticEvent.AgentStopRequested);
                     lifetime.Cancel();
                     return;
                 }
@@ -68,11 +70,15 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                     foreach (var removed in failures.Keys.Except(enabledIds).ToArray()) failures.Remove(removed);
                     foreach (var result in results)
                         if (result.Error is null) failures.Remove(result.MonitorId);
-                        else failures[result.MonitorId] = result.MonitorName + ": " + result.Error;
+                        else
+                        {
+                            if (!failures.ContainsKey(result.MonitorId)) DiagnosticLog.Current.Write(DiagnosticEvent.MonitoringFailed, DiagnosticLevel.Warning);
+                            failures[result.MonitorId] = result.MonitorName + ": " + result.Error;
+                        }
                     Volatile.Write(ref monitorError, failures.Count == 0 ? null : string.Join("; ", failures.Values));
                 }
                 catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { throw; }
-                catch (Exception ex) { Volatile.Write(ref monitorError, "Мониторинг SQL: " + ex.Message); }
+                catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.MonitoringFailed, DiagnosticLevel.Error, ex); Volatile.Write(ref monitorError, "Мониторинг SQL: " + ex.Message); }
             } while (await timer.WaitForNextTickAsync(lifetime.Token));
         }
         var executionTask = manual is null
@@ -88,7 +94,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             await completed;
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-        catch (Exception ex) { failure = ex; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.AgentFailed, DiagnosticLevel.Error, ex); failure = ex; }
         finally
         {
             lifetime.Cancel();
@@ -100,6 +106,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                 Phase = error is null ? LocalAgentPhase.Stopped : LocalAgentPhase.Faulted, Error = error,
                 MonitoringError = Volatile.Read(ref monitorError) }, CancellationToken.None);
         }
+        DiagnosticLog.Current.Write(DiagnosticEvent.AgentStopped, failure is null ? DiagnosticLevel.Info : DiagnosticLevel.Error);
         return failure is not null || manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? 1 : 0;
     }
 }

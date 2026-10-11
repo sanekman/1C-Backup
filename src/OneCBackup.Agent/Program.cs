@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using OneCBackup.Core;
 
+var diagnosticExitCode = 0;
 try
 {
     var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OneCBackup");
@@ -28,6 +29,13 @@ try
     }
     if (!Path.IsPathFullyQualified(directory) || poll is < 1 or > 3600)
         throw new ArgumentException("Укажите полный путь рабочего каталога и интервал 1..3600 секунд.");
+    // --status is polled by the GUI: do not create a new process log every few seconds.
+    if (command != "status")
+    {
+        DiagnosticLog.Start(directory, DiagnosticComponent.Agent, typeof(Program).Assembly);
+        AppDomain.CurrentDomain.UnhandledException += (_, error) => DiagnosticLog.Current.Write(DiagnosticEvent.UnhandledException, DiagnosticLevel.Error, error.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, error) => DiagnosticLog.Current.Write(DiagnosticEvent.UnobservedTaskException, DiagnosticLevel.Error, error.Exception);
+    }
     var control = new LocalAgentControlStore(directory);
     if (command is "stop" or "status")
     {
@@ -40,6 +48,7 @@ try
         if (state is null || state.Phase is not (LocalAgentPhase.Running or LocalAgentPhase.Stopping) ||
             !new BackupEngineCoordinator(directory).IsHeldElsewhere())
             throw new InvalidOperationException("Фоновый агент не работает.");
+        DiagnosticLog.Current.Write(DiagnosticEvent.AgentStopRequested);
         await control.RequestStopAsync(state.SessionId);
         Console.WriteLine("Запрошена остановка агента. Дождитесь завершения текущей операции.");
         return 0;
@@ -47,14 +56,16 @@ try
     using var cancellation = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancellation.Cancel(); };
     IFtpCredentialStore credentials = OperatingSystem.IsWindows() ? new WindowsFtpCredentialStore() : new UnsupportedCredentials();
-    return await new LocalAgentHost(directory, new DatabaseBackupExecutor(new BackupProcessRunner()), credentials)
+    var result = await new LocalAgentHost(directory, new DatabaseBackupExecutor(new BackupProcessRunner()), credentials)
         .RunAsync(runJob, TimeSpan.FromSeconds(poll), run =>
         {
             if (!quiet) Console.WriteLine($"{run.JobName}: {run.StatusDescription}. {run.Details}");
             return Task.CompletedTask;
         }, cancellation.Token);
+    diagnosticExitCode = result; return result;
 }
-catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+catch (Exception ex) { diagnosticExitCode = 1; DiagnosticLog.Current.Write(DiagnosticEvent.ProcessError, DiagnosticLevel.Error, ex); Console.Error.WriteLine(ex.Message); return 1; }
+finally { DiagnosticLog.Current.Write(DiagnosticEvent.ProcessStopped, values: new(Code: diagnosticExitCode)); }
 
 sealed class UnsupportedCredentials : IFtpCredentialStore
 {

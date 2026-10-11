@@ -1,5 +1,6 @@
 using System.Windows;
 using System.IO;
+using OneCBackup.Core;
 namespace OneCBackup.Desktop;
 public partial class App : Application
 {
@@ -17,6 +18,10 @@ public partial class App : Application
             DispatcherUnhandledException += (_, error) =>
             { error.Handled = true; DesktopSmoke.Finish(smokeOutput, false, error.Exception.ToString()); };
         }
+        DiagnosticLog.Start(DesktopPaths.DataDirectory, DiagnosticComponent.Desktop, typeof(App).Assembly);
+        DispatcherUnhandledException += (_, error) => DiagnosticLog.Current.Write(DiagnosticEvent.UnhandledException, DiagnosticLevel.Error, error.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, error) => DiagnosticLog.Current.Write(DiagnosticEvent.UnhandledException, DiagnosticLevel.Error, error.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, error) => DiagnosticLog.Current.Write(DiagnosticEvent.UnobservedTaskException, DiagnosticLevel.Error, error.Exception);
         try
         {
             var directory = DesktopPaths.DataDirectory;
@@ -26,6 +31,7 @@ public partial class App : Application
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            DiagnosticLog.Current.Write(DiagnosticEvent.ProcessError, DiagnosticLevel.Error, ex);
             if (smokeOutput is not null) { DesktopSmoke.Finish(smokeOutput, false, ex.ToString()); return; }
             MessageBox.Show("Не удалось открыть рабочий каталог. Возможно, программа уже запущена. " + ex.Message, "1C-Backup");
             Shutdown(1);
@@ -39,6 +45,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        DiagnosticLog.Current.Write(DiagnosticEvent.ProcessStopped, values: new(Code: e.ApplicationExitCode));
         instanceLock?.Dispose();
         base.OnExit(e);
     }

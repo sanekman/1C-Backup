@@ -13,7 +13,7 @@ public partial class MainWindow
             return "";
         }
         catch (Exception ex)
-        {
+        { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
             await RefreshCopiesAsync();
             return " Результат проверки не сохранён: " + ex.Message;
         }

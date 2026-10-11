@@ -16,9 +16,10 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         cancellationToken.ThrowIfCancellationRequested();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckStarted, jobId: job.Id, sourceKind: job.Kind);
         try
         {
-            return job.Kind switch
+            var result = job.Kind switch
             {
                 DatabaseKind.OneCFile => CheckFile(job, timeout.Token),
                 DatabaseKind.SqlServer => await CheckSqlAsync(job, timeout.Token),
@@ -27,13 +28,16 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
                 DatabaseKind.WebDav => await CheckWebDavAsync(job, timeout.Token),
                 _ => throw new NotSupportedException("Неизвестный тип базы.")
             };
+            DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckCompleted, result.Succeeded ? DiagnosticLevel.Info : DiagnosticLevel.Warning,
+                jobId: job.Id, sourceKind: job.Kind, values: new(Code: result.Succeeded ? 0 : 1));
+            return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        { return new(false, "Проверка источника отменена.", true); }
+        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckCompleted, DiagnosticLevel.Warning, jobId: job.Id, sourceKind: job.Kind, values: new(Code: 2)); return new(false, "Проверка источника отменена.", true); }
         catch (OperationCanceledException)
-        { return new(false, "Время проверки источника превысило 30 секунд. Проверьте подключение и доступ."); }
+        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Warning, jobId: job.Id, sourceKind: job.Kind, values: new(Code: 3)); return new(false, "Время проверки источника превысило 30 секунд. Проверьте подключение и доступ."); }
         catch (Exception ex)
-        { return new(false, ex.Message); }
+        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Error, ex, jobId: job.Id, sourceKind: job.Kind); return new(false, ex.Message); }
     }
 
     private async Task<SourceCheckReport> CheckWebDavAsync(BackupJob job, CancellationToken token)

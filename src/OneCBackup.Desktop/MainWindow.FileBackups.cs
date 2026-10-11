@@ -52,7 +52,7 @@ public partial class MainWindow
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         { CopyVerificationStatus.Text = Status.Text = "Восстановление отменено. Исходные данные и копии сохранены."; }
-        catch (Exception ex) { CopyVerificationStatus.Text = Status.Text = "Не удалось восстановить файлы: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); CopyVerificationStatus.Text = Status.Text = "Не удалось восстановить файлы: " + ex.Message; }
         finally { EndCopyExportProgress(); copyVerification = null; UpdateRunControls(); }
     }
 

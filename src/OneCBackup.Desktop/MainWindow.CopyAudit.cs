@@ -59,7 +59,7 @@ public partial class MainWindow
             StorageCheckDetails.Text = "Проверка отменена до чтения каталога копий.";
         }
         catch (Exception ex)
-        {
+        { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
             StorageCheckResults.Header = Status.Text = "Проверка копий не выполнена: " + job.Name;
             StorageCheckDetails.Text = ex.Message;
             StorageCheckResults.IsExpanded = true;

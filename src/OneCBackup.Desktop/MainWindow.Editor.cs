@@ -377,7 +377,7 @@ public partial class MainWindow
             }
             else CopyVerificationStatus.Text = "Для этого задания нет зарегистрированных копий. Создайте копию в разделе «Задания».";
         }
-        catch (Exception ex) { Status.Text = "Не удалось открыть копию: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось открыть копию: " + ex.Message; }
     }
 
     private async void ShowLatestRun_Click(object sender, RoutedEventArgs e)
@@ -393,7 +393,7 @@ public partial class MainWindow
             RunHistory.SelectedItem = latest;
             if (latest is not null) RunHistory.ScrollIntoView(latest);
         }
-        catch (Exception ex) { Status.Text = "Не удалось открыть результат: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось открыть результат: " + ex.Message; }
     }
 }
 

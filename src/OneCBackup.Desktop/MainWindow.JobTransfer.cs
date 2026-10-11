@@ -27,7 +27,7 @@ public partial class MainWindow
             await Task.Run(() => BackupJobTransfer.ExportAsync(job, dialog.FileName));
             Status.Text = "Настройки сохранены: " + dialog.FileName + ". Значения паролей в файл не записываются; на другом компьютере задайте их заново.";
         }
-        catch (Exception ex) { Status.Text = "Не удалось сохранить настройки задания: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось сохранить настройки задания: " + ex.Message; }
         finally { jobFileTransfer = false; UpdateRunControls(); }
     }
 
@@ -71,7 +71,7 @@ public partial class MainWindow
                 + (passwordUnavailable ? " Пароль архива недоступен: задайте его заново на шаге «Хранилища» или явно выключите шифрование." : "");
             Status.Text = "Проверьте импортированное задание в мастере. Изменения ещё не сохранены.";
         }
-        catch (Exception ex) { Status.Text = "Не удалось загрузить настройки задания: " + ex.Message; }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось загрузить настройки задания: " + ex.Message; }
         finally { jobFileTransfer = false; UpdateRunControls(); }
     }
 }

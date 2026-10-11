@@ -47,6 +47,7 @@ public sealed class BackupProcessRunner : IBackupProcessRunner
         };
         foreach (var argument in command.Arguments) info.ArgumentList.Add(argument);
         using var process = new Process { StartInfo = info };
+        DiagnosticLog.Current.Write(DiagnosticEvent.ExternalProcessStarted);
         if (!process.Start()) throw new IOException("Не удалось запустить программу резервного копирования.");
         using var ioCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var drains = Task.WhenAll(errorLog is null ? Task.CompletedTask : CaptureErrorAsync(process.StandardError.BaseStream, errorLog, ioCancellation.Token),
@@ -59,8 +60,9 @@ public sealed class BackupProcessRunner : IBackupProcessRunner
             await exit;
             await drains;
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticLog.Current.Write(DiagnosticEvent.ExternalProcessFailed, DiagnosticLevel.Error, ex);
             ioCancellation.Cancel();
             // Do not release the executor until the platform has stopped writing the dump.
             if (!process.HasExited)
@@ -73,6 +75,7 @@ public sealed class BackupProcessRunner : IBackupProcessRunner
             catch { /* Preserve the original cancellation or log error. */ }
             throw;
         }
+        DiagnosticLog.Current.Write(DiagnosticEvent.ExternalProcessExited, process.ExitCode == 0 ? DiagnosticLevel.Info : DiagnosticLevel.Error, values: new(Code: process.ExitCode));
         return process.ExitCode;
     }
 

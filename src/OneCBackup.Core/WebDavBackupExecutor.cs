@@ -21,7 +21,10 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
         using var client = clientFactory?.Invoke(job) ?? await WebDavClient.OpenAsync(job, token);
         var password = await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, token);
         var previous = await FileBackupBases.ReadAsync(job, client.SourceIdentity, catalog, snapshots, token);
+        DiagnosticLog.Current.Write(DiagnosticEvent.SourceEnumerationStarted);
         var scan = await client.ScanAsync(token);
+        DiagnosticLog.Current.Write(DiagnosticEvent.SourceEnumerated, values: new(Count: scan.Count));
+        var downloaded = 0; long downloadedBytes = 0;
         var oldFiles = previous?.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, FileBackupEntry>(StringComparer.OrdinalIgnoreCase);
         var id = Guid.NewGuid(); Directory.CreateDirectory(workDirectory);
@@ -46,6 +49,7 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
                         try
                         {
                             var hash = await client.DownloadAsync(item, download, token);
+                            downloaded++; downloadedBytes += item.Length;
                             files.Add(new(item.Path, item.Length, hash, modified) { WebDavETag = item.ETag });
                             if (old is null || old.Path != item.Path || old.Length != item.Length || old.Sha256 != hash)
                             {
@@ -70,8 +74,10 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
                 await output.FlushAsync(token); output.Flush(true);
             }
             // A denied/partial listing must never turn missing entries into deletions in a valid backup.
+            DiagnosticLog.Current.Write(DiagnosticEvent.WebDavTransfersCompleted, values: new(Count: downloaded, Bytes: downloadedBytes));
             var after = await client.ScanAsync(token);
             if (!scan.SequenceEqual(after)) throw new IOException("Состав или версии файлов WebDAV изменились во время копирования. Повторите запуск.");
+            DiagnosticLog.Current.Write(DiagnosticEvent.SourceRevalidated, values: new(Count: after.Count));
             await FileBackupZip.VerifyAsync(temporary, password, token);
             token.ThrowIfCancellationRequested(); File.Move(temporary, destination); return destination;
         }

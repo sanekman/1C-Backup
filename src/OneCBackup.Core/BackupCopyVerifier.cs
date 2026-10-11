@@ -9,7 +9,10 @@ public sealed class BackupCopyVerifier(IBackupStorage storage)
         ValidateRecord(record, job);
         job = GetStorageJob(record, job);
         await storage.PrepareAsync(job, cancellationToken);
-        await storage.VerifyAsync(record.Backup, job, cancellationToken);
+        DiagnosticLog.Current.Write(DiagnosticEvent.CopyVerificationStarted, jobId: job.Id, storageKind: job.StorageKind);
+        try { await storage.VerifyAsync(record.Backup, job, cancellationToken);
+            DiagnosticLog.Current.Write(DiagnosticEvent.CopyVerificationCompleted, jobId: job.Id, storageKind: job.StorageKind); }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.CopyVerificationFailed, DiagnosticLevel.Error, ex, jobId: job.Id, storageKind: job.StorageKind); throw; }
     }
 
     internal static string ValidateRecord(BackupRecord record, BackupJob job)

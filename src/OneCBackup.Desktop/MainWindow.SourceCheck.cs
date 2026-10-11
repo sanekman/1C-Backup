@@ -38,7 +38,7 @@ public partial class MainWindow
             StorageCheckDetails.Text = "Проверка отменена до обращения к источнику.";
         }
         catch (Exception ex)
-        {
+        { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
             StorageCheckResults.Header = Status.Text = "Проверка источника не выполнена: " + job.Name;
             StorageCheckDetails.Text = ex.Message;
             StorageCheckResults.IsExpanded = true;
