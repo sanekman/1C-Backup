@@ -41,6 +41,14 @@ def check():
     if previous is not None:
         raise RuntimeError('Installer smoke requires an isolated Windows user without agent autostart')
     installed = False
+    def uninstaller():
+        key_path = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\{142FA512-738F-4BE8-9C31-487B3500B30B}_is1'
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            value = winreg.QueryValueEx(key, 'UninstallString')[0]
+        executable = Path(value.strip('"'))
+        assert executable.parent == installation and executable.name.startswith('unins') and executable.suffix == '.exe'
+        assert executable.is_file(), 'Registered uninstaller missing'
+        return executable
     try:
         run(installer, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=' + str(installation))
         installed = True
@@ -73,7 +81,7 @@ def check():
             raise ctypes.WinError(ctypes.get_last_error())
         try:
             run(installer, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=' + str(installation), success=False)
-            run(installation / 'unins000.exe', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', success=False)
+            run(uninstaller(), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', success=False)
             assert (installation / 'OneCBackup.Desktop.exe').is_file()
             assert marker.read_bytes() == marker_bytes
         finally:
@@ -90,7 +98,7 @@ def check():
         foreign = '"C:\\Portable\\OneCBackup.Agent.exe" --run --quiet'
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_path) as key:
             winreg.SetValueEx(key, startup_name, 0, winreg.REG_SZ, foreign)
-        run(installation / 'unins000.exe', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+        run(uninstaller(), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
         installed = False
         assert marker.read_bytes() == marker_bytes
         assert not (installation / 'OneCBackup.Desktop.exe').exists()
@@ -104,7 +112,7 @@ def check():
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_path) as key:
             winreg.SetValueEx(key, startup_name, 0, winreg.REG_SZ,
                              '"' + str(installation / 'OneCBackup.Agent.exe') + '" --run --quiet')
-        run(installation / 'unins000.exe', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+        run(uninstaller(), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
         installed = False
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_path) as key:
             try:
@@ -120,8 +128,8 @@ def check():
         (artifacts / 'installer-result.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
         print(json.dumps(summary))
     finally:
-        if installed and (installation / 'unins000.exe').exists():
-            run(installation / 'unins000.exe', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+        if installed:
+            run(uninstaller(), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_path) as key:
             try:
                 winreg.DeleteValue(key, startup_name)
