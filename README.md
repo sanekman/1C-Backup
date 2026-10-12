@@ -348,3 +348,5 @@ python tests/ftp/run_integration.py
 Сценарий передачи установщику можно проверить без установки: `python tests/distribution/run_update_handoff.py` на Windows/PowerShell или `--docker` на Linux с заранее загруженным образом Microsoft PowerShell 7.4, указанным в скрипте. В этих проверках реестр и запуск процессов заменены тестовыми; они не подтверждают настоящую установку Windows.
 
 Служба для выполнения заданий до входа в Windows: [настройка и ограничения](docs/windows-service.md).
+
+Цифровая подпись издателя и ограничения SmartScreen: [настройка подписи Windows](docs/windows-signing.md). Текущий preview.42 не подписан; для подписанного выпуска нужен сертификат Code Signing или подключённая служба подписи.

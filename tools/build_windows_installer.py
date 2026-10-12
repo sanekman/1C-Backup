@@ -13,6 +13,8 @@ import zipfile
 
 
 def build(archive_path, compiler, kind="inno"):
+    from windows_signing import configured
+    configured()  # Do not compile an unsigned fallback when signing is required.
     archive_path = Path(archive_path).resolve()
     artifacts = archive_path.parent
     expected = archive_path.with_suffix('.zip.sha256').read_text(encoding='ascii').split()[0]
@@ -63,6 +65,8 @@ def build(archive_path, compiler, kind="inno"):
         else:
             raise ValueError('Unknown installer compiler')
     installer = artifacts / '1C-Backup-windows-x64-setup.exe'
+    from windows_signing import sign_and_verify
+    sign_and_verify([installer])
     with installer.open('rb') as stream:
         if stream.read(2) != b'MZ':
             raise RuntimeError('Installer is not a Windows executable')

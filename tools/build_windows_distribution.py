@@ -169,6 +169,8 @@ def main():
     parser.add_argument("--dotnet", default="dotnet", help="Path to the .NET 10 SDK command")
     parser.add_argument("--skip-publish", action="store_true", help="Package an existing artifacts/windows-x64 publish directory")
     args = parser.parse_args()
+    from windows_signing import configured
+    configured()  # Fail before publishing when release signing is required.
     root = Path(__file__).resolve().parents[1]
     artifacts = root / "artifacts"
     artifacts.mkdir(exist_ok=True)
@@ -217,6 +219,9 @@ def package(publish, artifacts):
     if not {"Microsoft.NETCore.App", "Microsoft.WindowsDesktop.App"}.issubset(frameworks):
         raise RuntimeError("The distribution does not include the .NET and Windows Desktop runtimes")
     version = distribution_version(publish)
+    from windows_signing import sign_and_verify
+    signed = sign_and_verify([publish / name for name in
+        ("OneCBackup.Desktop.exe", "OneCBackup.Agent.exe", "OneCBackup.Desktop.dll", "OneCBackup.Agent.dll", "OneCBackup.Core.dll")])
     files = [file for file in publish.rglob("*") if file.is_file() and file.suffix != ".pdb"]
     destination = artifacts / "1C-Backup-windows-x64.zip"
     handle, temporary_name = tempfile.mkstemp(suffix=".zip.tmp", dir=artifacts)
@@ -226,7 +231,9 @@ def package(publish, artifacts):
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for file in sorted(files):
                 archive.write(file, Path("1C-Backup") / file.relative_to(publish))
-            archive.writestr("1C-Backup/START-HERE.txt", INSTRUCTIONS.replace("\n", "\r\n").encode("utf-8-sig"))
+            instructions = INSTRUCTIONS.replace("Дистрибутив не подписан цифровой подписью.",
+                "Программы подписаны проверенной цифровой подписью издателя.") if signed else INSTRUCTIONS
+            archive.writestr("1C-Backup/START-HERE.txt", instructions.replace("\n", "\r\n").encode("utf-8-sig"))
             archive.writestr("1C-Backup/VERSION.txt", (version + "\r\n").encode("utf-8"))
         with zipfile.ZipFile(temporary) as archive:
             corrupt = archive.testzip()
