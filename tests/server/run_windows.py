@@ -30,17 +30,19 @@ def main():
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
         data = root / "data"
-        def run_tool(arguments):
-            result = subprocess.run(arguments, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        def run_tool(arguments, capture=True):
+            result = subprocess.run(arguments, capture_output=capture, text=True, encoding="utf-8", errors="replace", timeout=90)
             if result.returncode:
-                details = (result.stdout + result.stderr).replace(password, "[redacted]")
+                details = ((result.stdout or "") + (result.stderr or "")).replace(password, "[redacted]")
                 raise RuntimeError("PostgreSQL fixture tool failed: " + Path(arguments[0]).name + "\n" + details[-5000:])
             return result
         run_tool([str(pg / "initdb.exe"), "-D", str(data), "--username=onecbackup", "--auth=scram-sha-256",
                   "--encoding=UTF8", "--locale=C", "--pwfile=" + str(password_file)])
         started = False
         try:
-            run_tool([str(pg / "pg_ctl.exe"), "-D", str(data), "-l", str(root / "postgres.log"), "-o", f"-h 127.0.0.1 -p {port}", "-w", "start"])
+            # A background postgres can inherit pipe handles on Windows even with -l.
+            # pg_ctl performs its own readiness wait; use no redirected pipe for startup.
+            run_tool([str(pg / "pg_ctl.exe"), "-D", str(data), "-l", str(root / "postgres.log"), "-o", f"-h 127.0.0.1 -p {port}", "-w", "start"], capture=False)
             started = True
             connection = root / "connection.txt"
             connection.write_text(f"Host=127.0.0.1;Port={port};Database=postgres;Username=onecbackup;Password={password}")
