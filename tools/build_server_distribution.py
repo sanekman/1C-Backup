@@ -26,11 +26,11 @@ def main():
     subprocess.run([args.dotnet, "publish", "src/OneCBackup.Server", "-c", "Release", "-r", args.runtime,
                     "--self-contained", "true", "-p:RestoreLockedMode=true", "-o", str(output), "-p:Version=" + version], cwd=repository, check=True)
     (output / "VERSION.txt").write_text(version + "\n", encoding="utf-8")
-    (output / "START-HERE.md").write_text((repository / "docs/server-start.md").read_text(), encoding="utf-8")
+    (output / "START-HERE.md").write_text((repository / "docs/server-start.md").read_text(encoding="utf-8"), encoding="utf-8")
     shutil.copy(repository / "deploy/server/server.env.example", output)
     if args.runtime == "linux-x64":
         shutil.copy(repository / "deploy/server/onec-backup-server.service", output)
-    dependency = json.loads((output / "OneCBackup.Server.deps.json").read_text())
+    dependency = json.loads((output / "OneCBackup.Server.deps.json").read_text(encoding="utf-8"))
     if "OneCBackup.Server/" + version not in dependency["libraries"]:
         raise RuntimeError("Published server version mismatch")
     forbidden = {"connection-string.txt", "administrator-password.txt", "certificate-password.txt", "server.pfx", "postgres.env"}
