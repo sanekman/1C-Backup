@@ -41,6 +41,7 @@ VIAddVersionKey "LegalCopyright" "1C-Backup"
 !define MUI_FINISHPAGE_RUN_TEXT "Открыть 1C-Backup"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_COMPONENTS
+!define MUI_DIRECTORYPAGE_VERIFYONLEAVE
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -105,20 +106,34 @@ Function .onInit
 FunctionEnd
 
 Function VerifyDirectory
-  GetFullPathName $INSTDIR "$INSTDIR"
-  ${GetRoot} "$INSTDIR" $0
-  ${If} $INSTDIR == "$0"
-  ${OrIf} $INSTDIR == "$0\"
+  ; Validate only when leaving the directory page or starting a silent install.
+  ; Never rewrite $INSTDIR while NSIS is validating the directory edit control.
+  Push $0
+  Push $1
+  ClearErrors
+  GetFullPathName $1 "$INSTDIR"
+  ${If} ${Errors}
+  ${OrIf} $1 == ""
+    Pop $1
+    Pop $0
+    MessageBox MB_OK|MB_ICONSTOP "Укажите полный путь папки установки, например $LOCALAPPDATA\Programs\1C-Backup." /SD IDOK
     SetErrorLevel 1
     Abort
   ${EndIf}
-  ; Never install directly into the backup profile or user-directory roots.
-  ${If} $INSTDIR == "$LOCALAPPDATA\OneCBackup"
-  ${OrIf} $INSTDIR == "$LOCALAPPDATA"
-  ${OrIf} $INSTDIR == "$PROFILE"
+  ${GetRoot} "$1" $0
+  ${If} $1 == "$0"
+  ${OrIf} $1 == "$0\"
+  ${OrIf} $1 == "$LOCALAPPDATA\OneCBackup"
+  ${OrIf} $1 == "$LOCALAPPDATA"
+  ${OrIf} $1 == "$PROFILE"
+    Pop $1
+    Pop $0
+    MessageBox MB_OK|MB_ICONSTOP "Выберите отдельную папку для программы. Корень диска, папку пользователя и рабочий профиль резервного копирования использовать нельзя. Рекомендуется $LOCALAPPDATA\Programs\1C-Backup." /SD IDOK
     SetErrorLevel 1
     Abort
   ${EndIf}
+  Pop $1
+  Pop $0
 FunctionEnd
 
 Function .onVerifyInstDir
@@ -142,6 +157,21 @@ Section "Программа" MainSection
   SectionIn RO
   Call VerifyDirectory
   Call ProfileAvailable
+  ClearErrors
+  CreateDirectory "$INSTDIR"
+  ${If} ${Errors}
+    MessageBox MB_OK|MB_ICONSTOP "Нет доступа к папке установки. Выберите папку $LOCALAPPDATA\Programs\1C-Backup. Для установки в Program Files нужны права администратора." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
+  ClearErrors
+  GetTempFileName $0 "$INSTDIR"
+  ${If} ${Errors}
+    MessageBox MB_OK|MB_ICONSTOP "Не удалось записать файл в выбранную папку. Выберите папку $LOCALAPPDATA\Programs\1C-Backup либо проверьте права доступа." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
+  Delete "$0"
   SetOutPath "$INSTDIR"
   File /r "${SourceFolder}/*"
   WriteUninstaller "$INSTDIR\unins000.exe"
