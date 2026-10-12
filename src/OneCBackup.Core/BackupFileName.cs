@@ -16,6 +16,6 @@ public static class BackupFileName
         if (safe.Length == 0) safe = "Backup";
         var stamp = (createdAt ?? DateTimeOffset.Now).ToLocalTime().ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture);
         // The date suffix also makes reserved Windows device names (CON, AUX, ...) ordinary filenames.
-        return $"{safe}_{stamp}_{(uniqueId ?? Guid.NewGuid()).ToString("N")[..12]}{suffix}";
+        return $"{safe}_{stamp}_{(uniqueId ?? Guid.NewGuid()).ToString("N")[..6]}{suffix}";
     }
 }

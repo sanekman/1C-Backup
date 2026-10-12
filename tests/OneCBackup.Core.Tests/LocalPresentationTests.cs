@@ -15,7 +15,7 @@ public sealed class LocalPresentationTests
         var created = new DateTimeOffset(2026, 10, 12, 14, 15, 16, TimeSpan.FromHours(10));
         var id = Guid.Parse("12345678-1234-1234-1234-123456789abc");
         var actual = BackupFileName.Create(new() { Name = name }, ".bak.zip", created, id);
-        Assert.Equal(expected + "_" + created.ToLocalTime().ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture) + "_123456781234.bak.zip", actual);
+        Assert.Equal(expected + "_" + created.ToLocalTime().ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture) + "_123456.bak.zip", actual);
         Assert.DoesNotContain(actual, c => char.IsControl(c) || "<>:\"/\\|?*".Contains(c));
     }
 
