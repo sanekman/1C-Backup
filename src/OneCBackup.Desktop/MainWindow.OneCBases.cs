@@ -9,7 +9,7 @@ public partial class MainWindow
 {
     private bool changingOneCBasePicker;
     private int oneCListGeneration, oneCPlatformGeneration;
-    private readonly OneCUserBase manualOneCBase = new("Своя база — указать папку вручную", "", "");
+    private readonly OneCUserBase manualOneCBase = new("Своя база", "", "");
     private OneCSettings ReadOneCSettings(int timeout) => new()
     {
         AutoSelectPlatform = AutoOneCPlatform.IsChecked == true,
@@ -26,12 +26,13 @@ public partial class MainWindow
     private async Task RefreshOneCBasesAsync()
     {
         var generation = ++oneCListGeneration;
-        var selected = OneCBasePicker.SelectedItem as OneCUserBase;
-        OneCBaseListStatus.Text = "Чтение списка запуска 1С…";
+        OneCBaseListStatus.Visibility = Visibility.Visible;
+        OneCBaseListStatus.Text = "Загрузка баз…";
         try
         {
             var list = await Task.Run(OneCUserBases.ReadCurrentUser);
             if (generation != oneCListGeneration) return;
+            var selected = OneCBasePicker.SelectedItem as OneCUserBase;
             changingOneCBasePicker = true;
             try
             {
@@ -39,16 +40,17 @@ public partial class MainWindow
                 OneCBasePicker.SelectedItem = list.Bases.FirstOrDefault(b => b.Directory == selected?.Directory) ?? manualOneCBase;
             }
             finally { changingOneCBasePicker = false; }
-            OneCBaseListStatus.Text = list.Bases.Count == 0 ? "Файловые базы в списке пользователя не найдены. Укажите свою папку базы."
-                : $"Найдено файловых баз: {list.Bases.Count}.";
-            if (list.ServerBases > 0) OneCBaseListStatus.Text += " Серверные базы копируйте заданиями SQL Server или PostgreSQL.";
-            if (list.UnreadableLists > 0) OneCBaseListStatus.Text += " Часть списков недоступна; можно указать базу вручную.";
+            OneCBaseListStatus.Text = list.Bases.Count == 0 ? "Базы не найдены. Укажите папку вручную."
+                : "";
+            if (list.ServerBases > 0) OneCBaseListStatus.Text += " Серверные базы: создайте задание SQL.";
+            if (list.UnreadableLists > 0) OneCBaseListStatus.Text += " Часть списков недоступна.";
+            OneCBaseListStatus.Visibility = OneCBaseListStatus.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         }
         catch (Exception ex)
         {
             if (generation != oneCListGeneration) return;
             DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Warning, ex);
-            OneCBaseListStatus.Text = "Не удалось прочитать список. Укажите свою папку базы вручную.";
+            OneCBaseListStatus.Text = "Список недоступен. Укажите папку вручную.";
         }
     }
     private void OneCSource_Changed(object sender, TextChangedEventArgs e)

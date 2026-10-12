@@ -63,6 +63,22 @@ internal static partial class DesktopSmoke
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 window.UpdateLayout();
             }
+            void AssertComboLabel(string name, string expected)
+            {
+                var combo = Control<ComboBox>(name); combo.ApplyTemplate(); combo.UpdateLayout();
+                var presenter = (ContentPresenter)combo.Template.FindName("SelectionPresenter", combo);
+                static IEnumerable<TextBlock> Texts(DependencyObject parent)
+                {
+                    for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+                    {
+                        var child = VisualTreeHelper.GetChild(parent, i);
+                        if (child is TextBlock text) yield return text;
+                        foreach (var nested in Texts(child)) yield return nested;
+                    }
+                }
+                if (!Texts(presenter).Any(t => t.Text == expected))
+                    throw new InvalidOperationException("Выбранное значение отображается служебным объектом: " + name);
+            }
             void Screenshot(string name, Window? target = null)
             {
                 target ??= window;
@@ -193,12 +209,15 @@ internal static partial class DesktopSmoke
             if (Control<TextBox>("Source").Text != source || Control<TextBox>("OneCPlatformVersion").Text != "8.5"
                 || Control<CheckBox>("AutoOneCPlatform").IsChecked != true)
                 throw new InvalidOperationException("Выбор базы не перенёс папку и версию платформы.");
+            AssertComboLabel("OneCBasePicker", "База из списка");
             basePicker.SelectedItem = ownBase;
+            AssertComboLabel("OneCBasePicker", "Своя база");
             if (Control<TextBox>("Source").Text.Length != 0 || Control<TextBox>("OneCPlatformVersion").Text.Length != 0)
                 throw new InvalidOperationException("Своя база не сбросила версию для выбора самой новой платформы.");
             Control<TextBox>("JobName").Text = "Тестовая база 1С";
             Control<TextBox>("Source").Text = source;
             Control<ComboBox>("OneCMethodPicker").SelectedValue = OneCBackupMethod.FileArchive;
+            AssertComboLabel("OneCMethodPicker", "Архив базы (ZIP)");
             if (Control<TextBlock>("WizardError").IsVisible)
                 throw new InvalidOperationException("Устаревшая ошибка осталась после исправления поля.");
             Screenshot("wizard-base");

@@ -88,8 +88,8 @@ public partial class MainWindow : Window
         Kind.SelectedItem = DatabaseKind.OneCFile;
         OneCMethodPicker.ItemsSource = new Dictionary<OneCBackupMethod, string>
         {
-            [OneCBackupMethod.PlatformDump] = "Выгрузка .dt через платформу 1С",
-            [OneCBackupMethod.FileArchive] = "Архив файла базы без платформы"
+            [OneCBackupMethod.PlatformDump] = "Выгрузка через 1С (.dt)",
+            [OneCBackupMethod.FileArchive] = "Архив базы (ZIP)"
         };
         OneCMethodPicker.SelectedValue = OneCBackupMethod.PlatformDump;
         Storage.ItemsSource = new Dictionary<StorageKind, string>
@@ -417,8 +417,7 @@ public partial class MainWindow : Window
         WebDavPanel.Visibility = WebDavOptionsPanel.Visibility = WebDavCredentialsButton.Visibility = isWebDav ? Visibility.Visible : Visibility.Collapsed;
         FileSourceConsistencyHint.Text = isWebDav ? "Копируются файлы выбранной папки, без единого снимка сервера. Избегайте изменений во время копирования." : "Перед копированием закройте программы, изменяющие эти файлы.";
         UpdateFileBackupControls();
-        if (OneCSourceHelp is not null) OneCSourceHelp.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
-        if (SourceLabel is not null) SourceLabel.Text = isWebDav ? "HTTPS-адрес папки WebDAV" : isFiles ? "Исходный файл или папка" : isOneC ? "Папка базы 1С или файл 1Cv8.1CD" : "Имя базы данных";
+        if (SourceLabel is not null) SourceLabel.Text = isWebDav ? "HTTPS-адрес папки WebDAV" : isFiles ? "Исходный файл или папка" : isOneC ? fileArchive ? "Папка или файл базы" : "Папка базы" : "Имя базы данных";
     }
 
     private void UpdateRunControls()

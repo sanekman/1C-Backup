@@ -200,10 +200,12 @@
     <StackPanel Grid.Column="2"><TextBlock Text="Что копировать" /><ComboBox x:Name="Kind" Margin="0,4,0,10" ItemTemplate="{StaticResource DatabaseKindLabel}" SelectionChanged="Kind_Changed" /></StackPanel>
    </Grid>
    <StackPanel x:Name="OneCBasePickerPanel" Margin="0,0,0,8">
-    <TextBlock Text="База из списка пользователя 1С" />
+    <TextBlock Text="База 1С" />
     <DockPanel Margin="0,4,0,4">
      <Button DockPanel.Dock="Right" Content="Обновить" Click="RefreshOneCBases_Click" Margin="6,0,0,0" Padding="8,5" />
-     <ComboBox x:Name="OneCBasePicker" DisplayMemberPath="DisplayName" SelectionChanged="OneCBase_Changed" />
+     <ComboBox x:Name="OneCBasePicker" DisplayMemberPath="Name" ToolTip="{Binding SelectedItem.Directory, RelativeSource={RelativeSource Self}}" SelectionChanged="OneCBase_Changed">
+      <ComboBox.ItemContainerStyle><Style TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type ComboBoxItem}}"><Setter Property="ToolTip" Value="{Binding Directory}" /></Style></ComboBox.ItemContainerStyle>
+     </ComboBox>
     </DockPanel>
     <TextBlock x:Name="OneCBaseListStatus" FontSize="12" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
    </StackPanel>
@@ -213,7 +215,6 @@
     <Button DockPanel.Dock="Right" x:Name="WebDavCredentialsButton" Content="Логин и пароль…" Click="WebDavCredentials_Click" Padding="10,5" Margin="6,0,0,0" Visibility="Collapsed" />
     <TextBox x:Name="Source" TextChanged="OneCSource_Changed" />
    </DockPanel>
-   <TextBlock x:Name="OneCSourceHelp" Text="Выберите базу из списка или «Своя база» и укажите папку ниже. Список запуска 1С не изменяется." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
    <StackPanel x:Name="WebDavPanel" Visibility="Collapsed">
     <TextBlock x:Name="WebDavCredentialStatus" Text="Подключение ещё не настроено" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6" />
 
