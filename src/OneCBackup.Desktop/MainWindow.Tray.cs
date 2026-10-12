@@ -97,6 +97,7 @@ public partial class MainWindow
     private async Task StopFromTrayAsync(bool exit, Func<Task>? beforeClose = null)
     {
         if (trayStopping) return;
+        if (serviceManaging) { ShowFromTray(); Status.Text = "Дождитесь завершения установки или удаления службы."; return; }
         if (OwnedWindows.Cast<Window>().Any(window => window.IsVisible))
         { ShowFromTray(); Status.Text = "Сначала закройте окно настроек или мониторинга, затем повторите остановку из трея."; return; }
         if (exit) updateCancellation?.Cancel();
@@ -122,6 +123,7 @@ public partial class MainWindow
                 if (DateTimeOffset.UtcNow > deadline) throw new TimeoutException("Запуск агента ещё не завершён. Проверьте его состояние и повторите остановку.");
                 await Task.Delay(200);
             }
+            await StopOwnedServiceAsync();
             var stopped = await new LocalAgentStopper(DesktopPaths.DataDirectory).StopAsync(TimeSpan.FromMinutes(2));
             if (stopped is not null && stopped.ProcessId != Environment.ProcessId)
             {

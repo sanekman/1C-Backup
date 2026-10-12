@@ -129,6 +129,13 @@ Function un.onInit
   SetRegView 64
   SetShellVarContext current
   Call un.ProfileAvailable
+  IfFileExists "$INSTDIR\OneCBackup.Agent.exe" 0 service_check_done
+  ExecWait '"$INSTDIR\OneCBackup.Agent.exe" --registered-service' $0
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "Перед удалением программы удалите службу в настройках 1C-Backup. Задания и копии сохранятся." /SD IDOK
+    Abort
+  ${EndIf}
+  service_check_done:
 FunctionEnd
 
 Section "Программа" MainSection

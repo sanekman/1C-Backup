@@ -83,8 +83,17 @@ begin
 end;
 
 function InitializeUninstall: Boolean;
+var Code: Integer;
 begin
   Result := ProfileAvailable;
+  if Result and FileExists(ExpandConstant('{app}\OneCBackup.Agent.exe')) then begin
+    Result := Exec(ExpandConstant('{app}\OneCBackup.Agent.exe'), '--registered-service', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    if Result then Result := Code = 0;
+    if not Result then begin
+      SuppressibleMsgBox('Перед удалением программы удалите службу в настройках 1C-Backup. Задания и копии сохранятся.', mbError, MB_OK, IDOK);
+      Exit;
+    end;
+  end;
   if not Result then
     SuppressibleMsgBox('Выберите «Выйти полностью» в трее или настройках 1C-Backup. В старой версии остановите автоматическое копирование и закройте окно перед удалением. Задания, история и пароли сохраняются.', mbError, MB_OK, IDOK);
 end;

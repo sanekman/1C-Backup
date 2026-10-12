@@ -135,6 +135,7 @@ public partial class MainWindow : Window
                 await RefreshBackgroundStateAsync();
                 backgroundTimer.Start();
                 UpdateRunControls();
+                await InitializeServiceAsync();
                 _ = InitializeUpdatesAsync();
                 if (Application.Current is App app)
                 {
@@ -438,7 +439,7 @@ public partial class MainWindow : Window
     {
         if (ExportDiagnosticsButton is not null) ExportDiagnosticsButton.IsEnabled = ready && !jobFileTransfer;
         UpdateTray();
-        var idle = !installingUpdate && !trayStopping && !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
+        var idle = !serviceManaging && !installingUpdate && !trayStopping && !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
         var engineAvailable = !backgroundBusy && !backgroundStarting;
         NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle;
         ImportJobSettingsMenuItem.IsEnabled = NewJobButton.IsEnabled && !editorOpen;
@@ -560,7 +561,7 @@ public partial class MainWindow : Window
             }
         }
         catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); BackgroundStatus.Text = "Не удалось проверить состояние агента: " + ex.Message; }
-        finally { refreshingBackground = false; UpdateRunControls(); }
+        finally { refreshingBackground = false; UpdateRunControls(); RefreshService(); }
     }
 
     private async void StartBackground_Click(object sender, RoutedEventArgs e)
@@ -570,6 +571,12 @@ public partial class MainWindow : Window
         if (!File.Exists(executable)) { Status.Text = "Фоновый агент не найден рядом с приложением. Используйте полный дистрибутив Windows."; return; }
         try
         {
+            if (OwnService() is not null)
+            {
+                WindowsAgentService.Start(executable, DesktopPaths.DataDirectory);
+                await RefreshBackgroundStateAsync(); return;
+            }
+            if (WindowsAgentService.QueryInfo() is not null) throw new InvalidOperationException("Служба относится к другому профилю. Остановите или удалите её перед запуском другого агента.");
             var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true };
             start.ArgumentList.Add("--run"); start.ArgumentList.Add("--quiet");
             start.ArgumentList.Add("--data-dir");

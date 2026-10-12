@@ -514,6 +514,21 @@
      <TextBlock x:Name="BuildInfoStatus" TextWrapping="Wrap" Margin="0,6,0,0" />
     </StackPanel>
     <StackPanel Margin="0,0,0,18">
+     <TextBlock Text="Служба Windows" FontSize="18" FontWeight="SemiBold" />
+     <TextBlock Text="Выполняет задания до входа в Windows под вашей учётной записью. Использует существующие задания и историю. Для сети указывайте UNC-пути: подключённые буквы дисков службе недоступны." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,8" />
+     <TextBlock x:Name="ServiceStatus" Text="Состояние проверяется…" TextWrapping="Wrap" />
+     <Expander Header="Установка службы" Margin="0,8,0,8"><StackPanel>
+      <TextBlock x:Name="ServiceAccount" Margin="0,8,0,6" TextWrapping="Wrap" />
+      <TextBlock Text="Пароль Windows (не PIN). Установка и удаление потребуют подтверждения администратора. При смене пароля переустановите службу." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
+      <PasswordBox x:Name="ServicePassword" MaxLength="512" Margin="0,8,0,8" AutomationProperties.Name="Пароль учётной записи Windows для службы" />
+      <Button x:Name="InstallServiceButton" Content="Установить службу…" IsEnabled="False" HorizontalAlignment="Left" Click="InstallService_Click" />
+     </StackPanel></Expander>
+     <WrapPanel><Button x:Name="StartServiceButton" Content="Запустить" IsEnabled="False" Click="StartService_Click" Margin="0,0,8,6" />
+      <Button x:Name="StopServiceButton" Content="Остановить" IsEnabled="False" Click="StopService_Click" Margin="0,0,8,6" />
+      <Button x:Name="RemoveServiceButton" Content="Удалить службу…" IsEnabled="False" Click="RemoveService_Click" Margin="0,0,0,6" /></WrapPanel>
+     <TextBlock Text="Перед удалением программы удалите службу здесь. Сохранённые пароли для службы дополнительно защищены шифрованием Windows и правами доступа." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
+    </StackPanel>
+    <StackPanel Margin="0,0,0,18">
      <TextBlock Text="Обновления" FontSize="18" FontWeight="SemiBold" />
      <CheckBox x:Name="AutomaticUpdateChecks" Content="Проверять новые версии автоматически" IsChecked="True" Click="UpdatePreference_Click" Margin="0,10,0,6" />
      <CheckBox x:Name="UpdateOnExit" Content="Обновлять при полном выходе из программы" Click="UpdatePreference_Click" Margin="0,0,0,6" />

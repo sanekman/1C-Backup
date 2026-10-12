@@ -16,6 +16,12 @@ internal static class CurrentUserAgentStartup
         if (string.Equals(key?.GetValue(ValueName) as string, legacy, StringComparison.OrdinalIgnoreCase))
             key!.SetValue(ValueName, TrayCommand, RegistryValueKind.String);
     }
+    public static void RemoveOwnedEntry()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(KeyPath, writable: true);
+        if (string.Equals(key?.GetValue(ValueName) as string, TrayCommand, StringComparison.OrdinalIgnoreCase))
+            key!.DeleteValue(ValueName, false);
+    }
     public static bool IsEnabled()
     {
         using var key = Registry.CurrentUser.OpenSubKey(KeyPath);

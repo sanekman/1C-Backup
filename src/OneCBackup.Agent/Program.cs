@@ -5,6 +5,17 @@ using OneCBackup.Core;
 var diagnosticExitCode = 0;
 try
 {
+    if (args.Length == 1 && args[0] == "--registered-service")
+    {
+        if (!OperatingSystem.IsWindows()) return 0;
+        var registered = WindowsAgentService.QueryInfo();
+        return registered?.ImagePath.StartsWith("\"" + Environment.ProcessPath + "\" --service ", StringComparison.OrdinalIgnoreCase) == true ? 10 : 0;
+    }
+    if (args.Length == 2 && args[0] == "--manage-service")
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Служба доступна только в Windows.");
+        return await WindowsServiceHost.ManageAsync(args[1]);
+    }
     var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OneCBackup");
     Guid? runJob = null;
     var command = "run";
@@ -17,12 +28,13 @@ try
             case "--data-dir" when i + 1 < args.Length: directory = args[++i]; break;
             case "--run-job" when i + 1 < args.Length: runJob = Guid.Parse(args[++i]); break;
             case "--poll-seconds" when i + 1 < args.Length: poll = int.Parse(args[++i]); break;
+            case "--service": command = "service"; break;
             case "--run": command = "run"; break;
             case "--quiet": quiet = true; break;
             case "--stop": command = "stop"; break;
             case "--status": command = "status"; break;
             case "--help":
-                Console.WriteLine("OneCBackup.Agent [--run | --run-job GUID | --stop | --status] [--data-dir PATH] [--poll-seconds 1..3600]");
+                Console.WriteLine("OneCBackup.Agent [--run | --service | --run-job GUID | --stop | --status] [--data-dir PATH] [--poll-seconds 1..3600]");
                 return 0;
             default: throw new ArgumentException("Неизвестный или неполный аргумент: " + args[i]);
         }
@@ -35,6 +47,17 @@ try
         DiagnosticLog.Start(directory, DiagnosticComponent.Agent, typeof(Program).Assembly);
         AppDomain.CurrentDomain.UnhandledException += (_, error) => DiagnosticLog.Current.Write(DiagnosticEvent.UnhandledException, DiagnosticLevel.Error, error.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, error) => DiagnosticLog.Current.Write(DiagnosticEvent.UnobservedTaskException, DiagnosticLevel.Error, error.Exception);
+    }
+    if (command == "service")
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Служба доступна только в Windows.");
+        if (runJob is not null) throw new ArgumentException("Служба выполняет сохранённое расписание, --run-job не поддерживается.");
+        diagnosticExitCode = WindowsServiceHost.Run(directory, poll); return diagnosticExitCode;
+    }
+    if (OperatingSystem.IsWindows() && await WindowsServiceProfile.LoadAsync(directory) is { } profile)
+    {
+        profile.AssertCurrentUser();
+        WindowsFtpCredentialStore.SetServiceCache(new(directory, profile.OwnerSid));
     }
     var control = new LocalAgentControlStore(directory);
     if (command is "stop" or "status")

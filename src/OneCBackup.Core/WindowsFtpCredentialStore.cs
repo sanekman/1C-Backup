@@ -12,6 +12,25 @@ namespace OneCBackup.Core;
 public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
 {
     private readonly string prefix;
+    private static WindowsServiceCredentialCache? serviceCache;
+    public static void SetServiceCache(WindowsServiceCredentialCache? cache) => serviceCache = cache;
+    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV") && serviceCache is not null;
+    public async Task ExportForServiceAsync(string key, CancellationToken token = default)
+    {
+        var value = await GetAsync(key, token);
+        if (HasServiceCache) serviceCache!.Save(prefix, key, value);
+    }
+    public static async Task ExportProfileForServiceAsync(IReadOnlyList<BackupJob> jobs, IReadOnlyList<BackupRecord> copies)
+    {
+        var ftp = new WindowsFtpCredentialStore(); var archive = new WindowsFtpCredentialStore("Archive");
+        var dav = new WindowsFtpCredentialStore("WebDAV");
+        foreach (var key in jobs.SelectMany(job => job.StorageJobs).Where(job => job.StorageKind == StorageKind.Ftp)
+            .Select(job => job.Ftp?.CredentialKey).OfType<string>().Distinct()) await ftp.ExportForServiceAsync(key);
+        foreach (var key in jobs.Where(job => job.Kind == DatabaseKind.WebDav).Select(job => job.WebDav?.CredentialKey)
+            .OfType<string>().Distinct()) await dav.ExportForServiceAsync(key);
+        foreach (var key in jobs.Select(job => job.ArchivePasswordKey).Concat(copies.Select(copy => copy.Backup.ArchivePasswordKey))
+            .OfType<string>().Distinct()) await archive.ExportForServiceAsync(key);
+    }
     public WindowsFtpCredentialStore() : this("FTP") { }
     internal WindowsFtpCredentialStore(string prefix) => this.prefix = prefix;
     private const uint Generic = 1;
@@ -29,6 +48,7 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
         if (!Native.CredRead(Target(key), Generic, 0, out var pointer))
         {
             var code = Marshal.GetLastWin32Error();
+            if (HasServiceCache && serviceCache!.Read(prefix, key) is { } cached) return Task.FromResult(cached);
             if (code == 1168) throw new InvalidOperationException("Не сохранены учётные данные FTP: " + key);
             throw new Win32Exception(code, "Не удалось прочитать учётные данные FTP из Windows.");
         }
@@ -41,7 +61,8 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
             try
             {
                 if (bytes.Length != 0) Marshal.Copy(credential.Blob, bytes, 0, bytes.Length);
-                return Task.FromResult(new NetworkCredential(Marshal.PtrToStringUni(credential.Username) ?? "", Encoding.Unicode.GetString(bytes)));
+                var value = new NetworkCredential(Marshal.PtrToStringUni(credential.Username) ?? "", Encoding.Unicode.GetString(bytes));
+                return Task.FromResult(value);
             }
             finally { CryptographicOperations.ZeroMemory(bytes); }
         }
@@ -67,6 +88,7 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
                 Blob = blob, BlobSize = (uint)bytes.Length, Persist = 2 /* local machine, current user */ };
             if (!Native.CredWrite(ref credential, 0))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось сохранить учётные данные FTP в Windows.");
+            if (HasServiceCache) serviceCache!.Save(prefix, key, new NetworkCredential(username, password));
         }
         finally
         {
@@ -84,6 +106,7 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
     /// <summary>Explicit deletion only; jobs may share a credential reference.</summary>
     public bool Delete(string key)
     {
+        if (HasServiceCache) serviceCache!.Delete(prefix, key);
         if (Native.CredDelete(Target(key), Generic, 0)) return true;
         var code = Marshal.GetLastWin32Error();
         if (code == 1168) return false;
