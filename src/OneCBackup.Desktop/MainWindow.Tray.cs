@@ -20,11 +20,11 @@ public partial class MainWindow
     {
         try
         {
-            var resource = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/one-c-backup.ico"));
+            var resource = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/one-c-backup-tray.ico"));
             if (resource is not null)
             {
                 using (resource.Stream)
-                using (var original = new System.Drawing.Icon(resource.Stream)) trayImage = (System.Drawing.Icon)original.Clone();
+                using (var original = new System.Drawing.Icon(resource.Stream, Forms.SystemInformation.SmallIconSize)) trayImage = (System.Drawing.Icon)original.Clone();
             }
             trayImage ??= (System.Drawing.Icon)System.Drawing.SystemIcons.Shield.Clone();
             trayMenu = new Forms.ContextMenuStrip();

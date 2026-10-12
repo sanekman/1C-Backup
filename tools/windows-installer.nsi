@@ -155,6 +155,11 @@ Section "Ярлык на рабочем столе" DesktopSection
   CreateShortCut "$DESKTOP\1C-Backup.lnk" "$INSTDIR\OneCBackup.Desktop.exe"
 SectionEnd
 
+Function .onInstSuccess
+  ; Refresh shell icon caches after replacing the EXE at the same path.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+FunctionEnd
+
 Section "Uninstall"
   Call un.ProfileAvailable
   ReadRegStr $0 HKCU "${RunKey}" "OneCBackupAgent"
