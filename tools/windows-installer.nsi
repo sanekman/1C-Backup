@@ -134,6 +134,8 @@ Function VerifyDirectory
   ${EndIf}
   Pop $1
   Pop $0
+  ; A corrected path must clear the prior failed validation exit code.
+  SetErrorLevel 0
 FunctionEnd
 
 Function .onVerifyInstDir
