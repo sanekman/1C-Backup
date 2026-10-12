@@ -82,9 +82,13 @@ public sealed class GitHubApplicationUpdates(HttpClient client)
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     public static HttpClient CreateClient() => new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(10) };
 
+    // RFC 6750 b64token: GitHub PATs and standard bearer credentials (including JWTs).
+    public static bool IsValidToken(string token) => token.Length is >= 1 and <= 16384
+        && Regex.IsMatch(token, @"\A[A-Za-z0-9._~+/\-]+=*\z");
+
     private static HttpRequestMessage Request(string path, string? token, bool raw = false)
     {
-        if (token is not null && (token.Length is < 1 or > 1024 || token.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '_' and not '-')))
+        if (token is not null && (!IsValidToken(token)))
             throw new ArgumentException("Некорректный токен GitHub.");
         var request = new HttpRequestMessage(HttpMethod.Get, Api + path)
         { Version = HttpVersion.Version11, VersionPolicy = HttpVersionPolicy.RequestVersionExact };

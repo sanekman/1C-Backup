@@ -55,6 +55,22 @@ public sealed class ApplicationUpdateTests : IDisposable
         Assert.Equal(2, requests);
     }
 
+    [Theory]
+    [InlineData("abc.def_ghi-jkl~123+/==")]
+    [InlineData("ghp_fixture")]
+    public async Task StandardBearerTokenCharactersAreAcceptedWithoutBeingPlacedInUrl(string secret)
+    {
+        using var client = new HttpClient(new Handler((request, _) =>
+        {
+            Assert.Equal(secret, request.Headers.Authorization!.Parameter);
+            Assert.DoesNotContain(secret, request.RequestUri!.ToString());
+            return Task.FromResult(Json(Array.Empty<object>()));
+        }));
+        Assert.Null(await new GitHubApplicationUpdates(client).CheckAsync("0.1.0-preview.40", true, secret));
+        Assert.False(GitHubApplicationUpdates.IsValidToken("token\r\nInjected: header"));
+        Assert.False(GitHubApplicationUpdates.IsValidToken("token with spaces"));
+    }
+
     [Fact]
     public async Task StableChannelExcludesPreviewAndPublishedFlagMismatch()
     {

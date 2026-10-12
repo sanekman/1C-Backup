@@ -14,7 +14,7 @@ public sealed class WindowsUpdateCredentialStore
     }
     public void Save(string secret)
     {
-        if (secret.Length is < 1 or > 1024 || secret.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '_' and not '-')) throw new ArgumentException("Введите токен GitHub без пробелов и переводов строк.");
+        if (secret.Length is < 1 or > 1024 || !GitHubApplicationUpdates.IsValidToken(secret)) throw new ArgumentException("Введите токен GitHub без пробелов и переводов строк.");
         store.Save(Key, "github", secret);
     }
     public void Delete() => store.Delete(Key);
