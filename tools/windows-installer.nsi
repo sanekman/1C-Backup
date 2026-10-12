@@ -18,8 +18,8 @@ Unicode true
   !error "UninstallFiles is required"
 !endif
 
-Icon "../src/OneCBackup.Desktop/Assets/one-c-backup.ico"
-UninstallIcon "../src/OneCBackup.Desktop/Assets/one-c-backup.ico"
+!define MUI_ICON "../src/OneCBackup.Desktop/Assets/one-c-backup.ico"
+!define MUI_UNICON "../src/OneCBackup.Desktop/Assets/one-c-backup.ico"
 Name "1C-Backup"
 OutFile "${OutputFolder}/1C-Backup-windows-x64-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\1C-Backup"
