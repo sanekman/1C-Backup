@@ -23,9 +23,11 @@ def fixture_source(root, output, result):
 !include "FileFunc.nsh"
 Name "1C-Backup directory verification fixture"
 OutFile "OUTPUT"
-InstallDir "$LOCALAPPDATA\Programs\1C-Backup-test"
+InstallDir "$PROGRAMFILES64\1C-Backup-test"
 RequestExecutionLevel user
 Var Phase
+Var InstallOwnerLocalData
+Var InstallOwnerProfile
 POLICY
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW FixtureShow
 !insertmacro MUI_PAGE_DIRECTORY
@@ -33,7 +35,11 @@ POLICY
 !insertmacro MUI_LANGUAGE "Russian"
 Function .onInit
  SetShellVarContext current
+ StrCpy $InstallOwnerLocalData "$LOCALAPPDATA"
+ StrCpy $InstallOwnerProfile "$PROFILE"
  StrCpy $Phase 0
+ IfSilent 0 +2
+ SetErrorLevel 1
 FunctionEnd
 Function FixtureShow
  GetFunctionAddress $0 FixtureCheck
@@ -73,6 +79,12 @@ def check(compiler):
         lines = result.read_text().splitlines()
         assert len(lines) == 3, lines
         assert all(line.split('|')[1] == '1' for line in lines), 'Install button disabled for valid path: ' + repr(lines)
+        # A never-created destination must validate and clear a prior failure exit code.
+        fresh = base / 'new parent' / 'new destination'
+        assert not fresh.exists()
+        accepted = subprocess.run([str(exe), '/S', '/D=' + str(fresh)], timeout=15)
+        assert accepted.returncode == 0, 'New directory rejected: ' + str(fresh)
+        assert not fresh.exists(), 'Fixture must not create an installation directory'
         # Silent installs also validate roots/profile directories, before any writes.
         for folder in [Path(os.environ['LOCALAPPDATA']).anchor, os.environ['LOCALAPPDATA'],
                        str(Path(os.environ['LOCALAPPDATA']) / 'OneCBackup'), os.environ['USERPROFILE']]:

@@ -43,7 +43,7 @@ def check():
     installed = False
     def uninstaller():
         key_path = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\{142FA512-738F-4BE8-9C31-487B3500B30B}_is1'
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
             value = winreg.QueryValueEx(key, 'UninstallString')[0]
         executable = Path(value.strip('"'))
         assert executable.parent == installation and executable.name.startswith('unins') and executable.suffix == '.exe'

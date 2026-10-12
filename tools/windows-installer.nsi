@@ -22,8 +22,8 @@ Unicode true
 !define MUI_UNICON "../src/OneCBackup.Desktop/Assets/one-c-backup.ico"
 Name "1C-Backup"
 OutFile "${OutputFolder}/1C-Backup-windows-x64-setup.exe"
-InstallDir "$LOCALAPPDATA\Programs\1C-Backup"
-RequestExecutionLevel user
+InstallDir "$PROGRAMFILES64\1C-Backup"
+RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 ShowInstDetails show
 ShowUninstDetails show
@@ -36,9 +36,10 @@ VIAddVersionKey "LegalCopyright" "1C-Backup"
 
 !define UninstallKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\{142FA512-738F-4BE8-9C31-487B3500B30B}_is1"
 !define RunKey "Software\Microsoft\Windows\CurrentVersion\Run"
+Var InstallOwnerLocalData
+Var InstallOwnerProfile
 !define MUI_ABORTWARNING
-!define MUI_FINISHPAGE_RUN "$INSTDIR\OneCBackup.Desktop.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "Открыть 1C-Backup"
+!define MUI_FINISHPAGE_TEXT "1C-Backup установлен. Запустите программу из меню «Пуск»: задания и настройки будут открыты в профиле вашего пользователя."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_COMPONENTS
 !define MUI_DIRECTORYPAGE_VERIFYONLEAVE
@@ -53,7 +54,7 @@ VIAddVersionKey "LegalCopyright" "1C-Backup"
 ; Opening an existing lock with no sharing matches the desktop/agent lease.
 ; Missing files are allowed; sharing/access errors refuse installation and uninstall.
 !macro CheckLock FileName
-  StrCpy $0 "$LOCALAPPDATA\OneCBackup\${FileName}"
+  StrCpy $0 "$InstallOwnerLocalData\OneCBackup\${FileName}"
   System::Call 'kernel32::CreateFileW(w r0, i 0xC0000000, i 0, p 0, i 3, i 128, p 0) p .r1 ?e'
   Pop $2
   ${If} $1 = -1
@@ -83,6 +84,59 @@ FunctionEnd
 !insertmacro ProfileCheck ""
 !insertmacro ProfileCheck "un."
 
+!macro CheckProgramFile FileName
+  StrCpy $0 "$INSTDIR\${FileName}"
+  System::Call 'kernel32::CreateFileW(w r0, i 0xC0000000, i 0, p 0, i 3, i 128, p 0) p .r1 ?e'
+  Pop $2
+  ${If} $1 = -1
+    ${If} $2 != 2
+    ${AndIf} $2 != 3
+      MessageBox MB_OK|MB_ICONSTOP "Файлы программы используются или недоступны. Закройте 1C-Backup через «Выйти полностью» и остановите службу, в том числе в других сеансах Windows." /SD IDOK
+      SetErrorLevel 1
+      Abort
+    ${EndIf}
+  ${Else}
+    System::Call 'kernel32::CloseHandle(p r1) i'
+  ${EndIf}
+!macroend
+!macro ProgramCheck Prefix
+Function ${Prefix}ProgramAvailable
+  Push $0
+  Push $1
+  Push $2
+  !insertmacro CheckProgramFile "OneCBackup.Desktop.exe"
+  !insertmacro CheckProgramFile "OneCBackup.Agent.exe"
+  !insertmacro CheckProgramFile "OneCBackup.Desktop.dll"
+  !insertmacro CheckProgramFile "OneCBackup.Agent.dll"
+  !insertmacro CheckProgramFile "OneCBackup.Core.dll"
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+!macroend
+!insertmacro ProgramCheck ""
+!insertmacro ProgramCheck "un."
+
+Function VerifyServiceLocation
+  Push $0
+  Push $1
+  Push $2
+  ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Services\OneCBackupAgent" "ImagePath"
+  ${If} $0 != ""
+    StrCpy $1 '"$INSTDIR\OneCBackup.Agent.exe" --service '
+    StrLen $2 $1
+    StrCpy $0 $0 $2
+    ${If} $0 != $1
+      MessageBox MB_OK|MB_ICONSTOP "Служба 1C-Backup зарегистрирована в другой папке. Перед переносом программы остановите и удалите службу в настройках прежней версии. Задания и копии сохранятся." /SD IDOK
+      SetErrorLevel 1
+      Abort
+    ${EndIf}
+  ${EndIf}
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
 Function .onInit
   ${IfNot} ${RunningX64}
     MessageBox MB_OK|MB_ICONSTOP "Нужна 64-разрядная Windows 10 22H2 или Windows 11." /SD IDOK
@@ -102,6 +156,9 @@ Function .onInit
     Abort
   ${EndIf}
   SetShellVarContext current
+  StrCpy $InstallOwnerLocalData "$LOCALAPPDATA"
+  StrCpy $InstallOwnerProfile "$PROFILE"
+  SetShellVarContext all
   Call ProfileAvailable
 FunctionEnd
 
@@ -111,24 +168,27 @@ Function VerifyDirectory
   Push $0
   Push $1
   ClearErrors
-  GetFullPathName $1 "$INSTDIR"
-  ${If} ${Errors}
+  ; NSIS GetFullPathName can fail for a destination that does not exist yet.
+  ; Win32 GetFullPathNameW normalizes a new directory without requiring it to exist.
+  System::Call 'kernel32::GetFullPathNameW(w "$INSTDIR", i ${NSIS_MAX_STRLEN}, w .r1, p 0) i .r0'
+  ${If} $0 == 0
+  ${OrIf} $0 >= ${NSIS_MAX_STRLEN}
   ${OrIf} $1 == ""
     Pop $1
     Pop $0
-    MessageBox MB_OK|MB_ICONSTOP "Укажите полный путь папки установки, например $LOCALAPPDATA\Programs\1C-Backup." /SD IDOK
+    MessageBox MB_OK|MB_ICONSTOP "Укажите полный путь папки установки, например $PROGRAMFILES64\1C-Backup." /SD IDOK
     SetErrorLevel 1
     Abort
   ${EndIf}
   ${GetRoot} "$1" $0
   ${If} $1 == "$0"
   ${OrIf} $1 == "$0\"
-  ${OrIf} $1 == "$LOCALAPPDATA\OneCBackup"
-  ${OrIf} $1 == "$LOCALAPPDATA"
-  ${OrIf} $1 == "$PROFILE"
+  ${OrIf} $1 == "$InstallOwnerLocalData\OneCBackup"
+  ${OrIf} $1 == "$InstallOwnerLocalData"
+  ${OrIf} $1 == "$InstallOwnerProfile"
     Pop $1
     Pop $0
-    MessageBox MB_OK|MB_ICONSTOP "Выберите отдельную папку для программы. Корень диска, папку пользователя и рабочий профиль резервного копирования использовать нельзя. Рекомендуется $LOCALAPPDATA\Programs\1C-Backup." /SD IDOK
+    MessageBox MB_OK|MB_ICONSTOP "Выберите отдельную папку для программы. Корень диска, папку пользователя и рабочий профиль резервного копирования использовать нельзя. Рекомендуется $PROGRAMFILES64\1C-Backup." /SD IDOK
     SetErrorLevel 1
     Abort
   ${EndIf}
@@ -145,31 +205,37 @@ FunctionEnd
 Function un.onInit
   SetRegView 64
   SetShellVarContext current
+  StrCpy $InstallOwnerLocalData "$LOCALAPPDATA"
+  StrCpy $InstallOwnerProfile "$PROFILE"
+  SetShellVarContext all
   Call un.ProfileAvailable
-  IfFileExists "$INSTDIR\OneCBackup.Agent.exe" 0 service_check_done
-  ExecWait '"$INSTDIR\OneCBackup.Agent.exe" --registered-service' $0
-  ${If} $0 != 0
+  ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Services\OneCBackupAgent" "ImagePath"
+  StrCpy $1 '"$INSTDIR\OneCBackup.Agent.exe" --service '
+  StrLen $2 $1
+  StrCpy $0 $0 $2
+  ${If} $0 == $1
     MessageBox MB_OK|MB_ICONSTOP "Перед удалением программы удалите службу в настройках 1C-Backup. Задания и копии сохранятся." /SD IDOK
     Abort
   ${EndIf}
-  service_check_done:
 FunctionEnd
 
 Section "Программа" MainSection
   SectionIn RO
   Call VerifyDirectory
+  Call VerifyServiceLocation
   Call ProfileAvailable
+  Call ProgramAvailable
   ClearErrors
   CreateDirectory "$INSTDIR"
   ${If} ${Errors}
-    MessageBox MB_OK|MB_ICONSTOP "Нет доступа к папке установки. Выберите папку $LOCALAPPDATA\Programs\1C-Backup. Для установки в Program Files нужны права администратора." /SD IDOK
+    MessageBox MB_OK|MB_ICONSTOP "Нет доступа к папке установки. Проверьте права администратора и доступ к $PROGRAMFILES64\1C-Backup." /SD IDOK
     SetErrorLevel 1
     Abort
   ${EndIf}
   ClearErrors
   GetTempFileName $0 "$INSTDIR"
   ${If} ${Errors}
-    MessageBox MB_OK|MB_ICONSTOP "Не удалось записать файл в выбранную папку. Выберите папку $LOCALAPPDATA\Programs\1C-Backup либо проверьте права доступа." /SD IDOK
+    MessageBox MB_OK|MB_ICONSTOP "Не удалось записать файл в выбранную папку. Выберите папку $PROGRAMFILES64\1C-Backup либо проверьте права доступа." /SD IDOK
     SetErrorLevel 1
     Abort
   ${EndIf}
@@ -179,15 +245,15 @@ Section "Программа" MainSection
   WriteUninstaller "$INSTDIR\unins000.exe"
   CreateDirectory "$SMPROGRAMS\1C-Backup"
   CreateShortCut "$SMPROGRAMS\1C-Backup\1C-Backup.lnk" "$INSTDIR\OneCBackup.Desktop.exe"
-  WriteRegStr HKCU "${UninstallKey}" "DisplayName" "1C-Backup"
-  WriteRegStr HKCU "${UninstallKey}" "DisplayVersion" "${AppVersion}"
-  WriteRegStr HKCU "${UninstallKey}" "Publisher" "1C-Backup"
-  WriteRegStr HKCU "${UninstallKey}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UninstallKey}" "DisplayIcon" "$INSTDIR\OneCBackup.Desktop.exe"
-  WriteRegStr HKCU "${UninstallKey}" "UninstallString" '$\"$INSTDIR\unins000.exe$\"'
-  WriteRegStr HKCU "${UninstallKey}" "QuietUninstallString" '$\"$INSTDIR\unins000.exe$\" /S'
-  WriteRegDWORD HKCU "${UninstallKey}" "NoModify" 1
-  WriteRegDWORD HKCU "${UninstallKey}" "NoRepair" 1
+  WriteRegStr HKLM "${UninstallKey}" "DisplayName" "1C-Backup"
+  WriteRegStr HKLM "${UninstallKey}" "DisplayVersion" "${AppVersion}"
+  WriteRegStr HKLM "${UninstallKey}" "Publisher" "1C-Backup"
+  WriteRegStr HKLM "${UninstallKey}" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKLM "${UninstallKey}" "DisplayIcon" "$INSTDIR\OneCBackup.Desktop.exe"
+  WriteRegStr HKLM "${UninstallKey}" "UninstallString" '$\"$INSTDIR\unins000.exe$\"'
+  WriteRegStr HKLM "${UninstallKey}" "QuietUninstallString" '$\"$INSTDIR\unins000.exe$\" /S'
+  WriteRegDWORD HKLM "${UninstallKey}" "NoModify" 1
+  WriteRegDWORD HKLM "${UninstallKey}" "NoRepair" 1
 SectionEnd
 
 Section "Ярлык на рабочем столе" DesktopSection
@@ -201,6 +267,7 @@ FunctionEnd
 
 Section "Uninstall"
   Call un.ProfileAvailable
+  Call un.ProgramAvailable
   ReadRegStr $0 HKCU "${RunKey}" "OneCBackupAgent"
   StrCpy $1 '$\"$INSTDIR\OneCBackup.Agent.exe$\" --run --quiet'
   StrCpy $2 '$\"$INSTDIR\OneCBackup.Desktop.exe$\" --tray --start-agent'
@@ -214,5 +281,5 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\1C-Backup\1C-Backup.lnk"
   RMDir "$SMPROGRAMS\1C-Backup"
   Delete "$DESKTOP\1C-Backup.lnk"
-  DeleteRegKey HKCU "${UninstallKey}"
+  DeleteRegKey HKLM "${UninstallKey}"
 SectionEnd

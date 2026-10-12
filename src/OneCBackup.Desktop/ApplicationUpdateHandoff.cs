@@ -12,10 +12,15 @@ internal static class ApplicationUpdateHandoff
 {
     public static bool IsInstalled()
     {
-        using var hive = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64);
-        using var key = hive.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\{142FA512-738F-4BE8-9C31-487B3500B30B}_is1");
-        return key?.GetValue("InstallLocation") is string location && string.Equals(
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(location)), Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory), StringComparison.OrdinalIgnoreCase);
+        foreach (var registration in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
+        {
+            using var hive = RegistryKey.OpenBaseKey(registration, RegistryView.Registry64);
+            using var key = hive.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\{142FA512-738F-4BE8-9C31-487B3500B30B}_is1");
+            if (key?.GetValue("InstallLocation") is not string location || !Path.IsPathFullyQualified(location)) continue;
+            if (string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(location)),
+                Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory), StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
     private static string ReadScript()
     {

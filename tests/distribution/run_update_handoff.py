@@ -19,7 +19,7 @@ def run(use_docker=False):
     with tempfile.TemporaryDirectory(prefix='onec-update-handoff-') as temporary:
         root = Path(temporary)
         shutil.copyfile(fixture, root / fixture.name)
-        for case in ['success', 'inno', 'restart', 'corrupt', 'wrong-directory', 'wrong-version', 'installer-failure', 'parent-timeout']:
+        for case in ['success', 'inno', 'restart', 'corrupt', 'wrong-directory', 'wrong-version', 'installer-failure', 'parent-timeout', 'machine-registration', 'legacy-registration']:
             if use_docker:
                 command = ['docker', 'run', '--init', '--rm', '--user', '1000:1000', '--network', 'none',
                            '--env', 'POWERSHELL_TELEMETRY_OPTOUT=1',
@@ -36,12 +36,12 @@ def run(use_docker=False):
             if not result_path.exists():
                 raise RuntimeError((case, completed.returncode, completed.stdout, completed.stderr))
             result = json.loads(result_path.read_text(encoding='utf-8-sig'))
-            expected = case in ['success', 'inno', 'restart']
+            expected = case in ['success', 'inno', 'restart', 'machine-registration', 'legacy-registration']
             assert result['Success'] == expected, (case, result, completed.stderr)
             assert completed.returncode == (0 if expected else 1), (case, completed.stdout, completed.stderr)
             calls_file = root / case / 'calls.jsonl'
             calls = [json.loads(line) for line in calls_file.read_text(encoding='utf-8-sig').splitlines()] if calls_file.exists() else []
-            assert len(calls) == (2 if case == 'restart' else 1 if case in ['success', 'inno', 'wrong-version', 'installer-failure'] else 0), (case, calls)
+            assert len(calls) == (2 if case == 'restart' else 1 if case in ['success', 'inno', 'wrong-version', 'installer-failure', 'machine-registration', 'legacy-registration'] else 0), (case, calls)
             location = str(Path(fixture_base) / case / 'application with spaces') if not use_docker else fixture_base + '/' + case + '/application with spaces'
             if case == 'success': assert calls[0]['Arguments'] == ['/S', '/D=' + location], calls
             if case == 'inno': assert calls[0]['Arguments'] == ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/DIR="' + location + '"'], calls

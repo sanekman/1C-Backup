@@ -29,6 +29,8 @@ function Get-Process {
 }
 function Get-ItemProperty {
  [CmdletBinding()] param([string]$LiteralPath)
+ if ($Case -eq 'machine-registration' -and $LiteralPath.StartsWith('HKCU:')) { throw 'User registration missing' }
+ if ($Case -eq 'legacy-registration' -and $LiteralPath.StartsWith('HKLM:')) { throw 'Machine registration missing' }
  return [pscustomobject]@{ InstallLocation = $(if($Case -eq 'wrong-directory') {(Join-Path $FixtureBase 'other')} else {$installed}) }
 }
 function Start-Process {

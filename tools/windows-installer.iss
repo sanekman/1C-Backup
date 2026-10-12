@@ -14,10 +14,10 @@ AppId={{142FA512-738F-4BE8-9C31-487B3500B30B}
 AppName=1C-Backup
 AppVersion={#AppVersion}
 AppPublisher=1C-Backup
-DefaultDirName={localappdata}\Programs\1C-Backup
+DefaultDirName={autopf}\1C-Backup
 DefaultGroupName=1C-Backup
 DisableProgramGroupPage=yes
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.19045
@@ -41,11 +41,11 @@ Name: "desktopicon"; Description: "Создать ярлык на рабочем
 Source: "{#SourceFolder}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{userprograms}\1C-Backup\1C-Backup"; Filename: "{app}\OneCBackup.Desktop.exe"
-Name: "{userdesktop}\1C-Backup"; Filename: "{app}\OneCBackup.Desktop.exe"; Tasks: desktopicon
+Name: "{commonprograms}\1C-Backup\1C-Backup"; Filename: "{app}\OneCBackup.Desktop.exe"
+Name: "{commondesktop}\1C-Backup"; Filename: "{app}\OneCBackup.Desktop.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\OneCBackup.Desktop.exe"; Description: "Открыть 1C-Backup"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\OneCBackup.Desktop.exe"; Description: "Открыть 1C-Backup"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Code]
 const
@@ -75,27 +75,59 @@ begin
   end;
 end;
 
+function ProgramAvailable: Boolean;
+var Names: TArrayOfString; I: Integer; Path: String; Stream: TFileStream;
+begin
+  Result := True;
+  Names := ['OneCBackup.Desktop.exe', 'OneCBackup.Agent.exe', 'OneCBackup.Desktop.dll', 'OneCBackup.Agent.dll', 'OneCBackup.Core.dll'];
+  for I := 0 to GetArrayLength(Names) - 1 do begin
+    Path := ExpandConstant('{app}\') + Names[I];
+    if FileExists(Path) then begin
+      try
+        Stream := TFileStream.Create(Path, fmOpenReadWrite or fmShareExclusive);
+        Stream.Free;
+      except
+        Result := False;
+        Exit;
+      end;
+    end;
+  end;
+end;
+
+function ServiceImage: String;
+begin
+  Result := '';
+  RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Services\OneCBackupAgent', 'ImagePath', Result);
+end;
+
+function ServiceAtCurrentLocation: Boolean;
+var Prefix: String;
+begin
+  Prefix := '"' + ExpandConstant('{app}\OneCBackup.Agent.exe') + '" --service ';
+  Result := CompareText(Copy(ServiceImage, 1, Length(Prefix)), Prefix) = 0;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
-  if not ProfileAvailable then
-    Result := 'Выберите «Выйти полностью» в трее или настройках 1C-Backup. В старой версии остановите автоматическое копирование и закройте окно перед установкой. Данные профиля сейчас используются или недоступны.';
+  if (ServiceImage <> '') and not ServiceAtCurrentLocation then begin
+    Result := 'Служба зарегистрирована в другой папке. Перед переносом остановите и удалите службу в настройках прежней версии. Задания и копии сохранятся.';
+    Exit;
+  end;
+  if not ProfileAvailable or not ProgramAvailable then
+    Result := 'Выберите «Выйти полностью» в 1C-Backup и остановите службу, в том числе в других сеансах Windows. Файлы программы или профиль используются либо недоступны.';
 end;
 
 function InitializeUninstall: Boolean;
-var Code: Integer;
 begin
-  Result := ProfileAvailable;
-  if Result and FileExists(ExpandConstant('{app}\OneCBackup.Agent.exe')) then begin
-    Result := Exec(ExpandConstant('{app}\OneCBackup.Agent.exe'), '--registered-service', '', SW_HIDE, ewWaitUntilTerminated, Code);
-    if Result then Result := Code = 0;
-    if not Result then begin
-      SuppressibleMsgBox('Перед удалением программы удалите службу в настройках 1C-Backup. Задания и копии сохранятся.', mbError, MB_OK, IDOK);
-      Exit;
-    end;
+  Result := False;
+  if ServiceAtCurrentLocation then begin
+    SuppressibleMsgBox('Перед удалением программы удалите службу в настройках 1C-Backup. Задания и копии сохранятся.', mbError, MB_OK, IDOK);
+    Exit;
   end;
+  Result := ProfileAvailable and ProgramAvailable;
   if not Result then
-    SuppressibleMsgBox('Выберите «Выйти полностью» в трее или настройках 1C-Backup. В старой версии остановите автоматическое копирование и закройте окно перед удалением. Задания, история и пароли сохраняются.', mbError, MB_OK, IDOK);
+    SuppressibleMsgBox('Выберите «Выйти полностью» в 1C-Backup и остановите службу, в том числе в других сеансах Windows. Файлы программы или профиль используются либо недоступны.', mbError, MB_OK, IDOK);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
