@@ -74,17 +74,21 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         try
         {
             input = new FileStream(file, FileMode.Open, FileAccess.Read,
-                job.OneCMethod == OneCBackupMethod.FileArchive ? FileShare.None : FileShare.ReadWrite);
+                job.OneCMethod == OneCBackupMethod.FileArchive && !job.AllowOpenOneCDatabase ? FileShare.None : FileShare.ReadWrite);
         }
         catch (IOException) when (job.OneCMethod == OneCBackupMethod.FileArchive)
-        { throw new IOException("Не удалось получить эксклюзивный доступ к 1Cv8.1CD. Закройте сеансы 1С и проверьте доступ."); }
+        { throw new IOException(job.AllowOpenOneCDatabase
+            ? "Не удалось прочитать 1Cv8.1CD с совместным доступом. Закройте сеансы 1С и проверьте доступ."
+            : "Не удалось получить эксклюзивный доступ к 1Cv8.1CD. Закройте сеансы 1С и проверьте доступ."); }
         using (input)
         {
             if (input.Length == 0) throw new InvalidDataException("Файл базы 1Cv8.1CD пуст.");
             token.ThrowIfCancellationRequested();
         }
         return new(true, job.OneCMethod == OneCBackupMethod.FileArchive
-            ? "Файл базы найден; эксклюзивный доступ получен и освобождён. Сеансы должны быть закрыты также при копировании. Содержимое базы не проверялось."
+            ? job.AllowOpenOneCDatabase
+                ? "Файл базы найден; доступ на чтение проверен. " + OneCFileArchiveExecutor.OpenDatabaseWarning
+                : "Файл базы найден; эксклюзивный доступ получен и освобождён. Сеансы должны быть закрыты также при копировании. Содержимое базы не проверялось."
             : "Файл базы и программа 1С найдены; доступ на чтение проверен. Платформа не запускалась. Выгрузка .dt и эксклюзивное подключение проверяются первой копией.");
     }
 

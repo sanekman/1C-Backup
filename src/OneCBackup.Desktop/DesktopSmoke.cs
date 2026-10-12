@@ -218,6 +218,19 @@ internal static partial class DesktopSmoke
             Control<TextBox>("Source").Text = source;
             Control<ComboBox>("OneCMethodPicker").SelectedValue = OneCBackupMethod.FileArchive;
             AssertComboLabel("OneCMethodPicker", "Архив базы (ZIP)");
+            var openDatabase = Control<CheckBox>("AllowOpenOneCDatabase");
+            if (openDatabase.IsChecked == true) throw new InvalidOperationException("Новое задание разрешает открытую базу по умолчанию.");
+            openDatabase.IsChecked = true;
+            if (!Control<Border>("OpenOneCDatabaseWarning").IsVisible
+                || !Control<TextBlock>("OpenOneCDatabaseWarningText").Text.Contains("повреждённой"))
+                throw new InvalidOperationException("Разрешение открытой базы не показывает предупреждение.");
+            Control<ComboBox>("OneCMethodPicker").SelectedValue = OneCBackupMethod.PlatformDump;
+            if (Control<StackPanel>("OneCFileAccessPanel").IsVisible)
+                throw new InvalidOperationException("Настройка открытого файла показана для выгрузки .dt.");
+            Control<ComboBox>("OneCMethodPicker").SelectedValue = OneCBackupMethod.FileArchive;
+            openDatabase.IsChecked = false;
+            if (Control<Border>("OpenOneCDatabaseWarning").IsVisible)
+                throw new InvalidOperationException("Предупреждение не скрыто после отключения открытой базы.");
             if (Control<TextBlock>("WizardError").IsVisible)
                 throw new InvalidOperationException("Устаревшая ошибка осталась после исправления поля.");
             Screenshot("wizard-base");

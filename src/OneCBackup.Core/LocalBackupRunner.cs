@@ -20,7 +20,9 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             var clock = System.Diagnostics.Stopwatch.StartNew();
             log.Write(DiagnosticEvent.RunStarted, values: new(Count: job.StorageJobs.Count));
             var work = Path.Combine(Path.GetFullPath(job.TemporaryDirectory ?? workRoot), id.ToString("N"));
-            var run = new BackupRun(id, job.Id, job.Name, DateTimeOffset.UtcNow, null, BackupRunStatus.Running, work);
+            var run = new BackupRun(id, job.Id, job.Name, DateTimeOffset.UtcNow, null, BackupRunStatus.Running, work)
+            { Warnings = job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.FileArchive && job.AllowOpenOneCDatabase
+                ? new[] { OneCFileArchiveExecutor.OpenDatabaseWarning } : null };
             // A corrupt or unwritable history prevents starting an untracked operation.
             try { await history.SaveAsync(run, cancellationToken); }
             catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }
@@ -48,7 +50,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                     fileManifest = await FileBackupZip.ReadManifestAsync(dump,
                         await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, completion.Passwords, cancellationToken), cancellationToken);
                 log.Write(DiagnosticEvent.BackupDeliveryStarted);
-                var warnings = new List<string>();
+                var warnings = new List<string>(run.Warnings ?? []);
                 if (job.AdditionalDestinations?.Count > 0)
                 {
                     var completed = await completion.CompleteManyAsync(job, dump, Path.Combine(work, "archive"),

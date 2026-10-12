@@ -59,6 +59,17 @@ public sealed class SourceReadinessCheckerTests : IDisposable
     }
 
     [Fact]
+    public async Task SharedFileCheckAllowsWritableSessionAndExplainsConsistencyRisk()
+    {
+        await File.WriteAllTextAsync(Database, "fixture");
+        await using var held = new FileStream(Database, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+        var result = await Checker(NoProcess()).CheckAsync(FileJob with { AllowOpenOneCDatabase = true });
+        Assert.True(result.Succeeded, result.Details);
+        Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, result.Details);
+        Assert.False(Directory.Exists(Work));
+    }
+
+    [Fact]
     public async Task PlatformCheckRequiresExecutableButDoesNotRunIt()
     {
         await File.WriteAllTextAsync(Database, "fixture");

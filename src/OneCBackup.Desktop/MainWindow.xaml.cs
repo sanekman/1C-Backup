@@ -207,6 +207,7 @@ public partial class MainWindow : Window
             ScheduleKind = scheduleKind, DaysOfWeek = SelectedDays(),
             OneC = oneC,
             OneCMethod = oneCMethod,
+            AllowOpenOneCDatabase = AllowOpenOneCDatabase.IsChecked == true,
             SqlServer = sql, PostgreSql = postgres,
             WebDav = Kind.SelectedItem is DatabaseKind.WebDav ? new WebDavSettings { CredentialKey = webDavCredentialKey ?? "", TimeoutMinutes = int.TryParse(WebDavTimeout.Text, out var davTimeout) ? davTimeout : 120 } : null,
             Ftp = storageKind == StorageKind.Ftp ? new FtpSettings
@@ -312,6 +313,7 @@ public partial class MainWindow : Window
     private void LoadJobEditor(BackupJob job)
     {
         editingId = job.Id;
+        AllowOpenOneCDatabase.IsChecked = job.AllowOpenOneCDatabase;
         ResetOneCBasePicker();
         AutoOneCPlatform.IsChecked = job.OneC?.AutoSelectPlatform ?? true;
         OneCPlatformVersion.Text = job.OneC?.PlatformVersion ?? "";
@@ -365,6 +367,7 @@ public partial class MainWindow : Window
         FileBackupModePicker.SelectedValue = FileBackupMode.Full; FullBackupEvery.Text = "7";
         additionalDestinations.Clear();
         OneCMethodPicker.SelectedValue = OneCBackupMethod.FileArchive;
+        AllowOpenOneCDatabase.IsChecked = false;
         ResetOneCBasePicker();
         AutoOneCPlatform.IsChecked = true; OneCPlatformVersion.Clear();
         OneCExecutable.Clear(); OneCTimeout.Text = "120";
@@ -392,6 +395,8 @@ public partial class MainWindow : Window
 
     private void OneCMethod_Changed(object sender, SelectionChangedEventArgs e) => UpdateOneCControls();
 
+    private void OpenOneCDatabase_Changed(object sender, RoutedEventArgs e) => UpdateOneCControls();
+
     private void UpdateOneCControls()
     {
         if (OneCPanel is null || OneCMethodPanel is null || ArchiveCopies is null) return;
@@ -402,12 +407,18 @@ public partial class MainWindow : Window
         var fileArchive = isOneC && OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive;
         OneCBasePickerPanel.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
         OneCMethodPanel.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
+        if (OneCFileAccessPanel is not null) OneCFileAccessPanel.Visibility = fileArchive ? Visibility.Visible : Visibility.Collapsed;
+        if (OpenOneCDatabaseWarning is not null)
+        {
+            OpenOneCDatabaseWarning.Visibility = fileArchive && AllowOpenOneCDatabase.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            OpenOneCDatabaseWarningText.Text = OneCFileArchiveExecutor.OpenDatabaseWarning;
+        }
         OneCPanel.Visibility = isOneC && !fileArchive ? Visibility.Visible : Visibility.Collapsed;
         UpdateOneCPlatformControls();
         SqlBackupPanel.Visibility = Kind.SelectedItem is DatabaseKind.SqlServer ? Visibility.Visible : Visibility.Collapsed;
         if (SqlTemporaryHint is not null) SqlTemporaryHint.Visibility = SqlBackupPanel.Visibility;
         PostgresBackupPanel.Visibility = Kind.SelectedItem is DatabaseKind.PostgreSql ? Visibility.Visible : Visibility.Collapsed;
-        FileArchiveHint.Visibility = fileArchive ? Visibility.Visible : Visibility.Collapsed;
+        FileArchiveHint.Visibility = fileArchive && AllowOpenOneCDatabase.IsChecked != true ? Visibility.Visible : Visibility.Collapsed;
         ArchiveCopies.IsEnabled = !fileArchive && !isFiles;
         if (fileArchive || isFiles) ArchiveCopies.IsChecked = true;
         SourceBrowseButton.Visibility = isOneC || isLocalFiles ? Visibility.Visible : Visibility.Collapsed;

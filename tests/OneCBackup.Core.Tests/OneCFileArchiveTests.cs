@@ -71,6 +71,54 @@ public sealed class OneCFileArchiveTests : IDisposable
     }
 
     [Fact]
+    public async Task ExplicitOptInCopiesWhileWritableSessionIsOpenAndPersistsWarning()
+    {
+        var before = await File.ReadAllBytesAsync(SourceFile);
+        await using var activeSession = new FileStream(SourceFile, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+        if (OperatingSystem.IsWindows())
+        {
+            var exclusiveAttempt = await Runner.RunAsync(Job);
+            Assert.Equal(BackupRunStatus.Failed, exclusiveAttempt.Status);
+            Assert.Contains("эксклюзивный доступ", exclusiveAttempt.Error);
+        }
+        var result = await Runner.RunAsync(Job with { AllowOpenOneCDatabase = true });
+        Assert.Equal(BackupRunStatus.Succeeded, result.Status);
+        Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, result.Warnings!);
+        using var zip = ZipFile.OpenRead(result.Backup!.Location);
+        using var output = new MemoryStream();
+        await Assert.Single(zip.Entries).Open().CopyToAsync(output);
+        Assert.Equal(before, output.ToArray());
+        Assert.True(activeSession.CanWrite);
+        var saved = Assert.Single(await new BackupRunHistory(Path.Combine(root, "history.json")).ReadAsync());
+        Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, saved.Warnings!);
+    }
+
+    [Fact]
+    public async Task OptInCannotOverrideAnExclusiveLockAndKeepsPreviousCopy()
+    {
+        var previous = await Runner.RunAsync(Job with { KeepLast = 1 });
+        await using var held = new FileStream(SourceFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var result = await Runner.RunAsync(Job with { AllowOpenOneCDatabase = true, KeepLast = 1 });
+        Assert.Equal(BackupRunStatus.Failed, result.Status);
+        Assert.Contains("совместным доступом", result.Error);
+        Assert.True(File.Exists(previous.Backup!.Location));
+        Assert.Empty(Directory.GetFiles(result.WorkDirectory));
+    }
+
+    [Fact]
+    public async Task OpenDatabaseChoiceSurvivesSaveAndOldJobsStayExclusive()
+    {
+        var path = Path.Combine(root, "jobs-choice.json");
+        var store = new JobStore(path);
+        await store.SaveAsync([Job with { AllowOpenOneCDatabase = true }]);
+        Assert.True(Assert.Single(await store.LoadAsync()).AllowOpenOneCDatabase);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(path))!;
+        json[0]!.AsObject().Remove("AllowOpenOneCDatabase");
+        await File.WriteAllTextAsync(path, json.ToJsonString());
+        Assert.False(Assert.Single(await store.LoadAsync()).AllowOpenOneCDatabase);
+    }
+
+    [Fact]
     public async Task EmptyOrMissingDatabaseDoesNotPublishCopy()
     {
         await File.WriteAllBytesAsync(SourceFile, []);

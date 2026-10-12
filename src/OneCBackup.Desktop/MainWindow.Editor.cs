@@ -188,6 +188,11 @@ public partial class MainWindow
                 DatabaseKind.FilesAndFolders or DatabaseKind.WebDav => FileBackupModePicker.SelectedValue is FileBackupMode.Incremental ? "Инкрементная, первая полная" : "Полная",
                 _ => OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive ? "1Cv8.1CD, без платформы" : "Выгрузка .dt"
             };
+            if (Kind.SelectedItem is DatabaseKind.OneCFile && OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive)
+            {
+                shortMethod += AllowOpenOneCDatabase.IsChecked == true ? " · Открытая база разрешена — риск повреждения" : " · Только закрытая база";
+                if (AllowOpenOneCDatabase.IsChecked == true) WizardSummary.Text += "\n\n" + OneCFileArchiveExecutor.OpenDatabaseWarning;
+            }
             ReviewFormat.Text = format + " · " + shortMethod;
             ReviewFormat.ToolTip = ReviewFormat.Text + platformDescription;
             static string StorageLabel(StorageKind kind, bool tls) => kind switch

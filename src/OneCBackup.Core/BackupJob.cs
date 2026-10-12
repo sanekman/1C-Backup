@@ -36,6 +36,7 @@ public sealed record BackupJob
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ArchivePasswordKey { get; init; }
     public OneCSettings? OneC { get; init; }
+    public bool AllowOpenOneCDatabase { get; init; }
     public OneCBackupMethod OneCMethod { get; init; } = OneCBackupMethod.PlatformDump;
     public SqlServerBackupSettings? SqlServer { get; init; }
     public PostgreSqlBackupSettings? PostgreSql { get; init; }
