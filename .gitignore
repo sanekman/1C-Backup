@@ -5,3 +5,5 @@ TestResults/
 *.user
 **/__pycache__/
 artifacts/
+deploy/server/secrets/
+deploy/server/server.env

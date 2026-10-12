@@ -1,0 +1,65 @@
+name: Build and verify management server
+on:
+  push:
+    branches: [main, 'feature/**']
+    tags: ['server-v*-preview.*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  server:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            runtime: linux-x64
+          - os: windows-latest
+            runtime: win-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.401
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: dotnet restore tests/OneCBackup.Server.Tests --locked-mode
+      - run: dotnet build tests/OneCBackup.Server.Tests --no-restore -m:1 -nr:false
+      - if: runner.os == 'Linux'
+        run: |
+          python3 tools/dev_server_db.py start --state-dir /tmp/onec-server-ci --name onec-server-ci
+          echo "ONECBACKUP_SERVER_TEST_CONNECTION_FILE=/tmp/onec-server-ci/connection-string.txt" >> "$GITHUB_ENV"
+      - if: runner.os == 'Linux'
+        run: dotnet test tests/OneCBackup.Server.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=ServerPackage' --logger 'trx;LogFileName=server-linux.trx' --results-directory artifacts/server-tests
+      - if: runner.os == 'Windows'
+        run: python tests/server/run_windows.py
+      - run: python tools/build_server_distribution.py --runtime ${{ matrix.runtime }}
+      - if: runner.os == 'Linux'
+        run: |
+          export ONECBACKUP_SERVER_TEST_PACKAGE_DIR="$GITHUB_WORKSPACE/artifacts/server/linux-x64"
+          dotnet test tests/OneCBackup.Server.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category=ServerPackage' --logger 'trx;LogFileName=server-package-linux.trx' --results-directory artifacts/server-tests
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:ONECBACKUP_SERVER_TEST_PACKAGE_DIR = Join-Path $PWD 'artifacts/server/win-x64'
+          python tests/server/run_windows.py --package
+      - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }}
+      - if: runner.os == 'Linux'
+        run: python3 tests/server/compose_smoke.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.runtime }}-verification
+          path: |
+            artifacts/server/*.zip
+            artifacts/server/*.tar.gz
+            artifacts/server/*.sha256
+            artifacts/server-tests/*.trx
+            artifacts/server-tests/compose-result.json
+          retention-days: 14
+      - if: always() && runner.os == 'Linux'
+        run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci

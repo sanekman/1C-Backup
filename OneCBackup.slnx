@@ -3,8 +3,10 @@
     <Project Path="src/OneCBackup.Core/OneCBackup.Core.csproj" />
     <Project Path="src/OneCBackup.Agent/OneCBackup.Agent.csproj" />
     <Project Path="src/OneCBackup.Desktop/OneCBackup.Desktop.csproj" />
+    <Project Path="src/OneCBackup.Server/OneCBackup.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/OneCBackup.Core.Tests/OneCBackup.Core.Tests.csproj" />
+    <Project Path="tests/OneCBackup.Server.Tests/OneCBackup.Server.Tests.csproj" />
   </Folder>
 </Solution>

@@ -1,0 +1,48 @@
+@page "/connect"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject ServerLog Log
+@inject IHttpContextAccessor Http
+<PageTitle>Подключить агент — 1C-Backup</PageTitle>
+<a href="./">← Агенты</a>
+<h1>Подключить агент</h1>
+<section class="card narrow">
+    @if (Created is { } invitation)
+    {
+        <h2>Приглашение готово</h2>
+        <p>Код действует до <strong>@invitation.ExpiresUtc.ToString("dd.MM.yyyy HH:mm 'UTC'")</strong> и может быть использован один раз. Скопируйте его сейчас: при повторном открытии он не показывается.</p>
+        <label>Код приглашения<textarea readonly rows="2" aria-label="Код приглашения">@invitation.Code</textarea></label>
+        <p class="muted">Передайте код только администратору подключаемого компьютера. Это временное разрешение на регистрацию, не пароль пользователя.</p>
+        <a href="connect">Создать другое приглашение</a>
+    }
+    else
+    {
+        <p class="muted">Создайте код для регистрации через API. Подключение из окна Windows-программы будет добавлено отдельно.</p>
+        @if (Error is not null) { <p class="error" role="alert">@Error</p> }
+        <form method="post" @formname="invitation" @onsubmit="Create">
+            <AntiforgeryToken />
+            <label>Название приглашения<input name="Model.Name" value="@Model!.Name" maxlength="128" required placeholder="Например, бухгалтерия — основной сервер" /></label>
+            <label>ID существующего агента <span class="muted">(необязательно)</span><input name="Model.AgentId" value="@Model.AgentId" maxlength="36" placeholder="UUID агента" /></label>
+            <p class="hint">Укажите ID, если код должен подходить только одному конкретному агенту.</p>
+            <label>Срок действия, минут<input name="Model.Minutes" value="@Model.Minutes" type="number" min="1" max="60" required /></label>
+            <button type="submit">Создать приглашение</button>
+        </form>
+    }
+</section>
+@code {
+    [SupplyParameterFromForm] public InviteForm? Model { get; set; }
+    private Invitation? Created; private string? Error;
+    protected override void OnInitialized() => Model ??= new();
+    private async Task Create()
+    {
+        if (!string.IsNullOrWhiteSpace(Model!.AgentId) && !Guid.TryParse(Model.AgentId, out _)) { Error = "ID агента должен быть UUID. Оставьте поле пустым для нового агента."; return; }
+        try
+        {
+            Created = await Store.InviteAsync(ServerAuthentication.UserId(Http.HttpContext!.User),
+                new(Model.Name, string.IsNullOrWhiteSpace(Model.AgentId) ? null : Guid.Parse(Model.AgentId), Model.Minutes), Http.HttpContext.RequestAborted);
+            Log.Write(ServerEvent.InvitationCreated);
+        }
+        catch (ServerRequestException) { Error = "Проверьте название, ID агента и срок действия от 1 до 60 минут."; }
+    }
+    public sealed class InviteForm { public string Name { get; set; } = ""; public string? AgentId { get; set; } public int Minutes { get; set; } = 30; }
+}
