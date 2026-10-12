@@ -326,7 +326,7 @@ public partial class MainWindow
         if (Jobs.SelectedItem is not BackupJob job) { SelectedJobSummary.Text = "Выберите задание, чтобы создать копию или изменить настройки."; return; }
         var latest = LatestJobRuns.Runs?.GetValueOrDefault(job.Id);
         var running = activeJobId == job.Id || latest?.Status == BackupRunStatus.Running;
-        JobProgress.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        JobProgress.Visibility = running && BackupProgressPanel.Visibility != Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
         DateTimeOffset? next;
         try { next = BackupSchedule.NextRun(job, DateTimeOffset.UtcNow); }
         catch (ArgumentException) { SelectedJobSummary.Text = "Проверьте расписание задания."; return; }

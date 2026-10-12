@@ -74,7 +74,7 @@ public partial class MainWindow : Window
         verificationState = new BackupVerificationState(Path.Combine(dataDirectory, "verification-state.json"));
         runner = new LocalBackupRunner(new DatabaseBackupExecutor(new BackupProcessRunner()),
             new BackupCompletion(backupStorage, catalog),
-            history, Path.Combine(dataDirectory, "work"));
+            history, Path.Combine(dataDirectory, "work"), progress: value => Dispatcher.BeginInvoke(new Action(() => RenderBackupProgress(value))));
         dispatcher = new LocalBackupDispatcher(store, (job, token) =>
             Dispatcher.InvokeAsync(() => ExecuteJobAsync(job, token)).Task.Unwrap());
         Closing += WindowClosingToTray;
@@ -507,6 +507,7 @@ public partial class MainWindow : Window
         {
             backgroundBusy = engine.IsHeldElsewhere();
             backgroundState = await backgroundControl.ReadAsync();
+            await RefreshBackupProgressAsync();
             if (launchedAgent is not null && launchedAgent.HasExited)
             {
                 var code = launchedAgent.ExitCode;
@@ -939,6 +940,7 @@ public partial class MainWindow : Window
     private async Task ExecuteJobAsync(BackupJob job, CancellationToken cancellationToken)
     {
         using var lease = engine.Acquire();
+        ClearBackupProgress();
         activeJobId = job.Id;
         activeRun = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         UpdateRunControls();

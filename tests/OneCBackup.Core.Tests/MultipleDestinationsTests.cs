@@ -16,8 +16,8 @@ public sealed class MultipleDestinationsTests : IDisposable
     private BackupRunHistory History => new(Path.Combine(root, "runs.json"));
     public MultipleDestinationsTests() => Directory.CreateDirectory(root);
 
-    private LocalBackupRunner Runner(IBackupExecutor executor, IBackupStorage storage) =>
-        new(executor, new BackupCompletion(storage, Catalog, new Passwords()), History, Path.Combine(root, "work"));
+    private LocalBackupRunner Runner(IBackupExecutor executor, IBackupStorage storage, Action<BackupProgressSnapshot>? progress = null) =>
+        new(executor, new BackupCompletion(storage, Catalog, new Passwords()), History, Path.Combine(root, "work"), progress: progress);
 
     [Theory]
     [InlineData(false)]
@@ -27,7 +27,12 @@ public sealed class MultipleDestinationsTests : IDisposable
         var executor = new Executor();
         var storage = new Storage();
         var job = Job with { ArchiveCopies = true, ArchivePasswordKey = encrypted ? "test-password" : null };
-        var run = await Runner(executor, storage).RunAsync(job);
+        var progress = new List<BackupProgressSnapshot>();
+        var run = await Runner(executor, storage, progress.Add).RunAsync(job);
+        Assert.Equal(run.RunId, progress[^1].RunId);
+        Assert.Equal(BackupStage.Completed, progress[^1].Progress.Stage);
+        Assert.Equal(2, progress[^1].Destinations.Count);
+        Assert.All(progress[^1].Destinations, d => Assert.Equal(100, d.Progress.Percent));
         Assert.Equal(BackupRunStatus.Succeeded, run.Status);
         Assert.Equal(1, executor.Count);
         Assert.Equal(2, storage.Paths.Count);

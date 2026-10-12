@@ -18,10 +18,12 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
     }
     private async Task<string> CreateCoreAsync(BackupJob job, string workDirectory, CancellationToken token)
     {
+        BackupProgressContext.Report(BackupStage.ConnectingSource);
         using var client = clientFactory?.Invoke(job) ?? await WebDavClient.OpenAsync(job, token);
         var password = await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, token);
         var previous = await FileBackupBases.ReadAsync(job, client.SourceIdentity, catalog, snapshots, token);
         DiagnosticLog.Current.Write(DiagnosticEvent.SourceEnumerationStarted);
+        BackupProgressContext.Report(BackupStage.ScanningSource);
         var scan = await client.ScanAsync(token);
         DiagnosticLog.Current.Write(DiagnosticEvent.SourceEnumerated, values: new(Count: scan.Count));
         var downloaded = 0; long downloadedBytes = 0;
@@ -56,7 +58,7 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
                                 changed.Add(item.Path);
                                 zip.PutNextEntry(Entry("data/" + item.Path, item.Length, password));
                                 await using var input = new FileStream(download, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous);
-                                await input.CopyToAsync(zip, token); zip.CloseEntry();
+                                await BackupProgressContext.CopyAsync(input, zip, BackupStage.ArchivingFile, item.Length, token); zip.CloseEntry();
                             }
                         }
                         finally { File.Delete(download); }
@@ -75,6 +77,7 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
             }
             // A denied/partial listing must never turn missing entries into deletions in a valid backup.
             DiagnosticLog.Current.Write(DiagnosticEvent.WebDavTransfersCompleted, values: new(Count: downloaded, Bytes: downloadedBytes));
+            BackupProgressContext.Report(BackupStage.Verifying);
             var after = await client.ScanAsync(token);
             if (!scan.SequenceEqual(after)) throw new IOException("Состав или версии файлов WebDAV изменились во время копирования. Повторите запуск.");
             DiagnosticLog.Current.Write(DiagnosticEvent.SourceRevalidated, values: new(Count: after.Count));

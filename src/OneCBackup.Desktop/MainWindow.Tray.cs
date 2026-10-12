@@ -90,6 +90,7 @@ public partial class MainWindow
         if (trayExit is not null) trayExit.Enabled = !trayStopping;
         var text = trayStopping ? "1C-Backup — останавливается…" : activeRun is not null ? "1C-Backup — создаётся копия"
             : backgroundBusy || schedulingTask is not null ? "1C-Backup — автоматическое копирование включено" : "1C-Backup — автоматическое копирование выключено";
+        if (!trayStopping && latestBackupProgress is { Finished: false } progress) text = "1C-Backup — " + StageLabel(progress.Progress);
         trayIcon.Text = text.Length <= 63 ? text : text[..63];
     }
 

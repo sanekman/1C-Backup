@@ -36,6 +36,24 @@ internal static partial class DesktopSmoke
         {
             await WaitUntil(() => Application.Current.MainWindow is MainWindow { SmokeReady: true }, "Окно не завершило загрузку.");
             var window = (MainWindow)Application.Current.MainWindow;
+            // Measured progress is visible even when no job is selected. Independent destinations differ.
+            var progressRun = Guid.NewGuid();
+            window.RenderBackupProgress(new(progressRun, Guid.NewGuid(), "Тест прогресса", Environment.ProcessId, 1, DateTimeOffset.UtcNow,
+                new(BackupStage.Archiving, 37, 100), []));
+            window.UpdateLayout();
+            var progressLabel = (TextBlock)window.FindName("BackupProgressLabel");
+            var progressBar = (ProgressBar)window.FindName("BackupProgressBar");
+            if (!progressLabel.Text.Contains("37%") || progressBar.IsIndeterminate || progressBar.Value != 37)
+                throw new InvalidOperationException("Измеренный процент архивации не отображается.");
+            window.RenderBackupProgress(new(progressRun, Guid.NewGuid(), "Тест прогресса", Environment.ProcessId, 2, DateTimeOffset.UtcNow,
+                new(BackupStage.CopyingToStorage), [new(1, StorageKind.LocalDirectory, new(BackupStage.CopyingToStorage, 20, 100)),
+                    new(2, StorageKind.Ftp, new(BackupStage.CopyingToStorage, 80, 100))]));
+            window.UpdateLayout();
+            if (((ItemsControl)window.FindName("BackupDestinationProgressList")).Items.Count != 2 || !progressBar.IsIndeterminate)
+                throw new InvalidOperationException("Независимый прогресс хранилищ не отображается.");
+            window.RenderBackupProgress(new(progressRun, Guid.NewGuid(), "Тест прогресса", Environment.ProcessId, 3, DateTimeOffset.UtcNow,
+                new(BackupStage.Completed), []));
+
             T Control<T>(string name) where T : FrameworkElement => (T)window.FindName(name);
             void Click(string name)
             {

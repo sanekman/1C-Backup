@@ -53,6 +53,9 @@ public sealed class BackupArchiver
             throw new ArgumentException("Укажите имя файла без пути.", nameof(entryName));
         var destination = Path.GetFullPath(archivePath);
         if (File.Exists(destination)) throw new IOException("Архив с таким именем уже существует.");
+        var total = input.CanSeek ? input.Length - input.Position : 0;
+        BackupProgressContext.Report(BackupStage.Archiving, 0, total);
+        progress = BackupProgressContext.Bytes(BackupStage.Archiving, total, progress);
         if (password is not null)
             return await EncryptedZipArchiver.CreateAsync(input, entryName, destination, password, progress, cancellationToken);
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -84,6 +87,7 @@ public sealed class BackupArchiver
                 output.Flush(flushToDisk: true);
             }
 
+            BackupProgressContext.Report(BackupStage.Verifying);
             // Read the whole extracted entry, rather than just checking ZIP metadata.
             using (var archive = ZipFile.OpenRead(temporary))
             {

@@ -195,10 +195,14 @@ public sealed class FtpStorageIntegrationTests : IDisposable
         var contents = new byte[200000];
         new Random(75).NextBytes(contents);
         await File.WriteAllBytesAsync(source, contents);
+        var progress = new List<BackupProgressSnapshot>();
+        using var progressScope = BackupProgressContext.Begin(Job, Guid.NewGuid(), progress.Add);
         var stored = await new BackupDelivery(Storage()).DeliverAsync(Job with { ArchiveCopies = archive }, source,
             Path.Combine(directory, "stage"));
         var target = Path.Combine(RemoteRoot, remoteDirectory.TrimStart('/'), "Бухгалтерия.bak" + (archive ? ".zip" : ""));
         Assert.Equal(new FileInfo(target).Length, stored.Length);
+        Assert.Contains(progress, e => e.Progress.Stage == BackupStage.CopyingToStorage && e.Progress.Total == stored.Length && e.Progress.Completed == stored.Length);
+        Assert.Equal(BackupStage.Verifying, progress[^1].Progress.Stage);
         if (archive)
         {
             using var zip = ZipFile.OpenRead(target);

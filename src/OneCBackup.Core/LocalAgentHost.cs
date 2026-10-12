@@ -19,7 +19,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         await history.RecoverInterruptedAsync(cancellationToken);
         var storage = new RoutedBackupStorage(credentials, Path.Combine(directory, "ftp-verification"));
         var catalog = new BackupCatalog(Path.Combine(directory, "copies.json"));
-        var runner = new LocalBackupRunner(executor, new BackupCompletion(storage, catalog), history, Path.Combine(directory, "work"));
+        var runner = new LocalBackupRunner(executor, new BackupCompletion(storage, catalog), history, Path.Combine(directory, "work"), progress: new BackupProgressStore(directory).Write);
         var control = new LocalAgentControlStore(directory);
         var now = DateTimeOffset.UtcNow;
         var state = new LocalAgentState(Guid.NewGuid(), Environment.ProcessId, now, now, LocalAgentPhase.Running);

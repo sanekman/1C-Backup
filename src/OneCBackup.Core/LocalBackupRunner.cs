@@ -2,7 +2,7 @@ namespace OneCBackup.Core;
 
 /// <summary>Serializes runs and records failures before returning them to the desktop or service.</summary>
 public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion completion,
-    BackupRunHistory history, string workRoot, Func<BackupJob, WebDavClient>? webDavClientFactory = null, DiagnosticLog? diagnosticLog = null)
+    BackupRunHistory history, string workRoot, Func<BackupJob, WebDavClient>? webDavClientFactory = null, DiagnosticLog? diagnosticLog = null, Action<BackupProgressSnapshot>? progress = null)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -14,6 +14,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
         try
         {
             var id = Guid.NewGuid();
+            using var progressScope = BackupProgressContext.Begin(job, id, progress);
             var log = diagnosticLog ?? DiagnosticLog.Current;
             using var diagnosticScope = DiagnosticLog.Use(log, job.Id, id, job.Kind);
             var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -27,6 +28,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             {
                 Directory.CreateDirectory(work);
                 log.Write(DiagnosticEvent.SourcePreparationStarted);
+                BackupProgressContext.Report(BackupStage.PreparingStorage);
                 await completion.PrepareAsync(job, cancellationToken);
                 log.Write(DiagnosticEvent.SourcePreparationCompleted);
                 var fileSnapshots = new FileBackupSnapshotStore(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(workRoot))!, "file-snapshots"));
@@ -37,6 +39,8 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                     _ => executor
                 };
                 log.Write(DiagnosticEvent.BackupCreationStarted);
+                BackupProgressContext.Report(BackupStage.ConnectingSource);
+                BackupProgressContext.Report(BackupStage.CreatingBackup);
                 var dump = await selectedExecutor.CreateAsync(job, work, cancellationToken);
                 log.Write(DiagnosticEvent.BackupCreationCompleted, values: new(Bytes: new FileInfo(dump).Length));
                 FileBackupManifest? fileManifest = null;
@@ -94,6 +98,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }
             log.Write(DiagnosticEvent.RunFinished, run.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded ? DiagnosticLevel.Error : DiagnosticLevel.Info,
                 outcome: run.Status, values: new(Count: run.Warnings?.Count ?? 0, Bytes: run.Backup?.Length, Milliseconds: clock.ElapsedMilliseconds));
+            BackupProgressContext.Report(run.Status switch { BackupRunStatus.Succeeded => BackupStage.Completed, BackupRunStatus.Cancelled => BackupStage.Cancelled, BackupRunStatus.PartiallySucceeded => BackupStage.PartiallySucceeded, _ => BackupStage.Failed });
             return run;
         }
         finally { gate.Release(); }

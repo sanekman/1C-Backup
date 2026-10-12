@@ -176,6 +176,7 @@ public sealed class WebDavClient : IDisposable
     public async Task<string> DownloadAsync(WebDavEntry entry, string path, CancellationToken token = default)
     {
         if (entry.IsDirectory) throw new ArgumentException("Выберите файл WebDAV.");
+        BackupProgressContext.Report(BackupStage.DownloadingFile, 0, entry.Length);
         using var request = Request(HttpMethod.Get, Resolve(entry.Path, false));
         if (IsStrongETag(entry.ETag)) request.Headers.IfMatch.Add(EntityTagHeaderValue.Parse(entry.ETag!));
         using var response = await SendAsync(request, token);
@@ -191,6 +192,7 @@ public sealed class WebDavClient : IDisposable
             total += read;
             if (total > entry.Length) throw new IOException("Размер файла WebDAV изменился во время чтения.");
             hash.AppendData(buffer, 0, read); await output.WriteAsync(buffer.AsMemory(0, read), token);
+            BackupProgressContext.Report(BackupStage.DownloadingFile, total, entry.Length);
         }
         if (total != entry.Length) throw new IOException("Файл WebDAV скачан не полностью.");
         await output.FlushAsync(token); output.Flush(true);

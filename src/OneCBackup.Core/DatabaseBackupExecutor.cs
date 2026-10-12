@@ -85,7 +85,9 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
         try
         {
             await using var connection = connectionFactory?.Invoke(job) ?? CreateConnection(job);
+            BackupProgressContext.Report(BackupStage.ConnectingSource);
             await connection.OpenAsync(timeout.Token);
+            BackupProgressContext.Report(BackupStage.CreatingBackup);
             await using (var backup = connection.CreateCommand())
             {
                 backup.CommandText = "BACKUP DATABASE @database TO DISK = @path WITH COPY_ONLY, CHECKSUM;";
@@ -94,6 +96,7 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
                 AddParameter(backup, "@path", serverPath);
                 await backup.ExecuteNonQueryAsync(timeout.Token);
             }
+            BackupProgressContext.Report(BackupStage.Verifying);
             await using (var verify = connection.CreateCommand())
             {
                 verify.CommandText = "RESTORE VERIFYONLY FROM DISK = @path WITH CHECKSUM;";

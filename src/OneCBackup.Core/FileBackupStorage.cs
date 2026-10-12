@@ -54,12 +54,14 @@ public sealed class FileBackupStorage : IBackupStorage
         await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read,
             81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
         var length = input.Length;
+        BackupProgressContext.Report(BackupStage.Verifying);
         var sourceHash = await SHA256.HashDataAsync(input, cancellationToken);
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (string.Equals(source, destination, comparison))
             return new StoredBackup(destination, length, Convert.ToHexString(sourceHash));
         if (File.Exists(destination)) throw new IOException("Копия с таким именем уже существует в хранилище.");
 
+        BackupProgressContext.Report(BackupStage.ConnectingStorage);
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         var temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -68,10 +70,11 @@ public sealed class FileBackupStorage : IBackupStorage
             await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
                 81920, FileOptions.Asynchronous))
             {
-                await input.CopyToAsync(output, cancellationToken);
+                await BackupProgressContext.CopyAsync(input, output, BackupStage.CopyingToStorage, length, cancellationToken);
                 await output.FlushAsync(cancellationToken);
                 output.Flush(flushToDisk: true);
             }
+            BackupProgressContext.Report(BackupStage.Verifying);
             await using (var stored = File.OpenRead(temporary))
             {
                 var storedHash = await SHA256.HashDataAsync(stored, cancellationToken);

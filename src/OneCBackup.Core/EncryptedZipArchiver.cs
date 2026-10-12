@@ -50,6 +50,7 @@ internal static class EncryptedZipArchiver
                 await output.FlushAsync(cancellationToken);
                 output.Flush(flushToDisk: true);
             }
+            BackupProgressContext.Report(BackupStage.Verifying);
             // Decrypt and consume through the authentication code before publishing.
             using (var zip = new ZipFile(temporary) { Password = password })
             {

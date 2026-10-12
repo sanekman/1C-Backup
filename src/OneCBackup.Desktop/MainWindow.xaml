@@ -103,6 +103,20 @@
         <Button x:Name="CheckLatestCopiesButton" Content="Проверить последние копии" Margin="0,0,8,6" IsEnabled="False" Click="CheckLatestCopies_Click" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="CancelStorageCheckButton" Content="Отменить проверку" Margin="0,0,8,6" Visibility="Collapsed" Click="CancelCopyVerification_Click" />
        </WrapPanel>
+       <Border x:Name="BackupProgressPanel" Visibility="Collapsed" Padding="8,6" Margin="0,8,0,0" Background="{DynamicResource InfoSurfaceBrush}">
+        <StackPanel>
+         <TextBlock x:Name="BackupProgressLabel" FontSize="12" TextWrapping="Wrap" />
+         <ProgressBar x:Name="BackupProgressBar" Minimum="0" Maximum="100" Height="6" Margin="0,4,0,0" AutomationProperties.Name="Выполнение текущего этапа резервного копирования" />
+         <ScrollViewer MaxHeight="140" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+         <ItemsControl x:Name="BackupDestinationProgressList">
+          <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,6,0,0">
+           <TextBlock Text="{Binding Label}" FontSize="12" TextWrapping="Wrap" />
+           <ProgressBar Value="{Binding Percent}" IsIndeterminate="{Binding Indeterminate}" Maximum="100" Height="4" Margin="0,3,0,0" AutomationProperties.Name="Выполнение доставки в хранилище" />
+          </StackPanel></DataTemplate></ItemsControl.ItemTemplate>
+         </ItemsControl>
+         </ScrollViewer>
+        </StackPanel>
+       </Border>
        <ProgressBar x:Name="JobProgress" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,8,0,0" AutomationProperties.Name="Создание резервной копии" />
        <TextBlock x:Name="SelectedJobSummary" Text="Выберите задание, чтобы создать копию или изменить настройки." TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" />
        <Expander x:Name="StorageCheckResults" Header="Проверка хранилищ" Visibility="Collapsed" Margin="0,6,0,0">

@@ -79,6 +79,7 @@ public sealed class FtpBackupStorage(NetworkCredential credentials, string verif
         await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read,
             81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
         var length = input.Length;
+        BackupProgressContext.Report(BackupStage.Verifying);
         var sourceHash = await SHA256.HashDataAsync(input, cancellationToken);
         var remote = job.DestinationDirectory.TrimEnd('/') + "/" + fileName;
         var temporary = remote + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -88,14 +89,18 @@ public sealed class FtpBackupStorage(NetworkCredential credentials, string verif
         var uploadStarted = false;
         try
         {
+            BackupProgressContext.Report(BackupStage.ConnectingStorage);
             await client.Connect(cancellationToken);
             if (await client.FileExists(remote, cancellationToken))
                 throw new IOException("Копия с таким именем уже существует на FTP-сервере.");
             uploadStarted = true;
+            BackupProgressContext.Report(BackupStage.CopyingToStorage, 0, length);
+            var uploadProgress = BackupProgressContext.Bytes(BackupStage.CopyingToStorage, length);
             var uploaded = await client.UploadFile(source, temporary, FtpRemoteExists.Skip, createRemoteDir: true,
-                token: cancellationToken);
+                progress: new InlineProgress<FtpProgress>(p => uploadProgress.Report(p.TransferredBytes)), token: cancellationToken);
             if (uploaded != FtpStatus.Success) throw new IOException("Загрузка копии на FTP не завершена.");
 
+            BackupProgressContext.Report(BackupStage.Verifying);
             // A full readback works even on servers without HASH/SHA256 support.
             var downloaded = await client.DownloadFile(verificationFile, temporary, FtpLocalExists.Skip,
                 token: cancellationToken);

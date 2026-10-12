@@ -55,6 +55,11 @@ public sealed class LocalAgentHostTests : IDisposable
         Assert.Equal(0, await host.RunAsync(job.Id));
         var run = Assert.Single(await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync());
         Assert.Equal(BackupRunStatus.Succeeded, run.Status);
+        var progress = await new BackupProgressStore(directory).ReadAsync();
+        Assert.NotNull(progress);
+        Assert.Equal(run.RunId, progress.RunId);
+        Assert.Equal(BackupStage.Completed, progress.Progress.Stage);
+        Assert.Equal(100, progress.Progress.Percent);
         var record = Assert.Single(await new BackupCatalog(Path.Combine(directory, "copies.json")).ReadAsync());
         Assert.EndsWith(".1CD.zip", record.Backup.Location);
         await new BackupCopyVerifier(new FileBackupStorage()).VerifyAsync(record, job);
@@ -75,6 +80,10 @@ public sealed class LocalAgentHostTests : IDisposable
         Assert.Equal(1, await host.RunAsync(job.Id));
         var run = Assert.Single(await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync());
         Assert.Equal(BackupRunStatus.PartiallySucceeded, run.Status);
+        var progress = await new BackupProgressStore(directory).ReadAsync();
+        Assert.Equal(BackupStage.PartiallySucceeded, progress!.Progress.Stage);
+        Assert.Null(progress.Progress.Percent);
+        Assert.Equal(BackupStage.Failed, progress.Destinations[1].Progress.Stage);
         Assert.Equal(2, run.Destinations!.Count);
         var record = Assert.Single(await new BackupCatalog(Path.Combine(directory, "copies.json")).ReadAsync());
         Assert.True(File.Exists(record.Backup.Location));

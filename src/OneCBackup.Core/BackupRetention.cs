@@ -11,6 +11,7 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
     public async Task<RetentionResult> ApplyAsync(BackupJob job, BackupRecord newest,
         CancellationToken cancellationToken = default)
     {
+        BackupProgressContext.Report(BackupStage.Retention);
         if (job.KeepLast < 1) throw new ArgumentException("Нужно сохранять хотя бы одну копию.", nameof(job));
         DiagnosticLog.Current.Write(DiagnosticEvent.RetentionStarted, jobId: job.Id, storageKind: job.StorageKind, values: new(Count: job.KeepLast));
         var identity = StorageAddress.Identity(job);
@@ -101,6 +102,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
             using var prepared = await new BackupDelivery(storage, passwords).PrepareFileAsync(job,
                 completedBackupPath, stagingDirectory, cancellationToken);
             // Keep the prepared archive alive until every active delivery has finished cleanup.
+            BackupProgressContext.Report(BackupStage.CopyingToStorage);
             using var deliveries = new SemaphoreSlim(3, 3);
             var tasks = job.StorageJobs.Select((target, index) => DeliverToAsync(target, index + 1)).ToArray();
             var outcomes = await Task.WhenAll(tasks);
@@ -111,6 +113,8 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
             {
                 var destination = new BackupDestination { StorageKind = target.StorageKind,
                     DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, KeepLast = target.KeepLast }.Description;
+                using var progressDestination = BackupProgressContext.Destination(index);
+                BackupProgressContext.Report(BackupStage.Waiting);
                 BackupRecord? record = null;
                 var acquired = false;
                 try
@@ -119,6 +123,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                     acquired = true;
                     cancellationToken.ThrowIfCancellationRequested();
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationDeliveryStarted, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
+                    BackupProgressContext.Report(BackupStage.ConnectingStorage);
                     await storage.PrepareAsync(target, cancellationToken);
                     var stored = (await storage.StoreAsync(prepared.Path, target, cancellationToken))
                         with { ArchivePasswordKey = job.ArchivePasswordKey, FileSnapshot = prepared.FileSnapshot };
@@ -127,17 +132,20 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                     record = await catalog.RegisterAsync(target, stored, completedUtc, CancellationToken.None);
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationRegistered, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
                     var retention = await new BackupRetention(catalog, storage).ApplyAsync(target, record, cancellationToken);
+                    BackupProgressContext.Report(BackupStage.Completed);
                     return (new DestinationResult(destination, record, null,
                         retention.Failures.Select(f => "Очистка: " + f.Error.Message).Concat(retention.Warnings).ToArray()), false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    BackupProgressContext.Report(BackupStage.Cancelled);
                     return (new DestinationResult(destination, record, record is null ? "Доставка отменена или не начата." : null,
                         record is null ? null : ["Копия сохранена; очистка отменена."]), true);
                 }
                 catch (Exception ex)
                 {
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationFailed, DiagnosticLevel.Error, ex, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
+                    BackupProgressContext.Report(BackupStage.Failed);
                     var error = ex is IOException && target.StorageKind != StorageKind.Ftp && File.Exists(target.DestinationDirectory)
                         ? "Вместо папки копий указан файл. Выберите другую папку в настройках хранилища." : ex.Message;
                     return (new DestinationResult(destination, record, record is null ? error : null,
