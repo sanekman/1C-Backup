@@ -83,6 +83,33 @@ public sealed class LocalAgentHostTests : IDisposable
     }
 
     [Fact]
+    public async Task FullStopWithoutAnOwnerDoesNotCreateAStopRequest()
+    {
+        Assert.Null(await new LocalAgentStopper(directory).StopAsync(TimeSpan.FromSeconds(1)));
+        Assert.False(await new LocalAgentControlStore(directory).StopRequestedAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task FullStopDoesNotClaimSuccessWhileAnUnknownExecutorHoldsTheLease()
+    {
+        using var lease = new BackupEngineCoordinator(directory).Acquire();
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            new LocalAgentStopper(directory).StopAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.True(new BackupEngineCoordinator(directory).IsHeldElsewhere());
+    }
+
+    [Fact]
+    public async Task FullStopPreservesCallerCancellation()
+    {
+        using var lease = new BackupEngineCoordinator(directory).Acquire();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new LocalAgentStopper(directory).StopAsync(TimeSpan.FromSeconds(1), cancellation.Token));
+        Assert.True(new BackupEngineCoordinator(directory).IsHeldElsewhere());
+    }
+
+    [Fact]
     public async Task StopCancelsRunningBackupAndWaitsForItsTerminalHistory()
     {
         var job = await CreateJob();
@@ -93,7 +120,8 @@ public sealed class LocalAgentHostTests : IDisposable
         var control = new LocalAgentControlStore(directory);
         var state = (await control.ReadAsync())!;
         Assert.True(new BackupEngineCoordinator(directory).IsHeldElsewhere());
-        await control.RequestStopAsync(state.SessionId);
+        var stopped = await new LocalAgentStopper(directory).StopAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(state.SessionId, stopped!.SessionId);
         Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Equal(BackupRunStatus.Cancelled, Assert.Single(await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync()).Status);
         Assert.Equal(LocalAgentPhase.Stopped, (await control.ReadAsync())!.Phase);

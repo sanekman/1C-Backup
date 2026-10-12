@@ -18,6 +18,8 @@ Unicode true
   !error "UninstallFiles is required"
 !endif
 
+Icon "../src/OneCBackup.Desktop/Assets/one-c-backup.ico"
+UninstallIcon "../src/OneCBackup.Desktop/Assets/one-c-backup.ico"
 Name "1C-Backup"
 OutFile "${OutputFolder}/1C-Backup-windows-x64-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\1C-Backup"
@@ -56,7 +58,7 @@ VIAddVersionKey "LegalCopyright" "1C-Backup"
   ${If} $1 = -1
     ${If} $2 != 2
     ${AndIf} $2 != 3
-      MessageBox MB_OK|MB_ICONSTOP "Остановите автоматическое копирование и закройте 1C-Backup. Рабочий профиль используется или недоступен. Задания и копии сохраняются." /SD IDOK
+      MessageBox MB_OK|MB_ICONSTOP "Выберите «Выйти полностью» в трее или настройках 1C-Backup. В старой версии остановите автоматическое копирование и закройте окно. Рабочий профиль используется или недоступен. Задания и копии сохраняются." /SD IDOK
       SetErrorLevel 1
       Abort
     ${EndIf}
@@ -149,7 +151,7 @@ Section "Программа" MainSection
   WriteRegDWORD HKCU "${UninstallKey}" "NoRepair" 1
 SectionEnd
 
-Section /o "Ярлык на рабочем столе" DesktopSection
+Section "Ярлык на рабочем столе" DesktopSection
   CreateShortCut "$DESKTOP\1C-Backup.lnk" "$INSTDIR\OneCBackup.Desktop.exe"
 SectionEnd
 
@@ -157,7 +159,9 @@ Section "Uninstall"
   Call un.ProfileAvailable
   ReadRegStr $0 HKCU "${RunKey}" "OneCBackupAgent"
   StrCpy $1 '$\"$INSTDIR\OneCBackup.Agent.exe$\" --run --quiet'
+  StrCpy $2 '$\"$INSTDIR\OneCBackup.Desktop.exe$\" --tray --start-agent'
   ${If} $0 == $1
+  ${OrIf} $0 == $2
     DeleteRegValue HKCU "${RunKey}" "OneCBackupAgent"
   ${EndIf}
   !include "${UninstallFiles}"

@@ -111,7 +111,7 @@ def check():
         installed = True
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_path) as key:
             winreg.SetValueEx(key, startup_name, 0, winreg.REG_SZ,
-                             '"' + str(installation / 'OneCBackup.Agent.exe') + '" --run --quiet')
+                             '"' + str(installation / 'OneCBackup.Desktop.exe') + '" --tray --start-agent')
         run(uninstaller(), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
         installed = False
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_path) as key:

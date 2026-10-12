@@ -4,7 +4,7 @@
  xmlns:core="clr-namespace:OneCBackup.Core;assembly=OneCBackup.Core"
  xmlns:local="clr-namespace:OneCBackup.Desktop"
  PreviewKeyDown="Window_PreviewKeyDown" Title="1C-Backup" Width="1100" Height="740" MinWidth="900" MinHeight="580"
- WindowStartupLocation="CenterScreen" Background="{DynamicResource CanvasBrush}">
+ Icon="Assets/one-c-backup.ico" WindowStartupLocation="CenterScreen" Background="{DynamicResource CanvasBrush}">
  <Window.Resources>
   <local:LocalTimeConverter x:Key="LocalTimeConverter" />
   <local:JobRunOverviewConverter x:Key="JobRunOverviewConverter" />
@@ -460,6 +460,7 @@
    <ScrollViewer x:Name="AgentView" Grid.Row="2" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
     <Border Style="{StaticResource Card}" MaxWidth="700" HorizontalAlignment="Left">
    <StackPanel Margin="24">
+    <Button Content="Выйти полностью — остановить агент и закрыть окно" Click="ExitFully_Click" HorizontalAlignment="Left" Margin="0,0,0,14" />
     <TextBlock Text="Оформление" FontSize="18" FontWeight="SemiBold" />
     <TextBlock Text="По умолчанию тема следует настройкам Windows." Margin="0,6,0,4" Foreground="{DynamicResource MutedBrush}" />
     <ComboBox x:Name="ThemePicker" SelectedValuePath="Tag" SelectionChanged="Theme_Changed" Margin="0,0,0,18" AutomationProperties.Name="Тема оформления">
@@ -483,7 +484,7 @@
     <Border>
      <StackPanel>
       <TextBlock Text="Фоновая работа" FontSize="18" FontWeight="SemiBold" />
-      <CheckBox x:Name="AgentStartup" Content="Запускать фоновый агент при входе в Windows" Margin="0,12,0,12" />
+      <CheckBox x:Name="AgentStartup" Content="Запускать агент со значком в трее при входе в Windows" Margin="0,12,0,12" />
       <Button x:Name="SaveStartupButton" Content="Сохранить автозапуск" HorizontalAlignment="Left" Click="SaveStartup_Click" IsEnabled="False" />
       <TextBlock x:Name="StartupStatus" Text="Запуск от имени текущего пользователя. После переноса папки программы сохраните автозапуск заново. Это не служба Windows: работа без входа пользователя пока не поддерживается." TextWrapping="Wrap" Margin="0,10,0,0" Foreground="{DynamicResource MutedBrush}" />
      </StackPanel>

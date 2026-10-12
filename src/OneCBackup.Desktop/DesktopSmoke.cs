@@ -112,6 +112,16 @@ internal static partial class DesktopSmoke
                 if (position.Y < 0 || position.Y + content.ActualHeight > scroll.ActualHeight + 1)
                     throw new InvalidOperationException("Содержимое не помещается в видимой области мастера: " + name);
             }
+            if (!window.TrayVisible || window.Icon is null)
+                throw new InvalidOperationException("Не создан значок трея или окна.");
+            window.SmokeMode = false;
+            window.Close();
+            if (window.IsVisible || !window.TrayVisible || Application.Current.MainWindow != window)
+                throw new InvalidOperationException("Закрытие окна не сохранило управление в трее.");
+            window.ShowFromTray();
+            window.SmokeMode = true;
+            if (!window.IsVisible || !window.ShowInTaskbar)
+                throw new InvalidOperationException("Окно не вернулось из трея.");
             await CheckJobActionLayoutAsync(window);
             Screenshot("first-start");
             var expectedVersion = Environment.GetEnvironmentVariable("GITHUB_REF_TYPE") == "tag"

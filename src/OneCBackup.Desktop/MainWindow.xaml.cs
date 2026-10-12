@@ -77,13 +77,7 @@ public partial class MainWindow : Window
             history, Path.Combine(dataDirectory, "work"));
         dispatcher = new LocalBackupDispatcher(store, (job, token) =>
             Dispatcher.InvokeAsync(() => ExecuteJobAsync(job, token)).Task.Unwrap());
-        Closing += (_, e) =>
-        {
-            if (!persisting && !jobFileTransfer && activeRun is null && schedulingTask is null && !manualPending && copyVerification is null) return;
-            e.Cancel = true;
-            Status.Text = checkingStorages ? "Дождитесь завершения проверки хранилищ или нажмите «Отменить проверку» перед закрытием программы."
-                : "Остановите планировщик и дождитесь завершения операции или сохранения настроек перед закрытием программы.";
-        };
+        Closing += WindowClosingToTray;
         AgentModePicker.ItemsSource = new Dictionary<AgentMode, string>
         {
             [AgentMode.Standalone] = "Автономный агент",
@@ -117,6 +111,9 @@ public partial class MainWindow : Window
         SaveButton.IsEnabled = DeleteButton.IsEnabled = JobEditor.IsEnabled = false;
         Loaded += async (_, _) =>
         {
+            InitializeTray();
+            if (Application.Current is App { StartInTray: true } && TrayVisible) Hide();
+            else ShowInTaskbar = true;
             try
             {
                 agentSettings = await agentSettingsStore.LoadAsync();
@@ -132,21 +129,27 @@ public partial class MainWindow : Window
                 SaveAgentSettingsButton.IsEnabled = true;
                 ExternalMonitoringButton.IsEnabled = true;
                 ready = true;
-                try { AgentStartup.IsChecked = CurrentUserAgentStartup.IsEnabled(); }
+                try { CurrentUserAgentStartup.UpgradeOwnedLegacyEntry(); AgentStartup.IsChecked = CurrentUserAgentStartup.IsEnabled(); }
                 catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); StartupStatus.Text = "Не удалось прочитать автозапуск: " + ex.Message; }
                 await RefreshBackgroundStateAsync();
                 backgroundTimer.Start();
                 UpdateRunControls();
+                if (Application.Current is App app)
+                {
+                    if (app.StartAgent && StartBackgroundButton.IsEnabled) StartBackground_Click(this, new RoutedEventArgs());
+                    app.WindowReady();
+                }
             }
             catch (Exception ex)
             { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
+                ShowFromTray();
                 canSave = false;
                 JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = RunButton.IsEnabled = false;
                 Status.Text = "Не удалось прочитать настройки. Сохранение отключено, чтобы не затереть файл: " + ex.Message;
             }
         };
         backgroundTimer.Tick += async (_, _) => await RefreshBackgroundStateAsync();
-        Closed += (_, _) => { backgroundTimer.Stop(); launchedAgent?.Dispose(); };
+        Closed += (_, _) => { DisposeTray(); backgroundTimer.Stop(); launchedAgent?.Dispose(); };
     }
 
     private async void Save_Click(object sender, RoutedEventArgs e)
@@ -408,7 +411,8 @@ public partial class MainWindow : Window
     private void UpdateRunControls()
     {
         if (ExportDiagnosticsButton is not null) ExportDiagnosticsButton.IsEnabled = ready && !jobFileTransfer;
-        var idle = !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
+        UpdateTray();
+        var idle = !trayStopping && !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
         var engineAvailable = !backgroundBusy && !backgroundStarting;
         NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle;
         ImportJobSettingsMenuItem.IsEnabled = NewJobButton.IsEnabled && !editorOpen;

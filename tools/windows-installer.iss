@@ -9,6 +9,7 @@
 #endif
 
 [Setup]
+SetupIconFile=../src/OneCBackup.Desktop/Assets/one-c-backup.ico
 AppId={{142FA512-738F-4BE8-9C31-487B3500B30B}
 AppName=1C-Backup
 AppVersion={#AppVersion}
@@ -78,24 +79,25 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
   if not ProfileAvailable then
-    Result := 'Остановите автоматическое копирование и закройте 1C-Backup перед установкой. Данные профиля сейчас используются или недоступны.';
+    Result := 'Выберите «Выйти полностью» в трее или настройках 1C-Backup. В старой версии остановите автоматическое копирование и закройте окно перед установкой. Данные профиля сейчас используются или недоступны.';
 end;
 
 function InitializeUninstall: Boolean;
 begin
   Result := ProfileAvailable;
   if not Result then
-    SuppressibleMsgBox('Остановите автоматическое копирование и закройте 1C-Backup перед удалением. Задания, история и пароли сохраняются.', mbError, MB_OK, IDOK);
+    SuppressibleMsgBox('Выберите «Выйти полностью» в трее или настройках 1C-Backup. В старой версии остановите автоматическое копирование и закройте окно перед удалением. Задания, история и пароли сохраняются.', mbError, MB_OK, IDOK);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  CurrentValue, InstalledValue: String;
+  CurrentValue, InstalledValue, TrayValue: String;
 begin
   if CurUninstallStep = usUninstall then begin
     InstalledValue := '"' + ExpandConstant('{app}\OneCBackup.Agent.exe') + '" --run --quiet';
+    TrayValue := '"' + ExpandConstant('{app}\OneCBackup.Desktop.exe') + '" --tray --start-agent';
     if RegQueryStringValue(HKCU, RunKey, RunValue, CurrentValue) then
-      if CompareText(CurrentValue, InstalledValue) = 0 then
+      if (CompareText(CurrentValue, InstalledValue) = 0) or (CompareText(CurrentValue, TrayValue) = 0) then
         RegDeleteValue(HKCU, RunKey, RunValue);
   end;
 end;
