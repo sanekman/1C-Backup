@@ -112,6 +112,7 @@ internal static partial class DesktopSmoke
                 if (position.Y < 0 || position.Y + content.ActualHeight > scroll.ActualHeight + 1)
                     throw new InvalidOperationException("Содержимое не помещается в видимой области мастера: " + name);
             }
+            await CheckJobActionLayoutAsync(window);
             Screenshot("first-start");
             var expectedVersion = Environment.GetEnvironmentVariable("GITHUB_REF_TYPE") == "tag"
                 ? Environment.GetEnvironmentVariable("GITHUB_REF_NAME")![1..] : "0.1.0-dev";

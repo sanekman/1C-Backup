@@ -90,18 +90,18 @@
        </DockPanel>
       </Border>
       <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0">
-       <StackPanel><WrapPanel>
-        <Button x:Name="RunButton" Content="Создать копию" Style="{StaticResource PrimaryButton}" IsEnabled="False" Click="Run_Click" />
-        <Button x:Name="EditJobButton" Content="Изменить" Click="EditJob_Click" IsEnabled="False" Margin="8,0,0,0" />
-        <Button x:Name="DuplicateJobButton" Content="На основе…" Click="DuplicateJob_Click" IsEnabled="False" Margin="8,0,0,0" ToolTip="Создать новое задание с настройками выбранного. Автоматические запуски новой копии задания отключены до проверки." />
-        <Button x:Name="DeleteButton" Content="Удалить" Click="Delete_Click" IsEnabled="False" Margin="8,0,0,0" />
-        <Button x:Name="CancelRunButton" Content="Отменить" Margin="8,0,0,0" IsEnabled="False" Click="CancelRun_Click" />
-        <Button x:Name="ShowLatestCopyButton" Content="Последняя копия" Margin="8,0,0,0" IsEnabled="False" Click="ShowLatestCopy_Click" ToolTip="Открыть последнюю сохранённую копию выбранного задания" />
-        <Button x:Name="ShowLatestRunButton" Content="Результат" Margin="8,0,0,0" IsEnabled="False" Click="ShowLatestRun_Click" ToolTip="Открыть последний запуск выбранного задания, включая ошибки и предупреждения" />
-        <Button x:Name="CheckSourceButton" Content="Проверить источник" Margin="8,0,0,0" IsEnabled="False" Click="CheckSource_Click" ToolTipService.ShowOnDisabled="True" />
-        <Button x:Name="CheckStorageButton" Content="Проверить хранилища" Margin="8,0,0,0" IsEnabled="False" Click="CheckStorage_Click" ToolTipService.ShowOnDisabled="True" ToolTip="Проверить временную папку и запись, чтение и удаление тестового файла во всех хранилищах" />
-        <Button x:Name="CheckLatestCopiesButton" Content="Проверить последние копии" Margin="8,0,0,0" IsEnabled="False" Click="CheckLatestCopies_Click" ToolTipService.ShowOnDisabled="True" />
-        <Button x:Name="CancelStorageCheckButton" Content="Отменить проверку" Margin="8,0,0,0" Visibility="Collapsed" Click="CancelCopyVerification_Click" />
+       <StackPanel><WrapPanel x:Name="JobActions" Margin="0,0,0,2">
+        <Button x:Name="RunButton" Margin="0,0,8,6" Content="Создать копию" Style="{StaticResource PrimaryButton}" IsEnabled="False" Click="Run_Click" />
+        <Button x:Name="EditJobButton" Content="Изменить" Click="EditJob_Click" IsEnabled="False" Margin="0,0,8,6" />
+        <Button x:Name="DuplicateJobButton" Content="На основе…" Click="DuplicateJob_Click" IsEnabled="False" Margin="0,0,8,6" ToolTip="Создать новое задание с настройками выбранного. Автоматические запуски новой копии задания отключены до проверки." />
+        <Button x:Name="DeleteButton" Content="Удалить" Click="Delete_Click" IsEnabled="False" Margin="0,0,8,6" />
+        <Button x:Name="CancelRunButton" Content="Отменить" Margin="0,0,8,6" IsEnabled="False" Click="CancelRun_Click" />
+        <Button x:Name="ShowLatestCopyButton" Content="Последняя копия" Margin="0,0,8,6" IsEnabled="False" Click="ShowLatestCopy_Click" ToolTip="Открыть последнюю сохранённую копию выбранного задания" />
+        <Button x:Name="ShowLatestRunButton" Content="Результат" Margin="0,0,8,6" IsEnabled="False" Click="ShowLatestRun_Click" ToolTip="Открыть последний запуск выбранного задания, включая ошибки и предупреждения" />
+        <Button x:Name="CheckSourceButton" Content="Проверить источник" Margin="0,0,8,6" IsEnabled="False" Click="CheckSource_Click" ToolTipService.ShowOnDisabled="True" />
+        <Button x:Name="CheckStorageButton" Content="Проверить хранилища" Margin="0,0,8,6" IsEnabled="False" Click="CheckStorage_Click" ToolTipService.ShowOnDisabled="True" ToolTip="Проверить временную папку и запись, чтение и удаление тестового файла во всех хранилищах" />
+        <Button x:Name="CheckLatestCopiesButton" Content="Проверить последние копии" Margin="0,0,8,6" IsEnabled="False" Click="CheckLatestCopies_Click" ToolTipService.ShowOnDisabled="True" />
+        <Button x:Name="CancelStorageCheckButton" Content="Отменить проверку" Margin="0,0,8,6" Visibility="Collapsed" Click="CancelCopyVerification_Click" />
        </WrapPanel>
        <ProgressBar x:Name="JobProgress" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,8,0,0" AutomationProperties.Name="Создание резервной копии" />
        <TextBlock x:Name="SelectedJobSummary" Text="Выберите задание, чтобы создать копию или изменить настройки." TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" />
