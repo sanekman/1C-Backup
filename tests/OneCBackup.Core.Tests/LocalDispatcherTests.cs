@@ -76,16 +76,20 @@ public sealed class LocalDispatcherTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatcher.RunScheduleAsync(_ => Task.CompletedTask, stopped.Token));
     }
 
-    [Fact]
-    public async Task RestartDoesNotReplayConsumedSlot()
+    [Theory]
+    [InlineData(ScheduleKind.Daily)]
+    [InlineData(ScheduleKind.SystemStartup)]
+    public async Task RestartDoesNotReplayConsumedSlot(ScheduleKind kind)
     {
-        await Store.SaveAsync([Job]);
+        await Store.SaveAsync([Job with { ScheduleKind = kind }]);
         var calls = 0;
         var dispatcher = new LocalBackupDispatcher(Store, (_, _) => { calls++; return Task.CompletedTask; });
         using var cancellation = new CancellationTokenSource();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatcher.RunScheduleAsync(
             _ => { cancellation.Cancel(); return Task.CompletedTask; }, cancellation.Token, timeProvider: new FixedClock(Now)));
         Assert.Equal(1, calls);
+        if (kind == ScheduleKind.SystemStartup)
+            dispatcher = new LocalBackupDispatcher(Store, (_, _) => { calls++; return Task.CompletedTask; });
         using var secondCancellation = new CancellationTokenSource();
         var observedRead = new ReadCancellingClock(Now, secondCancellation);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatcher.RunScheduleAsync(
@@ -109,10 +113,12 @@ public sealed class LocalDispatcherTests : IDisposable
         Assert.Single(await dispatcher.LoadScheduledJobsAsync());
     }
 
-    [Fact]
-    public async Task ScheduleReachesRealFileArchiveRunnerAndPersistentHistory()
+    [Theory]
+    [InlineData(ScheduleKind.Daily)]
+    [InlineData(ScheduleKind.SystemStartup)]
+    public async Task ScheduleReachesRealFileArchiveRunnerAndPersistentHistory(ScheduleKind kind)
     {
-        var job = Job;
+        var job = Job with { ScheduleKind = kind };
         Directory.CreateDirectory(job.Source);
         await File.WriteAllTextAsync(Path.Combine(job.Source, "1Cv8.1CD"), "closed database fixture");
         await Store.SaveAsync([job]);

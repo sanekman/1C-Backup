@@ -313,6 +313,16 @@ internal static partial class DesktopSmoke
             Control<CheckBox>("Enabled").IsChecked = false;
             if (!Control<TextBlock>("NextRun").Text.Contains("отключены"))
                 throw new InvalidOperationException("Выключенное расписание показывает будущие запуски.");
+            Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.SystemStartup;
+            Control<CheckBox>("Enabled").IsChecked = true;
+            if (Control<StackPanel>("TimePanel").IsVisible || Control<WrapPanel>("DaysPanel").IsVisible
+                || !Control<StackPanel>("StartupSchedulePanel").IsVisible
+                || !Control<TextBlock>("NextRun").Text.Contains("Одна попытка"))
+                throw new InvalidOperationException("Расписание при загрузке системы показывает время вместо объяснения запуска.");
+            if (SystemBootSession.ReadId() == Guid.Empty || SystemBootSession.ReadId() != SystemBootSession.ReadId())
+                throw new InvalidOperationException("Нестабильный идентификатор загрузки Windows.");
+            Screenshot("schedule-startup");
+            Control<CheckBox>("Enabled").IsChecked = false;
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Manual;
             if (Control<TextBlock>("NextRun").Text != "Запуск только вручную." || Control<StackPanel>("TimePanel").IsVisible
                 || Control<TextBlock>("SchedulePreviewHint").IsVisible)

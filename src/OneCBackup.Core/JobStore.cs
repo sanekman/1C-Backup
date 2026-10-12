@@ -7,6 +7,8 @@ namespace OneCBackup.Core;
 // exposing a partial JSON document when writing fails or the process stops.
 public sealed class JobStore(string path, bool useLocalTime = false)
 {
+    internal string StartupSchedulePath => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "startup-schedule.json");
+
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,

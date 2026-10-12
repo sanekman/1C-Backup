@@ -150,6 +150,7 @@ public partial class MainWindow
                     : Kind.SelectedItem is DatabaseKind.SqlServer ? "Полная копия .bak" : "Дамп .dump";
             var schedule = Schedule.SelectedValue is ScheduleKind.Manual ? "Только вручную"
                 : Enabled.IsChecked != true ? "Автоматические запуски отключены"
+                : Schedule.SelectedValue is ScheduleKind.SystemStartup ? "При запуске системы, после входа в Windows"
                 : (Schedule.SelectedValue is ScheduleKind.Weekly ? "По дням: " + string.Join(", ", DayControls.Where(day => day.Box.IsChecked == true).Select(day => day.Box.Content)) : "Ежедневно") + " · " + DailyAt.Text.Trim();
             var format = EncryptArchive.IsChecked == true ? "ZIP с паролем (AES-256)"
                 : ArchiveCopies.IsChecked == true || OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive && Kind.SelectedItem is DatabaseKind.OneCFile
@@ -307,7 +308,7 @@ public partial class MainWindow
         {
             if (!int.TryParse(KeepLast.Text, out var keep) || keep < 1) return RejectWizard("Укажите число хранимых копий: минимум 1.", 2, KeepLast);
             TimeOnly[] times = [new(23, 0)];
-            if (Schedule.SelectedValue is not ScheduleKind.Manual && !TryParseRunTimes(DailyAt.Text, out times)) return RejectWizard("Введите время в формате 23:00. Несколько запусков: 09:00, 13:00, 23:00, без повторов.", 2, DailyAt);
+            if (Schedule.SelectedValue is ScheduleKind.Daily or ScheduleKind.Weekly && !TryParseRunTimes(DailyAt.Text, out times)) return RejectWizard("Введите время в формате 23:00. Несколько запусков: 09:00, 13:00, 23:00, без повторов.", 2, DailyAt);
             var job = new BackupJob { ScheduleKind = (ScheduleKind)Schedule.SelectedValue, DaysOfWeek = SelectedDays(), TimeZoneId = BackupSchedule.LocalTimeZone,
                 DailyAt = times[0], AdditionalDailyTimes = times.Skip(1).ToArray() };
             var errors = job.ValidateSchedule();
@@ -340,7 +341,8 @@ public partial class MainWindow
         try { next = BackupSchedule.NextRun(job, DateTimeOffset.UtcNow); }
         catch (ArgumentException) { SelectedJobSummary.Text = "Проверьте расписание задания."; return; }
         catch (InvalidOperationException) { SelectedJobSummary.Text = "Проверьте расписание задания."; return; }
-        var nextText = !job.Enabled || job.ScheduleKind == ScheduleKind.Manual || next is null ? "Автозапуск для задания выключен"
+        var nextText = job.Enabled && job.ScheduleKind == ScheduleKind.SystemStartup ? "При загрузке системы: одна попытка после запуска агента"
+            : !job.Enabled || job.ScheduleKind == ScheduleKind.Manual || next is null ? "Автозапуск для задания выключен"
             : "По расписанию: " + next.Value.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.InvariantCulture)
                 + (backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running || schedulingTask is not null ? "" : " · включите автоматическое копирование");
         var resultText = running ? "Создаётся копия. Дождитесь результата; отмена доступна в программе, которая запустила копирование."

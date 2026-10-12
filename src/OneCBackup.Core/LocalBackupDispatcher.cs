@@ -3,7 +3,7 @@ namespace OneCBackup.Core;
 /// <summary>Shares one execution gate between manual runs and a restartable local schedule loop.</summary>
 public sealed class LocalBackupDispatcher(JobStore store, Func<BackupJob, CancellationToken, Task> execute)
 {
-    private readonly BackupScheduler scheduler = new();
+    private readonly BackupScheduler scheduler = new(new StartupBackupSchedule(store.StartupSchedulePath));
     private readonly SemaphoreSlim executionGate = new(1, 1);
     private int scheduling;
 

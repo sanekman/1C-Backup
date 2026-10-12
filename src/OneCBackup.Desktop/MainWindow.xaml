@@ -339,6 +339,10 @@
     <CheckBox x:Name="Sat" Content="Сб" Margin="0,0,10,4" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
     <CheckBox x:Name="Sun" Content="Вс" Margin="0,0,10,4" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
    </WrapPanel>
+   <StackPanel x:Name="StartupSchedulePanel" Visibility="Collapsed" Margin="0,0,0,10">
+    <Button x:Name="EnableStartupForSchedule" Content="Включить автозапуск агента" HorizontalAlignment="Left" Click="EnableStartupForSchedule_Click" />
+    <TextBlock x:Name="StartupScheduleStatus" Text="Автозапуск действует при входе текущего пользователя в Windows." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="12" Margin="0,6,0,0" />
+   </StackPanel>
    <StackPanel x:Name="TimePanel">
     <TextBlock Text="Время запуска (местное время компьютера)" /><TextBox x:Name="DailyAt" Text="23:00" Margin="0,4,0,4" TextChanged="Schedule_Changed" />
     <TextBlock Text="Можно несколько раз в день: 09:00, 13:00, 23:00." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10" FontSize="12" />

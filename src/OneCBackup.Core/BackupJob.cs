@@ -58,6 +58,7 @@ public sealed record BackupJob
     public string ScheduleDescription => ScheduleKind switch
     {
         ScheduleKind.Manual => "Вручную",
+        ScheduleKind.SystemStartup => "При запуске системы",
         ScheduleKind.Daily => "Ежедневно в " + string.Join(", ", ScheduledTimes.Select(time => time.ToString("HH:mm"))),
         ScheduleKind.Weekly => "По дням недели в " + string.Join(", ", ScheduledTimes.Select(time => time.ToString("HH:mm"))),
         _ => "Некорректное расписание"
@@ -154,8 +155,8 @@ public sealed record BackupJob
     {
         var errors = new List<string>();
         if (!Enum.IsDefined(ScheduleKind)) errors.Add("Неизвестный тип расписания.");
-        if (AdditionalDailyTimes?.Count > 47) errors.Add("Укажите не более 48 запусков в день.");
-        if (AdditionalDailyTimes is not null && (AdditionalDailyTimes.Contains(DailyAt)
+        if (ScheduleKind != ScheduleKind.SystemStartup && AdditionalDailyTimes?.Count > 47) errors.Add("Укажите не более 48 запусков в день.");
+        if (ScheduleKind != ScheduleKind.SystemStartup && AdditionalDailyTimes is not null && (AdditionalDailyTimes.Contains(DailyAt)
             || AdditionalDailyTimes.Distinct().Count() != AdditionalDailyTimes.Count))
             errors.Add("Время каждого запуска должно быть уникальным.");
         if (ScheduleKind == ScheduleKind.Weekly && (DaysOfWeek == WeekDays.None || ((int)DaysOfWeek & ~127) != 0))

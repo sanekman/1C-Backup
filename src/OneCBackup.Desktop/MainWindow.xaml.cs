@@ -103,7 +103,8 @@ public partial class MainWindow : Window
         {
             [ScheduleKind.Manual] = "Только вручную",
             [ScheduleKind.Daily] = "Ежедневно",
-            [ScheduleKind.Weekly] = "По выбранным дням недели"
+            [ScheduleKind.Weekly] = "По выбранным дням недели",
+            [ScheduleKind.SystemStartup] = "Копировать при запуске системы"
         };
         Schedule.SelectedValue = ScheduleKind.Daily;
         Mon.IsChecked = true;
@@ -158,7 +159,7 @@ public partial class MainWindow : Window
         for (var step = 0; step < 3; step++) if (!ValidateWizardStep(step)) return;
         var scheduleKind = (ScheduleKind)Schedule.SelectedValue;
         TimeOnly[] times = [new(23, 0)];
-        if ((scheduleKind != ScheduleKind.Manual && !TryParseRunTimes(DailyAt.Text, out times))
+        if ((scheduleKind is ScheduleKind.Daily or ScheduleKind.Weekly && !TryParseRunTimes(DailyAt.Text, out times))
             || !int.TryParse(KeepLast.Text, out var keep))
         { Status.Text = "Укажите от 1 до 48 уникальных времён в формате чч:мм через запятую и целое число копий."; return; }
         var storageKind = (StorageKind)Storage.SelectedValue;
@@ -589,6 +590,25 @@ public partial class MainWindow : Window
             StopBackgroundButton.IsEnabled = false;
         }
         catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось остановить агент: " + ex.Message; }
+    }
+
+    private void EnableStartupForSchedule_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ready) return;
+        try
+        {
+            if (agentSettings?.Mode != AgentMode.Standalone)
+                throw new InvalidOperationException("Сначала сохраните автономный режим в настройках агента.");
+            CurrentUserAgentStartup.Save(true);
+            AgentStartup.IsChecked = true;
+            StartupScheduleStatus.Text = "Автозапуск включён. Агент запустится при следующем входе в Windows. Задание нужно сохранить отдельно.";
+            StartupStatus.Text = "Агент будет запускаться при входе текущего пользователя в Windows.";
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
+            StartupScheduleStatus.Text = "Не удалось включить автозапуск: " + ex.Message;
+        }
     }
 
     private void SaveStartup_Click(object sender, RoutedEventArgs e)
@@ -1077,11 +1097,17 @@ public partial class MainWindow : Window
     {
         if (NextRun is null || Enabled is null || Schedule.SelectedValue is not ScheduleKind kind) return;
         DaysPanel.Visibility = kind == ScheduleKind.Weekly ? Visibility.Visible : Visibility.Collapsed;
-        TimePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
+        TimePanel.Visibility = kind is ScheduleKind.Manual or ScheduleKind.SystemStartup ? Visibility.Collapsed : Visibility.Visible;
         Enabled.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         SchedulePreviewHint.Visibility = Visibility.Collapsed;
+        if (StartupSchedulePanel is not null) StartupSchedulePanel.Visibility = kind == ScheduleKind.SystemStartup ? Visibility.Visible : Visibility.Collapsed;
         if (kind == ScheduleKind.Manual) { NextRun.Text = "Запуск только вручную."; return; }
         if (Enabled.IsChecked != true) { NextRun.Text = "Автоматические запуски отключены. Чтобы увидеть ближайшие запуски, включите «Выполнять задание по расписанию»."; return; }
+        if (kind == ScheduleKind.SystemStartup)
+        {
+            NextRun.Text = "Одна попытка за загрузку системы после запуска агента. До входа в Windows агент не работает. Перезапуск программы и выход из сна не повторяют копию. После ошибки повторите вручную.";
+            return;
+        }
         if (!TryParseRunTimes(DailyAt.Text, out var times))
         { NextRun.Text = "Укажите от 1 до 48 уникальных времён в формате чч:мм через запятую."; return; }
         try

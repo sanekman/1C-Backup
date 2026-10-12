@@ -1,6 +1,6 @@
 namespace OneCBackup.Core;
 
-public enum ScheduleKind { Manual, Daily, Weekly }
+public enum ScheduleKind { Manual, Daily, Weekly, SystemStartup }
 
 [Flags]
 public enum WeekDays { None = 0, Monday = 1, Tuesday = 2, Wednesday = 4, Thursday = 8, Friday = 16, Saturday = 32, Sunday = 64 }
@@ -30,7 +30,7 @@ public static class BackupSchedule
     {
         var errors = job.ValidateSchedule();
         if (errors.Count > 0) throw new ArgumentException(string.Join(" ", errors), nameof(job));
-        if (!job.Enabled || job.ScheduleKind == ScheduleKind.Manual) return null;
+        if (!job.Enabled || job.ScheduleKind is ScheduleKind.Manual or ScheduleKind.SystemStartup) return null;
         var zone = ResolveTimeZone(job.TimeZoneId);
         var firstDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(after, zone).DateTime);
         for (var offset = 0; offset <= 8; offset++)

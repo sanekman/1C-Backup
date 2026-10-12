@@ -3,7 +3,7 @@ namespace OneCBackup.Core;
 public sealed record ScheduledExecution(Guid JobId, DateTimeOffset ScheduledAt, Exception? Error);
 
 /// <summary>A tick-driven dispatcher. Its host supplies the actual backup executor.</summary>
-public sealed class BackupScheduler
+public sealed class BackupScheduler(StartupBackupSchedule? startup = null)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Dictionary<Guid, (string Settings, DateTimeOffset Next)> pending = [];
@@ -42,6 +42,19 @@ public sealed class BackupScheduler
             foreach (var job in jobs)
             {
                 if (!job.Enabled || job.ScheduleKind == ScheduleKind.Manual) { pending.Remove(job.Id); continue; }
+                if (job.ScheduleKind == ScheduleKind.SystemStartup)
+                {
+                    pending.Remove(job.Id);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (startup is null) throw new InvalidOperationException("Не задана история запусков при загрузке системы.");
+                    if (!await startup.TryConsumeAsync(job.Id, cancellationToken)) continue;
+                    Exception? startupError = null;
+                    try { await execute(job, cancellationToken); }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (Exception ex) { startupError = ex; }
+                    results.Add(new ScheduledExecution(job.Id, now, startupError));
+                    continue;
+                }
                 var effectiveZone = BackupSchedule.ResolveTimeZone(job.TimeZoneId);
                 var zoneIdentity = job.TimeZoneId == BackupSchedule.LocalTimeZone ? effectiveZone.ToSerializedString() : job.TimeZoneId;
                 var settings = $"{job.ScheduleKind}|{(int)job.DaysOfWeek}|{string.Join(',', job.ScheduledTimes.Select(t => t.Ticks))}|{zoneIdentity}";
