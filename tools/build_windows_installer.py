@@ -11,7 +11,7 @@ import tempfile
 import zipfile
 
 
-def build(archive_path, compiler):
+def build(archive_path, compiler, kind="inno"):
     archive_path = Path(archive_path).resolve()
     artifacts = archive_path.parent
     expected = archive_path.with_suffix('.zip.sha256').read_text(encoding='ascii').split()[0]
@@ -38,9 +38,29 @@ def build(archive_path, compiler):
         version = (source / 'VERSION.txt').read_text(encoding='utf-8').strip()
         if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?', version):
             raise RuntimeError('Invalid distribution version')
-        subprocess.run([str(compiler), '/Qp', '/DSourceFolder=' + str(source),
-                        '/DOutputFolder=' + str(artifacts), '/DAppVersion=' + version,
-                        str(Path(__file__).with_name('windows-installer.iss'))], check=True)
+        if kind == "inno":
+            subprocess.run([str(compiler), '/Qp', '/DSourceFolder=' + str(source),
+                            '/DOutputFolder=' + str(artifacts), '/DAppVersion=' + version,
+                            str(Path(__file__).with_name('windows-installer.iss'))], check=True)
+        elif kind == "nsis":
+            def quote(value):
+                return str(value).replace('$', '$$').replace('"', '$' + chr(92) + '"')
+            # Keep generated uninstall metadata outside the input distribution.
+            with tempfile.TemporaryDirectory(prefix='nsis-manifest-', dir=artifacts) as metadata:
+                manifest = Path(metadata) / 'uninstall-files.nsh'
+                lines = ['Delete "$INSTDIR' + chr(92) + quote(str(file.relative_to(source)).replace('/', chr(92))) + '"'
+                         for file in sorted(source.rglob('*')) if file.is_file()]
+                directories = sorted((file for file in source.rglob('*') if file.is_dir()),
+                                     key=lambda file: len(file.parts), reverse=True)
+                lines += ['RMDir "$INSTDIR' + chr(92) + quote(str(directory.relative_to(source)).replace('/', chr(92))) + '"'
+                          for directory in directories]
+                manifest.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+                subprocess.run([str(compiler), '-V2', '-DSourceFolder=' + str(source),
+                                '-DOutputFolder=' + str(artifacts), '-DAppVersion=' + version,
+                                '-DUninstallFiles=' + str(manifest),
+                                str(Path(__file__).with_name('windows-installer.nsi'))], check=True)
+        else:
+            raise ValueError('Unknown installer compiler')
     installer = artifacts / '1C-Backup-windows-x64-setup.exe'
     with installer.open('rb') as stream:
         if stream.read(2) != b'MZ':
@@ -54,6 +74,8 @@ def build(archive_path, compiler):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--zip', type=Path, default=Path('artifacts/1C-Backup-windows-x64.zip'))
-    parser.add_argument('--compiler', type=Path, default=Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Inno Setup 6/ISCC.exe')
+    parser.add_argument('--kind', choices=['inno', 'nsis'], default='inno')
+    parser.add_argument('--compiler', type=Path)
     args = parser.parse_args()
-    build(args.zip, args.compiler)
+    compiler = args.compiler or (Path("makensis") if args.kind == "nsis" else Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Inno Setup 6/ISCC.exe")
+    build(args.zip, compiler, args.kind)
