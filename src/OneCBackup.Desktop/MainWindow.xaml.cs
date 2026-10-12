@@ -14,7 +14,7 @@ namespace OneCBackup.Desktop;
 public partial class MainWindow : Window
 {
     internal bool SmokeReady => ready && !persisting && !jobFileTransfer && !copiesRefreshing && activeRun is null && !manualPending && copyVerification is null;
-    private readonly JobStore store = new(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"));
+    private readonly JobStore store = new(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"), useLocalTime: true);
     private List<BackupJob> jobs = [];
     private readonly AgentSettingsStore agentSettingsStore = new(Path.Combine(DesktopPaths.DataDirectory, "agent.json"));
     private readonly AgentConfigurationCache agentCache = new(Path.Combine(DesktopPaths.DataDirectory, "server-jobs.json"));
@@ -55,6 +55,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ThemePicker.SelectedValue = DesktopTheme.Preference.ToString();
         AppVersion.Text = ApplicationBuildInfo.Version;
         AppVersion.ToolTip = ApplicationBuildInfo.SupportText;
         BuildInfo.Text = ApplicationBuildInfo.SupportText;
@@ -112,9 +113,7 @@ public partial class MainWindow : Window
         };
         Schedule.SelectedValue = ScheduleKind.Daily;
         Mon.IsChecked = true;
-        TimeZonePicker.ItemsSource = TimeZoneInfo.GetSystemTimeZones();
-        Zone.Text = TimeZoneInfo.Local.Id;
-        TimeZonePicker.SelectedValue = TimeZoneInfo.Local.Id;
+
         SaveButton.IsEnabled = DeleteButton.IsEnabled = JobEditor.IsEnabled = false;
         Loaded += async (_, _) =>
         {
@@ -194,7 +193,7 @@ public partial class MainWindow : Window
             TemporaryDirectory = string.IsNullOrWhiteSpace(TemporaryFolder.Text) ? null : TemporaryFolder.Text.Trim(),
             AdditionalDestinations = additionalDestinations.Count == 0 ? null : additionalDestinations.ToArray(),
             DailyAt = times[0], AdditionalDailyTimes = times.Length > 1 ? times.Skip(1).ToArray() : null,
-            TimeZoneId = Zone.Text.Trim(), KeepLast = keep, Enabled = Enabled.IsChecked == true,
+            TimeZoneId = BackupSchedule.LocalTimeZone, KeepLast = keep, Enabled = Enabled.IsChecked == true,
             ArchiveCopies = ArchiveCopies.IsChecked == true,
             FileBackupMode = FileBackupModePicker.SelectedValue is FileBackupMode mode ? mode : FileBackupMode.Full,
             FullBackupEvery = int.TryParse(FullBackupEvery.Text, out var every) && every is >= 1 and <= 365 ? every : 7,
@@ -306,7 +305,7 @@ public partial class MainWindow : Window
 
     private void LoadJobEditor(BackupJob job)
     {
-        editingId = job.Id; Zone.Text = job.TimeZoneId;
+        editingId = job.Id;
         OneCExecutable.Text = job.OneC?.ExecutablePath ?? "";
         OneCTimeout.Text = (job.OneC?.TimeoutMinutes ?? 120).ToString();
         SqlBackupServer.Text = job.SqlServer?.Server ?? "";
@@ -348,7 +347,7 @@ public partial class MainWindow : Window
         if (!NewJobButton.IsEnabled) return;
         selectionBeforeEdit = Jobs.SelectedItem as BackupJob;
         JobSearch.Clear();
-        Jobs.SelectedItem = null; editingId = null; Zone.Text = TimeZoneInfo.Local.Id;
+        Jobs.SelectedItem = null; editingId = null;
         webDavCredentialKey = null; WebDavTimeout.Text = "120"; UpdateWebDavCredentialStatus();
         JobName.Clear(); Source.Clear(); Destination.Clear(); Kind.SelectedItem = DatabaseKind.OneCFile;
         TemporaryFolder.Clear();
@@ -656,7 +655,7 @@ public partial class MainWindow : Window
         {
             "history" => ("История запусков", "Результаты запусков и ошибки. Время — на этом компьютере."),
             "copies" => ("Резервные копии", "Зарегистрированные копии всех заданий, расположение файлов и проверка целостности."),
-            "agent" => ("Настройки программы", "Фоновая работа и запуск при входе в Windows."),
+            "agent" => ("Настройки программы", "Оформление, фоновая работа и запуск при входе в Windows."),
             _ => ("Задания резервного копирования", "Файлы и папки · WebDAV · 1С · SQL Server · PostgreSQL")
         };
     }
@@ -725,8 +724,6 @@ public partial class MainWindow : Window
             + $"Окончание: {run.FinishedUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}\n"
             + $"Рабочая папка: {run.WorkDirectory}\nID запуска: {run.RunId}\n"
             + (run.Backup is null ? "" : $"SHA256: {run.Backup.Sha256}\n")
-            + $"Начало (UTC): {run.StartedUtc:dd.MM.yyyy HH:mm:ss}\n"
-            + $"Окончание (UTC): {run.FinishedUtc?.ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}"
             : "Выберите запуск в таблице.";
         UpdateRunControls();
     }
@@ -1050,9 +1047,6 @@ public partial class MainWindow : Window
     private void UpdateSchedulePreview()
     {
         if (NextRun is null || Enabled is null || Schedule.SelectedValue is not ScheduleKind kind) return;
-        if (TimeZonePicker is not null && TimeZonePicker.SelectedValue as string != Zone.Text.Trim()) TimeZonePicker.SelectedValue = Zone.Text.Trim();
-        if (ZonePanel is not null) ZonePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
-        TechnicalZoneOptions.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         DaysPanel.Visibility = kind == ScheduleKind.Weekly ? Visibility.Visible : Visibility.Collapsed;
         TimePanel.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         Enabled.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
@@ -1064,19 +1058,18 @@ public partial class MainWindow : Window
         try
         {
             var job = new BackupJob { DailyAt = times[0], AdditionalDailyTimes = times.Skip(1).ToArray(),
-                TimeZoneId = Zone.Text.Trim(), ScheduleKind = kind, DaysOfWeek = SelectedDays() };
+                TimeZoneId = BackupSchedule.LocalTimeZone, ScheduleKind = kind, DaysOfWeek = SelectedDays() };
             var errors = job.ValidateSchedule();
             if (errors.Count != 0) { NextRun.Text = string.Join(" ", errors); return; }
-            var zone = TimeZoneInfo.FindSystemTimeZoneById(job.TimeZoneId);
             var after = DateTimeOffset.UtcNow;
             var upcoming = new List<string>();
             for (var index = 0; index < 3; index++)
             {
                 var next = BackupSchedule.NextRun(job, after)!.Value;
-                upcoming.Add(TimeZoneInfo.ConvertTime(next, zone).ToString("dd.MM.yyyy HH:mm zzz", CultureInfo.InvariantCulture));
+                upcoming.Add(next.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture));
                 after = next;
             }
-            NextRun.Text = "Ближайшие 3 запуска по часовому поясу задания:\n" + string.Join("\n", upcoming);
+            NextRun.Text = "Ближайшие 3 запуска по местному времени:\n" + string.Join("\n", upcoming);
             SchedulePreviewHint.Visibility = Visibility.Visible;
         }
         catch (ArgumentException ex) { NextRun.Text = ex.Message.Split(Environment.NewLine)[0]; }

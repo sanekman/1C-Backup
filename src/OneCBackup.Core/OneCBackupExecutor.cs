@@ -128,7 +128,7 @@ public sealed class OneCBackupExecutor(IBackupProcessRunner processRunner, IArch
         if (!File.Exists(Path.Combine(source, "1Cv8.1CD")))
             throw new FileNotFoundException("В каталоге источника не найден файл 1Cv8.1CD.");
         Directory.CreateDirectory(workDirectory);
-        var dump = Path.Combine(Path.GetFullPath(workDirectory), $"{job.Id:N}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.dt");
+        var dump = Path.Combine(Path.GetFullPath(workDirectory), BackupFileName.Create(job, ".dt"));
         var log = Path.Combine(Path.GetFullPath(workDirectory), "platform.log");
         var command = new BackupProcess(settings.ExecutablePath,
             ["DESIGNER", "/F", source, "/DumpIB", dump, "/Out", log,

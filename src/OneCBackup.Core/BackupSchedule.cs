@@ -7,6 +7,16 @@ public enum WeekDays { None = 0, Monday = 1, Tuesday = 2, Wednesday = 4, Thursda
 
 public static class BackupSchedule
 {
+    public const string LocalTimeZone = "Local";
+
+    public static TimeZoneInfo ResolveTimeZone(string id)
+    {
+        if (id != LocalTimeZone) return TimeZoneInfo.FindSystemTimeZoneById(id);
+        // The standalone host can stay running while Windows time zone settings change.
+        TimeZoneInfo.ClearCachedData();
+        return TimeZoneInfo.Local;
+    }
+
     public static WeekDays DayFlag(DayOfWeek day) => day switch
     {
         DayOfWeek.Monday => WeekDays.Monday, DayOfWeek.Tuesday => WeekDays.Tuesday,
@@ -21,7 +31,7 @@ public static class BackupSchedule
         var errors = job.ValidateSchedule();
         if (errors.Count > 0) throw new ArgumentException(string.Join(" ", errors), nameof(job));
         if (!job.Enabled || job.ScheduleKind == ScheduleKind.Manual) return null;
-        var zone = TimeZoneInfo.FindSystemTimeZoneById(job.TimeZoneId);
+        var zone = ResolveTimeZone(job.TimeZoneId);
         var firstDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(after, zone).DateTime);
         for (var offset = 0; offset <= 8; offset++)
         {

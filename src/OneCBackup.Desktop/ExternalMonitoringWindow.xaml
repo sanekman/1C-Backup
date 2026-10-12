@@ -25,7 +25,6 @@
     <TextBlock Text="SQL Server (например SERVER\INSTANCE). Windows-аутентификация текущего пользователя, проверка TLS-сертификата." TextWrapping="Wrap" />
     <TextBox x:Name="SqlServer" Margin="0,4,0,10" />
     <WrapPanel>
-     <StackPanel Width="300" Margin="0,0,16,0"><TextBlock Text="Часовой пояс SQL Server" /><TextBox x:Name="Zone" Margin="0,4,0,10" /></StackPanel>
      <StackPanel Width="200"><TextBlock Text="История за дней" /><TextBox x:Name="Days" Text="30" Margin="0,4,0,10" /></StackPanel>
     </WrapPanel>
    </StackPanel>
@@ -62,7 +61,7 @@
   <Expander x:Name="ReportDetailsPanel" Expanded="ReportDetailsPanel_Expanded" DockPanel.Dock="Bottom" Header="Подробности выбранного наблюдения" Margin="0,8,0,0" IsExpanded="False">
    <TextBox x:Name="ReportDetails" IsReadOnly="True" TextWrapping="Wrap" Height="100" VerticalScrollBarVisibility="Auto" Text="Выберите наблюдение в таблице." />
   </Expander>
-  <Border DockPanel.Dock="Top" Background="#F1F5F9" Padding="8" Margin="0,0,0,8">
+  <Border DockPanel.Dock="Top" Background="{DynamicResource ControlBrush}" Padding="8" Margin="0,0,0,8">
    <StackPanel>
     <TextBlock x:Name="ReportsSummary" Text="Загрузка наблюдений…" FontWeight="SemiBold" Margin="0,0,0,6" />
     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="125" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -76,9 +75,9 @@
   <DataGrid x:Name="Reports" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" SelectionChanged="Report_Changed" RowHeight="30" ColumnHeaderHeight="30">
    <DataGrid.Columns>
     <DataGridTextColumn Header="База" Binding="{Binding Observation.DatabaseName}" Width="*" MinWidth="120"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding Observation.DatabaseName}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
-    <DataGridTextColumn Header="Окончание" Binding="{Binding Observation.FinishedAt, StringFormat=dd.MM.yyyy HH:mm}" Width="150"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding Observation.TimeZoneId}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
+    <DataGridTextColumn Header="Окончание" Binding="{Binding Observation, Converter={StaticResource ObservationLocalTimeConverter}}" Width="150"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="ToolTip" Value="Местное время компьютера" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
     <DataGridTextColumn Header="Тип" Binding="{Binding Observation.BackupType}" Width="85"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding Observation.BackupType}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
-    <DataGridTextColumn Header="Результат" Binding="{Binding Observation.OutcomeDescription}" Width="90"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#166534" /><Style.Triggers><DataTrigger Binding="{Binding Observation.Outcome}" Value="{x:Static core:ExternalBackupOutcome.Failed}"><Setter Property="Foreground" Value="#B91C1C" /></DataTrigger></Style.Triggers></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
+    <DataGridTextColumn Header="Результат" Binding="{Binding Observation.OutcomeDescription}" Width="90"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" /><Style.Triggers><DataTrigger Binding="{Binding Observation.Outcome}" Value="{x:Static core:ExternalBackupOutcome.Failed}"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" /></DataTrigger></Style.Triggers></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
     <DataGridTextColumn Header="Отправка" Binding="{Binding DeliveryDescription}" Width="130"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding DeliveryDescription}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
    </DataGrid.Columns>
   </DataGrid>

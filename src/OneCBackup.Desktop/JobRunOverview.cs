@@ -35,8 +35,8 @@ public sealed class JobRunOverviewConverter : IMultiValueConverter
             BackupRunStatus.Failed => "#B91C1C",
             _ => "#B45309"
         };
-        var help = label + "\nНачало: " + run.StartedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm zzz", culture);
-        if (run.FinishedUtc is { } finished) help += "\nЗавершение: " + finished.ToLocalTime().ToString("dd.MM.yyyy HH:mm zzz", culture);
+        var help = label + "\nНачало: " + run.StartedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm", culture);
+        if (run.FinishedUtc is { } finished) help += "\nЗавершение: " + finished.ToLocalTime().ToString("dd.MM.yyyy HH:mm", culture);
         if (!string.IsNullOrWhiteSpace(run.Details)) help += "\n" + run.Details;
         help += "\nВыберите задание и нажмите «Результат», чтобы открыть последний запуск. Проверка запуска не заменяет пробное восстановление базы.";
         return new JobRunBadge(label, color, help);

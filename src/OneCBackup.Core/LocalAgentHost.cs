@@ -11,7 +11,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         var settings = await new AgentSettingsStore(Path.Combine(directory, "agent.json")).LoadAsync(cancellationToken);
         if (settings.Mode != AgentMode.Standalone)
             throw new NotSupportedException("Локальный фоновый агент пока поддерживает только автономный режим.");
-        var store = new JobStore(Path.Combine(directory, "jobs.json"));
+        var store = new JobStore(Path.Combine(directory, "jobs.json"), useLocalTime: true);
         var jobs = await store.LoadAsync(cancellationToken);
         var manual = runJobId is Guid id ? jobs.SingleOrDefault(job => job.Id == id)
             ?? throw new InvalidDataException("Задание не найдено.") : null;

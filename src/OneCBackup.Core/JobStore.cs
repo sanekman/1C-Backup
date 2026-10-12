@@ -5,7 +5,7 @@ namespace OneCBackup.Core;
 
 // The caller owns synchronization. A temporary file in the same directory avoids
 // exposing a partial JSON document when writing fails or the process stops.
-public sealed class JobStore(string path)
+public sealed class JobStore(string path, bool useLocalTime = false)
 {
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -19,12 +19,14 @@ public sealed class JobStore(string path)
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
         var jobs = await JsonSerializer.DeserializeAsync<List<BackupJob>>(stream, Options, cancellationToken)
             ?? throw new InvalidDataException("Файл заданий содержит null.");
+        if (useLocalTime) jobs = jobs.Select(job => job is null ? null! : job with { TimeZoneId = BackupSchedule.LocalTimeZone }).ToList();
         ValidateJobs(jobs);
         return jobs;
     }
 
     public async Task SaveAsync(IReadOnlyList<BackupJob> jobs, CancellationToken cancellationToken = default)
     {
+        if (useLocalTime) jobs = jobs.Select(job => job is null ? null! : job with { TimeZoneId = BackupSchedule.LocalTimeZone }).ToArray();
         ValidateJobs(jobs);
         var fullPath = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);

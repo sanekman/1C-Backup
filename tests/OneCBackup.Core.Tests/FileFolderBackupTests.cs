@@ -45,9 +45,13 @@ public sealed class FileFolderBackupTests : IDisposable
         Directory.CreateDirectory(Path.Combine(Source, "empty")); Directory.CreateDirectory(Path.Combine(Source, "nested"));
         var changed = Path.Combine(Source, "nested", "данные.txt"); await File.WriteAllTextAsync(changed, "before");
         var full = await Run(); Assert.True(full.Backup.FileSnapshot!.IsFull);
+        Assert.StartsWith("files_", Path.GetFileName(full.Backup.Location));
+        Assert.EndsWith(".files-full.zip", full.Backup.Location);
         File.Delete(Path.Combine(Source, "remove.txt")); await File.WriteAllTextAsync(changed, "after");
         await File.WriteAllTextAsync(Path.Combine(Source, "new.txt"), "added");
         var increment = await Run(); Assert.Equal(full.Backup.FileSnapshot.SnapshotId, increment.Backup.FileSnapshot!.ParentSnapshotId);
+        Assert.StartsWith("files_", Path.GetFileName(increment.Backup.Location));
+        Assert.EndsWith(".files-incremental.zip", increment.Backup.Location);
         using (var zip = ZipFile.OpenRead(increment.Backup.Location))
         {
             Assert.DoesNotContain(zip.Entries, entry => entry.FullName == "data/stable.txt");
@@ -143,6 +147,8 @@ public sealed class FileFolderBackupTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "content"); var first = await Run();
         var state = Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"); await File.WriteAllTextAsync(state, "broken JSON");
         var full = await Run(); Assert.True(full.Backup.FileSnapshot!.IsFull);
+        Assert.StartsWith("files_", Path.GetFileName(full.Backup.Location));
+        Assert.EndsWith(".files-full.zip", full.Backup.Location);
         var inc = await Run(); Assert.False(inc.Backup.FileSnapshot!.IsFull);
         File.Delete(full.Backup.Location);
         await Assert.ThrowsAnyAsync<Exception>(() => Restorer().RestoreAsync(inc, Job, RestoreParent));

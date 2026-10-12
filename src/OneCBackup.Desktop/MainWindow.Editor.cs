@@ -130,7 +130,7 @@ public partial class MainWindow
         {
             0 => ("Что будем копировать?", "Название поможет найти задание. Выберите источник и способ копирования."),
             1 => ("Куда сохранять копии?", "Выберите отдельное место хранения. При необходимости включите ZIP и защиту паролем."),
-            2 => ("Когда запускать и сколько хранить?", "Время указано в выбранном часовом поясе. Сохраняются только успешные копии."),
+            2 => ("Когда запускать и сколько хранить?", "Используется местное время компьютера. Сохраняются только успешные копии."),
             _ => ("Всё верно?", "Проверьте итог. Полные пути и параметры можно раскрыть ниже.")
         };
         UpdateFileBackupControls();
@@ -158,7 +158,7 @@ public partial class MainWindow
                 : Kind.SelectedItem is DatabaseKind.PostgreSql ? "\nСервер: " + PgHost.Text.Trim() + ":" + PgPort.Text.Trim() : "";
             var ftpAddress = Storage.SelectedValue is StorageKind.Ftp ? "\nFTP-сервер: " + FtpHost.Text.Trim() + ":" + FtpPort.Text.Trim()
                 + (FtpTls.IsChecked == true ? " (FTPS)" : " (без TLS)") : "";
-            var zoneDescription = Schedule.SelectedValue is ScheduleKind.Manual ? "" : "\nЧасовой пояс: " + TimeZonePicker.Text;
+            var zoneDescription = "";
             var extraDestinations = additionalDestinations.Count == 0 ? "" : "\nТакже отправлять:\n" + string.Join("\n", additionalDestinations.Select(destination => "• " + destination.Description
                 + (destination.KeepLast is null ? " (" + KeepLast.Text.Trim() + ")" : "")));
             var temporary = string.IsNullOrWhiteSpace(TemporaryFolder.Text)
@@ -211,7 +211,6 @@ public partial class MainWindow
         Status.Text = "Настройки ещё не сохранены. " + message;
         for (DependencyObject? parent = field; parent is not null; parent = LogicalTreeHelper.GetParent(parent))
             if (parent is Expander expander) expander.IsExpanded = true;
-        if (field == TimeZonePicker) ZonePanel.Visibility = Visibility.Visible;
         field.BringIntoView(); field.Focus();
         return false;
     }
@@ -300,16 +299,14 @@ public partial class MainWindow
             if (!int.TryParse(KeepLast.Text, out var keep) || keep < 1) return RejectWizard("Укажите число хранимых копий: минимум 1.", 2, KeepLast);
             TimeOnly[] times = [new(23, 0)];
             if (Schedule.SelectedValue is not ScheduleKind.Manual && !TryParseRunTimes(DailyAt.Text, out times)) return RejectWizard("Введите время в формате 23:00. Несколько запусков: 09:00, 13:00, 23:00, без повторов.", 2, DailyAt);
-            var job = new BackupJob { ScheduleKind = (ScheduleKind)Schedule.SelectedValue, DaysOfWeek = SelectedDays(), TimeZoneId = Zone.Text.Trim(),
+            var job = new BackupJob { ScheduleKind = (ScheduleKind)Schedule.SelectedValue, DaysOfWeek = SelectedDays(), TimeZoneId = BackupSchedule.LocalTimeZone,
                 DailyAt = times[0], AdditionalDailyTimes = times.Skip(1).ToArray() };
             var errors = job.ValidateSchedule();
-            if (errors.Count != 0) return RejectWizard(string.Join(" ", errors), 2, TimeZonePicker);
+            if (errors.Count != 0) return RejectWizard(string.Join(" ", errors), 2, DailyAt);
         }
         return true;
     }
 
-    private void TimeZone_Changed(object sender, SelectionChangedEventArgs e)
-    { if (Zone is not null && TimeZonePicker.SelectedValue is string id && Zone.Text != id) Zone.Text = id; }
 
     private void UpdateSelectedJobSummary()
     {
@@ -332,10 +329,10 @@ public partial class MainWindow
         JobProgress.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         DateTimeOffset? next;
         try { next = BackupSchedule.NextRun(job, DateTimeOffset.UtcNow); }
-        catch (ArgumentException) { SelectedJobSummary.Text = "Проверьте расписание и часовой пояс задания."; return; }
+        catch (ArgumentException) { SelectedJobSummary.Text = "Проверьте расписание задания."; return; }
         catch (InvalidOperationException) { SelectedJobSummary.Text = "Проверьте расписание задания."; return; }
         var nextText = !job.Enabled || job.ScheduleKind == ScheduleKind.Manual || next is null ? "Автозапуск для задания выключен"
-            : "По расписанию: " + TimeZoneInfo.ConvertTime(next.Value, TimeZoneInfo.FindSystemTimeZoneById(job.TimeZoneId)).ToString("dd.MM HH:mm", CultureInfo.InvariantCulture)
+            : "По расписанию: " + next.Value.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.InvariantCulture)
                 + (backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running || schedulingTask is not null ? "" : " · включите автоматическое копирование");
         var resultText = running ? "Создаётся копия. Дождитесь результата; отмена доступна в программе, которая запустила копирование."
             : LatestJobRuns.IsLoading ? "Загружается история запусков."
@@ -355,7 +352,7 @@ public partial class MainWindow
         {
             resultText += " · " + (latest.FinishedUtc ?? latest.StartedUtc).ToLocalTime().ToString("dd.MM HH:mm");
             SelectedJobSummary.Foreground = latest.Status == BackupRunStatus.Succeeded && latest.Warnings?.Count is not > 0
-                ? System.Windows.Media.Brushes.DarkGreen : System.Windows.Media.Brushes.Maroon;
+                ? (System.Windows.Media.Brush)FindResource("SuccessBrush") : (System.Windows.Media.Brush)FindResource("ErrorBrush");
         }
         SelectedJobSummary.Text = resultText + "\n" + nextText;
     }

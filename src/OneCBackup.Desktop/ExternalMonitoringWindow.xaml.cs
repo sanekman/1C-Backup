@@ -40,7 +40,6 @@ public partial class ExternalMonitoringWindow : Window
             [ExternalBackupSourceKind.PostgreSqlReports] = "PostgreSQL: отчёты скрипта"
         };
         SourceKind.SelectedValue = ExternalBackupSourceKind.SqlServerHistory;
-        Zone.Text = TimeZoneInfo.Local.Id;
         Editor.IsEnabled = false;
         Sources.IsEnabled = false;
         Loaded += async (_, _) =>
@@ -115,7 +114,7 @@ public partial class ExternalMonitoringWindow : Window
         UpdateMonitorControls();
         if (SelectedMonitor is not { } monitor) return;
         editingId = monitor.Id; MonitorName.Text = monitor.Name; SourceKind.SelectedValue = monitor.Kind;
-        SqlServer.Text = monitor.SqlServer; Database.Text = monitor.DatabaseName; Zone.Text = monitor.TimeZoneId;
+        SqlServer.Text = monitor.SqlServer; Database.Text = monitor.DatabaseName;
         Days.Text = monitor.LookbackDays.ToString(); ReportDirectory.Text = monitor.ReportDirectory;
         MonitorEnabled.IsChecked = monitor.Enabled; PollInterval.Text = monitor.PollIntervalSeconds.ToString();
     }
@@ -130,7 +129,7 @@ public partial class ExternalMonitoringWindow : Window
     private void ClearMonitorEditor()
     {
         editingId = null; Sources.SelectedItem = null; MonitorName.Clear(); SqlServer.Clear(); Database.Clear();
-        ReportDirectory.Clear(); Zone.Text = TimeZoneInfo.Local.Id; Days.Text = "30";
+        ReportDirectory.Clear(); Days.Text = "30";
         MonitorEnabled.IsChecked = true; PollInterval.Text = "60";
     }
 
@@ -145,7 +144,7 @@ public partial class ExternalMonitoringWindow : Window
             {
                 Id = editingId ?? Guid.NewGuid(), Name = MonitorName.Text.Trim(),
                 Kind = (ExternalBackupSourceKind)SourceKind.SelectedValue,
-                SqlServer = SqlServer.Text.Trim(), DatabaseName = Database.Text.Trim(), TimeZoneId = Zone.Text.Trim(),
+                SqlServer = SqlServer.Text.Trim(), DatabaseName = Database.Text.Trim(), TimeZoneId = TimeZoneInfo.Local.Id,
                 LookbackDays = int.TryParse(Days.Text, out var days) ? days : 0, ReportDirectory = ReportDirectory.Text.Trim(),
                 Enabled = MonitorEnabled.IsChecked == true, PollIntervalSeconds = int.TryParse(PollInterval.Text, out var interval) ? interval : 0
             };
@@ -227,12 +226,12 @@ public partial class ExternalMonitoringWindow : Window
         { ReportDetails.Text = "Выберите наблюдение в таблице."; return; }
         var observation = report.Observation;
         ReportDetails.Text = $"Источник: {MonitorLabel(report.MonitorId)}\nБаза: {observation.DatabaseName}\nЭкземпляр: {observation.Instance}\nРезультат: {observation.OutcomeDescription}\n"
-            + $"Тип копии: {observation.BackupType}\nНачало: {observation.StartedAt:dd.MM.yyyy HH:mm:ss}\n"
-            + $"Окончание: {observation.FinishedAt:dd.MM.yyyy HH:mm:ss}\nЧасовой пояс источника: {observation.TimeZoneId}\n"
+            + $"Тип копии: {observation.BackupType}\nНачало: {new ObservationLocalTimeConverter().Convert(observation, typeof(string), "Start", System.Globalization.CultureInfo.CurrentCulture)}\n"
+            + $"Окончание: {new ObservationLocalTimeConverter().Convert(observation, typeof(string), "Finish", System.Globalization.CultureInfo.CurrentCulture)}\n"
             + $"Размер: {observation.SizeBytes?.ToString() ?? "не указан"} байт\nПути: {observation.LocationDescription}\n"
             + $"Основание результата: {observation.EvidenceDescription}\nОтправка: {report.DeliveryDescription}\n"
-            + $"Получено агентом: {report.ObservedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss zzz}\n"
-            + (report.DeliveredUtc is null ? "" : $"Отправлено: {report.DeliveredUtc.Value.ToLocalTime():dd.MM.yyyy HH:mm:ss zzz}\n")
+            + $"Получено агентом: {report.ObservedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n"
+            + (report.DeliveredUtc is null ? "" : $"Отправлено: {report.DeliveredUtc.Value.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n")
             + $"ID источника: {report.MonitorId}\nID наблюдения: {report.ReportId}\n" + (observation.Error is null ? "" : "Ошибка: " + observation.Error)
             + "\nЗавершение команды не подтверждает наличие файла сейчас или возможность восстановления базы.";
     }

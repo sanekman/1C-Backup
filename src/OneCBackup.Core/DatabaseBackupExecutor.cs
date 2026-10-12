@@ -73,7 +73,7 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
         var errors = job.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         Directory.CreateDirectory(workDirectory);
-        var name = $"{job.Id:N}-{Guid.NewGuid():N}.bak";
+        var name = BackupFileName.Create(job, ".bak");
         var serverPath = settings.ServerBackupDirectory.TrimEnd('/', '\\') +
             (settings.ServerBackupDirectory.StartsWith('/') ? "/" : "\\") + name;
         var readablePath = Path.Combine(settings.AgentReadDirectory, name);
@@ -135,7 +135,7 @@ public sealed class PostgreSqlBackupExecutor(IBackupProcessRunner processRunner)
             throw new FileNotFoundException("Не найдены pg_dump или pg_restore.");
         var work = Path.GetFullPath(workDirectory);
         Directory.CreateDirectory(work);
-        var dump = Path.Combine(work, $"{job.Id:N}-{Guid.NewGuid():N}.dump");
+        var dump = Path.Combine(work, BackupFileName.Create(job, ".dump"));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(settings.TimeoutMinutes));
         try

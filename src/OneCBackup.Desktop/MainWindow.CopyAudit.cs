@@ -37,7 +37,7 @@ public partial class MainWindow
                     : result.Status == BackupAuditStatus.Missing ? "Нет зарегистрированной копии."
                     : result.Status == BackupAuditStatus.Cancelled ? "Отменено или не проверено." : "Ошибка проверки.")
                 + (result.Record is null ? "" : "\nКопия: " + result.Record.Backup.Location
-                    + "\nСоздана: " + result.Record.CompletedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm zzz"))
+                    + "\nСоздана: " + result.Record.CompletedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))
                 + (result.Error is null ? "" : "\n" + result.Error)));
             details.Add("Проверены только последние зарегистрированные копии в текущих хранилищах. Проверка не изменяет файлы, каталог, историю запусков или правила хранения. Совпадение SHA-256 не заменяет пробное восстановление базы.");
             StorageCheckDetails.Text = string.Join("\n\n", details);

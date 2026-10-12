@@ -14,7 +14,7 @@ public sealed record BackupCopyRow(BackupRecord Record, string JobName,
     { BackupVerificationOutcome.Verified => "#166534", BackupVerificationOutcome.Failed => "#B91C1C", _ => "#64748B" };
     public string CheckHelp => VerificationUnavailable ? "Не удалось прочитать сохранённые результаты проверок. Проверить файл можно отдельно."
         : CurrentCheck is not { } check ? "Эту копию ещё не проверяли кнопками проверки целостности."
-        : $"Последняя проверка: {check.CheckedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss zzz}\n"
+        : $"Последняя проверка: {check.CheckedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n"
             + (check.Origin == BackupVerificationOrigin.Manual ? "Проверка выбранной копии." : "Проверка последних копий задания.")
             + "\n" + (check.Outcome == BackupVerificationOutcome.Verified ? "Размер и SHA-256 совпали с каталогом."
                 : check.Outcome == BackupVerificationOutcome.Cancelled ? "Проверка отменена; целостность не подтверждена." : "Проверка не пройдена; подробности: " + check.Error)

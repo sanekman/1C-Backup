@@ -37,6 +37,7 @@ public partial class App : Application
             Shutdown(1);
             return;
         }
+        DesktopTheme.Initialize();
         base.OnStartup(e);
         if (smokeOutput is not null)
             Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle,
@@ -46,6 +47,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         DiagnosticLog.Current.Write(DiagnosticEvent.ProcessStopped, values: new(Code: e.ApplicationExitCode));
+        DesktopTheme.Shutdown();
         instanceLock?.Dispose();
         base.OnExit(e);
     }

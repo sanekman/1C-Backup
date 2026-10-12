@@ -127,6 +127,25 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Сведения о программе не скопированы полностью.");
             File.WriteAllText(Path.Combine(output, "build-info.json"), JsonSerializer.Serialize(new
             { version = ApplicationBuildInfo.Version, revision = ApplicationBuildInfo.Revision, supportText = Clipboard.GetText() }));
+            if (Control<ComboBox>("ThemePicker").SelectedValue as string != "System")
+                throw new InvalidOperationException("Первый запуск не использует системную тему.");
+            Control<ComboBox>("ThemePicker").SelectedValue = "Dark";
+            window.UpdateLayout();
+            var darkSurface = (System.Windows.Media.SolidColorBrush)Application.Current.Resources["SurfaceBrush"];
+            if (darkSurface.Color.ToString() != "#FF1C2633" || DesktopTheme.Preference != DesktopThemePreference.Dark)
+                throw new InvalidOperationException("Тёмная тема не применена.");
+            Screenshot("settings-dark");
+            var persistedTheme = File.ReadAllText(Path.Combine(DesktopPaths.DataDirectory, "desktop-theme.txt"));
+            if (persistedTheme != "Dark") throw new InvalidOperationException("Выбранная тема не сохранена.");
+            DesktopTheme.Initialize();
+            if (DesktopTheme.Preference != DesktopThemePreference.Dark) throw new InvalidOperationException("Тема не восстановлена после повторной инициализации.");
+            Control<ComboBox>("ThemePicker").SelectedValue = "Light";
+            window.UpdateLayout();
+            var lightSurface = (System.Windows.Media.SolidColorBrush)Application.Current.Resources["SurfaceBrush"];
+            if (lightSurface.Color.ToString() != "#FFFFFFFF" || darkSurface.Color != lightSurface.Color)
+                throw new InvalidOperationException("Светлая тема или уже созданные кисти не обновились.");
+            Screenshot("settings-light");
+            Control<ComboBox>("ThemePicker").SelectedValue = "System";
             Screenshot("about-program");
             Click("JobsNavigation");
             Click("FirstJobButton");
@@ -186,26 +205,24 @@ internal static partial class DesktopSmoke
             Click("NextStepButton");
             var previewBefore = DateTimeOffset.UtcNow;
             Control<TextBox>("DailyAt").Text = "23:00, 09:00, 13:00";
-            var originalZone = Control<TextBox>("Zone").Text;
-            void CheckUpcoming(TimeSpan offset, DayOfWeek? day, TimeOnly[] times, DateTimeOffset before)
+            void CheckUpcoming(DayOfWeek? day, TimeOnly[] times, DateTimeOffset before)
             {
                 var lines = Control<TextBlock>("NextRun").Text.Split('\n');
                 if (lines.Length != 4 || !lines[0].StartsWith("Ближайшие 3 запуска") || !Control<TextBlock>("SchedulePreviewHint").IsVisible)
                     throw new InvalidOperationException("Три ближайших запуска не показаны.");
-                var actual = lines.Skip(1).Select(line => DateTimeOffset.ParseExact(line, "dd.MM.yyyy HH:mm zzz", CultureInfo.InvariantCulture)).ToArray();
+                var actual = lines.Skip(1).Select(line => new DateTimeOffset(DateTime.SpecifyKind(DateTime.ParseExact(line, "dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture), DateTimeKind.Local))).ToArray();
                 DateTimeOffset[] Expected(DateTimeOffset instant)
                 {
-                    var date = instant.ToOffset(offset).Date;
+                    var date = instant.ToLocalTime().Date;
                     return Enumerable.Range(0, 22).Select(index => date.AddDays(index))
                         .Where(value => day is null || value.DayOfWeek == day)
-                        .SelectMany(value => times.Order().Select(time => new DateTimeOffset(value.Add(time.ToTimeSpan()), offset)))
+                        .SelectMany(value => times.Order().Select(time => new DateTimeOffset(DateTime.SpecifyKind(value.Add(time.ToTimeSpan()), DateTimeKind.Local))))
                         .Where(value => value > instant).Take(3).ToArray();
                 }
-                if (actual.Any(value => value.Offset != offset) || (!actual.SequenceEqual(Expected(before)) && !actual.SequenceEqual(Expected(DateTimeOffset.UtcNow))))
+                if ((!actual.SequenceEqual(Expected(before)) && !actual.SequenceEqual(Expected(DateTimeOffset.UtcNow))))
                     throw new InvalidOperationException("Предпросмотр не соответствует времени, дням или часовому поясу задания.");
             }
-            Control<TextBox>("Zone").Text = "UTC";
-            CheckUpcoming(TimeSpan.Zero, null, [new(9, 0), new(13, 0), new(23, 0)], previewBefore);
+            CheckUpcoming(null, [new(9, 0), new(13, 0), new(23, 0)], previewBefore);
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Weekly;
             foreach (var name in new[] { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" }) Control<CheckBox>(name).IsChecked = false;
             if (Control<TextBlock>("NextRun").Text.StartsWith("Ближайшие") || Control<TextBlock>("SchedulePreviewHint").IsVisible)
@@ -216,16 +233,9 @@ internal static partial class DesktopSmoke
             Control<TextBox>("DailyAt").Text = "09:00";
             previewBefore = DateTimeOffset.UtcNow;
             Control<CheckBox>("Fri").IsChecked = true;
-            CheckUpcoming(TimeSpan.Zero, DayOfWeek.Friday, [new(9, 0)], previewBefore);
-            previewBefore = DateTimeOffset.UtcNow;
-            Control<ComboBox>("TimeZonePicker").SelectedValue = "Russian Standard Time";
-            CheckUpcoming(TimeSpan.FromHours(3), DayOfWeek.Friday, [new(9, 0)], previewBefore);
+            CheckUpcoming(DayOfWeek.Friday, [new(9, 0)], previewBefore);
             AssertEditorContentVisible("NextRun");
             Screenshot("schedule-preview-weekly");
-            Control<TextBox>("Zone").Text = "CI-invalid-time-zone";
-            if (Control<TextBlock>("NextRun").Text.StartsWith("Ближайшие") || Control<TextBlock>("SchedulePreviewHint").IsVisible)
-                throw new InvalidOperationException("Неизвестный часовой пояс показывает устаревшие даты.");
-            Control<TextBox>("Zone").Text = "UTC";
             Control<TextBox>("DailyAt").Text = "09:00, 09:00";
             if (Control<TextBlock>("NextRun").Text.StartsWith("Ближайшие") || Control<TextBlock>("SchedulePreviewHint").IsVisible)
                 throw new InvalidOperationException("Повторное время показывает устаревшие даты.");
@@ -234,14 +244,12 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Выключенное расписание показывает будущие запуски.");
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Manual;
             if (Control<TextBlock>("NextRun").Text != "Запуск только вручную." || Control<StackPanel>("TimePanel").IsVisible
-                || Control<StackPanel>("ZonePanel").IsVisible || Control<Expander>("TechnicalZoneOptions").IsVisible
                 || Control<TextBlock>("SchedulePreviewHint").IsVisible)
                 throw new InvalidOperationException("Ручной режим неверно объясняет запуск.");
             Control<ComboBox>("Schedule").SelectedValue = ScheduleKind.Daily;
             Control<CheckBox>("Mon").IsChecked = true;
             Control<CheckBox>("Fri").IsChecked = false;
             Control<TextBox>("DailyAt").Text = "23:00, 09:00, 13:00";
-            Control<TextBox>("Zone").Text = originalZone;
             Control<CheckBox>("Enabled").IsChecked = true;
             Control<TextBox>("KeepLast").Text = "0";
             Click("NextStepButton");

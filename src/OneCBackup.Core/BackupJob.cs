@@ -159,7 +159,7 @@ public sealed record BackupJob
             errors.Add("Время каждого запуска должно быть уникальным.");
         if (ScheduleKind == ScheduleKind.Weekly && (DaysOfWeek == WeekDays.None || ((int)DaysOfWeek & ~127) != 0))
             errors.Add("Выберите хотя бы один корректный день недели.");
-        try { TimeZoneInfo.FindSystemTimeZoneById(TimeZoneId ?? ""); }
+        try { BackupSchedule.ResolveTimeZone(TimeZoneId ?? ""); }
         catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
         { errors.Add("Укажите существующий часовой пояс."); }
         return errors;
