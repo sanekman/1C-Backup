@@ -5,13 +5,17 @@ namespace OneCBackup.Core;
 public sealed record OneCSettings
 {
     public string ExecutablePath { get; init; } = "";
+    public bool AutoSelectPlatform { get; init; }
+    public string PlatformVersion { get; init; } = "";
     public int TimeoutMinutes { get; init; } = 120;
 
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(ExecutablePath) || !Path.IsPathFullyQualified(ExecutablePath))
+        if (!AutoSelectPlatform && (string.IsNullOrWhiteSpace(ExecutablePath) || !Path.IsPathFullyQualified(ExecutablePath)))
             errors.Add("Укажите полный путь к 1cv8.exe.");
+        if (AutoSelectPlatform && !OneCPlatformLocator.IsVersionSelectorValid(PlatformVersion))
+            errors.Add("Укажите версию платформы, например 8.3 или 8.3.25.1540, либо оставьте поле пустым для самой новой.");
         if (TimeoutMinutes is < 1 or > 10080)
             errors.Add("Время ожидания выгрузки должно быть от 1 до 10080 минут.");
         return errors;
@@ -111,7 +115,7 @@ public interface IBackupExecutor
 }
 
 /// <summary>Uses the platform's exclusive Designer dump; never copies an open 1CD file.</summary>
-public sealed class OneCBackupExecutor(IBackupProcessRunner processRunner, IArchivePasswordStore? passwords = null) : IBackupExecutor
+public sealed class OneCBackupExecutor(IBackupProcessRunner processRunner, IArchivePasswordStore? passwords = null, Func<OneCSettings, string>? platformResolver = null) : IBackupExecutor
 {
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
@@ -123,14 +127,14 @@ public sealed class OneCBackupExecutor(IBackupProcessRunner processRunner, IArch
         var settings = job.OneC ?? throw new InvalidOperationException("Укажите путь к платформе 1С в настройках задания.");
         var errors = settings.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
-        if (!File.Exists(settings.ExecutablePath)) throw new FileNotFoundException("Не найдена платформа 1С.", settings.ExecutablePath);
+        var executable = platformResolver?.Invoke(settings) ?? OneCPlatformLocator.Resolve(settings);
         var source = Path.GetFullPath(job.Source);
         if (!File.Exists(Path.Combine(source, "1Cv8.1CD")))
             throw new FileNotFoundException("В каталоге источника не найден файл 1Cv8.1CD.");
         Directory.CreateDirectory(workDirectory);
         var dump = Path.Combine(Path.GetFullPath(workDirectory), BackupFileName.Create(job, ".dt"));
         var log = Path.Combine(Path.GetFullPath(workDirectory), "platform.log");
-        var command = new BackupProcess(settings.ExecutablePath,
+        var command = new BackupProcess(executable,
             ["DESIGNER", "/F", source, "/DumpIB", dump, "/Out", log,
              "/DisableStartupMessages", "/DisableStartupDialogs"], Path.GetFullPath(workDirectory));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

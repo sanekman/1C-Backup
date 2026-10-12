@@ -63,8 +63,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
     private static SourceCheckReport CheckFile(BackupJob job, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (job.OneCMethod == OneCBackupMethod.PlatformDump && !File.Exists(job.OneC!.ExecutablePath))
-            throw new FileNotFoundException("Не найдена программа 1С (1cv8.exe). Выберите установленную платформу.");
+        if (job.OneCMethod == OneCBackupMethod.PlatformDump) OneCPlatformLocator.Resolve(job.OneC!);
         var source = Path.GetFullPath(job.Source);
         var file = string.Equals(Path.GetFileName(source), "1Cv8.1CD", StringComparison.OrdinalIgnoreCase)
             ? source : Path.Combine(source, "1Cv8.1CD");

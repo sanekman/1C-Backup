@@ -158,12 +158,16 @@ public partial class MainWindow
                 : Kind.SelectedItem is DatabaseKind.PostgreSql ? "\nСервер: " + PgHost.Text.Trim() + ":" + PgPort.Text.Trim() : "";
             var ftpAddress = Storage.SelectedValue is StorageKind.Ftp ? "\nFTP-сервер: " + FtpHost.Text.Trim() + ":" + FtpPort.Text.Trim()
                 + (FtpTls.IsChecked == true ? " (FTPS)" : " (без TLS)") : "";
+            var platformDescription = Kind.SelectedItem is DatabaseKind.OneCFile && OneCMethodPicker.SelectedValue is OneCBackupMethod.PlatformDump
+                ? "\nПлатформа: " + (AutoOneCPlatform.IsChecked == true
+                    ? string.IsNullOrWhiteSpace(OneCPlatformVersion.Text) ? "самая новая установленная" : "версия " + OneCPlatformVersion.Text.Trim()
+                    : OneCExecutable.Text.Trim()) : "";
             var zoneDescription = "";
             var extraDestinations = additionalDestinations.Count == 0 ? "" : "\nТакже отправлять:\n" + string.Join("\n", additionalDestinations.Select(destination => "• " + destination.Description
                 + (destination.KeepLast is null ? " (" + KeepLast.Text.Trim() + ")" : "")));
             var temporary = string.IsNullOrWhiteSpace(TemporaryFolder.Text)
                 ? Path.Combine(DesktopPaths.DataDirectory, "work") + " (по умолчанию)" : TemporaryFolder.Text.Trim();
-            WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nОсновное хранилище: хранить {KeepLast.Text.Trim()} успешных копий";
+            WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}{platformDescription}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nОсновное хранилище: хранить {KeepLast.Text.Trim()} успешных копий";
             WizardSummary.Text += "\n\n" + NextRun.Text;
             if (Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav && FileBackupModePicker.SelectedValue is FileBackupMode.Incremental)
                 WizardSummary.Text += "\nВ цепочке не более " + FullBackupEvery.Text.Trim() + " архивов. Нужные предшествующие архивы сохраняются сверх лимита хранилища.";
@@ -185,7 +189,7 @@ public partial class MainWindow
                 _ => OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive ? "1Cv8.1CD, без платформы" : "Выгрузка .dt"
             };
             ReviewFormat.Text = format + " · " + shortMethod;
-            ReviewFormat.ToolTip = ReviewFormat.Text;
+            ReviewFormat.ToolTip = ReviewFormat.Text + platformDescription;
             static string StorageLabel(StorageKind kind, bool tls) => kind switch
             { StorageKind.Ftp => tls ? "FTPS" : "FTP", StorageKind.NetworkShare => "Сеть", _ => "Диск" };
             var storageSummaries = new[] { StorageLabel((StorageKind)Storage.SelectedValue, FtpTls.IsChecked == true) + " — " + KeepLast.Text.Trim() }
@@ -242,9 +246,9 @@ public partial class MainWindow
             }
             if (Kind.SelectedItem is DatabaseKind.OneCFile && OneCMethodPicker.SelectedValue is OneCBackupMethod.PlatformDump)
             {
-                if (string.IsNullOrWhiteSpace(OneCExecutable.Text)) return RejectWizard("Для выгрузки .dt выберите программу 1С (1cv8.exe). Для ZIP файла базы платформа не нужна.", 0, OneCExecutable);
+                if (AutoOneCPlatform.IsChecked != true && string.IsNullOrWhiteSpace(OneCExecutable.Text)) return RejectWizard("Для выгрузки .dt выберите программу 1С (1cv8.exe). Для ZIP файла базы платформа не нужна.", 0, OneCExecutable);
                 if (!int.TryParse(OneCTimeout.Text, out var timeout)) return RejectWizard("Время ожидания должно быть целым числом минут.", 0, OneCTimeout);
-                var errors = new OneCSettings { ExecutablePath = OneCExecutable.Text.Trim(), TimeoutMinutes = timeout }.Validate();
+                var errors = ReadOneCSettings(timeout).Validate();
                 if (errors.Count != 0) return RejectWizard(string.Join(" ", errors), 0, OneCExecutable);
             }
             if (Kind.SelectedItem is DatabaseKind.OneCFile && !Path.IsPathFullyQualified(Source.Text.Trim()))

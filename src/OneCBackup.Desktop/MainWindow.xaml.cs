@@ -164,11 +164,14 @@ public partial class MainWindow : Window
         var storageKind = (StorageKind)Storage.SelectedValue;
         OneCSettings? oneC = null;
         var oneCMethod = OneCMethodPicker.SelectedValue is OneCBackupMethod method ? method : OneCBackupMethod.PlatformDump;
-        if (Kind.SelectedItem is DatabaseKind.OneCFile && oneCMethod == OneCBackupMethod.PlatformDump && !string.IsNullOrWhiteSpace(OneCExecutable.Text))
+        if (Kind.SelectedItem is DatabaseKind.OneCFile)
         {
             if (!int.TryParse(OneCTimeout.Text, out var timeout))
-            { Status.Text = "Укажите целое число минут ожидания выгрузки."; return; }
-            oneC = new OneCSettings { ExecutablePath = OneCExecutable.Text.Trim(), TimeoutMinutes = timeout };
+            {
+                if (oneCMethod == OneCBackupMethod.PlatformDump) { Status.Text = "Укажите целое число минут ожидания выгрузки."; return; }
+                timeout = 120;
+            }
+            oneC = ReadOneCSettings(timeout);
         }
         var ftpPort = 21;
         SqlServerBackupSettings? sql = null;
@@ -309,7 +312,12 @@ public partial class MainWindow : Window
     private void LoadJobEditor(BackupJob job)
     {
         editingId = job.Id;
+        ResetOneCBasePicker();
+        AutoOneCPlatform.IsChecked = job.OneC?.AutoSelectPlatform ?? true;
+        OneCPlatformVersion.Text = job.OneC?.PlatformVersion ?? "";
         OneCExecutable.Text = job.OneC?.ExecutablePath ?? "";
+        if (job.Kind == DatabaseKind.OneCFile) _ = RefreshOneCBasesAsync();
+        else ++oneCListGeneration;
         OneCTimeout.Text = (job.OneC?.TimeoutMinutes ?? 120).ToString();
         SqlBackupServer.Text = job.SqlServer?.Server ?? "";
         SqlServerDirectory.Text = job.SqlServer?.ServerBackupDirectory ?? "";
@@ -357,7 +365,10 @@ public partial class MainWindow : Window
         FileBackupModePicker.SelectedValue = FileBackupMode.Full; FullBackupEvery.Text = "7";
         additionalDestinations.Clear();
         OneCMethodPicker.SelectedValue = OneCBackupMethod.FileArchive;
+        ResetOneCBasePicker();
+        AutoOneCPlatform.IsChecked = true; OneCPlatformVersion.Clear();
         OneCExecutable.Clear(); OneCTimeout.Text = "120";
+        _ = RefreshOneCBasesAsync();
         SqlBackupServer.Clear(); SqlServerDirectory.Clear(); SqlAgentDirectory.Clear(); SqlBackupTimeout.Text = "120";
         PgHost.Text = "localhost"; PgPort.Text = "5432"; PgUsername.Text = "postgres";
         PgDumpPath.Clear(); PgRestorePath.Clear(); PgTimeout.Text = "120";
@@ -389,8 +400,10 @@ public partial class MainWindow : Window
         var isWebDav = Kind.SelectedItem is DatabaseKind.WebDav;
         var isFiles = isLocalFiles || isWebDav;
         var fileArchive = isOneC && OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive;
+        OneCBasePickerPanel.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
         OneCMethodPanel.Visibility = isOneC ? Visibility.Visible : Visibility.Collapsed;
         OneCPanel.Visibility = isOneC && !fileArchive ? Visibility.Visible : Visibility.Collapsed;
+        UpdateOneCPlatformControls();
         SqlBackupPanel.Visibility = Kind.SelectedItem is DatabaseKind.SqlServer ? Visibility.Visible : Visibility.Collapsed;
         if (SqlTemporaryHint is not null) SqlTemporaryHint.Visibility = SqlBackupPanel.Visibility;
         PostgresBackupPanel.Visibility = Kind.SelectedItem is DatabaseKind.PostgreSql ? Visibility.Visible : Visibility.Collapsed;

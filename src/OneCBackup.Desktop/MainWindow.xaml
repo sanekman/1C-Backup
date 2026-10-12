@@ -199,13 +199,21 @@
     <StackPanel><TextBlock Text="Название" /><TextBox x:Name="JobName" Margin="0,4,0,10" /></StackPanel>
     <StackPanel Grid.Column="2"><TextBlock Text="Что копировать" /><ComboBox x:Name="Kind" Margin="0,4,0,10" ItemTemplate="{StaticResource DatabaseKindLabel}" SelectionChanged="Kind_Changed" /></StackPanel>
    </Grid>
+   <StackPanel x:Name="OneCBasePickerPanel" Margin="0,0,0,8">
+    <TextBlock Text="База из списка пользователя 1С" />
+    <DockPanel Margin="0,4,0,4">
+     <Button DockPanel.Dock="Right" Content="Обновить" Click="RefreshOneCBases_Click" Margin="6,0,0,0" Padding="8,5" />
+     <ComboBox x:Name="OneCBasePicker" DisplayMemberPath="DisplayName" SelectionChanged="OneCBase_Changed" />
+    </DockPanel>
+    <TextBlock x:Name="OneCBaseListStatus" FontSize="12" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+   </StackPanel>
    <TextBlock x:Name="SourceLabel" Text="Папка базы 1С" TextWrapping="Wrap" /><DockPanel Margin="0,4,0,10">
     <Button x:Name="SourceFileBrowseButton" DockPanel.Dock="Right" Content="Файл…" Tag="SourceFile" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" Visibility="Collapsed" />
     <Button x:Name="SourceBrowseButton" DockPanel.Dock="Right" Content="Выбрать…" Tag="Source" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
     <Button DockPanel.Dock="Right" x:Name="WebDavCredentialsButton" Content="Логин и пароль…" Click="WebDavCredentials_Click" Padding="10,5" Margin="6,0,0,0" Visibility="Collapsed" />
-    <TextBox x:Name="Source" />
+    <TextBox x:Name="Source" TextChanged="OneCSource_Changed" />
    </DockPanel>
-   <TextBlock x:Name="OneCSourceHelp" Text="Путь к базе можно посмотреть в окне запуска 1С: выделите базу и нажмите «Изменить»." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
+   <TextBlock x:Name="OneCSourceHelp" Text="Выберите базу из списка или «Своя база» и укажите папку ниже. Список запуска 1С не изменяется." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
    <StackPanel x:Name="WebDavPanel" Visibility="Collapsed">
     <TextBlock x:Name="WebDavCredentialStatus" Text="Подключение ещё не настроено" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6" />
 
@@ -236,10 +244,18 @@
 
    </StackPanel>
    <StackPanel x:Name="OneCPanel">
+    <CheckBox x:Name="AutoOneCPlatform" Content="Подбирать установленную платформу автоматически" IsChecked="True" Checked="AutoOneCPlatform_Changed" Unchecked="AutoOneCPlatform_Changed" Margin="0,0,0,6" />
+    <StackPanel x:Name="AutoOneCPlatformPanel">
+     <TextBlock Text="Версия из свойств базы (пусто — самая новая)" />
+     <TextBox x:Name="OneCPlatformVersion" TextChanged="OneCPlatformVersion_Changed" Margin="0,4,0,4" ToolTip="Например, 8.3 — самая новая 8.3; 8.3.25.1540 — точно эта версия." />
+    </StackPanel>
+    <StackPanel x:Name="ManualOneCPlatformPanel">
     <TextBlock Text="Программа 1С (1cv8.exe)" /><DockPanel Margin="0,4,0,10">
     <Button DockPanel.Dock="Right" Content="…" Tag="OneCExecutable" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
-    <TextBox x:Name="OneCExecutable" />
+    <TextBox x:Name="OneCExecutable" TextChanged="OneCPlatformVersion_Changed" />
    </DockPanel>
+    </StackPanel>
+    <TextBlock x:Name="OneCPlatformStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,0,0,6" />
     <Expander Header="Дополнительно: ограничение времени" Margin="0,0,0,10"><StackPanel><TextBlock Text="Ограничение времени выгрузки, минут" /><TextBox x:Name="OneCTimeout" Text="120" Margin="0,4,0,10" /></StackPanel></Expander>
     <TextBlock Text="Выгрузка .dt требует эксклюзивного доступа. В этой версии поддерживаются базы без пароля пользователя 1С."
      TextWrapping="Wrap" Margin="0,0,0,10" />

@@ -186,6 +186,16 @@ internal static partial class DesktopSmoke
             var source = Path.Combine(DesktopPaths.DataDirectory, "fixture-base");
             Directory.CreateDirectory(source);
             File.WriteAllText(Path.Combine(source, "1Cv8.1CD"), "CI fixture bytes; not a real 1C database");
+            var basePicker = Control<ComboBox>("OneCBasePicker");
+            var ownBase = (OneCUserBase)basePicker.Items[0];
+            var listedBase = new OneCUserBase("База из списка", source, "8.5");
+            basePicker.ItemsSource = new[] { ownBase, listedBase }; basePicker.SelectedItem = listedBase;
+            if (Control<TextBox>("Source").Text != source || Control<TextBox>("OneCPlatformVersion").Text != "8.5"
+                || Control<CheckBox>("AutoOneCPlatform").IsChecked != true)
+                throw new InvalidOperationException("Выбор базы не перенёс папку и версию платформы.");
+            basePicker.SelectedItem = ownBase;
+            if (Control<TextBox>("Source").Text.Length != 0 || Control<TextBox>("OneCPlatformVersion").Text.Length != 0)
+                throw new InvalidOperationException("Своя база не сбросила версию для выбора самой новой платформы.");
             Control<TextBox>("JobName").Text = "Тестовая база 1С";
             Control<TextBox>("Source").Text = source;
             Control<ComboBox>("OneCMethodPicker").SelectedValue = OneCBackupMethod.FileArchive;
