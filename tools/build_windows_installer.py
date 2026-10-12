@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -68,6 +69,9 @@ def build(archive_path, compiler, kind="inno"):
         stream.seek(0)
         digest = hashlib.file_digest(stream, 'sha256').hexdigest()
     installer.with_suffix('.exe.sha256').write_text(f'{digest}  {installer.name}\n', encoding='ascii')
+    manifest = {"SchemaVersion": 1, "Version": version, "Platform": "win-x64", "InstallerKind": kind,
+                "InstallerFile": installer.name, "Size": installer.stat().st_size, "Sha256": digest}
+    (artifacts / "update-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f'Installer: {installer.name}; version: {version}; SHA256: {digest}')
 
 

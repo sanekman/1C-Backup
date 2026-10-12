@@ -94,11 +94,12 @@ public partial class MainWindow
         trayIcon.Text = text.Length <= 63 ? text : text[..63];
     }
 
-    private async Task StopFromTrayAsync(bool exit)
+    private async Task StopFromTrayAsync(bool exit, Func<Task>? beforeClose = null)
     {
         if (trayStopping) return;
         if (OwnedWindows.Cast<Window>().Any(window => window.IsVisible))
         { ShowFromTray(); Status.Text = "Сначала закройте окно настроек или мониторинга, затем повторите остановку из трея."; return; }
+        if (exit) updateCancellation?.Cancel();
         trayStopping = true;
         IsEnabled = false;
         UpdateTray();
@@ -108,7 +109,7 @@ public partial class MainWindow
             schedulerCancellation?.Cancel();
             if (exit) { activeRun?.Cancel(); copyVerification?.Cancel(); }
             var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
-            while (schedulingTask is not null || exit && (activeRun is not null || manualPending || copyVerification is not null || persisting || jobFileTransfer))
+            while (schedulingTask is not null || exit && (updateBusy || savingUpdatePreferences || activeRun is not null || manualPending || copyVerification is not null || persisting || jobFileTransfer))
             {
                 if (DateTimeOffset.UtcNow > deadline) throw new TimeoutException("Текущая операция ещё завершается. Программа остаётся в трее; дождитесь записи результата и повторите выход.");
                 await Task.Delay(100);
@@ -137,6 +138,9 @@ public partial class MainWindow
             Status.Text = "Копирование остановлено. Рабочий профиль освобождён.";
             if (exit)
             {
+                if (beforeClose is not null) await beforeClose();
+                else if (updateSettings.UpdateOnExit && preparedUpdatePath is not null && availableUpdate is not null)
+                    await ApplicationUpdateHandoff.StartAsync(availableUpdate, preparedUpdatePath, restart: false, restartAgent: false);
                 allowFullClose = true;
                 Close();
             }

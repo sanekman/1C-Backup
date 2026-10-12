@@ -135,9 +135,11 @@ public partial class MainWindow : Window
                 await RefreshBackgroundStateAsync();
                 backgroundTimer.Start();
                 UpdateRunControls();
+                _ = InitializeUpdatesAsync();
                 if (Application.Current is App app)
                 {
                     if (app.StartAgent && StartBackgroundButton.IsEnabled) StartBackground_Click(this, new RoutedEventArgs());
+                    if (app.StartWindowSchedule) StartSchedule_Click(this, new RoutedEventArgs());
                     app.WindowReady();
                 }
             }
@@ -150,7 +152,7 @@ public partial class MainWindow : Window
             }
         };
         backgroundTimer.Tick += async (_, _) => await RefreshBackgroundStateAsync();
-        Closed += (_, _) => { DisposeTray(); backgroundTimer.Stop(); launchedAgent?.Dispose(); };
+        Closed += (_, _) => { updateTimer.Stop(); updateCancellation?.Cancel(); DisposeTray(); backgroundTimer.Stop(); launchedAgent?.Dispose(); };
     }
 
     private async void Save_Click(object sender, RoutedEventArgs e)
@@ -436,7 +438,7 @@ public partial class MainWindow : Window
     {
         if (ExportDiagnosticsButton is not null) ExportDiagnosticsButton.IsEnabled = ready && !jobFileTransfer;
         UpdateTray();
-        var idle = !trayStopping && !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
+        var idle = !installingUpdate && !trayStopping && !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
         var engineAvailable = !backgroundBusy && !backgroundStarting;
         NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle;
         ImportJobSettingsMenuItem.IsEnabled = NewJobButton.IsEnabled && !editorOpen;

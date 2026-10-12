@@ -514,6 +514,28 @@
      <TextBlock x:Name="BuildInfoStatus" TextWrapping="Wrap" Margin="0,6,0,0" />
     </StackPanel>
     <StackPanel Margin="0,0,0,18">
+     <TextBlock Text="Обновления" FontSize="18" FontWeight="SemiBold" />
+     <CheckBox x:Name="AutomaticUpdateChecks" Content="Проверять новые версии автоматически" IsChecked="True" Click="UpdatePreference_Click" Margin="0,10,0,6" />
+     <CheckBox x:Name="UpdateOnExit" Content="Обновлять при полном выходе из программы" Click="UpdatePreference_Click" Margin="0,0,0,6" />
+     <CheckBox x:Name="IncludePreviewUpdates" Content="Получать предварительные версии" IsChecked="True" Click="UpdatePreference_Click" Margin="0,0,0,10" />
+     <TextBlock Text="Автообновление скачивает новую версию и устанавливает её при «Выйти полностью», после остановки агента. Задания и копии сохраняются." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,0,0,10" />
+     <WrapPanel><Button x:Name="CheckUpdatesButton" IsEnabled="False" Content="Проверить обновления" Click="CheckUpdates_Click" Margin="0,0,8,6" />
+      <Button x:Name="InstallUpdateButton" Content="Обновить и перезапустить" Click="InstallUpdate_Click" IsEnabled="False" Margin="0,0,8,6" />
+      <Button x:Name="UpdateReleaseButton" Content="Страница версии" Click="OpenUpdateRelease_Click" IsEnabled="False" Margin="0,0,8,6" />
+      <Button x:Name="CancelUpdateButton" Content="Отменить" Click="CancelUpdate_Click" Visibility="Collapsed" Margin="0,0,0,6" /></WrapPanel>
+     <ProgressBar x:Name="UpdateProgress" Height="8" Minimum="0" Maximum="100" Visibility="Collapsed" Margin="0,4,0,8" />
+     <TextBlock x:Name="UpdateResultStatus" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,6" />
+     <TextBlock x:Name="UpdateStatus" Text="Обновления ещё не проверялись." TextWrapping="Wrap" Margin="0,0,0,6" />
+     <Expander x:Name="UpdateAccessPanel" Header="Доступ к закрытому репозиторию GitHub" IsEnabled="False"><StackPanel Margin="0,8,0,0">
+      <TextBlock Text="Для sanekman/1C-Backup нужен GitHub-токен с доступом к репозиторию и правом Contents: Read. Он хранится в диспетчере учётных данных Windows." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
+      <Button Content="Создать токен на GitHub" Click="CreateUpdateToken_Click" HorizontalAlignment="Left" Margin="0,8,0,4" />
+      <TextBlock Text="Выберите репозиторий sanekman/1C-Backup и разрешение Contents: Read." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
+      <PasswordBox x:Name="GitHubUpdateToken" Margin="0,8,0,8" MaxLength="1024" AutomationProperties.Name="Токен GitHub для обновлений" />
+      <WrapPanel><Button Content="Сохранить токен" Click="SaveUpdateToken_Click" Margin="0,0,8,6" /><Button Content="Удалить токен" Click="DeleteUpdateToken_Click" Margin="0,0,0,6" /></WrapPanel>
+      <TextBlock x:Name="UpdateTokenStatus" Text="Токен не сохранён." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
+     </StackPanel></Expander>
+    </StackPanel>
+    <StackPanel Margin="0,0,0,18">
      <TextBlock Text="Диагностика" FontSize="18" FontWeight="SemiBold" />
      <TextBlock Text="Возникла проблема? Сохраните ZIP и отправьте его для анализа вместе с примерным временем ошибки." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,10" />
      <WrapPanel><Button x:Name="ExportDiagnosticsButton" Content="Сохранить диагностику…" Click="ExportDiagnostics_Click" Margin="0,0,8,6" />

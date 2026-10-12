@@ -63,6 +63,11 @@ internal static partial class DesktopSmoke
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 window.UpdateLayout();
             }
+            await ApplicationUpdateHandoff.ValidateScriptSyntaxAsync();
+            if (Control<CheckBox>("UpdateOnExit").IsChecked == true)
+                throw new InvalidOperationException("Автоматическая установка включена без выбора пользователя.");
+            if (!Control<CheckBox>("AutomaticUpdateChecks").IsChecked.GetValueOrDefault())
+                throw new InvalidOperationException("Автоматическая проверка обновлений не включена по умолчанию.");
             void AssertComboLabel(string name, string expected)
             {
                 var combo = Control<ComboBox>(name); combo.ApplyTemplate(); combo.UpdateLayout();

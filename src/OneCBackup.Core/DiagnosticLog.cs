@@ -20,7 +20,8 @@ public enum DiagnosticEvent
     FileRestoreStarted, FileRestoreCompleted, FileRestoreFailed, FileRestoreCancelled,
     CopyVerificationStarted, CopyVerificationCompleted, CopyVerificationFailed,
     ExternalProcessStarted, ExternalProcessExited, ExternalProcessFailed,
-    DiagnosticExportStarted, DiagnosticExportCompleted, DiagnosticExportFailed
+    DiagnosticExportStarted, DiagnosticExportCompleted, DiagnosticExportFailed,
+    UpdateCheckStarted, UpdateCheckCompleted, UpdateDownloaded, UpdateInstallationStarted, UpdateResultLoaded, UpdateFailed
 }
 public sealed record DiagnosticValues(long? Count = null, long? Bytes = null, long? Milliseconds = null, int? Code = null);
 

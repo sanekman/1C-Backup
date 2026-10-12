@@ -10,6 +10,7 @@ public partial class App : Application
     private bool pendingShow;
     internal bool StartInTray { get; private set; }
     internal bool StartAgent { get; private set; }
+    internal bool StartWindowSchedule { get; private set; }
 
     private static string ShowEventName => @"Local\OneCBackup.Show." +
         System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value + "." +
@@ -31,6 +32,7 @@ public partial class App : Application
     {
         StartInTray = e.Args.Contains("--tray");
         StartAgent = e.Args.Contains("--start-agent");
+        StartWindowSchedule = e.Args.Contains("--start-window-scheduler");
         string? smokeOutput = null;
         if (e.Args.Length == 2 && e.Args[0] == "--smoke-ui")
         {
