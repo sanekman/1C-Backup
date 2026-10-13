@@ -225,7 +225,7 @@ def package(publish, artifacts):
     signed = sign_and_verify([publish / name for name in
         ("OneCBackup.Desktop.exe", "OneCBackup.Agent.exe", "OneCBackup.Desktop.dll", "OneCBackup.Agent.dll", "OneCBackup.Core.dll")])
     files = [file for file in publish.rglob("*") if file.is_file() and file.suffix != ".pdb"]
-    destination = artifacts / "1C-Backup-windows-x64.zip"
+    destination = artifacts / f"1C-Backup-{version}-windows-x64.zip"
     handle, temporary_name = tempfile.mkstemp(suffix=".zip.tmp", dir=artifacts)
     os.close(handle)
     temporary = Path(temporary_name)
@@ -235,7 +235,7 @@ def package(publish, artifacts):
                 archive.write(file, Path("1C-Backup") / file.relative_to(publish))
             instructions = INSTRUCTIONS.replace("Дистрибутив не подписан цифровой подписью.",
                 "Программы подписаны проверенной цифровой подписью издателя.") if signed else INSTRUCTIONS
-            archive.writestr("1C-Backup/START-HERE.txt", instructions.replace("\n", "\r\n").encode("utf-8-sig"))
+            archive.writestr("1C-Backup/START-HERE.txt", instructions.replace("1C-Backup-windows-x64-setup.exe", f"1C-Backup-{version}-windows-x64-setup.exe").replace("\n", "\r\n").encode("utf-8-sig"))
             archive.writestr("1C-Backup/VERSION.txt", (version + "\r\n").encode("utf-8"))
         with zipfile.ZipFile(temporary) as archive:
             corrupt = archive.testzip()
@@ -246,6 +246,7 @@ def package(publish, artifacts):
         temporary.unlink(missing_ok=True)
     with destination.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    (artifacts / "distribution-version.txt").write_text(version + "\n", encoding="ascii")
     destination.with_suffix(".zip.sha256").write_text(f"{digest}  {destination.name}\n", encoding="ascii")
     print(f"Distribution: {destination}")
     print(f"Version: {version}")

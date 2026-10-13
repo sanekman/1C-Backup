@@ -28,6 +28,7 @@ public sealed class ApplicationUpdateTests : IDisposable
     [InlineData("0.1.0-preview.39", "0.1.0-preview.40", -1)]
     [InlineData("0.1.0", "0.1.0-preview.999", 1)]
     [InlineData("0.2.0-alpha.1", "0.1.0", 1)]
+    [InlineData("0.2.0-alpha.1", "0.1.0-preview.45", 1)]
     [InlineData("0.1.0-alpha", "0.1.0-preview.1", -1)]
     [InlineData("0.1.0-preview.1+buildA", "0.1.0-preview.1+buildB", 0)]
     public void VersionOrderingPreventsDowngrades(string left, string right, int expected)

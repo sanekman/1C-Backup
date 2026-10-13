@@ -9,8 +9,12 @@ import subprocess
 import tempfile
 import zipfile
 
-FILES = ["1C-Backup-windows-x64.zip", "1C-Backup-windows-x64.zip.sha256",
-         "1C-Backup-windows-x64-setup.exe", "1C-Backup-windows-x64-setup.exe.sha256", "update-manifest.json"]
+def distribution_files(version):
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?", version):
+        raise ValueError("Invalid distribution version")
+    stem = "1C-Backup-" + version + "-windows-x64"
+    return [stem + ".zip", stem + ".zip.sha256", stem + "-setup.exe", stem + "-setup.exe.sha256",
+            "update-manifest.json", "1C-Backup-windows-x64-setup.exe", "1C-Backup-windows-x64-setup.exe.sha256"]
 
 
 def verify_artifacts(artifacts):
@@ -21,19 +25,20 @@ def verify_artifacts(artifacts):
             or manifest["InstallerFile"] != "1C-Backup-windows-x64-setup.exe"
             or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?", version)):
         raise ValueError("Invalid update manifest")
-    for name in [FILES[0], FILES[2]]:
+    files = distribution_files(version)
+    for name in [files[0], files[2], files[5]]:
         file = artifacts / name
         with file.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         expected = (artifacts / (name + ".sha256")).read_text().split()[0]
         if digest != expected:
             raise ValueError("Checksum mismatch: " + name)
-        if name == FILES[2] and (digest != manifest["Sha256"] or file.stat().st_size != manifest["Size"]):
+        if name in [files[2], files[5]] and (digest != manifest["Sha256"] or file.stat().st_size != manifest["Size"]):
             raise ValueError("Installer does not match update manifest")
-    with (artifacts / FILES[2]).open("rb") as stream:
+    with (artifacts / files[2]).open("rb") as stream:
         if stream.read(2) != b"MZ":
             raise ValueError("Installer is not a Windows executable")
-    with zipfile.ZipFile(artifacts / FILES[0]) as archive:
+    with zipfile.ZipFile(artifacts / files[0]) as archive:
         if archive.testzip() is not None or archive.read("1C-Backup/VERSION.txt").decode().strip() != version:
             raise ValueError("Distribution is corrupt or its version differs")
     return version
@@ -41,6 +46,7 @@ def verify_artifacts(artifacts):
 
 def publish(root, artifacts, branch=None, notes=None):
     version = verify_artifacts(artifacts)
+    files = distribution_files(version)
     branch = branch or "distribution/windows-x64-" + version
     if not re.fullmatch(r"distribution/windows-x64-[A-Za-z0-9.\-]+", branch):
         raise ValueError("Only dedicated distribution branches can be published")
@@ -54,7 +60,7 @@ def publish(root, artifacts, branch=None, notes=None):
     with tempfile.TemporaryDirectory(prefix="onec-update-git-") as temporary:
         env = dict(os.environ, GIT_INDEX_FILE=str(Path(temporary) / "index"))
         git("read-tree", "--empty", env=env)
-        files = FILES + [name for name in ["installer-payload-result.json", "icon-verification-result.json"] if (artifacts / name).is_file()]
+        files = files + [name for name in ["installer-payload-result.json", "icon-verification-result.json"] if (artifacts / name).is_file()]
         for name in files:
             blob = git("hash-object", "-w", str(artifacts / name))
             git("update-index", "--add", "--cacheinfo", "100644", blob, "windows/" + name, env=env)
@@ -65,7 +71,7 @@ def publish(root, artifacts, branch=None, notes=None):
     (artifacts / "distribution-commit.txt").write_text(commit + "\n")
     body = notes.read_text(encoding="utf-8") if notes else "1C-Backup " + version
     base = "https://github.com/sanekman/1C-Backup/blob/" + branch + "/windows/"
-    body += "\n\n[Скачать установщик](" + base + FILES[2] + "?raw=true)\n\n[Скачать ZIP](" + base + FILES[0] + "?raw=true)\n"
+    body += "\n\n[Скачать установщик](" + base + files[2] + "?raw=true)\n\n[Скачать ZIP](" + base + files[0] + "?raw=true)\n"
     body += "\n<!-- onec-update-manifest: " + branch + " -->\n"
     (artifacts / "release-notes-with-updates.md").write_text(body, encoding="utf-8")
     print("Update distribution: " + branch + "; commit: " + commit)

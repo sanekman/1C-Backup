@@ -3,7 +3,7 @@ name: Build and verify
 on:
   push:
     branches: [main, 'feature/**']
-    tags: ['v*-preview.*']
+    tags: ['v*-preview.*', 'v*-alpha.*', 'v*-beta.*']
   pull_request:
   workflow_dispatch:
 
@@ -107,7 +107,7 @@ jobs:
       - shell: pwsh
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::OpenRead((Join-Path $PWD 'artifacts/1C-Backup-windows-x64.zip'))
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Join-Path $PWD ('artifacts/1C-Backup-' + (Get-Content artifacts/distribution-version.txt).Trim() + '-windows-x64.zip')))
           try {
             $expectedVersion = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.Substring(1) } else { '0.1.0-dev' }
             foreach ($project in @('OneCBackup.Desktop', 'OneCBackup.Agent', 'OneCBackup.Core')) {
@@ -125,10 +125,10 @@ jobs:
         with:
           name: windows-x64-distribution
           path: |
-            artifacts/1C-Backup-windows-x64.zip
-            artifacts/1C-Backup-windows-x64.zip.sha256
-            artifacts/1C-Backup-windows-x64-setup.exe
-            artifacts/1C-Backup-windows-x64-setup.exe.sha256
+            artifacts/1C-Backup-*-windows-x64.zip
+            artifacts/1C-Backup-*-windows-x64.zip.sha256
+            artifacts/1C-Backup-*-windows-x64-setup.exe
+            artifacts/1C-Backup-*-windows-x64-setup.exe.sha256
             artifacts/installer-result.json
             artifacts/update-manifest.json
           retention-days: 14
@@ -143,7 +143,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python tools/publish_windows_update.py --notes docs/release-notes-preview.md
+          $notes = if ($env:GITHUB_REF_NAME -like "*-alpha.*") { "docs/release-notes-alpha.md" } else { "docs/release-notes-preview.md" }
+          python tools/publish_windows_update.py --notes $notes
           if ($LASTEXITCODE -ne 0) { throw 'Update distribution publication failed' }
-          gh release create "$env:GITHUB_REF_NAME" artifacts/1C-Backup-windows-x64.zip artifacts/1C-Backup-windows-x64.zip.sha256 artifacts/1C-Backup-windows-x64-setup.exe artifacts/1C-Backup-windows-x64-setup.exe.sha256 --verify-tag --prerelease --title "1C-Backup $env:GITHUB_REF_NAME — Windows x64" --notes-file artifacts/release-notes-with-updates.md
+          $version = (Get-Content artifacts/distribution-version.txt).Trim()
+          $files = Get-ChildItem "artifacts/1C-Backup-$version-windows-x64*" | ForEach-Object { $_.FullName }
+          gh release create "$env:GITHUB_REF_NAME" @files --verify-tag --prerelease --title "1C-Backup $version — Windows x64" --notes-file artifacts/release-notes-with-updates.md
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

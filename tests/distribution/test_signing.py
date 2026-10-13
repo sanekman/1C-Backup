@@ -78,7 +78,7 @@ class SigningTests(unittest.TestCase):
             with zipfile.ZipFile(archive, 'w') as output:
                 output.writestr('1C-Backup/VERSION.txt', '0.1.0-test')
             archive.with_suffix('.zip.sha256').write_text(hashlib.sha256(archive.read_bytes()).hexdigest())
-            exe = root / '1C-Backup-windows-x64-setup.exe'
+            exe = root / '1C-Backup-0.1.0-test-windows-x64-setup.exe'
             def compile_fixture(*args, **kwargs): exe.write_bytes(b'MZfixture')
             def sign_fixture(files):
                 self.assertEqual([exe], files)
@@ -99,7 +99,7 @@ class SigningTests(unittest.TestCase):
             root = Path(temporary); archive = root / 'package.zip'
             with zipfile.ZipFile(archive, 'w') as output: output.writestr('1C-Backup/VERSION.txt', '0.1.0-test')
             archive.with_suffix('.zip.sha256').write_text(hashlib.sha256(archive.read_bytes()).hexdigest())
-            exe = root / '1C-Backup-windows-x64-setup.exe'
+            exe = root / '1C-Backup-0.1.0-test-windows-x64-setup.exe'
             with patch.object(module.subprocess, 'run', side_effect=lambda *args, **kwargs: exe.write_bytes(b'MZfixture')), patch.object(signing, 'sign_and_verify', side_effect=RuntimeError('Untrusted certificate')):
                 with self.assertRaisesRegex(RuntimeError, 'Untrusted'):
                     module.build(archive, 'fixture compiler', 'nsis')

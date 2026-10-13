@@ -20,6 +20,9 @@ class DistributionVersionTests(unittest.TestCase):
                 distribution.os.environ.update(GITHUB_REF_TYPE="tag", GITHUB_REF_NAME=tag)
             return distribution.distribution_version(publish)
 
+    def test_alpha_matches_both_applications(self):
+        self.assertEqual(self.check_version("0.2.0-alpha.1", "0.2.0-alpha.1", "v0.2.0-alpha.1"), "0.2.0-alpha.1")
+
     def test_release_matches_both_applications(self):
         self.assertEqual(self.check_version("0.1.0-preview.15", "0.1.0-preview.15", "v0.1.0-preview.15"), "0.1.0-preview.15")
 

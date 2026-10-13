@@ -1,4 +1,4 @@
-"""Compile a per-user installer from the already validated distribution ZIP."""
+"""Compile an installer from the already validated distribution ZIP."""
 
 import argparse
 import hashlib
@@ -64,7 +64,7 @@ def build(archive_path, compiler, kind="inno"):
                                 str(Path(__file__).with_name('windows-installer.nsi'))], check=True)
         else:
             raise ValueError('Unknown installer compiler')
-    installer = artifacts / '1C-Backup-windows-x64-setup.exe'
+    installer = artifacts / f"1C-Backup-{version}-windows-x64-setup.exe"
     from windows_signing import sign_and_verify
     sign_and_verify([installer])
     with installer.open('rb') as stream:
@@ -73,17 +73,23 @@ def build(archive_path, compiler, kind="inno"):
         stream.seek(0)
         digest = hashlib.file_digest(stream, 'sha256').hexdigest()
     installer.with_suffix('.exe.sha256').write_text(f'{digest}  {installer.name}\n', encoding='ascii')
+    # Older preview clients require this exact name. Publish the same signed bytes
+    # under an alias while all human-facing downloads use the versioned name.
+    alias = artifacts / "1C-Backup-windows-x64-setup.exe"
+    shutil.copyfile(installer, alias)
+    alias.with_suffix(".exe.sha256").write_text(f"{digest}  {alias.name}\n", encoding="ascii")
     manifest = {"SchemaVersion": 1, "Version": version, "Platform": "win-x64", "InstallerKind": kind,
-                "InstallerFile": installer.name, "Size": installer.stat().st_size, "Sha256": digest}
+                "InstallerFile": alias.name, "Size": installer.stat().st_size, "Sha256": digest}
     (artifacts / "update-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f'Installer: {installer.name}; version: {version}; SHA256: {digest}')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--zip', type=Path, default=Path('artifacts/1C-Backup-windows-x64.zip'))
+    parser.add_argument('--zip', type=Path, default=None)
     parser.add_argument('--kind', choices=['inno', 'nsis'], default='inno')
     parser.add_argument('--compiler', type=Path)
     args = parser.parse_args()
     compiler = args.compiler or (Path("makensis") if args.kind == "nsis" else Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Inno Setup 6/ISCC.exe")
-    build(args.zip, compiler, args.kind)
+    archive = args.zip or Path("artifacts") / ("1C-Backup-" + Path("artifacts/distribution-version.txt").read_text().strip() + "-windows-x64.zip")
+    build(archive, compiler, args.kind)

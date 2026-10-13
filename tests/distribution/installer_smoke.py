@@ -23,7 +23,8 @@ def run(executable, *arguments, success=True, timeout=120):
 def check():
     root = Path(__file__).resolve().parents[2]
     artifacts = root / 'artifacts'
-    installer = artifacts / '1C-Backup-windows-x64-setup.exe'
+    version = (artifacts / 'distribution-version.txt').read_text().strip()
+    installer = artifacts / f'1C-Backup-{version}-windows-x64-setup.exe'
     installation = Path(os.environ['LOCALAPPDATA']) / 'Programs' / ('OneCBackup-test-' + uuid.uuid4().hex)
     profile = Path(os.environ['LOCALAPPDATA']) / 'OneCBackup'
     profile.mkdir(parents=True, exist_ok=True)
@@ -52,7 +53,7 @@ def check():
     try:
         run(installer, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=' + str(installation))
         installed = True
-        with zipfile.ZipFile(artifacts / '1C-Backup-windows-x64.zip') as archive:
+        with zipfile.ZipFile(artifacts / f'1C-Backup-{version}-windows-x64.zip') as archive:
             for name in archive.namelist():
                 if name.endswith('/'):
                     continue
@@ -67,7 +68,7 @@ def check():
                 pass
             else:
                 raise AssertionError('Installation unexpectedly enabled autostart')
-        shortcut = Path(os.environ['APPDATA']) / 'Microsoft/Windows/Start Menu/Programs/1C-Backup/1C-Backup.lnk'
+        shortcut = Path(os.environ['PROGRAMDATA']) / 'Microsoft/Windows/Start Menu/Programs/1C-Backup/1C-Backup.lnk'
         assert shortcut.is_file(), 'Missing Start Menu shortcut'
         # A live engine owns this exact share-denying lock in normal application use.
         kernel = ctypes.WinDLL('kernel32', use_last_error=True)
