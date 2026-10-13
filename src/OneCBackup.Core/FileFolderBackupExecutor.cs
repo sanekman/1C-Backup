@@ -25,9 +25,10 @@ public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSn
         var previous = await FileBackupBases.ReadAsync(job, sourceIdentity, catalog, snapshots, cancellationToken);
         BackupProgressContext.Report(BackupStage.ScanningSource);
         var scan = FileBackupPaths.Scan(source, isFile, cancellationToken);
-        var totalFiles = scan.Files.Count;
-        long processedFiles = 0;
-        BackupProgressContext.Report(BackupStage.ProcessingFiles, 0, totalFiles);
+        var lengths = scan.Files.ToDictionary(file => file.RelativePath, file =>
+        { cancellationToken.ThrowIfCancellationRequested(); return new FileInfo(file.FullPath).Length; }, StringComparer.Ordinal);
+        var archiveProgress = new FileArchiveProgress(lengths.Values.Sum());
+        archiveProgress.Report();
         var oldFiles = previous?.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, FileBackupEntry>(StringComparer.OrdinalIgnoreCase);
         var id = Guid.NewGuid();
@@ -50,6 +51,7 @@ public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSn
                             FileOptions.Asynchronous | FileOptions.SequentialScan);
                         var modified = new DateTimeOffset(File.GetLastWriteTimeUtc(item.FullPath));
                         var length = input.Length;
+                        if (length != lengths[item.RelativePath]) throw new IOException("Размер файла изменился после сканирования: " + item.RelativePath);
                         var hash = Convert.ToHexStringLower(await SHA256.HashDataAsync(input, cancellationToken));
                         var descriptor = new FileBackupEntry(item.RelativePath, length, hash, modified);
                         files.Add(descriptor);
@@ -57,10 +59,10 @@ public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSn
                         {
                             changed.Add(item.RelativePath); input.Position = 0;
                             zip.PutNextEntry(Entry("data/" + item.RelativePath, length, password));
-                            await BackupProgressContext.CopyAsync(input, zip, BackupStage.ArchivingFile, length, cancellationToken);
+                            await archiveProgress.CopyAsync(input, zip, cancellationToken);
                             zip.CloseEntry();
                         }
-                        BackupProgressContext.Report(BackupStage.ProcessingFiles, ++processedFiles, totalFiles);
+                        archiveProgress.Advance(length);
                         if (input.Length != length || File.GetLastWriteTimeUtc(item.FullPath) != modified.UtcDateTime)
                             throw new IOException("Файл изменился во время копирования: " + item.RelativePath);
                     }

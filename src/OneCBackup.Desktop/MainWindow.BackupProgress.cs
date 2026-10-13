@@ -17,6 +17,8 @@ public partial class MainWindow
             BackupStage.CreatingBackup => "Получение копии из источника",
             BackupStage.ProcessingFiles => "Обработка файлов (по числу файлов)",
             BackupStage.ArchivingFile => "Архивация текущего файла",
+            BackupStage.ArchivingFiles => "Архивация файлов",
+            BackupStage.DownloadingAndArchivingFiles => "Скачивание и архивация файлов",
             BackupStage.DownloadingFile => "Скачивание текущего файла",
             BackupStage.Archiving => "Архивация",
             BackupStage.ConnectingStorage => "Подключение к хранилищу",

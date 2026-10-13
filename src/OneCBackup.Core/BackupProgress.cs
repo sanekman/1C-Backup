@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace OneCBackup.Core;
 
-public enum BackupStage { ConnectingSource, PreparingStorage, CreatingBackup, ScanningSource, ProcessingFiles, DownloadingFile, ArchivingFile, Archiving, ConnectingStorage, CopyingToStorage, Verifying, Retention, Waiting, Completed, Failed, Cancelled, PartiallySucceeded }
+public enum BackupStage { ConnectingSource, PreparingStorage, CreatingBackup, ScanningSource, ProcessingFiles, DownloadingFile, ArchivingFile, Archiving, ConnectingStorage, CopyingToStorage, Verifying, Retention, Waiting, Completed, Failed, Cancelled, PartiallySucceeded, ArchivingFiles, DownloadingAndArchivingFiles }
 public sealed record BackupStageProgress(BackupStage Stage, long Completed = 0, long Total = 0)
 {
     public int? Percent => Total > 0 ? (int)Math.Clamp(100d * Completed / Total, 0, 100) : Stage == BackupStage.Completed ? 100 : null;
@@ -43,10 +43,10 @@ public static class BackupProgressContext
         var slot = current.Value;
         return new InlineProgress<long>(bytes => { slot?.Session.Report(slot.Destination, new(stage, Math.Max(0, bytes), Math.Max(0, total))); other?.Report(bytes); });
     }
-    public static async Task CopyAsync(Stream input, Stream output, BackupStage stage, long total, CancellationToken token)
+    public static async Task CopyAsync(Stream input, Stream output, BackupStage stage, long total, CancellationToken token, long completedBefore = 0)
     {
-        Report(stage, 0, total);
-        var buffer = new byte[81920]; long completed = 0; int read;
+        Report(stage, completedBefore, total);
+        var buffer = new byte[81920]; long completed = completedBefore; int read;
         while ((read = await input.ReadAsync(buffer, token)) != 0)
         {
             await output.WriteAsync(buffer.AsMemory(0, read), token);

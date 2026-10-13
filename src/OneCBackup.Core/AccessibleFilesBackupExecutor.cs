@@ -74,6 +74,15 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
         var password = await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, token);
         BackupProgressContext.Report(BackupStage.ScanningSource);
         var scan = ReadSource(source, isFile, token); var skipped = new HashSet<string>(scan.Skipped, StringComparer.OrdinalIgnoreCase);
+        var lengths = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var item in scan.Files)
+        {
+            token.ThrowIfCancellationRequested();
+            try { lengths.Add(item.RelativePath, new FileInfo(item.FullPath).Length); }
+            catch (Exception ex) when (IsAccessFailure(ex)) { skipped.Add(item.RelativePath); }
+        }
+        var archiveProgress = new FileArchiveProgress(lengths.Values.Sum());
+        archiveProgress.Report();
         var files = new List<FileBackupEntry>(); var id = Guid.NewGuid();
         Directory.CreateDirectory(workDirectory);
         var destination = Path.Combine(Path.GetFullPath(workDirectory), BackupFileName.Create(job, ".files-full.zip", uniqueId: id));
@@ -84,10 +93,11 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
             {
                 using (var zip = new ZipOutputStream(output) { IsStreamOwner = false, Password = password, UseZip64 = UseZip64.Dynamic })
                 {
-                    zip.SetLevel(6); long processed = 0;
+                    zip.SetLevel(6);
                     foreach (var item in scan.Files)
                     {
                         token.ThrowIfCancellationRequested();
+                        if (!lengths.TryGetValue(item.RelativePath, out var plannedLength)) continue;
                         Stream input; long length; DateTimeOffset modified; string sha;
                         try
                         {
@@ -97,23 +107,24 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
                             try
                             {
                                 length = input.Length; modified = new(File.GetLastWriteTimeUtc(item.FullPath));
+                                if (length != plannedLength) throw new IOException("Размер файла изменился после сканирования: " + item.RelativePath);
                                 sha = Convert.ToHexStringLower(await SHA256.HashDataAsync(input, token));
                             }
                             catch { await input.DisposeAsync(); throw; }
                         }
                         catch (Exception ex) when (IsAccessFailure(ex))
-                        { skipped.Add(item.RelativePath); BackupProgressContext.Report(BackupStage.ProcessingFiles, ++processed, scan.Files.Count); continue; }
+                        { skipped.Add(item.RelativePath); archiveProgress.Advance(plannedLength); continue; }
                         await using (input)
                         {
                             input.Position = 0;
                             zip.PutNextEntry(Entry("data/" + item.RelativePath, length, password));
                             // Once an entry starts, any read/write error invalidates the archive.
-                            await BackupProgressContext.CopyAsync(input, zip, BackupStage.ArchivingFile, length, token); zip.CloseEntry();
+                            await archiveProgress.CopyAsync(input, zip, token); zip.CloseEntry();
                             if (input.Length != length || File.GetLastWriteTimeUtc(item.FullPath) != modified.UtcDateTime)
                                 throw new IOException("Файл изменился во время копирования: " + item.RelativePath);
                             files.Add(new(item.RelativePath, length, sha, modified));
                         }
-                        BackupProgressContext.Report(BackupStage.ProcessingFiles, ++processed, scan.Files.Count);
+                        archiveProgress.Advance(length);
                     }
                     var manifest = new FileBackupManifest
                     {

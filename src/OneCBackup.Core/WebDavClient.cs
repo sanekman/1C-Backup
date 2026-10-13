@@ -173,10 +173,15 @@ public sealed class WebDavClient : IDisposable
         return new Uri(root, string.Join('/', path.Split('/').Select(Uri.EscapeDataString)) + (directory ? "/" : ""));
     }
     public static bool IsStrongETag(string? etag) => etag is not null && EntityTagHeaderValue.TryParse(etag, out var value) && !value.IsWeak && value.Tag != "*";
-    public async Task<string> DownloadAsync(WebDavEntry entry, string path, CancellationToken token = default)
+    public async Task<string> DownloadAsync(WebDavEntry entry, string path, CancellationToken token = default, IProgress<long>? progress = null)
     {
         if (entry.IsDirectory) throw new ArgumentException("Выберите файл WebDAV.");
-        BackupProgressContext.Report(BackupStage.DownloadingFile, 0, entry.Length);
+        void Report(long bytes)
+        {
+            if (progress is null) BackupProgressContext.Report(BackupStage.DownloadingFile, bytes, entry.Length);
+            else progress.Report(bytes);
+        }
+        Report(0);
         using var request = Request(HttpMethod.Get, Resolve(entry.Path, false));
         if (IsStrongETag(entry.ETag)) request.Headers.IfMatch.Add(EntityTagHeaderValue.Parse(entry.ETag!));
         using var response = await SendAsync(request, token);
@@ -192,7 +197,7 @@ public sealed class WebDavClient : IDisposable
             total += read;
             if (total > entry.Length) throw new IOException("Размер файла WebDAV изменился во время чтения.");
             hash.AppendData(buffer, 0, read); await output.WriteAsync(buffer.AsMemory(0, read), token);
-            BackupProgressContext.Report(BackupStage.DownloadingFile, total, entry.Length);
+            Report(total);
         }
         if (total != entry.Length) throw new IOException("Файл WebDAV скачан не полностью.");
         await output.FlushAsync(token); output.Flush(true);

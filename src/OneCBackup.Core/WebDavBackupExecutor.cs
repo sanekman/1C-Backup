@@ -26,6 +26,8 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
         var scan = await client.ScanAsync(token);
         DiagnosticLog.Current.Write(DiagnosticEvent.SourceEnumerated, values: new(Count: scan.Count));
         var downloaded = 0; long downloadedBytes = 0;
+        var archiveProgress = new FileArchiveProgress(scan.Where(entry => !entry.IsDirectory).Sum(entry => entry.Length), BackupStage.DownloadingAndArchivingFiles);
+        archiveProgress.Report();
         var oldFiles = previous?.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, FileBackupEntry>(StringComparer.OrdinalIgnoreCase);
         var id = Guid.NewGuid(); Directory.CreateDirectory(workDirectory);
@@ -46,10 +48,10 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
                         // Only a strong server validator can avoid downloading. Dates/length alone do not establish equality.
                         if (old is not null && old.Path == item.Path && old.Length == item.Length
                             && WebDavClient.IsStrongETag(item.ETag) && old.WebDavETag == item.ETag)
-                        { files.Add(old with { LastWriteUtc = modified }); continue; }
+                        { files.Add(old with { LastWriteUtc = modified }); archiveProgress.Advance(item.Length); continue; }
                         try
                         {
-                            var hash = await client.DownloadAsync(item, download, token);
+                            var hash = await client.DownloadAsync(item, download, token, new InlineProgress<long>(_ => archiveProgress.Report()));
                             downloaded++; downloadedBytes += item.Length;
                             files.Add(new(item.Path, item.Length, hash, modified) { WebDavETag = item.ETag });
                             if (old is null || old.Path != item.Path || old.Length != item.Length || old.Sha256 != hash)
@@ -57,10 +59,11 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
                                 changed.Add(item.Path);
                                 zip.PutNextEntry(Entry("data/" + item.Path, item.Length, password));
                                 await using var input = new FileStream(download, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous);
-                                await BackupProgressContext.CopyAsync(input, zip, BackupStage.ArchivingFile, item.Length, token); zip.CloseEntry();
+                                await archiveProgress.CopyAsync(input, zip, token); zip.CloseEntry();
                             }
                         }
                         finally { File.Delete(download); }
+                        archiveProgress.Advance(item.Length);
                     }
                     var current = files.Select(file => file.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
                     var manifest = new FileBackupManifest { SnapshotId = id, FullSnapshotId = previous?.FullSnapshotId ?? id,

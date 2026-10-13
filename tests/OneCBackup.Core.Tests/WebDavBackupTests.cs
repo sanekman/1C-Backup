@@ -26,8 +26,8 @@ public sealed class WebDavBackupTests : IDisposable
         TemporaryDirectory = Path.Combine(root, "hdd"), ScheduleKind = ScheduleKind.Manual, KeepLast = 1,
         FileBackupMode = FileBackupMode.Incremental, FullBackupEvery = 3 };
     private WebDavClient Client(BackupJob job) => new(job.Source, new NetworkCredential("пользователь", "app-secret"), dav.Handler());
-    private LocalBackupRunner Runner() => new(new Unused(), new BackupCompletion(storage, catalog, new Passwords()),
-        new BackupRunHistory(Path.Combine(root, "runs.json")), Path.Combine(root, "work"), Client);
+    private LocalBackupRunner Runner(Action<BackupProgressSnapshot>? progress = null) => new(new Unused(), new BackupCompletion(storage, catalog, new Passwords()),
+        new BackupRunHistory(Path.Combine(root, "runs.json")), Path.Combine(root, "work"), Client, progress: progress);
     private async Task<BackupRecord> Run(BackupJob? job = null)
     {
         var result = await Runner().RunAsync(job ?? Job); Assert.True(result.Status == BackupRunStatus.Succeeded, result.Error);
@@ -38,6 +38,24 @@ public sealed class WebDavBackupTests : IDisposable
         var parent = Path.Combine(root, "restores"); Directory.CreateDirectory(parent);
         return (await new FileBackupRestorer(storage, catalog, Path.Combine(root, "work"), new Passwords())
             .RestoreAsync(record, job ?? Job, parent)).Directory;
+    }
+    [Fact]
+    public async Task WholeSourceByteProgressDoesNotSwitchStagesForEachWebDavFile()
+    {
+        dav.Files["a.txt"] = (new string('a', 100), "\"a1\"");
+        dav.Files["b.txt"] = (new string('b', 900), "\"b1\"");
+        var events = new List<BackupProgressSnapshot>();
+        for (var run = 0; run < 2; run++)
+        {
+            events.Clear();
+            var result = await Runner(events.Add).RunAsync(Job);
+            Assert.Equal(BackupRunStatus.Succeeded, result.Status);
+            Assert.DoesNotContain(events, value => value.Progress.Stage is BackupStage.ArchivingFile or BackupStage.DownloadingFile or BackupStage.ProcessingFiles);
+            var batch = events.Where(value => value.Progress.Stage == BackupStage.DownloadingAndArchivingFiles).ToArray();
+            Assert.NotEmpty(batch); Assert.All(batch, value => Assert.Equal(1000, value.Progress.Total));
+            Assert.Equal(1000, batch[^1].Progress.Completed);
+            Assert.Equal(batch.Select(value => value.Progress.Completed).Order(), batch.Select(value => value.Progress.Completed));
+        }
     }
     [Fact]
     public async Task FullIncrementalDeletionUnicodeEmptyFoldersAndIndependentRetentionRestore()
