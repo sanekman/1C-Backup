@@ -6,6 +6,7 @@ internal static class StorageAddress
 {
     public static string Identity(BackupJob job)
     {
+        if (job.StorageKind == StorageKind.GoogleDrive) return "GoogleDrive:" + job.DestinationDirectory;
         if (job.StorageKind == StorageKind.Ftp)
             return new UriBuilder(job.Ftp!.UseTls ? "ftps" : "ftp", job.Ftp.Host.ToLowerInvariant(), job.Ftp.Port,
                 job.DestinationDirectory.TrimEnd('/') + "/").Uri.AbsoluteUri;
@@ -15,6 +16,7 @@ internal static class StorageAddress
 
     public static string ValidateLocation(BackupJob job, StoredBackup backup)
     {
+        if (job.StorageKind == StorageKind.GoogleDrive) return GoogleDriveSettings.FileId(job, backup);
         if (job.StorageKind == StorageKind.Ftp)
         {
             var settings = job.Ftp!;

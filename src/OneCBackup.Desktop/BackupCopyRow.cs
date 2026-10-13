@@ -19,10 +19,11 @@ public sealed record BackupCopyRow(BackupRecord Record, string JobName,
             + "\n" + (check.Outcome == BackupVerificationOutcome.Verified ? "Размер и SHA-256 совпали с каталогом."
                 : check.Outcome == BackupVerificationOutcome.Cancelled ? "Проверка отменена; целостность не подтверждена." : "Проверка не пройдена; подробности: " + check.Error)
             + "\nЭто результат на указанное время. Он не подтверждает наличие файла сейчас и не заменяет пробное восстановление.";
-    public string CompactStorage => (StorageCategory switch { "ftp" => Location.StartsWith("ftps:", StringComparison.OrdinalIgnoreCase) ? "FTPS" : "FTP", "network" => "Сеть", _ => "Диск" }) + " · " + SizeDescription;
-    public string StorageHelp => StorageDescription + " · " + SizeDescription + "\n" + Location;
+    public string CompactStorage => (StorageCategory switch { "google" => "Google Drive", "ftp" => Location.StartsWith("ftps:", StringComparison.OrdinalIgnoreCase) ? "FTPS" : "FTP", "network" => "Сеть", _ => "Диск" }) + " · " + SizeDescription;
+    public string StorageHelp => StorageDescription + " · " + SizeDescription + "\n" + DisplayLocation;
     public DateTimeOffset CompletedUtc => Record.CompletedUtc;
     public string Location => Record.Backup.Location;
+    public string DisplayLocation => StorageCategory == "google" ? "Google Drive · " + (Record.Backup.OriginalFileName ?? "Копия") : Location;
     public string EncryptionDescription => Record.Backup.ArchivePasswordKey is null ? "Без пароля" : "ZIP AES-256";
     public string Sha256 => Record.Backup.Sha256;
     public string SizeDescription => Record.Backup.Length switch
@@ -33,9 +34,9 @@ public sealed record BackupCopyRow(BackupRecord Record, string JobName,
         _ => $"{Record.Backup.Length} Б"
     };
     public string StorageCategory => Record.StorageIdentity.StartsWith("ftp", StringComparison.OrdinalIgnoreCase)
-        ? "ftp" : Record.StorageIdentity.StartsWith("NetworkShare:", StringComparison.Ordinal) ? "network" : "local";
+        ? "ftp" : Record.StorageIdentity.StartsWith("GoogleDrive:", StringComparison.Ordinal) ? "google" : Record.StorageIdentity.StartsWith("NetworkShare:", StringComparison.Ordinal) ? "network" : "local";
     public string StorageDescription => StorageCategory switch
-    { "ftp" => "FTP / FTPS", "network" => "Сетевая папка", _ => "Локальный диск" };
+    { "google" => "Google Drive", "ftp" => "FTP / FTPS", "network" => "Сетевая папка", _ => "Локальный диск" };
     public bool CanOpenDirectory => Path.IsPathFullyQualified(Location) &&
         !Location.StartsWith("ftp", StringComparison.OrdinalIgnoreCase);
 }

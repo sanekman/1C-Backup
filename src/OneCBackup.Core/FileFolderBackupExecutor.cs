@@ -18,7 +18,7 @@ public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSn
         {
             FileBackupPaths.RequireOutside(source, workDirectory, "Временная папка должна находиться вне исходной папки.");
             FileBackupPaths.RequireOutside(source, snapshots.DirectoryPath, "Исходная папка содержит рабочий профиль программы. Выберите отдельную папку с данными.");
-            foreach (var target in job.StorageJobs.Where(target => target.StorageKind != StorageKind.Ftp))
+            foreach (var target in job.StorageJobs.Where(target => (target.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare)))
                 FileBackupPaths.RequireOutside(source, target.DestinationDirectory, "Хранилища должны находиться вне исходной папки.");
         }
         var sourceIdentity = FileBackupManifest.IdentifySource(source, isFile);

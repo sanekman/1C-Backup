@@ -82,6 +82,23 @@ internal static partial class DesktopSmoke
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 window.UpdateLayout();
             }
+            var storagePicker = Control<ComboBox>("Storage");
+            storagePicker.SelectedValue = StorageKind.GoogleDrive;
+            window.UpdateLayout();
+            if (Control<StackPanel>("GoogleDrivePanel").Visibility != Visibility.Visible
+                || Control<DockPanel>("StorageDestinationPanel").Visibility != Visibility.Collapsed
+                || Control<StackPanel>("FtpPanel").Visibility != Visibility.Collapsed)
+                throw new InvalidOperationException("Google Drive должен показывать подключение, скрывая локальный путь и FTP.");
+            storagePicker.SelectedValue = StorageKind.LocalDirectory;
+            var googleDestination = new DestinationWindow(new WindowsFtpCredentialStore(), new BackupDestination
+            { StorageKind = StorageKind.GoogleDrive, DestinationDirectory = "FixtureFolder", KeepLast = 3,
+                GoogleDrive = new() { CredentialKey = "fixture" } }) { Owner = window };
+            googleDestination.Show(); googleDestination.UpdateLayout();
+            if (((StackPanel)googleDestination.FindName("GoogleDrivePanel")).Visibility != Visibility.Visible
+                || ((DockPanel)googleDestination.FindName("DestinationPanel")).Visibility != Visibility.Collapsed
+                || ((TextBox)googleDestination.FindName("KeepLast")).Text != "3")
+                throw new InvalidOperationException("Дополнительное Google Drive не восстановило подключение и лимит.");
+            googleDestination.Close();
             await ApplicationUpdateHandoff.ValidateScriptSyntaxAsync();
             if (Control<CheckBox>("UpdateOnExit").IsChecked == true)
                 throw new InvalidOperationException("Автоматическая установка включена без выбора пользователя.");

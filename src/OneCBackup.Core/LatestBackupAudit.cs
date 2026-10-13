@@ -18,7 +18,7 @@ public sealed class LatestBackupAudit(IBackupStorage storage, BackupCatalog cata
         foreach (var target in job.StorageJobs)
         {
             var destination = new BackupDestination { StorageKind = target.StorageKind,
-                DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, KeepLast = target.KeepLast }.Description;
+                DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, GoogleDrive = target.GoogleDrive, KeepLast = target.KeepLast }.Description;
             var identity = StorageAddress.Identity(target);
             var record = records.Where(record => record.JobId == job.Id && record.StorageIdentity == identity)
                 .OrderByDescending(record => record.CompletedUtc).ThenByDescending(record => record.Id).FirstOrDefault();

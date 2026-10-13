@@ -17,8 +17,8 @@ public partial class MainWindow
         try
         {
             BackupCopyVerifier.GetStorageJob(row.Record, job);
-            var name = row.StorageCategory == "ftp" && Uri.TryCreate(row.Location, UriKind.Absolute, out var uri)
-                ? Path.GetFileName(Uri.UnescapeDataString(uri.AbsolutePath)) : Path.GetFileName(row.Location);
+            var name = row.Record.Backup.OriginalFileName ?? (row.StorageCategory == "ftp" && Uri.TryCreate(row.Location, UriKind.Absolute, out var uri)
+                ? Path.GetFileName(Uri.UnescapeDataString(uri.AbsolutePath)) : Path.GetFileName(row.Location));
             var dialog = new SaveFileDialog { Title = row.Record.Backup.FileSnapshot is { IsFull: false }
                 ? "Сохранить инкрементный архив — для восстановления нужна вся цепочка" : "Сохранить резервную копию на компьютер", FileName = name,
                 Filter = "Все файлы (*.*)|*.*", DefaultExt = Path.GetExtension(name), AddExtension = true, OverwritePrompt = false, CheckPathExists = true };
@@ -30,7 +30,7 @@ public partial class MainWindow
             copyVerification = cancellation;
             UpdateRunControls();
             var progress = BeginCopyExportProgress();
-            CopyVerificationStatus.Text = Status.Text = "Сохраняется копия с проверкой размера и SHA-256: " + row.Location;
+            CopyVerificationStatus.Text = Status.Text = "Сохраняется копия с проверкой размера и SHA-256: " + row.DisplayLocation;
             try
             {
                 var exported = await Task.Run(() => new BackupCopyExporter(backupStorage).ExportAsync(row.Record, job,

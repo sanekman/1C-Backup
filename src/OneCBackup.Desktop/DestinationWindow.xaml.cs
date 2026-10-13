@@ -10,6 +10,8 @@ public partial class DestinationWindow : Window
 {
     private readonly WindowsFtpCredentialStore credentials;
     private string? credentialKey;
+    private GoogleDriveSettings? googleDriveSettings;
+    private string? googleDriveFolder;
     public BackupDestination? Result { get; private set; }
 
     public DestinationWindow(WindowsFtpCredentialStore credentials, BackupDestination? initial = null)
@@ -23,9 +25,11 @@ public partial class DestinationWindow : Window
         Storage.ItemsSource = new Dictionary<StorageKind, string>
         {
             [StorageKind.LocalDirectory] = "Локальный диск", [StorageKind.NetworkShare] = "Сетевая папка (UNC)",
-            [StorageKind.Ftp] = "FTP / FTPS"
+            [StorageKind.Ftp] = "FTP / FTPS", [StorageKind.GoogleDrive] = "Google Drive"
         };
         credentialKey = initial?.Ftp?.CredentialKey;
+        googleDriveSettings = initial?.GoogleDrive;
+        googleDriveFolder = initial?.StorageKind == StorageKind.GoogleDrive ? initial.DestinationDirectory : null;
         Destination.Text = initial?.DestinationDirectory ?? "";
         KeepLast.Text = initial?.KeepLast?.ToString() ?? "";
         FtpHost.Text = initial?.Ftp?.Host ?? "";
@@ -41,8 +45,14 @@ public partial class DestinationWindow : Window
         if (FtpPanel is null || BrowseButton is null || PathHint is null) return;
         var kind = Storage.SelectedValue is StorageKind selected ? selected : StorageKind.LocalDirectory;
         Height = kind == StorageKind.Ftp ? 620 : 420;
+        var cloud = kind == StorageKind.GoogleDrive;
+        if (cloud && googleDriveFolder is not null) Destination.Text = googleDriveFolder;
+        else if (!cloud && googleDriveFolder is not null && Destination.Text == googleDriveFolder) Destination.Clear();
+        GoogleDrivePanel.Visibility = cloud ? Visibility.Visible : Visibility.Collapsed;
+        DestinationLabel.Visibility = DestinationPanel.Visibility = PathHint.Visibility = cloud ? Visibility.Collapsed : Visibility.Visible;
+        GoogleDriveStatus.Text = googleDriveSettings is null ? "Аккаунт пока не подключён." : "Подключено · папка «" + googleDriveSettings.FolderName + "».";
         FtpPanel.Visibility = kind == StorageKind.Ftp ? Visibility.Visible : Visibility.Collapsed;
-        BrowseButton.Visibility = kind == StorageKind.Ftp ? Visibility.Collapsed : Visibility.Visible;
+        BrowseButton.Visibility = kind is StorageKind.Ftp or StorageKind.GoogleDrive ? Visibility.Collapsed : Visibility.Visible;
         PathHint.Text = kind switch
         {
             StorageKind.NetworkShare => @"Укажите сетевую папку: \\server\share\backups. Доступ — под текущим пользователем Windows.",
@@ -66,6 +76,14 @@ public partial class DestinationWindow : Window
         CredentialsStatus.Text = "Логин и пароль сохранены в Windows. Соединение проверяется при доставке копии.";
     }
 
+    private void GoogleDriveConnect_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new GoogleDriveWindow(googleDriveFolder, googleDriveSettings?.CredentialKey) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        googleDriveSettings = dialog.Settings; googleDriveFolder = dialog.FolderId; Destination.Text = googleDriveFolder;
+        GoogleDriveStatus.Text = "Подключено · папка «" + googleDriveSettings!.FolderName + "».";
+    }
+
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         var kind = (StorageKind)Storage.SelectedValue;
@@ -80,11 +98,11 @@ public partial class DestinationWindow : Window
         if (kind == StorageKind.Ftp && !int.TryParse(FtpPort.Text, out port))
         { Status.Text = "Порт FTP должен быть числом от 1 до 65535."; FtpPort.Focus(); return; }
         var destination = new BackupDestination { StorageKind = kind, DestinationDirectory = Destination.Text.Trim(),
-            KeepLast = keepLast,
+            KeepLast = keepLast, GoogleDrive = kind == StorageKind.GoogleDrive ? googleDriveSettings : null,
             Ftp = kind == StorageKind.Ftp ? new FtpSettings { Host = FtpHost.Text.Trim(), Port = port,
                 UseTls = FtpTls.IsChecked == true, CredentialKey = credentialKey ?? "" } : null };
         var errors = destination.ApplyTo(new BackupJob { Name = "Хранилище", Source = "check" }).Validate().ToList();
-        if (kind != StorageKind.Ftp && !Path.IsPathFullyQualified(destination.DestinationDirectory))
+        if (kind is StorageKind.LocalDirectory or StorageKind.NetworkShare && !Path.IsPathFullyQualified(destination.DestinationDirectory))
             errors.Add("Укажите полный путь к папке копий.");
         if (errors.Count != 0) { Status.Text = errors[0]; return; }
         Result = destination;

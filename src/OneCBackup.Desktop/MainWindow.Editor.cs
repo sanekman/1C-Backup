@@ -168,7 +168,7 @@ public partial class MainWindow
                 + (destination.KeepLast is null ? " (" + KeepLast.Text.Trim() + ")" : "")));
             var temporary = string.IsNullOrWhiteSpace(TemporaryFolder.Text)
                 ? Path.Combine(DesktopPaths.DataDirectory, "work") + " (по умолчанию)" : TemporaryFolder.Text.Trim();
-            WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}{platformDescription}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {Destination.Text.Trim()}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nОсновное хранилище: хранить {KeepLast.Text.Trim()} успешных копий";
+            WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}{platformDescription}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {(Storage.SelectedValue is StorageKind.GoogleDrive ? googleDriveSettings?.FolderName : Destination.Text.Trim())}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nОсновное хранилище: хранить {KeepLast.Text.Trim()} успешных копий";
             WizardSummary.Text += "\n\n" + NextRun.Text;
             if (Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav && FileBackupModePicker.SelectedValue is FileBackupMode.Incremental)
                 WizardSummary.Text += "\nВ цепочке не более " + FullBackupEvery.Text.Trim() + " архивов. Нужные предшествующие архивы сохраняются сверх лимита хранилища.";
@@ -197,12 +197,12 @@ public partial class MainWindow
             ReviewFormat.Text = format + " · " + shortMethod;
             ReviewFormat.ToolTip = ReviewFormat.Text + platformDescription;
             static string StorageLabel(StorageKind kind, bool tls) => kind switch
-            { StorageKind.Ftp => tls ? "FTPS" : "FTP", StorageKind.NetworkShare => "Сеть", _ => "Диск" };
+            { StorageKind.GoogleDrive => "Google Drive", StorageKind.Ftp => tls ? "FTPS" : "FTP", StorageKind.NetworkShare => "Сеть", _ => "Диск" };
             var storageSummaries = new[] { StorageLabel((StorageKind)Storage.SelectedValue, FtpTls.IsChecked == true) + " — " + KeepLast.Text.Trim() }
                 .Concat(additionalDestinations.Select(destination => StorageLabel(destination.StorageKind, destination.Ftp?.UseTls == true)
                     + " — " + (destination.KeepLast?.ToString(CultureInfo.InvariantCulture) ?? KeepLast.Text.Trim())));
             ReviewStorages.Text = string.Join("; ", storageSummaries) + " копий";
-            ReviewStorages.ToolTip = Destination.Text.Trim() + ftpAddress + extraDestinations;
+            ReviewStorages.ToolTip = (Storage.SelectedValue is StorageKind.GoogleDrive ? googleDriveSettings?.FolderName : Destination.Text.Trim()) + ftpAddress + extraDestinations;
             ReviewSchedule.Text = schedule;
             ReviewSchedule.ToolTip = schedule + zoneDescription + "\n" + NextRun.Text;
             ReviewTemporary.Text = temporary;
@@ -283,7 +283,7 @@ public partial class MainWindow
             if (temporary is not null && (!Path.IsPathFullyQualified(temporary) || temporary.Any(char.IsControl)))
                 return RejectWizard("Укажите полный путь к временной папке или выберите её кнопкой справа.", 1, TemporaryFolder);
             if (string.IsNullOrWhiteSpace(Destination.Text)) return RejectWizard("Выберите папку, в которой будут храниться резервные копии.", 1, Destination);
-            if (Storage.SelectedValue is not StorageKind.Ftp && !Path.IsPathFullyQualified(Destination.Text.Trim()))
+            if (Storage.SelectedValue is StorageKind.LocalDirectory or StorageKind.NetworkShare && !Path.IsPathFullyQualified(Destination.Text.Trim()))
                 return RejectWizard("Укажите полный путь к папке копий или выберите её кнопкой справа.", 1, Destination);
             var ftpPort = 21;
             if (Storage.SelectedValue is StorageKind.Ftp && !int.TryParse(FtpPort.Text, out ftpPort)) return RejectWizard("Порт FTP должен быть числом от 1 до 65535.", 1, FtpPort);
@@ -295,6 +295,7 @@ public partial class MainWindow
             }
             var job = new BackupJob { Name = "check", Source = "check", DestinationDirectory = Destination.Text.Trim(), StorageKind = (StorageKind)Storage.SelectedValue,
                 TemporaryDirectory = temporary,
+                GoogleDrive = Storage.SelectedValue is StorageKind.GoogleDrive ? googleDriveSettings : null,
                 AdditionalDestinations = additionalDestinations.Count == 0 ? null : additionalDestinations.ToArray(),
                 Ftp = Storage.SelectedValue is StorageKind.Ftp ? new FtpSettings { Host = FtpHost.Text.Trim(), Port = ftpPort, UseTls = FtpTls.IsChecked == true,
                     CredentialKey = FtpCredentialKey.Text.Trim() } : null };

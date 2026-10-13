@@ -41,7 +41,7 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
             foreach (var target in job.StorageJobs)
             {
                 var label = new BackupDestination { StorageKind = target.StorageKind,
-                    DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, KeepLast = target.KeepLast }.Description;
+                    DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, GoogleDrive = target.GoogleDrive, KeepLast = target.KeepLast }.Description;
                 if (cancellationToken.IsCancellationRequested)
                 { cancelled = true; results.Add(new(label, false, "Проверка отменена.")); continue; }
                 StoredBackup? stored = null;
@@ -59,7 +59,7 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
                 catch (OperationCanceledException) { error = "Превышено время проверки хранилища (30 секунд)."; }
                 catch (Exception ex)
                 {
-                    error = ex is IOException && target.StorageKind != StorageKind.Ftp && File.Exists(target.DestinationDirectory)
+                    error = ex is IOException && (target.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare) && File.Exists(target.DestinationDirectory)
                         ? "Вместо папки хранилища указан файл. Выберите другую папку." : ex.Message;
                 }
                 finally

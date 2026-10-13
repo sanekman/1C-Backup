@@ -49,6 +49,7 @@ public partial class MainWindow
         bool Matches(BackupCopyRow row) => (jobId is null || row.Record.JobId == jobId)
             && (string.IsNullOrEmpty(storage) || row.StorageCategory == storage)
             && (query.Length == 0 || row.JobName.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || row.DisplayLocation.Contains(query, StringComparison.OrdinalIgnoreCase)
                 || row.Location.Contains(query, StringComparison.OrdinalIgnoreCase));
         if (Copies.SelectedItem is BackupCopyRow selected && !Matches(selected)) Copies.SelectedItem = null;
         var view = CollectionViewSource.GetDefaultView(Copies.ItemsSource);

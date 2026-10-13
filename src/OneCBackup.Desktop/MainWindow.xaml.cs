@@ -96,7 +96,8 @@ public partial class MainWindow : Window
         {
             [StorageKind.LocalDirectory] = "Локальный диск",
             [StorageKind.NetworkShare] = "Сетевая папка (UNC)",
-            [StorageKind.Ftp] = "FTP / FTPS"
+            [StorageKind.Ftp] = "FTP / FTPS",
+            [StorageKind.GoogleDrive] = "Google Drive"
         };
         Storage.SelectedValue = StorageKind.LocalDirectory;
         Schedule.ItemsSource = new Dictionary<ScheduleKind, string>
@@ -208,6 +209,7 @@ public partial class MainWindow : Window
             FileBackupMode = FileBackupModePicker.SelectedValue is FileBackupMode mode ? mode : FileBackupMode.Full,
             FullBackupEvery = int.TryParse(FullBackupEvery.Text, out var every) && every is >= 1 and <= 365 ? every : 7,
             ArchivePasswordKey = EncryptArchive.IsChecked == true ? archivePasswordKey : null, StorageKind = storageKind,
+            GoogleDrive = storageKind == StorageKind.GoogleDrive ? googleDriveSettings : null,
             ScheduleKind = scheduleKind, DaysOfWeek = SelectedDays(),
             OneC = oneC,
             OneCMethod = oneCMethod,
@@ -339,7 +341,10 @@ public partial class MainWindow : Window
         OneCMethodPicker.SelectedValue = job.OneCMethod;
         FileBackupModePicker.SelectedValue = job.FileBackupMode;
         FullBackupEvery.Text = job.FullBackupEvery.ToString(CultureInfo.InvariantCulture);
+        googleDriveSettings = job.GoogleDrive;
+        googleDriveFolder = job.StorageKind == StorageKind.GoogleDrive ? job.DestinationDirectory : null;
         Destination.Text = job.DestinationDirectory;
+        UpdateGoogleDriveStatus();
         TemporaryFolder.Text = job.TemporaryDirectory ?? "";
         additionalDestinations.Clear();
         foreach (var destination in job.AdditionalDestinations ?? []) additionalDestinations.Add(destination);
@@ -385,6 +390,7 @@ public partial class MainWindow : Window
         UpdateArchivePasswordStatus();
         Storage.SelectedValue = StorageKind.LocalDirectory;
         FtpHost.Clear(); FtpPort.Text = "21"; FtpTls.IsChecked = true; FtpCredentialKey.Clear();
+        googleDriveSettings = null; googleDriveFolder = null; UpdateGoogleDriveStatus();
         Schedule.SelectedValue = ScheduleKind.Daily; SetDays(WeekDays.Monday);
         UpdateSchedulePreview();
         UpdateOneCControls();
@@ -483,6 +489,7 @@ public partial class MainWindow : Window
         ExternalMonitoringButton.IsEnabled = ready && idle && schedulingTask is null;
         StartScheduleButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null && !editorOpen;
         ArchivePasswordButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
+        GoogleDriveConnectButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         FtpCredentialsButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         StopScheduleButton.IsEnabled = schedulingTask is not null && !schedulerStopping;
         RefreshCopiesButton.IsEnabled = ready && !copiesRefreshing;
@@ -874,10 +881,10 @@ public partial class MainWindow : Window
         if (copyVerification is null) CopyVerificationStatus.Text = "";
         CopyDetails.Visibility = Copies.SelectedItem is BackupCopyRow ? Visibility.Visible : Visibility.Collapsed;
         SelectedCopyPath.Text = Copies.SelectedItem is BackupCopyRow selectedCopy ? selectedCopy.Record.Backup.FileSnapshot is { } fileSnapshot
-            ? (fileSnapshot.IsFull ? "Полная копия · 1 архив" : $"Инкрементная копия · архивов для восстановления: {fileSnapshot.Depth + 1}") + " · " + selectedCopy.Location
-            : selectedCopy.Location : "";
+            ? (fileSnapshot.IsFull ? "Полная копия · 1 архив" : $"Инкрементная копия · архивов для восстановления: {fileSnapshot.Depth + 1}") + " · " + selectedCopy.DisplayLocation
+            : selectedCopy.DisplayLocation : "";
         CopyDetails.Text = Copies.SelectedItem is BackupCopyRow row
-            ? $"{row.JobName}\n{row.Location}\nРазмер: {row.Record.Backup.Length} байт\nШифрование: {row.EncryptionDescription}\nSHA256: {row.Sha256}\n{FileSnapshotDetails(row.Record.Backup.FileSnapshot)}\n{row.CheckHelp}" : "";
+            ? $"{row.JobName}\n{row.DisplayLocation}\nРазмер: {row.Record.Backup.Length} байт\nШифрование: {row.EncryptionDescription}\nSHA256: {row.Sha256}\n{FileSnapshotDetails(row.Record.Backup.FileSnapshot)}\n{row.CheckHelp}" : "";
         UpdateRunControls();
     }
 
@@ -892,8 +899,8 @@ public partial class MainWindow : Window
         using var cancellation = new CancellationTokenSource();
         copyVerification = cancellation;
         UpdateRunControls();
-        CopyVerificationStatus.Text = row.Record.Backup.FileSnapshot is null ? "Проверяется размер и SHA256: " + row.Location
-            : "Проверяется размер и SHA-256 всех архивов файловой цепочки: " + row.Location;
+        CopyVerificationStatus.Text = row.Record.Backup.FileSnapshot is null ? "Проверяется размер и SHA256: " + row.DisplayLocation
+            : "Проверяется размер и SHA-256 всех архивов файловой цепочки: " + row.DisplayLocation;
         BackupVerificationOutcome outcome;
         string? error = null;
         try
@@ -901,13 +908,13 @@ public partial class MainWindow : Window
             var checkedArchives = await Task.Run(() => new BackupPointVerifier(backupStorage, catalog).VerifyAsync(row.Record, job, cancellation.Token));
             outcome = BackupVerificationOutcome.Verified;
             CopyVerificationStatus.Text = row.Record.Backup.FileSnapshot is null
-                ? "Размер и SHA256 совпадают с журналом: " + row.Location + ". Проверка не заменяет пробное восстановление базы."
+                ? "Размер и SHA256 совпадают с журналом: " + row.DisplayLocation + ". Проверка не заменяет пробное восстановление базы."
                 : $"Файловая цепочка проверена: архивов {checkedArchives}, размер и SHA-256 совпадают. Для проверки содержимого используйте «Восстановить файлы…».";
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        { outcome = BackupVerificationOutcome.Cancelled; CopyVerificationStatus.Text = "Проверка отменена: " + row.Location; }
+        { outcome = BackupVerificationOutcome.Cancelled; CopyVerificationStatus.Text = "Проверка отменена: " + row.DisplayLocation; }
         catch (Exception ex)
-        { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); outcome = BackupVerificationOutcome.Failed; error = ex.Message; CopyVerificationStatus.Text = "Проверка не пройдена: " + row.Location + ". " + ex.Message; }
+        { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); outcome = BackupVerificationOutcome.Failed; error = ex.Message; CopyVerificationStatus.Text = "Проверка не пройдена: " + row.DisplayLocation + ". " + ex.Message; }
         try
         {
             var message = CopyVerificationStatus.Text;
@@ -1145,7 +1152,16 @@ public partial class MainWindow : Window
         if (FtpPanel is not null)
             FtpPanel.Visibility = Storage.SelectedValue is StorageKind.Ftp ? Visibility.Visible : Visibility.Collapsed;
         if (DestinationBrowseButton is not null)
-            DestinationBrowseButton.Visibility = Storage.SelectedValue is StorageKind.Ftp ? Visibility.Collapsed : Visibility.Visible;
+            DestinationBrowseButton.Visibility = Storage.SelectedValue is StorageKind.Ftp or StorageKind.GoogleDrive ? Visibility.Collapsed : Visibility.Visible;
+        if (GoogleDrivePanel is not null)
+        {
+            var cloud = Storage.SelectedValue is StorageKind.GoogleDrive;
+            if (cloud && googleDriveFolder is not null) Destination.Text = googleDriveFolder;
+            else if (!cloud && googleDriveFolder is not null && Destination.Text == googleDriveFolder) Destination.Clear();
+            GoogleDrivePanel.Visibility = cloud ? Visibility.Visible : Visibility.Collapsed;
+            StorageDestinationLabel.Visibility = StorageDestinationPanel.Visibility = cloud ? Visibility.Collapsed : Visibility.Visible;
+            UpdateGoogleDriveStatus();
+        }
     }
 
     private void UpdateArchivePasswordStatus()

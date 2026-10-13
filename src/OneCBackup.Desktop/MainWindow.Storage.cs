@@ -43,7 +43,7 @@ public partial class MainWindow
     private static bool CanExtractCopy(BackupRecord record, BackupJob job)
     {
         if (job.Kind != DatabaseKind.OneCFile || job.OneCMethod != OneCBackupMethod.FileArchive) return false;
-        try { return BackupCopyVerifier.GetStorageJob(record, job).StorageKind != StorageKind.Ftp; }
+        try { return BackupCopyVerifier.GetStorageJob(record, job).StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare; }
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException) { return false; }
     }
 }

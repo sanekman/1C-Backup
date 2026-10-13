@@ -9,9 +9,11 @@ public interface IFtpCredentialStore
 
 /// <summary>Selects storage from each immutable job. Credentials are never part of the job document.</summary>
 public sealed class RoutedBackupStorage(IFtpCredentialStore credentials, string verificationDirectory,
-    Func<NetworkCredential, string, IBackupStorage>? ftpFactory = null) : IBackupStorage
+    Func<NetworkCredential, string, IBackupStorage>? ftpFactory = null, IFtpCredentialStore? googleCredentials = null,
+    Func<GoogleDriveCredentials, IBackupStorage>? googleFactory = null) : IBackupStorage
 {
     private readonly FileBackupStorage files = new();
+    private static readonly HttpClient googleHttp = GoogleDriveClient.CreateHttpClient();
 
     public async Task PrepareAsync(BackupJob job, CancellationToken cancellationToken = default)
     {
@@ -19,12 +21,21 @@ public sealed class RoutedBackupStorage(IFtpCredentialStore credentials, string 
         var errors = job.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         if (job.StorageKind == StorageKind.Ftp) await ResolveAsync(job, cancellationToken);
+        if (job.StorageKind == StorageKind.GoogleDrive) await (await ResolveAsync(job, cancellationToken)).PrepareAsync(job, cancellationToken);
     }
 
     private async Task<IBackupStorage> ResolveAsync(BackupJob job, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (job.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare) return files;
+        if (job.StorageKind == StorageKind.GoogleDrive)
+        {
+            if (job.GoogleDrive is null || job.Validate().Count != 0) throw new InvalidDataException("Некорректное хранилище Google Drive.");
+            var store = googleCredentials ?? (OperatingSystem.IsWindows() ? new WindowsGoogleDriveCredentialStore()
+                : throw new PlatformNotSupportedException("Подключение Google Drive доступно в Windows."));
+            var value = GoogleDriveCredentials.Parse(await store.GetAsync(job.GoogleDrive.CredentialKey, cancellationToken));
+            return googleFactory?.Invoke(value) ?? new GoogleDriveBackupStorage(new GoogleDriveClient(googleHttp, value));
+        }
         if (job.StorageKind != StorageKind.Ftp || job.Ftp is null || job.Validate().Count != 0)
             throw new InvalidDataException("Некорректное хранилище задания.");
         var login = await credentials.GetAsync(job.Ftp.CredentialKey, cancellationToken);

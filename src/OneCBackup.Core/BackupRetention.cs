@@ -112,7 +112,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
             async Task<(DestinationResult Result, bool Cancelled)> DeliverToAsync(BackupJob target, int index)
             {
                 var destination = new BackupDestination { StorageKind = target.StorageKind,
-                    DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, KeepLast = target.KeepLast }.Description;
+                    DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, GoogleDrive = target.GoogleDrive, KeepLast = target.KeepLast }.Description;
                 using var progressDestination = BackupProgressContext.Destination(index);
                 BackupProgressContext.Report(BackupStage.Waiting);
                 BackupRecord? record = null;
@@ -146,7 +146,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                 {
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationFailed, DiagnosticLevel.Error, ex, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
                     BackupProgressContext.Report(BackupStage.Failed);
-                    var error = ex is IOException && target.StorageKind != StorageKind.Ftp && File.Exists(target.DestinationDirectory)
+                    var error = ex is IOException && (target.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare) && File.Exists(target.DestinationDirectory)
                         ? "Вместо папки копий указан файл. Выберите другую папку в настройках хранилища." : ex.Message;
                     return (new DestinationResult(destination, record, record is null ? error : null,
                         record is null ? null : ["Копия сохранена; очистка: " + ex.Message]), false);

@@ -14,7 +14,7 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
     private readonly string prefix;
     private static WindowsServiceCredentialCache? serviceCache;
     public static void SetServiceCache(WindowsServiceCredentialCache? cache) => serviceCache = cache;
-    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV") && serviceCache is not null;
+    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV" or "GoogleDrive") && serviceCache is not null;
     public async Task ExportForServiceAsync(string key, CancellationToken token = default)
     {
         var value = await GetAsync(key, token);
@@ -24,6 +24,10 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
     {
         var ftp = new WindowsFtpCredentialStore(); var archive = new WindowsFtpCredentialStore("Archive");
         var dav = new WindowsFtpCredentialStore("WebDAV");
+        var google = new WindowsFtpCredentialStore("GoogleDrive");
+        foreach (var key in jobs.SelectMany(job => job.StorageJobs).Where(job => job.StorageKind == StorageKind.GoogleDrive)
+            .Select(job => job.GoogleDrive!.CredentialKey).Distinct(StringComparer.Ordinal))
+            await google.ExportForServiceAsync(key);
         foreach (var key in jobs.SelectMany(job => job.StorageJobs).Where(job => job.StorageKind == StorageKind.Ftp)
             .Select(job => job.Ftp?.CredentialKey).OfType<string>().Distinct()) await ftp.ExportForServiceAsync(key);
         foreach (var key in jobs.Where(job => job.Kind == DatabaseKind.WebDav).Select(job => job.WebDav?.CredentialKey)

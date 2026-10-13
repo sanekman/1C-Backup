@@ -1,6 +1,6 @@
 namespace OneCBackup.Core;
 
-public enum StorageKind { LocalDirectory, NetworkShare, Ftp }
+public enum StorageKind { LocalDirectory, NetworkShare, Ftp, GoogleDrive }
 
 // Credentials are supplied at runtime. The desktop binds this key to Windows Credential Manager.
 public sealed record FtpSettings

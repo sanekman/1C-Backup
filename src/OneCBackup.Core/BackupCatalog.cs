@@ -26,7 +26,7 @@ public sealed class BackupCatalog(string path)
         try
         {
             var records = await ReadCoreAsync(cancellationToken);
-            var comparison = OperatingSystem.IsWindows() && job.StorageKind != StorageKind.Ftp
+            var comparison = OperatingSystem.IsWindows() && (job.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare)
                 ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             if (records.Any(r => string.Equals(r.Backup.Location, backup.Location, comparison)))
                 throw new InvalidDataException("Копия с этим расположением уже зарегистрирована.");
@@ -67,6 +67,8 @@ public sealed class BackupCatalog(string path)
             string.IsNullOrWhiteSpace(r.Backup.Location) || r.Backup.Length < 0 || r.Backup.Sha256 is null ||
             (r.Backup.ArchivePasswordKey is not null && (string.IsNullOrWhiteSpace(r.Backup.ArchivePasswordKey)
                 || r.Backup.ArchivePasswordKey.Length > 512 || r.Backup.ArchivePasswordKey.Any(char.IsControl))) ||
+            (r.Backup.OriginalFileName is { } name && (string.IsNullOrWhiteSpace(name) || name.Length > 255
+                || name is "." or ".." || name.Any(char.IsControl) || name.IndexOfAny(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) >= 0)) ||
             r.Backup.Sha256.Length != 64 || r.Backup.Sha256.Any(c => !Uri.IsHexDigit(c))) ||
             records.Select(r => r.Id).Distinct().Count() != records.Count ||
             records.Select(r => r.Backup.Location).Distinct().Count() != records.Count)

@@ -17,8 +17,8 @@ public sealed class BackupArchiver
         if (job.ArchivePasswordKey is not null)
             throw new InvalidOperationException("Для зашифрованных заданий используйте BackupDelivery с хранилищем паролей.");
         if (!job.ShouldArchiveCopy) return Task.FromResult(source);
-        if (job.StorageKind == StorageKind.Ftp)
-            throw new ArgumentException("Для FTP используйте BackupDelivery с локальным рабочим каталогом.", nameof(job));
+        if (job.StorageKind is StorageKind.Ftp or StorageKind.GoogleDrive)
+            throw new ArgumentException("Для облачных и FTP-хранилищ используйте BackupDelivery с локальным рабочим каталогом.", nameof(job));
         if (string.IsNullOrWhiteSpace(job.DestinationDirectory))
             throw new ArgumentException("Укажите каталог резервных копий.", nameof(job));
         return CreateZipAsync(source, Path.Combine(job.DestinationDirectory, Path.GetFileName(source) + ".zip"),

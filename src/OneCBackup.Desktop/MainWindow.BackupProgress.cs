@@ -42,7 +42,7 @@ public partial class MainWindow
         BackupProgressBar.Value = value.Progress.Percent ?? 0;
         BackupDestinationProgressList.ItemsSource = value.Destinations.Select(d => new
         {
-            Label = $"Хранилище {d.Index} · " + (d.Kind == StorageKind.Ftp ? "FTP" : d.Kind == StorageKind.NetworkShare ? "сетевая папка" : "локальный диск") + " · " + StageLabel(d.Progress),
+            Label = $"Хранилище {d.Index} · " + (d.Kind == StorageKind.GoogleDrive ? "Google Drive" : d.Kind == StorageKind.Ftp ? "FTP" : d.Kind == StorageKind.NetworkShare ? "сетевая папка" : "локальный диск") + " · " + StageLabel(d.Progress),
             Percent = d.Progress.Percent ?? 0,
             Indeterminate = d.Progress.Percent is null && d.Progress.Stage is not (BackupStage.Cancelled or BackupStage.Failed)
         }).ToArray();
