@@ -3,7 +3,7 @@
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:core="clr-namespace:OneCBackup.Core;assembly=OneCBackup.Core"
  xmlns:local="clr-namespace:OneCBackup.Desktop"
- PreviewKeyDown="Window_PreviewKeyDown" Title="1C-Backup" Width="1100" Height="740" MinWidth="900" MinHeight="580"
+ PreviewKeyDown="Window_PreviewKeyDown" Title="1C-Backup" Width="1100" Height="620" MinWidth="900" MinHeight="520"
  Icon="Assets/one-c-backup.ico" WindowStartupLocation="CenterScreen" Background="{DynamicResource CanvasBrush}">
  <Window.Resources>
   <local:LocalTimeConverter x:Key="LocalTimeConverter" />
@@ -90,6 +90,7 @@
        </DockPanel>
       </Border>
       <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0">
+       <ScrollViewer x:Name="JobActionsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
        <StackPanel><WrapPanel x:Name="JobActions" Margin="0,0,0,2">
         <Button x:Name="RunButton" Margin="0,0,8,6" Content="Создать копию" Style="{StaticResource PrimaryButton}" IsEnabled="False" Click="Run_Click" />
         <Button x:Name="EditJobButton" Content="Изменить" Click="EditJob_Click" IsEnabled="False" Margin="0,0,8,6" />
@@ -122,7 +123,7 @@
        <Expander x:Name="StorageCheckResults" Header="Проверка хранилищ" Visibility="Collapsed" Margin="0,6,0,0">
         <TextBox x:Name="StorageCheckDetails" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="130" VerticalScrollBarVisibility="Auto" BorderThickness="0" Padding="6" />
        </Expander>
-      </StackPanel></Border>
+      </StackPanel></ScrollViewer></Border>
       <Grid>
        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
        <DockPanel Margin="12,4"><TextBlock Text="Поиск" Foreground="{DynamicResource MutedBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />

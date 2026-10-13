@@ -9,6 +9,7 @@ public partial class MainWindow
     private void JobsView_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (StorageCheckDetails is not null) StorageCheckDetails.MaxHeight = ActualHeight < 650 ? 60 : 130;
+        if (JobActionsScroll is not null) JobActionsScroll.MaxHeight = Math.Max(144, JobsView.ActualHeight * 0.55);
     }
 
     private async void CheckStorage_Click(object sender, RoutedEventArgs e)

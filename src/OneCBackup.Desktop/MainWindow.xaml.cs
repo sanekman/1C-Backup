@@ -78,6 +78,7 @@ public partial class MainWindow : Window
         dispatcher = new LocalBackupDispatcher(store, (job, token) =>
             Dispatcher.InvokeAsync(() => ExecuteJobAsync(job, token)).Task.Unwrap());
         Closing += WindowClosingToTray;
+        SourceInitialized += (_, _) => FitInitialWindowToWorkArea();
         AgentModePicker.ItemsSource = new Dictionary<AgentMode, string>
         {
             [AgentMode.Standalone] = "Автономный агент",
