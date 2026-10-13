@@ -16,6 +16,8 @@ public sealed class GoogleDriveClient(HttpClient http, GoogleDriveCredentials cr
     {
         if (response.IsSuccessStatusCode) return;
         var code = (int)response.StatusCode;
+        DiagnosticLog.Current.Write(DiagnosticEvent.GoogleDriveRequestFailed, DiagnosticLevel.Warning,
+            storageKind: StorageKind.GoogleDrive, values: new(Code: code));
         throw new IOException(code switch
         {
             400 or 401 => "Google Drive: подключение истекло или отозвано. Подключите аккаунт заново.",

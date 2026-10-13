@@ -21,7 +21,7 @@ public enum DiagnosticEvent
     CopyVerificationStarted, CopyVerificationCompleted, CopyVerificationFailed,
     ExternalProcessStarted, ExternalProcessExited, ExternalProcessFailed,
     DiagnosticExportStarted, DiagnosticExportCompleted, DiagnosticExportFailed,
-    UpdateCheckStarted, UpdateCheckCompleted, UpdateDownloaded, UpdateInstallationStarted, UpdateResultLoaded, UpdateFailed
+    UpdateCheckStarted, UpdateCheckCompleted, UpdateDownloaded, UpdateInstallationStarted, UpdateResultLoaded, UpdateFailed, GoogleDriveRequestFailed
 }
 public sealed record DiagnosticValues(long? Count = null, long? Bytes = null, long? Milliseconds = null, int? Code = null);
 

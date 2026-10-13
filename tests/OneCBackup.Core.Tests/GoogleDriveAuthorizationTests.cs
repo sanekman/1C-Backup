@@ -48,6 +48,22 @@ public sealed class GoogleDriveAuthorizationTests
         }, CancellationToken.None);
         await browser!; Assert.Equal("fixture-refresh", result.RefreshToken);
     }
+    private sealed class Denied(HttpStatusCode status) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+            => Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("fixture-private-token-and-account") });
+    }
+    [Theory]
+    [InlineData(400)] [InlineData(401)] [InlineData(403)] [InlineData(429)] [InlineData(500)]
+    public async Task ErrorMessagesDoNotExposeGoogleResponseBody(int status)
+    {
+        using var http = new HttpClient(new Denied((HttpStatusCode)status));
+        var drive = new GoogleDriveClient(http, new("fixture.apps.googleusercontent.com", "fixture-secret", "fixture-refresh"));
+        var error = await Assert.ThrowsAsync<IOException>(() => drive.CheckFolderAsync("Folder_A", CancellationToken.None));
+        Assert.DoesNotContain("fixture-private", error.Message);
+        Assert.DoesNotContain("fixture-secret", error.Message);
+        Assert.DoesNotContain("fixture-refresh", error.Message);
+    }
     [Fact]
     public async Task CancelledBrowserWaitStopsWithoutTokenExchange()
     {
