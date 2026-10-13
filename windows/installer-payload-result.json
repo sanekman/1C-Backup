@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "version": "0.2.0-alpha.6",
+  "sha256": "79ec551400434b45793f3e094fab8c7a7702172337a167fe380a4eeb834ccc34",
+  "bytes": 55774316,
+  "payload_files_checked": 521,
+  "checks": [
+    "Windows PE bootstrap",
+    "NSIS archive decompression/CRC",
+    "all payload files match distribution ZIP",
+    "package version",
+    "installer SHA-256"
+  ],
+  "native_windows_installation_tested": false,
+  "administrator_manifest_verified": true
+}
