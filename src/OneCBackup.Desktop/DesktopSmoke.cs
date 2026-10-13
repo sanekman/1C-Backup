@@ -45,6 +45,20 @@ internal static partial class DesktopSmoke
             var progressBar = (ProgressBar)window.FindName("BackupProgressBar");
             if (!progressLabel.Text.Contains("37%") || progressBar.IsIndeterminate || progressBar.Value != 37)
                 throw new InvalidOperationException("Измеренный процент архивации не отображается.");
+            if (!window.TrayAnimationRunning) throw new InvalidOperationException("Значок должен вращаться во время задания.");
+            var iconResource = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/one-c-backup-tray.ico"))!;
+            using (iconResource.Stream)
+            using (var icon = new System.Drawing.Icon(iconResource.Stream))
+            using (var animation = new TrayAnimationIcons(icon))
+            {
+                var hashes = animation.Frames.Select(frame =>
+                {
+                    using var bitmap = frame.ToBitmap(); using var bytes = new MemoryStream();
+                    bitmap.Save(bytes, System.Drawing.Imaging.ImageFormat.Png);
+                    return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes.ToArray()));
+                }).ToArray();
+                if (hashes.Distinct().Count() < 8) throw new InvalidOperationException("Кадры вращения стрелки не различаются.");
+            }
             window.RenderBackupProgress(new(progressRun, Guid.NewGuid(), "Тест прогресса", Environment.ProcessId, 2, DateTimeOffset.UtcNow,
                 new(BackupStage.CopyingToStorage), [new(1, StorageKind.LocalDirectory, new(BackupStage.CopyingToStorage, 20, 100)),
                     new(2, StorageKind.Ftp, new(BackupStage.CopyingToStorage, 80, 100))]));
@@ -72,6 +86,8 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Шкалы хранилищ должны отображать отдельные проценты с привязкой только для чтения.");
             window.RenderBackupProgress(new(progressRun, Guid.NewGuid(), "Тест прогресса", Environment.ProcessId, 3, DateTimeOffset.UtcNow,
                 new(BackupStage.Completed), []));
+            if (window.TrayAnimationRunning || window.TrayCurrentRunStopAvailable)
+                throw new InvalidOperationException("После задания анимация и остановка текущего задания должны отключиться.");
 
             T Control<T>(string name) where T : FrameworkElement => (T)window.FindName(name);
             void Click(string name)

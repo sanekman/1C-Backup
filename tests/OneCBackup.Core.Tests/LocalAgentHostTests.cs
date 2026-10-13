@@ -173,6 +173,59 @@ public sealed class LocalAgentHostTests : IDisposable
     {
         public Task<NetworkCredential> GetAsync(string key, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Unexpected FTP access");
     }
+    private sealed class TwoBlockingRuns : IBackupExecutor
+    {
+        public TaskCompletionSource First { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Second { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public CancellationToken FirstToken { get; private set; }
+        public CancellationToken SecondToken { get; private set; }
+        private int calls;
+        public async Task<string> CreateAsync(BackupJob job, string work, CancellationToken token)
+        {
+            if (Interlocked.Increment(ref calls) == 1) { FirstToken = token; First.SetResult(); }
+            else { SecondToken = token; Second.SetResult(); }
+            await Task.Delay(Timeout.Infinite, token); throw new InvalidOperationException("Unreachable");
+        }
+    }
+    [Fact]
+    public async Task CancelCurrentRunKeepsAgentAndNextScheduledJobAliveAndRejectsStaleCommands()
+    {
+        var first = (await CreateJob()) with { ScheduleKind = ScheduleKind.SystemStartup };
+        var second = first with { Id = Guid.NewGuid(), Name = "Следующее задание" };
+        await new JobStore(Path.Combine(directory, "jobs.json")).SaveAsync([first, second]);
+        var executor = new TwoBlockingRuns(); using var shutdown = new CancellationTokenSource();
+        var task = new LocalAgentHost(directory, executor, new NoCredentials()).RunAsync(pollInterval: TimeSpan.FromMilliseconds(50), cancellationToken: shutdown.Token);
+        try
+        {
+            await executor.First.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var control = new LocalAgentControlStore(directory); var state = (await control.ReadAsync())!;
+            var progress = (await new BackupProgressStore(directory).ReadAsync())!;
+            Assert.True(state.CanCancelCurrentRun);
+            await control.RequestCancelRunAsync(Guid.NewGuid(), progress.RunId);
+            await Task.Delay(1200); Assert.False(executor.FirstToken.IsCancellationRequested);
+            await control.RequestCancelRunAsync(state.SessionId, Guid.NewGuid());
+            await Task.Delay(1200); Assert.False(executor.FirstToken.IsCancellationRequested);
+            await control.RequestCancelRunAsync(state.SessionId, progress.RunId);
+            await executor.Second.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(executor.FirstToken.IsCancellationRequested);
+            Assert.Equal(BackupRunStatus.Cancelled, (await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync()).Single(run => run.JobId == first.Id).Status);
+            // The command remains on disk while the second run is active.
+            await Task.Delay(1200); Assert.False(executor.SecondToken.IsCancellationRequested);
+            Assert.False(task.IsCompleted); Assert.Equal(LocalAgentPhase.Running, (await control.ReadAsync())!.Phase);
+            Assert.True(new BackupEngineCoordinator(directory).IsHeldElsewhere());
+        }
+        finally { shutdown.Cancel(); await task.WaitAsync(TimeSpan.FromSeconds(5)); }
+    }
+    [Fact]
+    public async Task CancelRunCommandRequiresBothIdentifiersAndDoesNotCreateFullStopCommand()
+    {
+        var control = new LocalAgentControlStore(directory); var session = Guid.NewGuid(); var run = Guid.NewGuid();
+        await Assert.ThrowsAsync<ArgumentException>(() => control.RequestCancelRunAsync(Guid.Empty, run));
+        await Assert.ThrowsAsync<ArgumentException>(() => control.RequestCancelRunAsync(session, Guid.Empty));
+        await control.RequestCancelRunAsync(session, run);
+        Assert.Equal(new LocalAgentCancelRunRequest(session, run), await control.ReadCancelRunAsync());
+        Assert.False(await control.StopRequestedAsync(session));
+    }
     private sealed class BlockingExecutor : IBackupExecutor
     {
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

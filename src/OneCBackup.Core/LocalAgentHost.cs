@@ -19,10 +19,18 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         await history.RecoverInterruptedAsync(cancellationToken);
         var storage = new RoutedBackupStorage(credentials, Path.Combine(directory, "ftp-verification"));
         var catalog = new BackupCatalog(Path.Combine(directory, "copies.json"));
-        var runner = new LocalBackupRunner(executor, new BackupCompletion(storage, catalog), history, Path.Combine(directory, "work"), progress: new BackupProgressStore(directory).Write);
+        var progressStore = new BackupProgressStore(directory);
+        var runGate = new object();
+        CancellationTokenSource? runningCancellation = null;
+        Guid? runningId = null;
+        var runner = new LocalBackupRunner(executor, new BackupCompletion(storage, catalog), history, Path.Combine(directory, "work"), progress: snapshot =>
+        {
+            lock (runGate) runningId = snapshot.Finished ? null : snapshot.RunId;
+            progressStore.Write(snapshot);
+        });
         var control = new LocalAgentControlStore(directory);
         var now = DateTimeOffset.UtcNow;
-        var state = new LocalAgentState(Guid.NewGuid(), Environment.ProcessId, now, now, LocalAgentPhase.Running);
+        var state = new LocalAgentState(Guid.NewGuid(), Environment.ProcessId, now, now, LocalAgentPhase.Running) { CanCancelCurrentRun = true };
         await control.WriteAsync(state, cancellationToken);
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         string? lastError = null;
@@ -30,7 +38,10 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         BackupRun? lastRun = null;
         var dispatcher = new LocalBackupDispatcher(store, async (job, token) =>
         {
-            lastRun = await runner.RunAsync(job, token);
+            using var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+            lock (runGate) { runningCancellation = runCancellation; runningId = null; }
+            try { lastRun = await runner.RunAsync(job, runCancellation.Token); }
+            finally { lock (runGate) { runningCancellation = null; runningId = null; } }
             Volatile.Write(ref lastError, lastRun.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded ? lastRun.Error : null);
             if (report is not null) await report(lastRun);
         });
@@ -46,6 +57,12 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                     DiagnosticLog.Current.Write(DiagnosticEvent.AgentStopRequested);
                     lifetime.Cancel();
                     return;
+                }
+                var cancel = await control.ReadCancelRunAsync(lifetime.Token);
+                if (cancel?.SessionId == state.SessionId)
+                {
+                    lock (runGate)
+                        if (cancel.RunId == runningId) runningCancellation?.Cancel();
                 }
                 await control.WriteAsync(state with { UpdatedUtc = DateTimeOffset.UtcNow, Error = Volatile.Read(ref lastError),
                     MonitoringError = Volatile.Read(ref monitorError) }, lifetime.Token);
