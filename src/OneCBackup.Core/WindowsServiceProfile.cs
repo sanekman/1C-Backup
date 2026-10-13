@@ -11,10 +11,12 @@ namespace OneCBackup.Core;
 
 public sealed record WindowsServiceProfile(string OwnerSid, string UserProfile, string AppData, string LocalAppData)
 {
+    public string? ServiceSid { get; init; }
+    public string EffectiveServiceSid => ServiceSid ?? OwnerSid;
     public static string FileName => "windows-service.json";
     public void Validate()
     {
-        if (!Regex.IsMatch(OwnerSid ?? "", @"^S-1-\d+(?:-\d+){1,15}$") || OwnerSid is "S-1-5-18" or "S-1-5-19" or "S-1-5-20")
+        if (new[] { OwnerSid, EffectiveServiceSid }.Any(sid => !Regex.IsMatch(sid ?? "", @"^S-1-\d+(?:-\d+){1,15}$") || sid is "S-1-5-18" or "S-1-5-19" or "S-1-5-20"))
             throw new InvalidDataException("Для службы нужна учётная запись пользователя Windows.");
         if (new[] { UserProfile, AppData, LocalAppData }.Any(path => path is null || !Path.IsPathFullyQualified(path) || path.Any(char.IsControl)))
             throw new InvalidDataException("Некорректные папки профиля службы.");
@@ -36,7 +38,9 @@ public sealed record WindowsServiceProfile(string OwnerSid, string UserProfile, 
     [SupportedOSPlatform("windows")]
     public void ApplyEnvironment()
     {
-        AssertCurrentUser();
+        Validate();
+        if (WindowsIdentity.GetCurrent().User?.Value != EffectiveServiceSid)
+            throw new InvalidOperationException("Учётная запись службы не совпадает с настроенной. Переустановите службу с нужным пользователем.");
         Environment.SetEnvironmentVariable("USERPROFILE", UserProfile);
         Environment.SetEnvironmentVariable("APPDATA", AppData);
         Environment.SetEnvironmentVariable("LOCALAPPDATA", LocalAppData);
@@ -49,18 +53,22 @@ public sealed record WindowsServiceProfile(string OwnerSid, string UserProfile, 
 [SupportedOSPlatform("windows")]
 public sealed class WindowsServiceCredentialCache
 {
-    private readonly string directory, sid;
+    private readonly string directory, sid, serviceSid;
+    public bool PreferCache { get; }
     private sealed record Secret(string Username, string Password);
-    public WindowsServiceCredentialCache(string profile, string ownerSid)
+    public WindowsServiceCredentialCache(string profile, string ownerSid, string? serviceAccountSid = null)
     {
-        sid = ownerSid;
-        if (WindowsIdentity.GetCurrent().User?.Value != ownerSid) throw new UnauthorizedAccessException("Другой владелец профиля службы.");
+        sid = ownerSid; serviceSid = serviceAccountSid ?? ownerSid;
+        var current = WindowsIdentity.GetCurrent().User?.Value;
+        PreferCache = current != ownerSid;
+        if (current != ownerSid && current != serviceSid) throw new UnauthorizedAccessException("Другой владелец профиля службы.");
         directory = Path.Combine(Path.GetFullPath(profile), "service-secrets");
     }
     private byte[] Entropy(string prefix, string key) => SHA256.HashData(Encoding.UTF8.GetBytes("OneCBackup.Service.v1\0" + sid + "\0" + prefix + "\0" + key));
     private string FilePath(string prefix, string key) => Path.Combine(directory, Convert.ToHexString(Entropy(prefix, key)).ToLowerInvariant() + ".bin");
     private void SecureDirectory()
     {
+        if (PreferCache) throw new UnauthorizedAccessException("Пароли изменяет владелец заданий через интерфейс программы.");
         Directory.CreateDirectory(directory);
         if (File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint)) throw new IOException("Папка паролей службы не должна быть ссылкой.");
         var acl = new DirectorySecurity(); acl.SetAccessRuleProtection(true, false);
@@ -68,6 +76,9 @@ public sealed class WindowsServiceCredentialCache
         foreach (var account in new[] { new SecurityIdentifier(sid), new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
             new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) })
             acl.AddAccessRule(new FileSystemAccessRule(account, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        if (serviceSid != sid)
+            acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(serviceSid), FileSystemRights.ReadAndExecute,
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         new DirectoryInfo(directory).SetAccessControl(acl);
     }
@@ -99,5 +110,5 @@ public sealed class WindowsServiceCredentialCache
         finally { CryptographicOperations.ZeroMemory(plain); }
     }
     public void Delete(string prefix, string key)
-    { var file = FilePath(prefix, key); if (File.Exists(file)) File.Delete(file); }
+    { if (PreferCache) throw new UnauthorizedAccessException("Пароли удаляет владелец заданий."); var file = FilePath(prefix, key); if (File.Exists(file)) File.Delete(file); }
 }

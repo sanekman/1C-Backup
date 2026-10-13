@@ -7,6 +7,56 @@ namespace OneCBackup.Core.Tests;
 
 public class WindowsServiceTests
 {
+    [Theory]
+    [InlineData("backup", "PC\\backup")]
+    [InlineData(".\\backup", "PC\\backup")]
+    [InlineData("  DOMAIN\\backup  ", "DOMAIN\\backup")]
+    [InlineData("backup@example.org", "backup@example.org")]
+    public void AccountNamesSupportLocalDomainAndUpn(string input, string expected) =>
+        Assert.Equal(expected, ServiceAccountName.Normalize(input, "PC"));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("domain\\")]
+    [InlineData("a\\b\\c")]
+    [InlineData("user\n")]
+    [InlineData("user\" /run")]
+    public void InvalidAccountNamesAreRejected(string input) =>
+        Assert.Throws<ArgumentException>(() => ServiceAccountName.Normalize(input, "PC"));
+
+    [Fact]
+    public async Task SelectedServiceSidRoundTripsSeparatelyFromOwner()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            var profile = new WindowsServiceProfile("S-1-5-21-11-22-33-1001", Path.GetFullPath("user"), Path.GetFullPath("roaming"), Path.GetFullPath("local"))
+                { ServiceSid = "S-1-5-21-11-22-33-1002" };
+            await profile.SaveAsync(root);
+            var loaded = await WindowsServiceProfile.LoadAsync(root);
+            Assert.Equal(profile, loaded);
+            Assert.NotEqual(loaded!.OwnerSid, loaded.EffectiveServiceSid);
+            profile = profile with { ServiceSid = "S-1-5-18" };
+            Assert.Throws<InvalidDataException>(() => profile.Validate());
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [WindowsCredentialTheory]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    [Trait("Category", "WindowsIntegration")]
+    [InlineData("current-account")]
+    public void CurrentAccountResolvesAndGroupsAreRejected(string fixture)
+    {
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        var account = WindowsServiceAccounts.Resolve(identity.Name);
+        Assert.Equal(identity.User!.Value, account.Sid);
+        Assert.All(WindowsServiceAccounts.LocalUsers(), name => Assert.StartsWith(Environment.MachineName + "\\", name));
+        var group = ((System.Security.Principal.NTAccount)new System.Security.Principal.SecurityIdentifier(
+            System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null).Translate(typeof(System.Security.Principal.NTAccount))).Value;
+        Assert.Throws<ArgumentException>(() => WindowsServiceAccounts.Resolve(group));
+    }
+
     [WindowsCredentialTheory]
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     [Trait("Category", "WindowsIntegration")]
@@ -31,6 +81,30 @@ public class WindowsServiceTests
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
+    [WindowsCredentialTheory]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    [Trait("Category", "WindowsIntegration")]
+    [InlineData("delegated-cache")]
+    public void SelectedServiceGetsReadOnlySecretDirectoryAccess(string fixture)
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            var owner = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+            var service = "S-1-5-21-11-22-33-2000000000";
+            var cache = new WindowsServiceCredentialCache(root, owner, service);
+            cache.Save("FTP", "fixture", new System.Net.NetworkCredential("fixture-user", "fixture-password"));
+            var rules = new DirectoryInfo(Path.Combine(root, "service-secrets")).GetAccessControl()
+                .GetAccessRules(true, false, typeof(System.Security.Principal.SecurityIdentifier)).Cast<FileSystemAccessRule>();
+            var rule = Assert.Single(rules.Where(rule => rule.IdentityReference.Value == service));
+            Assert.Equal(FileSystemRights.ReadAndExecute, rule.FileSystemRights & FileSystemRights.ReadAndExecute);
+            Assert.Equal(0, (int)(rule.FileSystemRights & (FileSystemRights.Write | FileSystemRights.Delete | FileSystemRights.ChangePermissions)));
+            Assert.Equal("fixture-password", cache.Read("FTP", "fixture")!.Password);
+            cache.Delete("FTP", "fixture");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData("S-1-5-18")]
     [InlineData("S-1-5-19")]

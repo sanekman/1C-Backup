@@ -57,7 +57,7 @@ try
     if (OperatingSystem.IsWindows() && await WindowsServiceProfile.LoadAsync(directory) is { } profile)
     {
         profile.AssertCurrentUser();
-        WindowsFtpCredentialStore.SetServiceCache(new(directory, profile.OwnerSid));
+        WindowsFtpCredentialStore.SetServiceCache(new(directory, profile.OwnerSid, profile.EffectiveServiceSid));
     }
     var control = new LocalAgentControlStore(directory);
     if (command is "stop" or "status")

@@ -45,6 +45,9 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
     public Task<NetworkCredential> GetAsync(string key, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        _ = Target(key);
+        if (HasServiceCache && serviceCache!.PreferCache)
+            return Task.FromResult(serviceCache.Read(prefix, key) ?? throw new InvalidOperationException("Не экспортирован пароль для службы: " + key));
         if (!Native.CredRead(Target(key), Generic, 0, out var pointer))
         {
             var code = Marshal.GetLastWin32Error();

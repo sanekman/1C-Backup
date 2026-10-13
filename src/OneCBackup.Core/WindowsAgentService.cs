@@ -114,17 +114,20 @@ public static class WindowsAgentService
         if (!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
             throw new UnauthorizedAccessException("Для установки службы нужны права администратора.");
         var profile = WindowsServiceProfile.LoadAsync(directory).GetAwaiter().GetResult() ?? throw new InvalidDataException("Нет профиля службы.");
-        if (profile.OwnerSid != ownerSid || ((SecurityIdentifier)new NTAccount(account).Translate(typeof(SecurityIdentifier))).Value != ownerSid)
-            throw new InvalidOperationException("Учётная запись службы должна совпадать с владельцем профиля.");
+        var selected = WindowsServiceAccounts.Resolve(account);
+        if (profile.OwnerSid != ownerSid || selected.Sid != profile.EffectiveServiceSid)
+            throw new InvalidOperationException("Выбранный пользователь не совпадает с настроенным пользователем службы.");
+        account = selected.Name;
         if (string.IsNullOrEmpty(password) || password.Length > 512 || password.IndexOf('\0') >= 0)
             throw new ArgumentException("Введите пароль Windows, а не PIN.");
         var image = WindowsAgentServiceDefinition.ImagePath(executable, directory);
         if (!File.Exists(executable)) throw new FileNotFoundException("Агент не найден.");
         if (QueryInfo() is not null) throw new InvalidOperationException("Служба уже установлена. Для переустановки сначала удалите её из программы.");
-        var granted = ServiceLogonRight.Ensure(ownerSid);
+        var granted = ServiceLogonRight.Ensure(selected.Sid);
         IntPtr manager = IntPtr.Zero, service = IntPtr.Zero, secret = IntPtr.Zero;
         try
         {
+            WindowsServiceProfileAccess.Grant(directory, profile);
             manager = Manager(3);
             secret = Marshal.StringToHGlobalUni(password);
             service = Native.CreateService(manager, WindowsAgentServiceDefinition.Name, "1C-Backup — резервное копирование", All,
@@ -139,7 +142,7 @@ public static class WindowsAgentService
         catch
         {
             if (service != IntPtr.Zero) Native.DeleteService(service);
-            if (granted) { try { ServiceLogonRight.Remove(ownerSid); } catch { /* Keep the original installation error. */ } }
+            if (granted) { try { ServiceLogonRight.Remove(selected.Sid); } catch { /* Keep the original installation error. */ } }
             throw;
         }
         finally

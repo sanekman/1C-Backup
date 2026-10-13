@@ -12,7 +12,7 @@ internal sealed class WindowsServiceHost(string directory, int poll) : ServiceBa
     {
         var profile = WindowsServiceProfile.LoadAsync(directory).GetAwaiter().GetResult() ?? throw new InvalidDataException("Не настроен профиль службы.");
         profile.ApplyEnvironment();
-        WindowsFtpCredentialStore.SetServiceCache(new(directory, profile.OwnerSid));
+        WindowsFtpCredentialStore.SetServiceCache(new(directory, profile.OwnerSid, profile.EffectiveServiceSid));
         cancellation = new();
         running = Task.Run(async () =>
         {
@@ -59,6 +59,7 @@ internal sealed class WindowsServiceHost(string directory, int poll) : ServiceBa
             var request = await ServiceManagementProtocol.ReadAsync<ServiceManagementRequest>(pipe, timeout.Token);
             if (!string.Equals(Path.GetFullPath(request.Executable), Environment.ProcessPath, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Путь агента не совпадает с запущенной программой.");
+            WindowsServiceAccounts.AssertPipeOwner(pipe.SafePipeHandle, request.OwnerSid);
             switch (request.Action)
             {
                 case "install": WindowsAgentService.Install(request.Executable, request.Directory, request.Account, request.OwnerSid, request.Password ?? ""); break;

@@ -515,10 +515,13 @@
     </StackPanel>
     <StackPanel Margin="0,0,0,18">
      <TextBlock Text="Служба Windows" FontSize="18" FontWeight="SemiBold" />
-     <TextBlock Text="Выполняет задания до входа в Windows под вашей учётной записью. Использует существующие задания и историю. Для сети указывайте UNC-пути: подключённые буквы дисков службе недоступны." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,8" />
+     <TextBlock Text="Выполняет задания до входа в Windows под выбранной учётной записью. Использует существующие задания и историю. Для сети указывайте UNC-пути: подключённые буквы дисков службе недоступны." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,8" />
      <TextBlock x:Name="ServiceStatus" Text="Состояние проверяется…" TextWrapping="Wrap" />
      <Expander Header="Установка службы" Margin="0,8,0,8"><StackPanel>
-      <TextBlock x:Name="ServiceAccount" Margin="0,8,0,6" TextWrapping="Wrap" />
+      <TextBlock Text="Пользователь службы" Margin="0,8,0,4" />
+      <ComboBox x:Name="ServiceAccount" IsEditable="True" IsTextSearchEnabled="False" Margin="0,0,0,6" AutomationProperties.Name="Выберите или введите пользователя службы Windows" />
+      <TextBlock Text="Выберите из списка или введите КОМПЬЮТЕР\пользователь / ДОМЕН\пользователь. Выбранный пользователь получит доступ к заданиям и сохранённым паролям. Доступ к базам, SQL Server и сетевым папкам должен быть у него отдельно." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
+      <TextBlock x:Name="ServiceAccountHint" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,4,0,6" />
       <TextBlock Text="Пароль Windows (не PIN). Установка и удаление потребуют подтверждения администратора. При смене пароля переустановите службу." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
       <PasswordBox x:Name="ServicePassword" MaxLength="512" Margin="0,8,0,8" AutomationProperties.Name="Пароль учётной записи Windows для службы" />
       <Button x:Name="InstallServiceButton" Content="Установить службу…" IsEnabled="False" HorizontalAlignment="Left" Click="InstallService_Click" />

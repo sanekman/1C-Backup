@@ -20,11 +20,22 @@ public partial class MainWindow
     private async Task InitializeServiceAsync()
     {
         if (SmokeMode) { RefreshService(); return; }
-        ServiceAccount.Text = WindowsIdentity.GetCurrent().Name;
+        var currentAccount = WindowsIdentity.GetCurrent().Name;
+        ServiceAccount.Text = currentAccount;
+        try
+        {
+            var users = await Task.Run(WindowsServiceAccounts.LocalUsers);
+            ServiceAccount.ItemsSource = new[] { currentAccount }.Concat(users).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            ServiceAccount.Text = currentAccount;
+            ServiceAccountHint.Text = "Список содержит локальных пользователей. Доменное имя можно ввести вручную.";
+        }
+        catch (Exception error) { ServiceAccountHint.Text = "Список недоступен. Имя можно ввести вручную. " + error.Message; }
         if (await WindowsServiceProfile.LoadAsync(DesktopPaths.DataDirectory) is { } profile)
         {
             profile.AssertCurrentUser();
-            WindowsFtpCredentialStore.SetServiceCache(new(DesktopPaths.DataDirectory, profile.OwnerSid));
+            WindowsFtpCredentialStore.SetServiceCache(new(DesktopPaths.DataDirectory, profile.OwnerSid, profile.EffectiveServiceSid));
+            try { ServiceAccount.Text = ((NTAccount)new SecurityIdentifier(profile.EffectiveServiceSid).Translate(typeof(NTAccount))).Value; }
+            catch { ServiceAccountHint.Text = "Сохранённый пользователь недоступен. Укажите имя вручную."; }
         }
         RefreshService();
     }
@@ -35,7 +46,7 @@ public partial class MainWindow
         {
             var info = WindowsAgentService.QueryInfo();
             var owned = info?.Matches(ServiceExecutable, DesktopPaths.DataDirectory) == true;
-            ServiceStatus.Text = info is null ? "Служба не установлена." : owned ? "Служба: " + info.Description
+            ServiceStatus.Text = info is null ? "Служба не установлена." : owned ? "Служба: " + info.Description + " · " + info.Account
                 : "Служба установлена для другой папки программы или профиля.";
             InstallServiceButton.IsEnabled = ready && !serviceManaging && info is null && ApplicationUpdateHandoff.IsInstalled();
             RemoveServiceButton.IsEnabled = ready && !serviceManaging && owned && info!.State == 1;
@@ -49,7 +60,7 @@ public partial class MainWindow
     private async Task ManageServiceAsync(string action)
     {
         if (!ready || serviceManaging || SmokeMode) return;
-        serviceManaging = true; UpdateRunControls();
+        serviceManaging = true; ServiceAccount.IsEnabled = ServicePassword.IsEnabled = false; UpdateRunControls();
         try
         {
             if (!ApplicationUpdateHandoff.IsInstalled()) throw new InvalidOperationException("Для службы установите программу установщиком Windows.");
@@ -57,13 +68,18 @@ public partial class MainWindow
                 throw new InvalidOperationException("Сначала остановите автоматическое копирование и дождитесь окончания операций.");
             if (agentSettings?.Mode != AgentMode.Standalone) throw new InvalidOperationException("Сначала сохраните автономный режим агента.");
             var identity = WindowsIdentity.GetCurrent(); var sid = identity.User!.Value;
+            var account = identity.Name;
             if (action == "install")
             {
                 if (string.IsNullOrEmpty(ServicePassword.Password)) throw new InvalidOperationException("Введите пароль Windows, а не PIN.");
+                var enteredAccount = ServiceAccount.Text;
+                var selected = await Task.Run(() => WindowsServiceAccounts.Resolve(enteredAccount));
+                account = selected.Name;
+                ServiceAccount.Text = selected.Name;
                 var profile = new WindowsServiceProfile(sid, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)) { ServiceSid = selected.Sid };
                 await profile.SaveAsync(DesktopPaths.DataDirectory);
-                WindowsFtpCredentialStore.SetServiceCache(new(DesktopPaths.DataDirectory, sid));
+                WindowsFtpCredentialStore.SetServiceCache(new(DesktopPaths.DataDirectory, sid, selected.Sid));
                 await WindowsFtpCredentialStore.ExportProfileForServiceAsync(jobs, await catalog.ReadAsync());
             }
             RefreshService();
@@ -78,7 +94,7 @@ public partial class MainWindow
                 Arguments = "--manage-service " + pipeName }) ?? throw new InvalidOperationException("Не удалось запустить установку службы.");
             await pipe.WaitForConnectionAsync(deadline.Token);
             await ServiceManagementProtocol.WriteAsync(pipe, new ServiceManagementRequest(action, ServiceExecutable,
-                DesktopPaths.DataDirectory, identity.Name, sid, action == "install" ? ServicePassword.Password : null), deadline.Token);
+                DesktopPaths.DataDirectory, account, sid, action == "install" ? ServicePassword.Password : null), deadline.Token);
             ServicePassword.Clear();
             var result = await ServiceManagementProtocol.ReadAsync<ServiceManagementResult>(pipe, deadline.Token);
             if (!result.Success) throw new InvalidOperationException(result.Message);
@@ -86,7 +102,7 @@ public partial class MainWindow
             Status.Text = result.Message;
         }
         catch (Exception error) { Status.Text = "Управление службой: " + error.Message; }
-        finally { ServicePassword.Clear(); serviceManaging = false; UpdateRunControls(); RefreshService(); }
+        finally { ServicePassword.Clear(); serviceManaging = false; ServiceAccount.IsEnabled = ServicePassword.IsEnabled = true; UpdateRunControls(); RefreshService(); }
     }
     private async void StartService_Click(object sender, RoutedEventArgs e)
     {
