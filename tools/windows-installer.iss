@@ -20,7 +20,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0.19045
+MinVersion=10.0.14393
 OutputDir={#OutputFolder}
 OutputBaseFilename=1C-Backup-{#AppVersion}-windows-x64-setup
 Compression=lzma2
@@ -51,6 +51,18 @@ Filename: "{app}\OneCBackup.Desktop.exe"; Description: "Открыть 1C-Backup
 const
   RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
   RunValue = 'OneCBackupAgent';
+
+function InitializeSetup: Boolean;
+var
+  Version: TWindowsVersion;
+begin
+  GetWindowsVersionEx(Version);
+  { MinVersion checks the Server 2016 floor; keep the client 22H2 floor. }
+  Result := (Version.ProductType = VER_NT_SERVER) or
+    (Version.ProductType = VER_NT_DOMAIN_CONTROLLER) or (Version.Build >= 19045);
+  if not Result then
+    SuppressibleMsgBox('Нужна Windows 10 22H2 или Windows 11. Для серверной ОС — Windows Server 2016 или новее.', mbError, MB_OK, IDOK);
+end;
 
 function ProfileAvailable: Boolean;
 var

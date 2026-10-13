@@ -139,21 +139,29 @@ FunctionEnd
 
 Function .onInit
   ${IfNot} ${RunningX64}
-    MessageBox MB_OK|MB_ICONSTOP "Нужна 64-разрядная Windows 10 22H2 или Windows 11." /SD IDOK
+    MessageBox MB_OK|MB_ICONSTOP "Нужна 64-разрядная Windows Server 2016 или новее, Windows 10 22H2 или Windows 11." /SD IDOK
     SetErrorLevel 1
     Abort
   ${EndIf}
   ${IfNot} ${AtLeastWin10}
-    MessageBox MB_OK|MB_ICONSTOP "Нужна Windows 10 22H2 или Windows 11." /SD IDOK
+    MessageBox MB_OK|MB_ICONSTOP "Нужна Windows Server 2016 или новее, Windows 10 22H2 или Windows 11." /SD IDOK
     SetErrorLevel 1
     Abort
   ${EndIf}
   SetRegView 64
-  ReadRegStr $0 HKLM "Software\Microsoft\Windows NT\CurrentVersion" "CurrentBuildNumber"
-  ${If} $0 < 19045
-    MessageBox MB_OK|MB_ICONSTOP "Нужна Windows 10 22H2 или Windows 11." /SD IDOK
-    SetErrorLevel 1
-    Abort
+  ; Server 2016 is build 14393; do not apply the workstation 22H2 floor.
+  ${If} ${IsServerOS}
+    ${IfNot} ${AtLeastBuild} 14393
+      MessageBox MB_OK|MB_ICONSTOP "Нужна Windows Server 2016 или новее." /SD IDOK
+      SetErrorLevel 1
+      Abort
+    ${EndIf}
+  ${Else}
+    ${IfNot} ${AtLeastBuild} 19045
+      MessageBox MB_OK|MB_ICONSTOP "Нужна Windows 10 22H2 или Windows 11." /SD IDOK
+      SetErrorLevel 1
+      Abort
+    ${EndIf}
   ${EndIf}
   SetShellVarContext current
   StrCpy $InstallOwnerLocalData "$LOCALAPPDATA"
