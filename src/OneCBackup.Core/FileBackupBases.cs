@@ -9,7 +9,7 @@ internal static class FileBackupBases
         {
             try { previous = await snapshots.ReadAsync(job.Id, token); }
             catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException) { previous = null; }
-            if (previous is not null && (previous.SourceIdentity != sourceIdentity || previous.Depth + 1 >= job.FullBackupEvery)) previous = null;
+            if (previous is not null && (previous.GetSnapshot().IsIncomplete || previous.SourceIdentity != sourceIdentity || previous.Depth + 1 >= job.FullBackupEvery)) previous = null;
             if (previous is not null)
             {
                 var records = await catalog.ReadAsync(token);

@@ -755,7 +755,7 @@ public partial class MainWindow : Window
         {
             view.Filter = item => item is BackupRun run && (filter switch
             {
-                "problems" => run.Status is BackupRunStatus.Failed or BackupRunStatus.Cancelled or BackupRunStatus.Interrupted or BackupRunStatus.PartiallySucceeded,
+                "problems" => run.Warnings?.Count > 0 || run.Status is BackupRunStatus.Failed or BackupRunStatus.Cancelled or BackupRunStatus.Interrupted or BackupRunStatus.PartiallySucceeded,
                 "succeeded" => run.Status == BackupRunStatus.Succeeded,
                 "running" => run.Status == BackupRunStatus.Running,
                 _ => true

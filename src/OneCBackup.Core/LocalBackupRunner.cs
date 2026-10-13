@@ -2,7 +2,8 @@ namespace OneCBackup.Core;
 
 /// <summary>Serializes runs and records failures before returning them to the desktop or service.</summary>
 public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion completion,
-    BackupRunHistory history, string workRoot, Func<BackupJob, WebDavClient>? webDavClientFactory = null, DiagnosticLog? diagnosticLog = null, Action<BackupProgressSnapshot>? progress = null)
+    BackupRunHistory history, string workRoot, Func<BackupJob, WebDavClient>? webDavClientFactory = null, DiagnosticLog? diagnosticLog = null, Action<BackupProgressSnapshot>? progress = null,
+    Func<IBackupExecutor, IBackupExecutor>? fileAccessWrapper = null)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -36,7 +37,8 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 var fileSnapshots = new FileBackupSnapshotStore(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(workRoot))!, "file-snapshots"));
                 IBackupExecutor selectedExecutor = job.Kind switch
                 {
-                    DatabaseKind.FilesAndFolders => new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords),
+                    DatabaseKind.FilesAndFolders => fileAccessWrapper?.Invoke(new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords))
+                        ?? new AccessibleFilesBackupExecutor(new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords), completion.Passwords),
                     DatabaseKind.WebDav => new WebDavBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, webDavClientFactory),
                     _ => executor
                 };
@@ -51,6 +53,13 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                         await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, completion.Passwords, cancellationToken), cancellationToken);
                 log.Write(DiagnosticEvent.BackupDeliveryStarted);
                 var warnings = new List<string>(run.Warnings ?? []);
+                if (fileManifest?.SkippedPaths is { Count: > 0 } skipped)
+                {
+                    log.Write(DiagnosticEvent.SourceItemsSkipped, DiagnosticLevel.Warning, values: new(Count: skipped.Count));
+                    warnings.Add("Копия неполная: не удалось прочитать файлов / папок: " + skipped.Count + ".");
+                    warnings.AddRange(skipped.Take(100).Select(path => "Не удалось скопировать (нет доступа или файл занят): " + path));
+                    if (skipped.Count > 100) warnings.Add("Полный список пропусков: onec-backup-manifest.json внутри архива.");
+                }
                 if (job.AdditionalDestinations?.Count > 0)
                 {
                     var completed = await completion.CompleteManyAsync(job, dump, Path.Combine(work, "archive"),
@@ -98,7 +107,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             // Cancellation must not discard the terminal report.
             try { await history.SaveAsync(run, CancellationToken.None); }
             catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }
-            log.Write(DiagnosticEvent.RunFinished, run.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded ? DiagnosticLevel.Error : DiagnosticLevel.Info,
+            log.Write(DiagnosticEvent.RunFinished, run.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded ? DiagnosticLevel.Error : run.Warnings?.Count > 0 ? DiagnosticLevel.Warning : DiagnosticLevel.Info,
                 outcome: run.Status, values: new(Count: run.Warnings?.Count ?? 0, Bytes: run.Backup?.Length, Milliseconds: clock.ElapsedMilliseconds));
             BackupProgressContext.Report(run.Status switch { BackupRunStatus.Succeeded => BackupStage.Completed, BackupRunStatus.Cancelled => BackupStage.Cancelled, BackupRunStatus.PartiallySucceeded => BackupStage.PartiallySucceeded, _ => BackupStage.Failed });
             return run;

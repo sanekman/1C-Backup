@@ -8,10 +8,12 @@ namespace OneCBackup.Core;
 public sealed record FileBackupSnapshot(Guid SnapshotId, Guid FullSnapshotId, Guid? ParentSnapshotId,
     string SourceIdentity, bool SourceIsFile, int Depth, string ManifestSha256)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsIncomplete { get; init; }
     public bool IsFull => ParentSnapshotId is null;
     public void Validate()
     {
-        if (SnapshotId == Guid.Empty || FullSnapshotId == Guid.Empty || !FileBackupManifest.IsHash(SourceIdentity)
+        if (IsIncomplete && !IsFull || SnapshotId == Guid.Empty || FullSnapshotId == Guid.Empty || !FileBackupManifest.IsHash(SourceIdentity)
             || !FileBackupManifest.IsHash(ManifestSha256) || Depth is < 0 or >= 365
             || (IsFull ? Depth != 0 || FullSnapshotId != SnapshotId
                 : ParentSnapshotId == Guid.Empty || ParentSnapshotId == SnapshotId || FullSnapshotId == SnapshotId || Depth == 0))
@@ -43,6 +45,8 @@ public sealed record FileBackupManifest
     [JsonRequired] public IReadOnlyList<string> Directories { get; init; } = [];
     [JsonRequired] public IReadOnlyList<string> ChangedFiles { get; init; } = [];
     [JsonRequired] public IReadOnlyList<string> DeletedFiles { get; init; } = [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? SkippedPaths { get; init; }
 
     internal static bool IsHash(string? hash) => hash is { Length: 64 } && hash.All(Uri.IsHexDigit);
     internal static void ValidateRelativePath(string path)
@@ -61,9 +65,24 @@ public sealed record FileBackupManifest
     }
     public void Validate()
     {
-        if (Application != "1C-Backup" || FormatVersion != 1 || Files is null || Directories is null
+        if (Application != "1C-Backup" || FormatVersion is not (1 or 2) || Files is null || Directories is null
             || ChangedFiles is null || DeletedFiles is null || Files.Count > 100000 || Directories.Count > 100000)
             throw new InvalidDataException("Некорректный формат или слишком большой индекс файловой копии.");
+        var incomplete = SkippedPaths?.Count > 0;
+        if ((FormatVersion == 2) != incomplete || SkippedPaths?.Count > 100000)
+            throw new InvalidDataException("Некорректная отметка неполной копии.");
+        if (SkippedPaths is not null)
+        {
+            if (SkippedPaths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != SkippedPaths.Count)
+                throw new InvalidDataException("Повторяющиеся пропущенные пути.");
+            foreach (var path in SkippedPaths)
+            {
+                if (path != ".") ValidateRelativePath(path);
+                if (Files.Any(file => file is not null && (path == "." || file.Path.Equals(path, StringComparison.OrdinalIgnoreCase)
+                    || file.Path.StartsWith(path + "/", StringComparison.OrdinalIgnoreCase))))
+                    throw new InvalidDataException("Пропущенный путь содержит скопированные файлы.");
+            }
+        }
         var snapshot = GetSnapshot(); snapshot.Validate();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var file in Files)
@@ -99,7 +118,7 @@ public sealed record FileBackupManifest
             if (names.Contains(path) || !deleted.Add(path)) throw new InvalidDataException("Некорректный список удалённых файлов.");
         }
         if (ParentSnapshotId is null && (changed.Count != Files.Count || deleted.Count != 0)
-            || SourceIsFile && (Files.Count != 1 || Directories.Count != 0))
+            || SourceIsFile && (Files.Count != 1 && !(incomplete && Files.Count == 0) || Directories.Count != 0))
             throw new InvalidDataException("Полная копия или индекс одиночного файла некорректны.");
     }
     public FileBackupSnapshot GetSnapshot()
@@ -107,7 +126,7 @@ public sealed record FileBackupManifest
         var bytes = JsonSerializer.SerializeToUtf8Bytes(this, Options);
         if (bytes.Length > MaximumBytes) throw new InvalidDataException("Индекс файловой копии превышает 32 МБ.");
         return new(SnapshotId, FullSnapshotId, ParentSnapshotId, SourceIdentity, SourceIsFile, Depth,
-            Convert.ToHexStringLower(SHA256.HashData(bytes)));
+            Convert.ToHexStringLower(SHA256.HashData(bytes))) { IsIncomplete = SkippedPaths?.Count > 0 };
     }
     internal static string IdentifySource(string source, bool isFile)
     {

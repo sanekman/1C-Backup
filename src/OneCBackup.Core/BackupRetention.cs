@@ -19,16 +19,25 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
         if (newest.JobId != job.Id || newest.StorageIdentity != identity || !records.Contains(newest))
             throw new InvalidDataException("Очистка разрешена только после регистрации новой успешной копии этого задания.");
         await storage.VerifyAsync(newest.Backup, job, cancellationToken);
+        // A partial source must never trigger deletion of earlier recoverable data.
+        if (newest.Backup.FileSnapshot?.IsIncomplete == true)
+            return new([], []) { Warnings = ["Очистка пропущена: новая копия неполная. Прежние копии сохранены."] };
         var owned = records.Where(r => r.JobId == job.Id && r.StorageIdentity == identity).ToArray();
-        var keep = owned.Where(r => r.Id != newest.Id).OrderByDescending(r => r.CompletedUtc).ThenByDescending(r => r.Id)
+        var keep = owned.Where(r => r.Id != newest.Id && r.Backup.FileSnapshot?.IsIncomplete != true).OrderByDescending(r => r.CompletedUtc).ThenByDescending(r => r.Id)
             .Take(job.KeepLast - 1).Select(r => r.Id).Append(newest.Id).ToHashSet();
+        // Partial archives do not consume the successful-copy quota; removal is explicit.
+        foreach (var partial in owned.Where(r => r.Backup.FileSnapshot?.IsIncomplete == true)) keep.Add(partial.Id);
         var deleted = new List<Guid>();
         var failures = new List<RetentionFailure>();
         // Keep the complete ancestry of every retained snapshot before deleting anything.
         foreach (var record in owned.Where(record => keep.Contains(record.Id) && record.Backup.FileSnapshot is not null).ToArray())
             foreach (var ancestor in FileBackupChains.Resolve(record, owned)) keep.Add(ancestor.Id);
-        var warnings = keep.Count > job.KeepLast && owned.Any(record => record.Backup.FileSnapshot is not null)
-            ? new[] { $"Для восстановления сохранена вся инкрементная цепочка: {keep.Count} архивов при лимите {job.KeepLast}. Старую цепочку можно удалить после следующей полной копии." } : [];
+        var partialCount = owned.Count(record => record.Backup.FileSnapshot?.IsIncomplete == true);
+        var warnings = new List<string>();
+        if (keep.Count - partialCount > job.KeepLast && owned.Any(record => record.Backup.FileSnapshot is not null))
+            warnings.Add($"Для восстановления сохранена вся инкрементная цепочка: {keep.Count - partialCount} архивов при лимите {job.KeepLast}. Старую цепочку можно удалить после следующей полной копии.");
+        if (partialCount > 0)
+            warnings.Add($"Неполные копии сохранены вне лимита: {partialCount}. При необходимости удалите их вручную.");
         foreach (var record in owned.Where(r => !keep.Contains(r.Id)).OrderByDescending(r => r.Backup.FileSnapshot?.Depth ?? 0).ThenBy(r => r.CompletedUtc))
         {
             if (keep.Contains(record.Id)) continue;

@@ -11,7 +11,7 @@ public sealed record BackupRun(Guid RunId, Guid JobId, string JobName, DateTimeO
     [System.Text.Json.Serialization.JsonIgnore]
     public string StatusDescription => Status switch
     {
-        BackupRunStatus.Running => "Выполняется", BackupRunStatus.Succeeded => "Успешно",
+        BackupRunStatus.Running => "Выполняется", BackupRunStatus.Succeeded => Warnings?.Count > 0 ? "С предупреждениями" : "Успешно",
         BackupRunStatus.Cancelled => "Отменено", BackupRunStatus.Interrupted => "Прервано",
         BackupRunStatus.PartiallySucceeded => "Частично", _ => "Ошибка"
     };

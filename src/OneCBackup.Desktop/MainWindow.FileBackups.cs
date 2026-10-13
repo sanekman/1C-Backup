@@ -8,7 +8,8 @@ namespace OneCBackup.Desktop;
 
 public partial class MainWindow
 {
-    private static string FileSnapshotDetails(FileBackupSnapshot? snapshot) => snapshot is null ? "" : snapshot.IsFull
+    private static string FileSnapshotDetails(FileBackupSnapshot? snapshot) => snapshot is null ? "" : snapshot.IsIncomplete
+        ? "Неполная файловая копия: часть источника недоступна. Список пропусков находится в индексе архива.\n" : snapshot.IsFull
         ? "Файловая копия: полная. Для восстановления достаточно этого архива.\n"
         : $"Файловая копия: инкрементная. Для восстановления нужны полная основа и все изменения в этом хранилище. Архивов в цепочке: {snapshot.Depth + 1}.\n";
     private void FileBackupMode_Changed(object sender, SelectionChangedEventArgs e) => UpdateFileBackupControls();
@@ -49,6 +50,11 @@ public partial class MainWindow
                 .RestoreAsync(row.Record, job, parentDirectory, cancellation.Token, passwordOverride, progress));
             CopyVerificationStatus.Text = $"Восстановлено файлов: {result.Files}; архивов в цепочке: {result.Archives}. Папка: {result.Directory}";
             Status.Text = $"Файлы восстановлены в новую папку. Файлов: {result.Files}; архивов: {result.Archives}.";
+            if (result.SkippedPaths is { Count: > 0 } skipped)
+            {
+                CopyVerificationStatus.Text += "\nПредупреждение: исходная копия неполная. Не скопировано: " + string.Join(", ", skipped.Take(100));
+                Status.Text += " Предупреждение: исходная копия неполная.";
+            }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         { CopyVerificationStatus.Text = Status.Text = "Восстановление отменено. Исходные данные и копии сохранены."; }

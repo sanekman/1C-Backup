@@ -19,8 +19,10 @@ public sealed record BackupCopyRow(BackupRecord Record, string JobName,
             + "\n" + (check.Outcome == BackupVerificationOutcome.Verified ? "Размер и SHA-256 совпали с каталогом."
                 : check.Outcome == BackupVerificationOutcome.Cancelled ? "Проверка отменена; целостность не подтверждена." : "Проверка не пройдена; подробности: " + check.Error)
             + "\nЭто результат на указанное время. Он не подтверждает наличие файла сейчас и не заменяет пробное восстановление.";
-    public string CompactStorage => (StorageCategory switch { "google" => "Google Drive", "ftp" => Location.StartsWith("ftps:", StringComparison.OrdinalIgnoreCase) ? "FTPS" : "FTP", "network" => "Сеть", _ => "Диск" }) + " · " + SizeDescription;
-    public string StorageHelp => StorageDescription + " · " + SizeDescription + "\n" + DisplayLocation;
+    public string CompactStorage => (StorageCategory switch { "google" => "Google Drive", "ftp" => Location.StartsWith("ftps:", StringComparison.OrdinalIgnoreCase) ? "FTPS" : "FTP", "network" => "Сеть", _ => "Диск" }) + " · " + SizeDescription
+        + (Record.Backup.FileSnapshot?.IsIncomplete == true ? " · Неполная" : "");
+    public string StorageHelp => (Record.Backup.FileSnapshot?.IsIncomplete == true ? "Неполная копия: часть источника не скопирована.\n" : "")
+        + StorageDescription + " · " + SizeDescription + "\n" + DisplayLocation;
     public DateTimeOffset CompletedUtc => Record.CompletedUtc;
     public string Location => Record.Backup.Location;
     public string DisplayLocation => StorageCategory == "google" ? "Google Drive · " + (Record.Backup.OriginalFileName ?? "Копия") : Location;
