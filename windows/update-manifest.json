@@ -1,0 +1,9 @@
+{
+  "SchemaVersion": 1,
+  "Version": "0.2.0-alpha.4",
+  "Platform": "win-x64",
+  "InstallerKind": "nsis",
+  "InstallerFile": "1C-Backup-windows-x64-setup.exe",
+  "Size": 55772536,
+  "Sha256": "1a117b8fbdfaa63ce621590f5012ff47d669da772a3e75071e08e92f07d76072"
+}
