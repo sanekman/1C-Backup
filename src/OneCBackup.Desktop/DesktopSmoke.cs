@@ -49,8 +49,27 @@ internal static partial class DesktopSmoke
                 new(BackupStage.CopyingToStorage), [new(1, StorageKind.LocalDirectory, new(BackupStage.CopyingToStorage, 20, 100)),
                     new(2, StorageKind.Ftp, new(BackupStage.CopyingToStorage, 80, 100))]));
             window.UpdateLayout();
-            if (((ItemsControl)window.FindName("BackupDestinationProgressList")).Items.Count != 2 || !progressBar.IsIndeterminate)
+            var destinations = (ItemsControl)window.FindName("BackupDestinationProgressList");
+            if (destinations.Items.Count != 2 || !progressBar.IsIndeterminate)
                 throw new InvalidOperationException("Независимый прогресс хранилищ не отображается.");
+            // Check the instantiated templates, not just the source items: Value defaults
+            // to TwoWay and must never write into the read-only progress projection.
+            IEnumerable<ProgressBar> DestinationBars(DependencyObject parent)
+            {
+                for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+                {
+                    var child = VisualTreeHelper.GetChild(parent, index);
+                    if (child is ProgressBar bar) yield return bar;
+                    foreach (var nested in DestinationBars(child)) yield return nested;
+                }
+            }
+            destinations.ApplyTemplate();
+            destinations.UpdateLayout();
+            var destinationBars = DestinationBars(destinations).ToArray();
+            if (destinationBars.Length != 2 || destinationBars[0].Value != 20 || destinationBars[1].Value != 80
+                || destinationBars.Any(bar => System.Windows.Data.BindingOperations.GetBinding(bar,
+                    System.Windows.Controls.Primitives.RangeBase.ValueProperty)?.Mode != System.Windows.Data.BindingMode.OneWay))
+                throw new InvalidOperationException("Шкалы хранилищ должны отображать отдельные проценты с привязкой только для чтения.");
             window.RenderBackupProgress(new(progressRun, Guid.NewGuid(), "Тест прогресса", Environment.ProcessId, 3, DateTimeOffset.UtcNow,
                 new(BackupStage.Completed), []));
 

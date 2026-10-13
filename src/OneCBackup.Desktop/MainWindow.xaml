@@ -111,7 +111,7 @@
          <ItemsControl x:Name="BackupDestinationProgressList">
           <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,6,0,0">
            <TextBlock Text="{Binding Label}" FontSize="12" TextWrapping="Wrap" />
-           <ProgressBar Value="{Binding Percent}" IsIndeterminate="{Binding Indeterminate}" Maximum="100" Height="4" Margin="0,3,0,0" AutomationProperties.Name="Выполнение доставки в хранилище" />
+           <ProgressBar Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate}" Maximum="100" Height="4" Margin="0,3,0,0" AutomationProperties.Name="Выполнение доставки в хранилище" />
           </StackPanel></DataTemplate></ItemsControl.ItemTemplate>
          </ItemsControl>
          </ScrollViewer>
