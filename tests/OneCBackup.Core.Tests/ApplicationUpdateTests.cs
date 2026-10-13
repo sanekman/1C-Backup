@@ -178,5 +178,93 @@ public sealed class ApplicationUpdateTests : IDisposable
         Assert.DoesNotContain("ghp_", await File.ReadAllTextAsync(path));
     }
 
+    private sealed class TlsCloseFailure(byte[] bytes) : MemoryStream(bytes)
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+        {
+            if (Position >= Length) throw new IOException("Received an unexpected EOF or 0 bytes from the transport stream.");
+            return base.ReadAsync(buffer, token);
+        }
+    }
+    private static HttpResponseMessage TlsResponse(byte[] bytes)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new TlsCloseFailure(bytes)) };
+        response.Content.Headers.ContentLength = Installer.Length; return response;
+    }
+    [Fact]
+    public async Task TlsCloseErrorAfterAllBytesAcceptsOnlyVerifiedInstallerAndReports100AfterVerification()
+    {
+        var requests = 0; var reported = new List<int>();
+        using var client = new HttpClient(new Handler((_, _) => { requests++; return Task.FromResult(TlsResponse(Installer)); }));
+        var path = await new GitHubApplicationUpdates(client).DownloadAsync(Update, directory, progress: new InlineProgress<int>(percent =>
+        {
+            reported.Add(percent);
+            if (percent == 100)
+            {
+                Assert.Single(Directory.GetFiles(directory, "*.exe"));
+                Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
+            }
+        }));
+        Assert.True(await GitHubApplicationUpdates.IsVerifiedAsync(path, Update.Manifest));
+        Assert.Equal(1, requests); Assert.Equal(100, reported[^1]); Assert.Single(reported, percent => percent == 100);
+    }
+    [Fact]
+    public async Task TlsCloseErrorCannotMakeWrongHashAcceptableAndDoesNotRetryIntegrityFailure()
+    {
+        var requests = 0; var bytes = Installer; bytes[^1] ^= 1;
+        using var client = new HttpClient(new Handler((_, _) => { requests++; return Task.FromResult(TlsResponse(bytes)); }));
+        await Assert.ThrowsAsync<InvalidDataException>(() => new GitHubApplicationUpdates(client).DownloadAsync(Update, directory));
+        Assert.Equal(1, requests); Assert.Empty(Directory.GetFiles(directory));
+    }
+    [Fact]
+    public async Task InterruptedPartialTransferRestartsAndPublishesOnlyCompleteVerifiedFile()
+    {
+        var requests = 0; var notices = new List<UpdateRetryNotice>();
+        using var client = new HttpClient(new Handler((_, _) => Task.FromResult(++requests == 1 ? TlsResponse(Installer[..5])
+            : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Installer) })));
+        var path = await new GitHubApplicationUpdates(client).DownloadAsync(Update, directory, retry: new InlineProgress<UpdateRetryNotice>(notices.Add));
+        Assert.Equal(2, requests); Assert.Equal(new UpdateRetryNotice(UpdateRequestPhase.Downloading, 2, 3), Assert.Single(notices));
+        Assert.Equal(Installer, await File.ReadAllBytesAsync(path)); Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
+    }
+    [Fact]
+    public async Task PersistentTransportFailureStopsAfterThreeAttemptsWithNoPartialFile()
+    {
+        var requests = 0;
+        using var client = new HttpClient(new Handler((_, _) => { requests++; return Task.FromResult(TlsResponse(Installer[..5])); }));
+        var error = await Assert.ThrowsAsync<IOException>(() => new GitHubApplicationUpdates(client).DownloadAsync(Update, directory));
+        Assert.Contains("трёх попыток", error.Message); Assert.Equal(3, requests); Assert.Empty(Directory.GetFiles(directory));
+    }
+    [Fact]
+    public async Task CancellingDuringRetryDoesNotMakeAnotherRequestOrLeavePartialFile()
+    {
+        var requests = 0; using var stop = new CancellationTokenSource();
+        using var client = new HttpClient(new Handler((_, _) => { requests++; return Task.FromResult(TlsResponse(Installer[..5])); }));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new GitHubApplicationUpdates(client).DownloadAsync(Update, directory,
+            token: stop.Token, retry: new InlineProgress<UpdateRetryNotice>(_ => stop.Cancel())));
+        Assert.Equal(1, requests); Assert.Empty(Directory.GetFiles(directory));
+    }
+    [Fact]
+    public async Task TemporaryGitHubErrorRetriesReleaseCheckWithoutChangingTrustedEndpoint()
+    {
+        var requests = 0; var notices = new List<UpdateRetryNotice>();
+        using var client = new HttpClient(new Handler((request, _) =>
+        {
+            Assert.Equal("api.github.com", request.RequestUri!.Host); requests++;
+            return Task.FromResult(requests == 1 ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                : request.RequestUri.AbsolutePath.EndsWith("/releases") ? Json(new[] { Release("0.1.0-preview.42") }) : Json(Manifest()));
+        }));
+        var update = await new GitHubApplicationUpdates(client).CheckAsync("0.1.0-preview.40", true, retry: new InlineProgress<UpdateRetryNotice>(notices.Add));
+        Assert.Equal(Update.Manifest, update!.Manifest); Assert.Equal(3, requests);
+        Assert.Equal(UpdateRequestPhase.Checking, Assert.Single(notices).Phase);
+    }
+    [Fact]
+    public async Task DiskFailureDoesNotTriggerNetworkRetry()
+    {
+        Directory.CreateDirectory(directory); var file = Path.Combine(directory, "file"); await File.WriteAllTextAsync(file, "existing");
+        var requests = 0; using var client = new HttpClient(new Handler((_, _) => { requests++; throw new InvalidOperationException(); }));
+        await Assert.ThrowsAnyAsync<IOException>(() => new GitHubApplicationUpdates(client).DownloadAsync(Update, Path.Combine(file, "updates")));
+        Assert.Equal(0, requests); Assert.Equal("existing", await File.ReadAllTextAsync(file));
+    }
+
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
 }

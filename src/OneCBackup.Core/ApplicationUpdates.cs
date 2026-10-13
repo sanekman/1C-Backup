@@ -37,6 +37,8 @@ public sealed record ApplicationUpdate(UpdateManifest Manifest, string Distribut
 {
     public string ReleaseAddress => "https://github.com/sanekman/1C-Backup/releases/tag/v" + Manifest.Version;
 }
+public enum UpdateRequestPhase { Checking, Downloading }
+public sealed record UpdateRetryNotice(UpdateRequestPhase Phase, int Attempt, int TotalAttempts);
 
 /// <summary>Strict SemVer ordering: numeric preview components, no downgrade, stable after prerelease.</summary>
 public sealed class ApplicationReleaseVersion : IComparable<ApplicationReleaseVersion>
@@ -80,6 +82,29 @@ public sealed class GitHubApplicationUpdates(HttpClient client)
 {
     private const string Api = "https://api.github.com/repos/sanekman/1C-Backup/";
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
+    private sealed class TransferInterrupted(string message, Exception? inner = null) : IOException(message, inner);
+    private static async Task<T> RetryAsync<T>(Func<Task<T>> action, UpdateRequestPhase phase, IProgress<UpdateRetryNotice>? retry, CancellationToken token)
+    {
+        const int attempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            token.ThrowIfCancellationRequested();
+            try { return await action(); }
+            catch (Exception error) when (!token.IsCancellationRequested && (error is TransferInterrupted || error is HttpRequestException { StatusCode: null }))
+            {
+                if (attempt == attempts)
+                    throw new IOException("Соединение с GitHub прервалось. После трёх попыток обновление не получено. Повторите позже или скачайте установщик со страницы версии.", error);
+                retry?.Report(new(phase, attempt + 1, attempts));
+                await Task.Delay(TimeSpan.FromMilliseconds(500 * attempt), token);
+            }
+        }
+    }
+    private static async ValueTask<int> ReadResponseAsync(Stream input, Memory<byte> buffer, CancellationToken token)
+    {
+        try { return await input.ReadAsync(buffer, token); }
+        catch (Exception error) when (error is IOException or HttpRequestException)
+        { throw new TransferInterrupted("Соединение прервалось при чтении ответа GitHub.", error); }
+    }
     public static HttpClient CreateClient() => new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(10) };
 
     // RFC 6750 b64token: GitHub PATs and standard bearer credentials (including JWTs).
@@ -102,9 +127,13 @@ public sealed class GitHubApplicationUpdates(HttpClient client)
     {
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
             throw new InvalidOperationException("GitHub не предоставил доступ. Для закрытого репозитория сохраните токен с правом Contents: Read; проверьте его срок и лимит запросов.");
+        if ((int)response.StatusCode is 408 or 500 or 502 or 503 or 504)
+            throw new TransferInterrupted($"Временная ошибка GitHub (HTTP {(int)response.StatusCode}).");
         if (!response.IsSuccessStatusCode) throw new IOException($"Не удалось получить обновление с GitHub (HTTP {(int)response.StatusCode}).");
     }
-    private async Task<byte[]> ReadSmallAsync(string path, string? secret, bool raw, CancellationToken token)
+    private Task<byte[]> ReadSmallAsync(string path, string? secret, bool raw, CancellationToken token, IProgress<UpdateRetryNotice>? retry)
+        => RetryAsync(() => ReadSmallOnceAsync(path, secret, raw, token), UpdateRequestPhase.Checking, retry, token);
+    private async Task<byte[]> ReadSmallOnceAsync(string path, string? secret, bool raw, CancellationToken token)
     {
         using var request = Request(path, secret, raw);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
@@ -112,17 +141,19 @@ public sealed class GitHubApplicationUpdates(HttpClient client)
         await using var input = await response.Content.ReadAsStreamAsync(token);
         using var output = new MemoryStream();
         var buffer = new byte[8192]; int count;
-        while ((count = await input.ReadAsync(buffer, token)) != 0)
+        while ((count = await ReadResponseAsync(input, buffer, token)) != 0)
         {
             if (output.Length + count > 1024 * 1024) throw new InvalidDataException("Сведения об обновлении слишком велики.");
             output.Write(buffer, 0, count);
         }
+        if (response.Content.Headers.ContentLength is long expected && output.Length != expected)
+            throw new TransferInterrupted("Ответ GitHub получен не полностью.");
         return output.ToArray();
     }
-    public async Task<ApplicationUpdate?> CheckAsync(string currentVersion, bool includePreview, string? secret = null, CancellationToken token = default)
+    public async Task<ApplicationUpdate?> CheckAsync(string currentVersion, bool includePreview, string? secret = null, CancellationToken token = default, IProgress<UpdateRetryNotice>? retry = null)
     {
         var current = ApplicationReleaseVersion.Parse(currentVersion);
-        using var releases = JsonDocument.Parse(await ReadSmallAsync("releases?per_page=50", secret, false, token));
+        using var releases = JsonDocument.Parse(await ReadSmallAsync("releases?per_page=50", secret, false, token, retry));
         var candidates = new List<(string Version, string Branch, ApplicationReleaseVersion Order)>();
         foreach (var release in releases.RootElement.EnumerateArray())
         {
@@ -139,14 +170,14 @@ public sealed class GitHubApplicationUpdates(HttpClient client)
         }
         var latest = candidates.OrderByDescending(candidate => candidate.Order).FirstOrDefault();
         if (latest.Order is null) return null;
-        var bytes = await ReadSmallAsync("contents/windows/update-manifest.json?ref=" + Uri.EscapeDataString(latest.Branch), secret, true, token);
+        var bytes = await ReadSmallAsync("contents/windows/update-manifest.json?ref=" + Uri.EscapeDataString(latest.Branch), secret, true, token, retry);
         var manifest = JsonSerializer.Deserialize<UpdateManifest>(bytes, Json) ?? throw new InvalidDataException("Нет сведений об обновлении.");
         manifest.Validate(latest.Version);
         return new(manifest, latest.Branch);
     }
 
     public async Task<string> DownloadAsync(ApplicationUpdate update, string directory, string? secret = null,
-        IProgress<int>? progress = null, CancellationToken token = default)
+        IProgress<int>? progress = null, CancellationToken token = default, IProgress<UpdateRetryNotice>? retry = null)
     {
         update.Manifest.Validate(update.Manifest.Version);
         if (!Regex.IsMatch(update.DistributionBranch, @"^distribution/windows-x64-[A-Za-z0-9.\-]+$"))
@@ -155,6 +186,11 @@ public sealed class GitHubApplicationUpdates(HttpClient client)
         var target = Path.Combine(root, update.Manifest.Sha256.ToLowerInvariant() + ".exe");
         if (File.Exists(target) && await IsVerifiedAsync(target, update.Manifest, token)) { progress?.Report(100); return target; }
         if (File.Exists(target)) File.Delete(target);
+        return await RetryAsync(() => DownloadOnceAsync(update, target, secret, progress, token), UpdateRequestPhase.Downloading, retry, token);
+    }
+    private async Task<string> DownloadOnceAsync(ApplicationUpdate update, string target, string? secret, IProgress<int>? progress, CancellationToken token)
+    {
+        progress?.Report(0);
         var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -167,13 +203,22 @@ public sealed class GitHubApplicationUpdates(HttpClient client)
             await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous))
             {
                 var buffer = new byte[81920]; long copied = 0; int count;
-                while ((count = await input.ReadAsync(buffer, token)) != 0)
+                while (true)
                 {
+                    try { count = await ReadResponseAsync(input, buffer, token); }
+                    catch (TransferInterrupted) when (copied == update.Manifest.Size)
+                    {
+                        // A TLS close error after all bytes is harmless only if the file
+                        // subsequently passes the exact length, MZ and SHA-256 checks.
+                        break;
+                    }
+                    if (count == 0) break;
                     copied += count;
                     if (copied > update.Manifest.Size) throw new InvalidDataException("Размер обновления превышает опубликованный.");
                     await output.WriteAsync(buffer.AsMemory(0, count), token);
-                    progress?.Report((int)(copied * 100 / update.Manifest.Size));
+                    progress?.Report((int)Math.Min(99, copied * 100 / update.Manifest.Size));
                 }
+                if (copied != update.Manifest.Size) throw new TransferInterrupted("Установщик получен не полностью.");
                 await output.FlushAsync(token); output.Flush(true);
             }
             if (!await IsVerifiedAsync(temporary, update.Manifest, token))

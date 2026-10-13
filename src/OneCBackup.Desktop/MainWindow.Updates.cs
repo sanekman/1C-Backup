@@ -33,7 +33,7 @@ public partial class MainWindow
                 DiagnosticLog.Current.Write(DiagnosticEvent.UpdateResultLoaded, values: new(Code: result.RootElement.GetProperty("Success").GetBoolean() ? 0 : 1));
                 UpdateResultStatus.Visibility = Visibility.Visible;
                 UpdateResultStatus.Text = result.RootElement.GetProperty("Success").GetBoolean()
-                    ? "Установлено обновление " + result.RootElement.GetProperty("Version").GetString() + "."
+                    ? "Текущая версия: " + ApplicationBuildInfo.Version + ". Последняя установка через обновление: " + result.RootElement.GetProperty("Version").GetString() + "."
                     : "Последнее обновление не установлено: " + result.RootElement.GetProperty("Message").GetString();
             }
             updateInitialized = true; UpdateUpdateControls();
@@ -140,7 +140,7 @@ public partial class MainWindow
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
             deadline.CancelAfter(TimeSpan.FromSeconds(30));
             var secret = await UpdateSecretAsync(token);
-            var candidate = await new GitHubApplicationUpdates(client).CheckAsync(ApplicationBuildInfo.Version, updateSettings.IncludePreview, secret, deadline.Token);
+            var candidate = await new GitHubApplicationUpdates(client).CheckAsync(ApplicationBuildInfo.Version, updateSettings.IncludePreview, secret, deadline.Token, UpdateRetryProgress());
             if (candidate?.Manifest.Version != availableUpdate?.Manifest.Version) preparedUpdatePath = null;
             availableUpdate = candidate;
             DiagnosticLog.Current.Write(DiagnosticEvent.UpdateCheckCompleted, values: new(Count: candidate is null ? 0 : 1));
@@ -168,13 +168,16 @@ public partial class MainWindow
     private async Task<string> DownloadUpdateAsync(HttpClient client, ApplicationUpdate candidate, string? secret, CancellationToken token)
     {
         UpdateProgress.Visibility = Visibility.Visible; UpdateProgress.Value = 0;
+        var active = true;
         var progress = new Progress<int>(percent =>
         {
-            if (!updateBusy) return;
+            if (!active || !updateBusy) return;
             UpdateProgress.Value = percent;
             UpdateStatus.Text = "Скачивание " + candidate.Manifest.Version + ": " + percent + "%";
         });
-        var path = await new GitHubApplicationUpdates(client).DownloadAsync(candidate, Path.Combine(DesktopPaths.DataDirectory, "updates"), secret, progress, token);
+        string path;
+        try { path = await new GitHubApplicationUpdates(client).DownloadAsync(candidate, Path.Combine(DesktopPaths.DataDirectory, "updates"), secret, progress, token, UpdateRetryProgress(candidate.Manifest.Version)); }
+        finally { active = false; }
         DiagnosticLog.Current.Write(DiagnosticEvent.UpdateDownloaded, values: new(Bytes: candidate.Manifest.Size));
         // Keep the current and one previous download slot; never touch arbitrary EXEs or active helper files.
         foreach (var old in Directory.EnumerateFiles(Path.GetDirectoryName(path)!, "*.exe")
@@ -185,6 +188,13 @@ public partial class MainWindow
         }
         return path;
     }
+    private IProgress<UpdateRetryNotice> UpdateRetryProgress(string? version = null) => new Progress<UpdateRetryNotice>(notice =>
+    {
+        if (!updateBusy) return;
+        DiagnosticLog.Current.Write(DiagnosticEvent.UpdateRetrying, DiagnosticLevel.Warning, values: new(Count: notice.Attempt, Code: (int)notice.Phase));
+        UpdateStatus.Text = "Соединение прервалось. Повторная " + (notice.Phase == UpdateRequestPhase.Checking ? "проверка" : "загрузка " + version)
+            + ": попытка " + notice.Attempt + " из " + notice.TotalAttempts + ".";
+    });
     private async void InstallUpdate_Click(object sender, RoutedEventArgs e)
     {
         if (updateBusy || trayStopping || availableUpdate is null) return;
@@ -203,7 +213,8 @@ public partial class MainWindow
             preparedUpdatePath = await DownloadUpdateAsync(client, candidate, await UpdateSecretAsync(updateCancellation.Token), updateCancellation.Token);
         }
         catch (OperationCanceledException) { UpdateStatus.Text = "Скачивание отменено."; return; }
-        catch (Exception error) { UpdateStatus.Text = "Обновление не установлено: " + error.Message; return; }
+        catch (Exception error)
+        { DiagnosticLog.Current.Write(DiagnosticEvent.UpdateFailed, DiagnosticLevel.Warning, error); UpdateStatus.Text = "Обновление не установлено: " + error.Message; return; }
         finally
         {
             updateCancellation.Dispose(); updateCancellation = null; updateBusy = false;
