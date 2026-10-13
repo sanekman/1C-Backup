@@ -5,6 +5,17 @@ namespace OneCBackup.Core;
 
 internal static class FileBackupZip
 {
+    internal static async Task WriteManifestAsync(ZipOutputStream zip, FileBackupManifest manifest, string? password, CancellationToken token)
+    {
+        // Measure using a bounded sink, then write directly into the ZIP entry.
+        using var measured = new FileManifestStream(Stream.Null);
+        await System.Text.Json.JsonSerializer.SerializeAsync(measured, manifest, FileBackupManifest.Options, token);
+        zip.PutNextEntry(new ZipEntry(FileBackupManifest.ArchiveEntryName)
+        { Size = measured.Length, AESKeySize = password is null ? 0 : 256, DateTime = DateTime.UtcNow });
+        using var bounded = new FileManifestStream(zip);
+        await System.Text.Json.JsonSerializer.SerializeAsync(bounded, manifest, FileBackupManifest.Options, token);
+        zip.CloseEntry();
+    }
     internal static async Task<FileBackupManifest> ReadManifestAsync(string path, string? password, CancellationToken token)
     {
         using var zip = new ZipFile(path) { Password = password };

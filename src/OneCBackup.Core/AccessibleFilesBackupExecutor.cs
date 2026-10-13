@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text.Json;
 using ICSharpCode.SharpZipLib.Zip;
 
 namespace OneCBackup.Core;
@@ -49,10 +48,12 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
                 catch (Exception ex) when (IsAccessFailure(ex)) { skipped.Add(relative); continue; }
                 if (attributes.HasFlag(FileAttributes.Directory)) { directories.Add(relative); pending.Push(child); }
                 else files.Add(new(child, relative));
-                if (files.Count > 100000 || directories.Count > 100000 || skipped.Count > 100000)
-                    throw new InvalidDataException("Слишком много файлов, папок или пропусков в одном задании.");
+                if (files.Count > FileBackupManifest.MaximumItems || directories.Count > FileBackupManifest.MaximumItems || skipped.Count > FileBackupManifest.MaximumItems)
+                    throw new InvalidDataException("Одна файловая копия поддерживает до 1000000 файлов, папок и пропусков каждого вида.");
             }
         }
+        if (skipped.Count > FileBackupManifest.MaximumItems)
+            throw new InvalidDataException("Одна файловая копия поддерживает до 1000000 пропусков.");
         return new(files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray(),
             directories.Order(StringComparer.Ordinal).ToArray(), skipped.Order(StringComparer.Ordinal).ToArray());
     }
@@ -121,15 +122,12 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
                         FormatVersion = skipped.Count > 0 ? 2 : 1, SkippedPaths = skipped.Count > 0 ? skipped.Order(StringComparer.Ordinal).ToArray() : null
                     };
                     manifest.Validate();
-                    var bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, FileBackupManifest.Options);
-                    zip.PutNextEntry(Entry(FileBackupManifest.ArchiveEntryName, bytes.Length, password));
-                    await zip.WriteAsync(bytes, token); zip.CloseEntry(); zip.Finish();
+                    await FileBackupZip.WriteManifestAsync(zip, manifest, password, token); zip.Finish();
                 }
                 await output.FlushAsync(token); output.Flush(true);
             }
             var after = ReadSource(source, isFile, token);
-            bool Excluded(string path) => skipped.Any(skip => skip == "." || path.Equals(skip, StringComparison.OrdinalIgnoreCase)
-                || path.StartsWith(skip + "/", StringComparison.OrdinalIgnoreCase));
+            bool Excluded(string path) => FileBackupManifest.IsSkipped(path, skipped);
             if (after.Skipped.Any(path => !Excluded(path))
                 || !scan.Files.Where(file => !Excluded(file.RelativePath)).Select(file => file.RelativePath)
                     .SequenceEqual(after.Files.Where(file => !Excluded(file.RelativePath)).Select(file => file.RelativePath))

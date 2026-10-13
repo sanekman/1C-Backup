@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text.Json;
 using ICSharpCode.SharpZipLib.Zip;
 
 namespace OneCBackup.Core;
@@ -71,9 +70,7 @@ public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSn
                         Depth = previous is null ? 0 : previous.Depth + 1, Files = files, Directories = scan.Directories,
                         ChangedFiles = changed, DeletedFiles = oldFiles.Keys.Where(path => !currentPaths.Contains(path)).Order(StringComparer.Ordinal).ToArray() };
                     manifest.Validate();
-                    var bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, FileBackupManifest.Options);
-                    zip.PutNextEntry(Entry(FileBackupManifest.ArchiveEntryName, bytes.Length, password));
-                    await zip.WriteAsync(bytes, cancellationToken); zip.CloseEntry(); zip.Finish();
+                    await FileBackupZip.WriteManifestAsync(zip, manifest, password, cancellationToken); zip.Finish();
                 }
                 await output.FlushAsync(cancellationToken); output.Flush(true);
             }
@@ -149,8 +146,8 @@ internal static class FileBackupPaths
                 FileBackupManifest.ValidateRelativePath(relative);
                 if (Directory.Exists(child)) { directories.Add(relative); pending.Push(child); }
                 else files.Add(new(child, relative));
-                if (files.Count > 100000 || directories.Count > 100000)
-                    throw new InvalidDataException("Одна файловая копия поддерживает до 100000 файлов и 100000 папок.");
+                if (files.Count > FileBackupManifest.MaximumItems || directories.Count > FileBackupManifest.MaximumItems)
+                    throw new InvalidDataException("Одна файловая копия поддерживает до 1000000 файлов и 1000000 папок.");
             }
         }
         return new(files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray(), directories.Order(StringComparer.Ordinal).ToArray());

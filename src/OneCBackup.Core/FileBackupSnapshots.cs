@@ -29,7 +29,8 @@ public sealed record FileBackupEntry(string Path, long Length, string Sha256, Da
 
 public sealed record FileBackupManifest
 {
-    public const int MaximumBytes = 32 * 1024 * 1024;
+    public const int MaximumItems = 1_000_000;
+    public const int MaximumBytes = 512 * 1024 * 1024;
     public const string ArchiveEntryName = "onec-backup-manifest.json";
     internal static readonly JsonSerializerOptions Options = new()
     { WriteIndented = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
@@ -66,21 +67,20 @@ public sealed record FileBackupManifest
     public void Validate()
     {
         if (Application != "1C-Backup" || FormatVersion is not (1 or 2) || Files is null || Directories is null
-            || ChangedFiles is null || DeletedFiles is null || Files.Count > 100000 || Directories.Count > 100000)
+            || ChangedFiles is null || DeletedFiles is null || Files.Count > MaximumItems || Directories.Count > MaximumItems
+            || ChangedFiles.Count > MaximumItems || DeletedFiles.Count > MaximumItems)
             throw new InvalidDataException("Некорректный формат или слишком большой индекс файловой копии.");
         var incomplete = SkippedPaths?.Count > 0;
-        if ((FormatVersion == 2) != incomplete || SkippedPaths?.Count > 100000)
+        if ((FormatVersion == 2) != incomplete || SkippedPaths?.Count > MaximumItems)
             throw new InvalidDataException("Некорректная отметка неполной копии.");
+        var skipped = new HashSet<string>(SkippedPaths ?? [], StringComparer.OrdinalIgnoreCase);
         if (SkippedPaths is not null)
         {
-            if (SkippedPaths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != SkippedPaths.Count)
+            if (skipped.Count != SkippedPaths.Count)
                 throw new InvalidDataException("Повторяющиеся пропущенные пути.");
             foreach (var path in SkippedPaths)
             {
                 if (path != ".") ValidateRelativePath(path);
-                if (Files.Any(file => file is not null && (path == "." || file.Path.Equals(path, StringComparison.OrdinalIgnoreCase)
-                    || file.Path.StartsWith(path + "/", StringComparison.OrdinalIgnoreCase))))
-                    throw new InvalidDataException("Пропущенный путь содержит скопированные файлы.");
             }
         }
         var snapshot = GetSnapshot(); snapshot.Validate();
@@ -92,6 +92,8 @@ public sealed record FileBackupManifest
             if (file.WebDavETag is not null && (file.WebDavETag.Length > 1024 || file.WebDavETag.Any(char.IsControl)))
                 throw new InvalidDataException("Некорректный ETag файла WebDAV.");
             ValidateRelativePath(file.Path);
+            if (IsSkipped(file.Path, skipped))
+                throw new InvalidDataException("Пропущенный путь содержит скопированные файлы.");
             if (!names.Add(file.Path)) throw new InvalidDataException("Повторяющийся путь в индексе копии.");
         }
         var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -123,10 +125,24 @@ public sealed record FileBackupManifest
     }
     public FileBackupSnapshot GetSnapshot()
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(this, Options);
-        if (bytes.Length > MaximumBytes) throw new InvalidDataException("Индекс файловой копии превышает 32 МБ.");
+        using var hash = SHA256.Create();
+        using var hashed = new CryptoStream(Stream.Null, hash, CryptoStreamMode.Write, leaveOpen: true);
+        using var bounded = new FileManifestStream(hashed);
+        JsonSerializer.Serialize(bounded, this, Options);
+        hashed.FlushFinalBlock();
         return new(SnapshotId, FullSnapshotId, ParentSnapshotId, SourceIdentity, SourceIsFile, Depth,
-            Convert.ToHexStringLower(SHA256.HashData(bytes))) { IsIncomplete = SkippedPaths?.Count > 0 };
+            Convert.ToHexStringLower(hash.Hash!)) { IsIncomplete = SkippedPaths?.Count > 0 };
+    }
+    internal static bool IsSkipped(string path, ISet<string> skipped)
+    {
+        if (skipped.Contains(".")) return true;
+        while (true)
+        {
+            if (skipped.Contains(path)) return true;
+            var slash = path.LastIndexOf('/');
+            if (slash < 0) return false;
+            path = path[..slash];
+        }
     }
     internal static string IdentifySource(string source, bool isFile)
     {
@@ -136,14 +152,8 @@ public sealed record FileBackupManifest
     }
     internal static async Task<FileBackupManifest> ReadAsync(Stream stream, CancellationToken token)
     {
-        using var bounded = new MemoryStream();
-        var buffer = new byte[81920]; int count;
-        while ((count = await stream.ReadAsync(buffer, token)) != 0)
-        {
-            if (bounded.Length + count > MaximumBytes) throw new InvalidDataException("Индекс файловой копии превышает 32 МБ.");
-            bounded.Write(buffer, 0, count);
-        }
-        var result = JsonSerializer.Deserialize<FileBackupManifest>(bounded.ToArray(), Options)
+        using var bounded = new FileManifestStream(stream);
+        var result = await JsonSerializer.DeserializeAsync<FileBackupManifest>(bounded, Options, token)
             ?? throw new InvalidDataException("Пустой индекс файловой копии.");
         result.Validate(); return result;
     }
@@ -166,7 +176,11 @@ public sealed class FileBackupSnapshotStore(string directory)
         try
         {
             await using (var output = new FileStream(stage, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            { await output.WriteAsync(JsonSerializer.SerializeToUtf8Bytes(manifest, FileBackupManifest.Options), token); output.Flush(true); }
+            {
+                using var bounded = new FileManifestStream(output);
+                await JsonSerializer.SerializeAsync(bounded, manifest, FileBackupManifest.Options, token);
+                output.Flush(true);
+            }
             token.ThrowIfCancellationRequested(); File.Move(stage, path, overwrite: true);
         }
         finally { File.Delete(stage); }

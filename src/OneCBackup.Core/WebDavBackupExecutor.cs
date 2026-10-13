@@ -1,4 +1,3 @@
-using System.Text.Json;
 using ICSharpCode.SharpZipLib.Zip;
 
 namespace OneCBackup.Core;
@@ -69,9 +68,8 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
                         Depth = previous is null ? 0 : previous.Depth + 1, Files = files,
                         Directories = scan.Where(entry => entry.IsDirectory).Select(entry => entry.Path).ToArray(), ChangedFiles = changed,
                         DeletedFiles = oldFiles.Keys.Where(path => !current.Contains(path)).Order(StringComparer.Ordinal).ToArray() };
-                    manifest.Validate(); var bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, FileBackupManifest.Options);
-                    zip.PutNextEntry(Entry(FileBackupManifest.ArchiveEntryName, bytes.Length, password));
-                    await zip.WriteAsync(bytes, token); zip.CloseEntry(); zip.Finish();
+                    manifest.Validate();
+                    await FileBackupZip.WriteManifestAsync(zip, manifest, password, token); zip.Finish();
                 }
                 await output.FlushAsync(token); output.Flush(true);
             }
