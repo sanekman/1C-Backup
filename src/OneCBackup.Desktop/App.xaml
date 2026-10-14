@@ -73,14 +73,23 @@
   <Style TargetType="ComboBox">
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
     <Grid>
-     <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+     <ToggleButton x:Name="DropDownToggle" Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
       <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4"><DockPanel><TextBlock DockPanel.Dock="Right" Text="▾" Foreground="{DynamicResource TextBrush}" Margin="8,0" VerticalAlignment="Center" /><ContentPresenter /></DockPanel></Border></ControlTemplate></ToggleButton.Template>
      </ToggleButton>
      <ContentPresenter x:Name="SelectionPresenter" Margin="8,4,28,4" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}" VerticalAlignment="Center" />
+     <TextBox x:Name="PART_EditableTextBox" Visibility="Collapsed" Margin="1,1,28,1" BorderThickness="0" Padding="7,3" Background="{TemplateBinding Background}" Foreground="{TemplateBinding Foreground}" IsReadOnly="{TemplateBinding IsReadOnly}" VerticalContentAlignment="Center" />
      <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
       <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"><ScrollViewer MaxHeight="{TemplateBinding MaxDropDownHeight}"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" /></ScrollViewer></Border>
      </Popup>
-    </Grid><ControlTemplate.Triggers><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger></ControlTemplate.Triggers>
+    </Grid><ControlTemplate.Triggers>
+     <Trigger Property="IsEditable" Value="True">
+      <Setter TargetName="SelectionPresenter" Property="Visibility" Value="Collapsed" />
+      <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
+      <Setter TargetName="DropDownToggle" Property="HorizontalAlignment" Value="Right" />
+      <Setter TargetName="DropDownToggle" Property="Width" Value="28" />
+     </Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
+    </ControlTemplate.Triggers>
    </ControlTemplate></Setter.Value></Setter>
    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />

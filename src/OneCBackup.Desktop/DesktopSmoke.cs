@@ -244,9 +244,29 @@ internal static partial class DesktopSmoke
             Control<ComboBox>("ThemePicker").SelectedValue = "Light";
             window.UpdateLayout();
             var lightSurface = (System.Windows.Media.SolidColorBrush)Application.Current.Resources["SurfaceBrush"];
-            if (lightSurface.Color.ToString() != "#FFFFFFFF" || darkSurface.Color != lightSurface.Color)
-                throw new InvalidOperationException("Светлая тема или уже созданные кисти не обновились.");
+            // WPF can freeze resource brushes. Check the existing control's dynamic
+            // resource instead of requiring mutation of a replaced frozen brush.
+            if (lightSurface.Color.ToString() != "#FFFFFFFF"
+                || (Control<PasswordBox>("ServicePassword").Background as SolidColorBrush)?.Color != lightSurface.Color)
+                throw new InvalidOperationException("Светлая тема или фон уже созданного поля не обновились.");
             Screenshot("settings-light");
+            var serviceAccount = Control<ComboBox>("ServiceAccount");
+            serviceAccount.ItemsSource = new[] { @"COMPUTER\local-user", @"DOMAIN\backup-user" };
+            serviceAccount.ApplyTemplate();
+            var accountEditor = serviceAccount.Template.FindName("PART_EditableTextBox", serviceAccount) as TextBox;
+            if (accountEditor is null || accountEditor.IsReadOnly || !accountEditor.IsEnabled
+                || accountEditor.Visibility != Visibility.Visible)
+                throw new InvalidOperationException("Поле пользователя службы недоступно для ручного ввода.");
+            serviceAccount.IsDropDownOpen = true;
+            serviceAccount.SelectedIndex = 1;
+            serviceAccount.IsDropDownOpen = false;
+            if (serviceAccount.Text != @"DOMAIN\backup-user" || accountEditor.Text != serviceAccount.Text)
+                throw new InvalidOperationException("Выбранный пользователь службы не перенесён в поле.");
+            accountEditor.Text = @"OTHERDOMAIN\manual-user";
+            accountEditor.CaretIndex = accountEditor.Text.Length;
+            if (serviceAccount.Text != @"OTHERDOMAIN\manual-user")
+                throw new InvalidOperationException("Ручной ввод пользователя службы не передан для установки.");
+            Screenshot("service-account-manual");
             Control<ComboBox>("ThemePicker").SelectedValue = "System";
             Screenshot("about-program");
             Click("JobsNavigation");
