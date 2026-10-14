@@ -1,0 +1,8 @@
+{
+  "version": "0.1.0-alpha.1",
+  "sha256": "eba494711d77744bd5266850445c08fe3d2c1b87b8852a79eb26d75729d30ed9",
+  "bytes": 47647832,
+  "source_revision": "c7b4d1d524e421df165ccac0f75d14c771519893",
+  "platform": "linux-x64",
+  "component": "storage-gateway"
+}
