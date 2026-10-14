@@ -39,6 +39,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         string? lastError = null;
         string? monitorError = null;
+        string? notificationError = null;
         BackupRun? lastRun = null;
         var dispatcher = new LocalBackupDispatcher(store, async (job, token) =>
         {
@@ -77,7 +78,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                 { warnings.Set("Чтение команд агента", error); }
                 try
                 {
-                    var notices = new[] { warnings.Summary, Volatile.Read(ref lastError), Volatile.Read(ref monitorError) }.Where(text => !string.IsNullOrEmpty(text)).ToArray();
+                    var notices = new[] { warnings.Summary, Volatile.Read(ref lastError), Volatile.Read(ref monitorError), Volatile.Read(ref notificationError) }.Where(text => !string.IsNullOrEmpty(text)).ToArray();
                     await control.WriteAsync(state with { UpdatedUtc = DateTimeOffset.UtcNow, Error = Volatile.Read(ref lastError),
                         MonitoringError = Volatile.Read(ref monitorError), Warning = notices.Length == 0 ? null : string.Join("\n", notices) }, lifetime.Token);
                     warnings.Set("Управление агентом", null);
@@ -151,6 +152,16 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         }
         var executionTask = ExecuteLoop();
         var monitoringTask = manual is null ? MonitorLoop() : Task.CompletedTask;
+        async Task NotificationLoop()
+        {
+            using var client = BotNotificationSender.CreateClient();
+            IFtpCredentialStore secrets = OperatingSystem.IsWindows() ? new WindowsNotificationCredentialStore() : credentials;
+            var notifications = new BackupNotificationDispatcher(directory, new BotNotificationSender(client, secrets));
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+            do { Volatile.Write(ref notificationError, await notifications.PollAsync(lifetime.Token)); }
+            while (await timer.WaitForNextTickAsync(lifetime.Token));
+        }
+        var notificationTask = manual is null ? NotificationLoop() : Task.CompletedTask;
         Exception? failure = null;
         try
         {
@@ -164,7 +175,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         finally
         {
             lifetime.Cancel();
-            try { await Task.WhenAll(executionTask, controlTask, monitoringTask); }
+            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) { failure ??= ex; }
             var error = failure?.Message ?? (manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? lastRun.Error : null);

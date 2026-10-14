@@ -81,6 +81,7 @@ public partial class MainWindow
                 await profile.SaveAsync(DesktopPaths.DataDirectory);
                 WindowsFtpCredentialStore.SetServiceCache(new(DesktopPaths.DataDirectory, sid, selected.Sid));
                 await WindowsFtpCredentialStore.ExportProfileForServiceAsync(jobs, await catalog.ReadAsync());
+                await new WindowsNotificationCredentialStore().ExportForServiceAsync(DesktopPaths.DataDirectory);
             }
             RefreshService();
             var pipeName = "OneCBackup-Service-" + Guid.NewGuid().ToString("N");

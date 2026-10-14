@@ -154,8 +154,8 @@ public partial class MainWindow : Window
                 Status.Text = "Не удалось прочитать настройки. Сохранение отключено, чтобы не затереть файл: " + ex.Message;
             }
         };
-        backgroundTimer.Tick += async (_, _) => await RefreshBackgroundStateAsync();
-        Closed += (_, _) => { updateTimer.Stop(); updateCancellation?.Cancel(); DisposeTray(); backgroundTimer.Stop(); launchedAgent?.Dispose(); };
+        backgroundTimer.Tick += async (_, _) => { await RefreshBackgroundStateAsync(); await PollNotificationsAsync(); };
+        Closed += (_, _) => { notificationCancellation.Cancel(); notificationClient.Dispose(); updateTimer.Stop(); updateCancellation?.Cancel(); DisposeTray(); backgroundTimer.Stop(); launchedAgent?.Dispose(); };
     }
 
     private async void Save_Click(object sender, RoutedEventArgs e)
