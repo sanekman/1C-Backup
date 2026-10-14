@@ -198,6 +198,10 @@ internal static partial class DesktopSmoke
             {
                 window.UpdateLayout();
                 var content = Control<FrameworkElement>(name);
+                // The compact wizard is scrollable: reveal the control as a user
+                // would before checking that it can fit in the viewport.
+                content.BringIntoView();
+                window.UpdateLayout();
                 var scroll = Control<ScrollViewer>("EditorScroll");
                 var position = content.TranslatePoint(new Point(), scroll);
                 if (position.Y < 0 || position.Y + content.ActualHeight > scroll.ActualHeight + 1)
@@ -251,6 +255,10 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Светлая тема или фон уже созданного поля не обновились.");
             Screenshot("settings-light");
             var serviceAccount = Control<ComboBox>("ServiceAccount");
+            for (DependencyObject? parent = serviceAccount; parent is not null; parent = LogicalTreeHelper.GetParent(parent))
+                if (parent is Expander expander) expander.IsExpanded = true;
+            serviceAccount.BringIntoView();
+            window.UpdateLayout();
             serviceAccount.ItemsSource = new[] { @"COMPUTER\local-user", @"DOMAIN\backup-user" };
             serviceAccount.ApplyTemplate();
             var accountEditor = serviceAccount.Template.FindName("PART_EditableTextBox", serviceAccount) as TextBox;
