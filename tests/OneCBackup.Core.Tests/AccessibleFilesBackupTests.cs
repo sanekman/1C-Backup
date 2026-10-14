@@ -93,6 +93,173 @@ public sealed class AccessibleFilesBackupTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => access.CreateAsync(job, work, cancellation.Token));
         Assert.Empty(await catalog.ReadAsync()); Assert.False(Directory.Exists(work));
     }
+    private sealed class FailedRead(byte[] data) : MemoryStream(data)
+    {
+        private bool read;
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+        {
+            if (read) throw new IOException("fixture source read failure");
+            read = true;
+            return base.ReadAsync(buffer[..Math.Min(buffer.Length, 2)], token);
+        }
+    }
+    [Theory]
+    [InlineData("size")]
+    [InlineData("read")]
+    [InlineData("deleted")]
+    public async Task SourceFileFailureKeepsOtherFilesAndDeliversVerifiedPartialToEveryDestination(string failure)
+    {
+        var bad = Path.Combine(job.Source, "a-changing.xls");
+        await File.WriteAllTextAsync(bad, "changing spreadsheet");
+        await File.WriteAllTextAsync(Path.Combine(job.Source, "b-available.txt"), "available");
+        Stream Open(string path)
+        {
+            if (path != bad) return File.OpenRead(path);
+            var bytes = File.ReadAllBytes(path);
+            if (failure == "read") return new FailedRead(bytes);
+            if (failure == "deleted") { File.Delete(path); throw new FileNotFoundException("fixture deleted source", path); }
+            File.AppendAllText(path, "changed after scan");
+            return File.OpenRead(path);
+        }
+        var targets = job with { AdditionalDestinations = [new() { StorageKind = StorageKind.LocalDirectory,
+            DestinationDirectory = Path.Combine(root, "other-copies"), KeepLast = 3 }] };
+        var result = await Runner(true, open: Open).RunAsync(targets);
+        Assert.Equal(BackupRunStatus.Succeeded, result.Status);
+        Assert.Contains(result.Warnings!, warning => warning.Contains("a-changing.xls"));
+        var records = await catalog.ReadAsync(); Assert.Equal(2, records.Count);
+        foreach (var record in records)
+        {
+            var manifest = ReadManifest(record.Backup.Location);
+            Assert.True(manifest.GetSnapshot().IsIncomplete);
+            Assert.Equal(new[] { "a-changing.xls" }, manifest.SkippedPaths);
+            Assert.Equal("b-available.txt", Assert.Single(manifest.Files).Path);
+            using var zip = ZipFile.OpenRead(record.Backup.Location);
+            Assert.Null(zip.GetEntry("data/a-changing.xls"));
+            using var reader = new StreamReader(zip.GetEntry("data/b-available.txt")!.Open());
+            Assert.Equal("available", await reader.ReadToEndAsync());
+        }
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "work"), "*.tmp", SearchOption.AllDirectories));
+    }
+    [Fact]
+    public async Task NormalSizeChangeAfterScanRetriesAndCreatesCopyInsteadOfFailingTheJob()
+    {
+        var changing = Path.Combine(job.Source, "changing.xls"); await File.WriteAllTextAsync(changing, "before");
+        await File.WriteAllTextAsync(Path.Combine(job.Source, "available.txt"), "available");
+        var changed = false;
+        var runner = new LocalBackupRunner(new Denied(), new(storage, catalog), history, Path.Combine(root, "work"), progress: value =>
+        {
+            if (value.Progress.Stage == BackupStage.ArchivingFiles && !changed)
+            { changed = true; File.AppendAllText(changing, " after scan"); }
+        });
+        var result = await runner.RunAsync(job);
+        Assert.True(changed); Assert.Equal(BackupRunStatus.Succeeded, result.Status);
+        var manifest = ReadManifest(result.Backup!.Location); Assert.Equal(2, manifest.Files.Count);
+        using var zip = ZipFile.OpenRead(result.Backup.Location);
+        using var reader = new StreamReader(zip.GetEntry("data/changing.xls")!.Open());
+        Assert.Equal("before after scan", await reader.ReadToEndAsync());
+    }
+    private sealed class FailedSecondPass(byte[] data) : MemoryStream(data)
+    {
+        private bool copying;
+        private bool copied;
+        public override long Position { get => base.Position; set { base.Position = value; copying = true; } }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+        {
+            if (copying && copied) throw new IOException("fixture read failure inside ZIP entry");
+            if (copying) { copied = true; buffer = buffer[..Math.Min(buffer.Length, 2)]; }
+            return base.ReadAsync(buffer, token);
+        }
+    }
+    [Fact]
+    public async Task ReadFailureInsideNormalZipEntryRetriesWithoutPublishingBrokenZip()
+    {
+        await File.WriteAllTextAsync(Path.Combine(job.Source, "data.txt"), "complete data");
+        var normal = new FileFolderBackupExecutor(catalog, new(Path.Combine(root, "snapshots")),
+            openSource: path => new FailedSecondPass(File.ReadAllBytes(path)));
+        var runner = new LocalBackupRunner(new Denied(), new(storage, catalog), history, Path.Combine(root, "work"),
+            fileAccessWrapper: _ => new AccessibleFilesBackupExecutor(normal));
+        var result = await runner.RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, result.Status);
+        var manifest = ReadManifest(result.Backup!.Location); Assert.Single(manifest.Files);
+        using var zip = ZipFile.OpenRead(result.Backup.Location);
+        using var reader = new StreamReader(zip.GetEntry("data/data.txt")!.Open());
+        Assert.Equal("complete data", await reader.ReadToEndAsync());
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "work"), "*.partial", SearchOption.AllDirectories));
+    }
+    [Fact]
+    public async Task LaterSourceEditsDoNotInvalidateAlreadyCapturedFileVersions()
+    {
+        var first = Path.Combine(job.Source, "a.txt"); await File.WriteAllTextAsync(first, "captured");
+        await File.WriteAllTextAsync(Path.Combine(job.Source, "b.txt"), "later");
+        Stream Open(string path)
+        {
+            if (Path.GetFileName(path) == "b.txt") File.WriteAllText(first, "edited later");
+            return File.OpenRead(path);
+        }
+        var result = await Runner(true, open: Open).RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, result.Status);
+        using var zip = ZipFile.OpenRead(result.Backup!.Location);
+        using var reader = new StreamReader(zip.GetEntry("data/a.txt")!.Open());
+        Assert.Equal("captured", await reader.ReadToEndAsync());
+    }
+    private sealed class Passwords : IArchivePasswordStore
+    { public Task<string> GetAsync(string key, CancellationToken token = default) => Task.FromResult("fixture-password"); }
+    [Fact]
+    public async Task PartialEncryptedCopyCanBeRestoredAndTemporaryPlaintextIsRemoved()
+    {
+        await File.WriteAllTextAsync(Path.Combine(job.Source, "available.txt"), "private available data");
+        await File.WriteAllTextAsync(Path.Combine(job.Source, "bad.xls"), "bad");
+        var passwords = new Passwords();
+        Stream Open(string path) => Path.GetFileName(path) == "bad.xls" ? new FailedRead(File.ReadAllBytes(path)) : File.OpenRead(path);
+        var encrypted = job with { ArchiveCopies = true, ArchivePasswordKey = Guid.NewGuid().ToString("N") };
+        var runner = new LocalBackupRunner(new Denied(), new(storage, catalog, passwords), history, Path.Combine(root, "work"),
+            fileAccessWrapper: _ => new AccessibleFilesBackupExecutor(new Denied(), passwords, openSource: Open));
+        var result = await runner.RunAsync(encrypted);
+        Assert.Equal(BackupRunStatus.Succeeded, result.Status); Assert.True(result.Backup!.FileSnapshot!.IsIncomplete);
+        var restore = Path.Combine(root, "restore"); Directory.CreateDirectory(restore);
+        var restored = await new FileBackupRestorer(storage, catalog, Path.Combine(root, "restore-work"), passwords)
+            .RestoreAsync(Assert.Single(await catalog.ReadAsync()), encrypted, restore);
+        Assert.Equal("private available data", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "available.txt")));
+        Assert.Equal(new[] { "bad.xls" }, restored.SkippedPaths);
+        Assert.Empty(Directory.EnumerateDirectories(Path.Combine(root, "work"), "source-stage-*", SearchOption.AllDirectories));
+    }
+    private sealed class ChangedSecondPass(byte[] bytes) : MemoryStream(bytes.ToArray())
+    {
+        public override long Position
+        {
+            get => base.Position;
+            set
+            {
+                base.Position = value;
+                if (value == 0) { var changed = bytes.ToArray(); changed[0] ^= 1; base.Write(changed); base.Position = 0; }
+            }
+        }
+    }
+    [Fact]
+    public async Task SameLengthContentChangeIsDetectedBeforePublishingAndRetriedSafely()
+    {
+        await File.WriteAllTextAsync(Path.Combine(job.Source, "spreadsheet.xls"), "original data");
+        var normal = new FileFolderBackupExecutor(catalog, new(Path.Combine(root, "snapshots")),
+            openSource: path => new ChangedSecondPass(File.ReadAllBytes(path)));
+        var runner = new LocalBackupRunner(new Denied(), new(storage, catalog), history, Path.Combine(root, "work"),
+            fileAccessWrapper: _ => new AccessibleFilesBackupExecutor(normal));
+        var result = await runner.RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, result.Status);
+        using var zip = ZipFile.OpenRead(result.Backup!.Location);
+        using var reader = new StreamReader(zip.GetEntry("data/spreadsheet.xls")!.Open());
+        Assert.Equal("original data", await reader.ReadToEndAsync());
+    }
+    [Fact]
+    public async Task CancellationWhileStagingDoesNotPublishOrLeavePlaintextFiles()
+    {
+        await File.WriteAllTextAsync(Path.Combine(job.Source, "data.txt"), "data");
+        using var cancellation = new CancellationTokenSource();
+        Stream Open(string path) { cancellation.Cancel(); return File.OpenRead(path); }
+        var result = await Runner(true, open: Open).RunAsync(job, cancellation.Token);
+        Assert.Equal(BackupRunStatus.Cancelled, result.Status); Assert.Empty(await catalog.ReadAsync());
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "work"), "*.tmp", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateDirectories(Path.Combine(root, "work"), "source-stage-*", SearchOption.AllDirectories));
+    }
     [Fact]
     public void IncompleteManifestCannotClaimAnIncrementalParentOrMarkCopiedDataAsSkipped()
     {

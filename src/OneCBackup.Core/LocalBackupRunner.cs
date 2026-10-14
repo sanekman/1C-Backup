@@ -57,7 +57,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 {
                     log.Write(DiagnosticEvent.SourceItemsSkipped, DiagnosticLevel.Warning, values: new(Count: skipped.Count));
                     warnings.Add("Копия неполная: не удалось прочитать файлов / папок: " + skipped.Count + ".");
-                    warnings.AddRange(skipped.Take(100).Select(path => "Не удалось скопировать (нет доступа или файл занят): " + path));
+                    warnings.AddRange(skipped.Take(100).Select(path => "Не удалось скопировать (недоступен, занят, изменился или ошибка чтения): " + path));
                     if (skipped.Count > 100) warnings.Add("Полный список пропусков: onec-backup-manifest.json внутри архива.");
                 }
                 if (job.AdditionalDestinations?.Count > 0)

@@ -159,24 +159,17 @@ public sealed class FileFolderBackupTests : IDisposable
     public async Task SourceAccessFailureKeepsPreviousCopyAndPreventsUnsafeIncrementalBase()
     {
         var file = Path.Combine(Source, "a.txt"); await File.WriteAllTextAsync(file, "content"); var first = await Run();
-        var before = JsonSerializer.Serialize(await catalog.ReadAsync()); var state = Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json");
-        var bytes = await File.ReadAllBytesAsync(state);
         await using (var held = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
             var result = await Runner().RunAsync(Job);
-            if (OperatingSystem.IsWindows())
-            {
-                // Sharing violation is an explicitly recoverable skip since partial file backups were introduced.
-                Assert.Equal(BackupRunStatus.Succeeded, result.Status); Assert.NotEmpty(result.Warnings!);
-                var records = await catalog.ReadAsync(); Assert.Equal(2, records.Count);
-                Assert.Contains(records, record => record.Backup.Location == first.Backup.Location);
-                Assert.True(records.Single(record => record.Backup.Location == result.Backup!.Location).Backup.FileSnapshot!.IsIncomplete);
-            }
-            else
-            { Assert.Equal(BackupRunStatus.Failed, result.Status); Assert.Equal(before, JsonSerializer.Serialize(await catalog.ReadAsync())); Assert.Equal(bytes, await File.ReadAllBytesAsync(state)); }
+            // A per-source read failure is recoverable on every platform.
+            Assert.Equal(BackupRunStatus.Succeeded, result.Status); Assert.NotEmpty(result.Warnings!);
+            var records = await catalog.ReadAsync(); Assert.Equal(2, records.Count);
+            Assert.Contains(records, record => record.Backup.Location == first.Backup.Location);
+            Assert.True(records.Single(record => record.Backup.Location == result.Backup!.Location).Backup.FileSnapshot!.IsIncomplete);
         }
         Assert.True(File.Exists(first.Backup.Location));
-        if (OperatingSystem.IsWindows()) Assert.True((await Run()).Backup.FileSnapshot!.IsFull);
+        Assert.True((await Run()).Backup.FileSnapshot!.IsFull);
     }
 
     [Fact]

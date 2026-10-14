@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using ICSharpCode.SharpZipLib.Zip;
 
 namespace OneCBackup.Core;
 
-/// <summary>On source access refusal, produces an independent full snapshot with explicit omissions.</summary>
+/// <summary>On a source read failure, produces an independent full snapshot with explicit omissions.</summary>
 public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchivePasswordStore? passwords = null,
     Func<string, IEnumerable<string>>? enumerateSource = null, Func<string, Stream>? openSource = null) : IBackupExecutor
 {
@@ -11,7 +13,8 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
     {
         if (job.Kind != DatabaseKind.FilesAndFolders) throw new ArgumentException("Выберите файлы и папки.");
         try { return await normal.CreateAsync(job, workDirectory, token); }
-        catch (Exception ex) when (IsAccessFailure(ex)) { return await CreateAccessibleAsync(job, workDirectory, token); }
+        catch (Exception ex) when (ex is FileBackupSourceException || IsAccessFailure(ex))
+        { return await CreateAccessibleAsync(job, workDirectory, token); }
     }
 
     private static bool IsAccessFailure(Exception error) => error is UnauthorizedAccessException or System.Security.SecurityException
@@ -37,7 +40,7 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
                 FileBackupPaths.RejectReparse(directory);
                 entries = (enumerateSource?.Invoke(directory) ?? Directory.EnumerateFileSystemEntries(directory)).ToArray();
             }
-            catch (Exception ex) when (IsAccessFailure(ex))
+            catch (Exception ex) when (FileBackupSourceException.IsReadFailure(ex))
             { skipped.Add(directory == source ? "." : Relative(source, directory)); continue; }
             foreach (var child in entries)
             {
@@ -45,7 +48,7 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
                 var relative = Relative(source, child); FileBackupManifest.ValidateRelativePath(relative);
                 FileAttributes attributes;
                 try { FileBackupPaths.RejectReparse(child); attributes = File.GetAttributes(child); }
-                catch (Exception ex) when (IsAccessFailure(ex)) { skipped.Add(relative); continue; }
+                catch (Exception ex) when (FileBackupSourceException.IsReadFailure(ex)) { skipped.Add(relative); continue; }
                 if (attributes.HasFlag(FileAttributes.Directory)) { directories.Add(relative); pending.Push(child); }
                 else files.Add(new(child, relative));
                 if (files.Count > FileBackupManifest.MaximumItems || directories.Count > FileBackupManifest.MaximumItems || skipped.Count > FileBackupManifest.MaximumItems)
@@ -79,7 +82,7 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
         {
             token.ThrowIfCancellationRequested();
             try { lengths.Add(item.RelativePath, new FileInfo(item.FullPath).Length); }
-            catch (Exception ex) when (IsAccessFailure(ex)) { skipped.Add(item.RelativePath); }
+            catch (Exception ex) when (FileBackupSourceException.IsReadFailure(ex)) { skipped.Add(item.RelativePath); }
         }
         var archiveProgress = new FileArchiveProgress(lengths.Values.Sum());
         archiveProgress.Report();
@@ -87,8 +90,10 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
         Directory.CreateDirectory(workDirectory);
         var destination = Path.Combine(Path.GetFullPath(workDirectory), BackupFileName.Create(job, ".files-full.zip", uniqueId: id));
         var temporary = destination + ".partial";
+        var staging = Path.Combine(Path.GetFullPath(workDirectory), "source-stage-" + Guid.NewGuid().ToString("N"));
         try
         {
+            CreatePrivateStaging(staging);
             await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.Asynchronous))
             {
                 using (var zip = new ZipOutputStream(output) { IsStreamOwner = false, Password = password, UseZip64 = UseZip64.Dynamic })
@@ -98,33 +103,26 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
                     {
                         token.ThrowIfCancellationRequested();
                         if (!lengths.TryGetValue(item.RelativePath, out var plannedLength)) continue;
-                        Stream input; long length; DateTimeOffset modified; string sha;
+                        var staged = Path.Combine(staging, "file.tmp");
                         try
                         {
-                            FileBackupPaths.RejectReparse(item.FullPath);
-                            input = openSource?.Invoke(item.FullPath) ?? new FileStream(item.FullPath, FileMode.Open, FileAccess.Read,
-                                FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                            FileBackupEntry descriptor;
                             try
                             {
-                                length = input.Length; modified = new(File.GetLastWriteTimeUtc(item.FullPath));
-                                if (length != plannedLength) throw new IOException("Размер файла изменился после сканирования: " + item.RelativePath);
-                                sha = Convert.ToHexStringLower(await SHA256.HashDataAsync(input, token));
+                                descriptor = await StageAsync(item, plannedLength, staged, token);
                             }
-                            catch { await input.DisposeAsync(); throw; }
-                        }
-                        catch (Exception ex) when (IsAccessFailure(ex))
-                        { skipped.Add(item.RelativePath); archiveProgress.Advance(plannedLength); continue; }
-                        await using (input)
-                        {
-                            input.Position = 0;
-                            zip.PutNextEntry(Entry("data/" + item.RelativePath, length, password));
-                            // Once an entry starts, any read/write error invalidates the archive.
+                            catch (FileBackupSourceException)
+                            { skipped.Add(item.RelativePath); archiveProgress.Advance(plannedLength); continue; }
+                            // The ZIP only receives a complete, validated local file. Source
+                            // errors cannot leave a half-written entry in the final archive.
+                            await using var input = new FileStream(staged, FileMode.Open, FileAccess.Read, FileShare.Read, 81920,
+                                FileOptions.Asynchronous | FileOptions.SequentialScan);
+                            zip.PutNextEntry(Entry("data/" + item.RelativePath, descriptor.Length, password));
                             await archiveProgress.CopyAsync(input, zip, token); zip.CloseEntry();
-                            if (input.Length != length || File.GetLastWriteTimeUtc(item.FullPath) != modified.UtcDateTime)
-                                throw new IOException("Файл изменился во время копирования: " + item.RelativePath);
-                            files.Add(new(item.RelativePath, length, sha, modified));
+                            files.Add(descriptor);
+                            archiveProgress.Advance(plannedLength);
                         }
-                        archiveProgress.Advance(length);
+                        finally { File.Delete(staged); }
                     }
                     var manifest = new FileBackupManifest
                     {
@@ -137,24 +135,49 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
                 }
                 await output.FlushAsync(token); output.Flush(true);
             }
-            var after = ReadSource(source, isFile, token);
-            bool Excluded(string path) => FileBackupManifest.IsSkipped(path, skipped);
-            if (after.Skipped.Any(path => !Excluded(path))
-                || !scan.Files.Where(file => !Excluded(file.RelativePath)).Select(file => file.RelativePath)
-                    .SequenceEqual(after.Files.Where(file => !Excluded(file.RelativePath)).Select(file => file.RelativePath))
-                || !scan.Directories.Where(path => !Excluded(path)).SequenceEqual(after.Directories.Where(path => !Excluded(path))))
-                throw new IOException("Состав или доступность источника изменились во время копирования.");
-            foreach (var file in files)
-            {
-                var info = new FileInfo(isFile ? source : FileBackupPaths.Resolve(source, file.Path));
-                if (info.Length != file.Length || info.LastWriteTimeUtc != file.LastWriteUtc.UtcDateTime)
-                    throw new IOException("Файл изменился во время копирования: " + file.Path);
-            }
+            // Each entry describes its validated staged version. Later edits or
+            // deletions in the source do not invalidate data already captured.
             BackupProgressContext.Report(BackupStage.Verifying);
             await FileBackupZip.VerifyAsync(temporary, password, token);
             token.ThrowIfCancellationRequested(); File.Move(temporary, destination); return destination;
         }
-        finally { File.Delete(temporary); }
+        finally { File.Delete(temporary); if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+    }
+    private async Task<FileBackupEntry> StageAsync(FileBackupSourceFile item, long plannedLength, string staged, CancellationToken token)
+    {
+        FileBackupSourceException.Read(() => { FileBackupPaths.RejectReparse(item.FullPath); return true; });
+        await using var input = new FileBackupSourceStream(FileBackupSourceException.Read(() => openSource?.Invoke(item.FullPath)
+            ?? new FileStream(item.FullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920,
+                FileOptions.Asynchronous | FileOptions.SequentialScan)), item.RelativePath, plannedLength);
+        var modified = FileBackupSourceException.Read(() => File.GetLastWriteTimeUtc(item.FullPath));
+        if (input.Length != plannedLength)
+            throw new FileBackupSourceException("Размер файла изменился после сканирования: " + item.RelativePath);
+        await using var output = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[81920]; int count;
+        while ((count = await input.ReadAsync(buffer, token)) != 0)
+        { hash.AppendData(buffer, 0, count); await output.WriteAsync(buffer.AsMemory(0, count), token); }
+        var info = new FileInfo(item.FullPath);
+        if (input.Length != plannedLength || FileBackupSourceException.Read(() => info.Length) != plannedLength
+            || FileBackupSourceException.Read(() => info.LastWriteTimeUtc) != modified)
+            throw new FileBackupSourceException("Файл изменился во время копирования: " + item.RelativePath);
+        await output.FlushAsync(token);
+        return new(item.RelativePath, plannedLength, Convert.ToHexStringLower(hash.GetHashAndReset()), new(modified));
+    }
+    private static void CreatePrivateStaging(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var acl = new DirectorySecurity(); acl.SetAccessRuleProtection(true, false);
+            var inheritance = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+            acl.AddAccessRule(new FileSystemAccessRule(identity.User!, FileSystemRights.FullControl,
+                inheritance, PropagationFlags.None, AccessControlType.Allow));
+            acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+                FileSystemRights.FullControl, inheritance, PropagationFlags.None, AccessControlType.Allow));
+            new DirectoryInfo(path).Create(acl);
+        }
+        else Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
     private static ZipEntry Entry(string name, long length, string? password) => new(name)
     { Size = length, AESKeySize = password is null ? 0 : 256, DateTime = DateTime.UtcNow };
