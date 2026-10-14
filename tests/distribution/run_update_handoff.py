@@ -1,6 +1,7 @@
 """Exercise the actual PowerShell handoff with mocked registry and process launches; never installs an EXE."""
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -31,7 +32,10 @@ def run(use_docker=False):
             else:
                 command = [shell, '-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(fixture), case, str(root), str(source)]
                 fixture_base = str(root)
-            completed = subprocess.run(command, capture_output=True, text=True, timeout=40)
+            # Match the application's child-process environment: a Windows
+            # PowerShell 5 host must not inherit PowerShell 7's module paths.
+            environment = {key: value for key, value in os.environ.items() if key.lower() != 'psmodulepath'}
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=40, env=environment)
             result_path = root / case / 'updates/update-result.json'
             if not result_path.exists():
                 raise RuntimeError((case, completed.returncode, completed.stdout, completed.stderr))

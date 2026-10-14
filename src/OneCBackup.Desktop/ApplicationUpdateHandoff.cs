@@ -37,6 +37,9 @@ internal static class ApplicationUpdateHandoff
             + "'));$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count -ne 0){$errors|ForEach-Object{$_.ToString()};exit 1}";
         var start = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe"))
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        // Windows PowerShell must use its own modules, even if the application
+        // was launched from PowerShell 7 with that host's PSModulePath.
+        start.Environment.Remove("PSModulePath");
         start.ArgumentList.Add("-NoProfile"); start.ArgumentList.Add("-NonInteractive"); start.ArgumentList.Add("-EncodedCommand");
         start.ArgumentList.Add(Convert.ToBase64String(Encoding.Unicode.GetBytes(command)));
         using var process = Process.Start(start) ?? throw new IOException("Не найден Windows PowerShell.");
@@ -62,6 +65,7 @@ internal static class ApplicationUpdateHandoff
         var script = "$planPath = '" + planPath.Replace("'", "''") + "'\n" + ReadScript();
         var start = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe"))
         { UseShellExecute = false, CreateNoWindow = true };
+        start.Environment.Remove("PSModulePath");
         start.ArgumentList.Add("-NoProfile"); start.ArgumentList.Add("-NonInteractive");
         start.ArgumentList.Add("-EncodedCommand"); start.ArgumentList.Add(Convert.ToBase64String(Encoding.Unicode.GetBytes(script)));
         DiagnosticLog.Current.Write(DiagnosticEvent.UpdateInstallationStarted);
