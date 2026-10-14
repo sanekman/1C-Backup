@@ -33,7 +33,8 @@ public sealed class LocalBackupDispatcher(JobStore store, Func<BackupJob, Cancel
     }
 
     public async Task RunScheduleAsync(Func<IReadOnlyList<ScheduledExecution>, Task> report,
-        CancellationToken cancellationToken = default, TimeSpan? pollInterval = null, TimeProvider? timeProvider = null)
+        CancellationToken cancellationToken = default, TimeSpan? pollInterval = null, TimeProvider? timeProvider = null,
+        Func<Exception?, Task>? reportWarning = null)
     {
         if (Interlocked.CompareExchange(ref scheduling, 1, 0) != 0)
             throw new InvalidOperationException("Планировщик уже запущен.");
@@ -41,7 +42,7 @@ public sealed class LocalBackupDispatcher(JobStore store, Func<BackupJob, Cancel
         {
             // Retain this scheduler across stop/start so an already consumed slot is not replayed.
             await scheduler.RunAsync(LoadScheduledJobsAsync, ExecuteAsync, report,
-                pollInterval, timeProvider, cancellationToken);
+                pollInterval, timeProvider, cancellationToken, reportWarning);
         }
         finally { Interlocked.Exchange(ref scheduling, 0); }
     }

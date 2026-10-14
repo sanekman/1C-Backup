@@ -105,4 +105,52 @@ public sealed class SchedulerTests
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     { public override DateTimeOffset GetUtcNow() => now; }
+    [Fact]
+    public async Task UnwritableStartupMarkerDoesNotBlockOtherJobsAndIsRetriedAfterRecovery()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "OneCBackup-startup-warning-" + Guid.NewGuid());
+        var marker = Path.Combine(directory, "startup.json");
+        Directory.CreateDirectory(marker);
+        try
+        {
+            var scheduler = new BackupScheduler(new StartupBackupSchedule(marker, () => Guid.Parse("f8d04165-8d1d-4b81-a4a7-25d2c57ade44")));
+            var startupJob = Job with { ScheduleKind = ScheduleKind.SystemStartup };
+            var dailyJob = Job; var executed = new List<Guid>();
+            Task Execute(BackupJob job, CancellationToken _) { executed.Add(job.Id); return Task.CompletedTask; }
+            var results = await scheduler.RunDueAsync([startupJob, dailyJob], At(10, 23), Execute);
+            Assert.NotNull(results[0].Error); Assert.Null(results[1].Error);
+            Assert.Equal([dailyJob.Id], executed);
+            Directory.Delete(marker);
+            var recovered = Assert.Single(await scheduler.RunDueAsync([startupJob, dailyJob], At(10, 23), Execute));
+            Assert.Equal(startupJob.Id, recovered.JobId); Assert.Null(recovered.Error);
+            Assert.Equal([dailyJob.Id, startupJob.Id], executed);
+            Assert.Empty(await scheduler.RunDueAsync([startupJob, dailyJob], At(10, 23), Execute));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+    [Fact]
+    public async Task TemporaryAccessFailureIsReportedAndNextTickLoadsJobsAgain()
+    {
+        using var shutdown = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var warnings = new List<Exception?>(); var loads = 0; var executions = 0;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new BackupScheduler().RunAsync(
+            _ => ++loads == 1 ? Task.FromException<IReadOnlyList<BackupJob>>(new UnauthorizedAccessException("fixture"))
+                : Task.FromResult<IReadOnlyList<BackupJob>>([Job]),
+            (_, _) => { executions++; return Task.CompletedTask; },
+            _ => { shutdown.Cancel(); return Task.CompletedTask; },
+            pollInterval: TimeSpan.FromMilliseconds(20), timeProvider: new FixedClock(At(10, 23)), cancellationToken: shutdown.Token,
+            reportWarning: error => { warnings.Add(error); return Task.CompletedTask; }));
+        Assert.Equal(2, loads); Assert.Equal(1, executions);
+        Assert.IsType<UnauthorizedAccessException>(warnings[0]); Assert.Null(warnings[1]);
+    }
+    [Fact]
+    public async Task InvalidConfigurationIsNotSilentlyRetriedAsAnIoWarning()
+    {
+        var warnings = 0;
+        await Assert.ThrowsAsync<InvalidDataException>(() => new BackupScheduler().RunAsync(
+            _ => Task.FromException<IReadOnlyList<BackupJob>>(new InvalidDataException("corrupt configuration")),
+            (_, _) => Task.CompletedTask, _ => Task.CompletedTask,
+            reportWarning: _ => { warnings++; return Task.CompletedTask; }));
+        Assert.Equal(0, warnings);
+    }
 }

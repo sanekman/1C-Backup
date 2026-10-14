@@ -558,7 +558,8 @@ public partial class MainWindow : Window
                 : schedulingTask is not null ? "Расписание работает только пока открыто это окно." : live
                 ? backgroundState!.Phase == LocalAgentPhase.Stopping ? "Останавливается текущая операция…"
                     : (scheduledCount == 0 ? "Фоновая работа включена, но заданий по расписанию нет. " : $"Работает · заданий по расписанию: {scheduledCount}. ")
-                        + (backgroundState.Error ?? backgroundState.MonitoringError ?? "Можно закрыть окно.")
+                        + (backgroundState.Warning is { Length: > 0 } warning ? "Предупреждение: " + warning
+                            : backgroundState.Error ?? backgroundState.MonitoringError ?? "Можно закрыть окно.")
                 : backgroundBusy ? "Рабочий каталог занят другим исполнителем."
                 : backgroundState?.Phase == LocalAgentPhase.Faulted ? "Агент остановлен с ошибкой: " + backgroundState.Error
                 : "Выключено. Включите для запуска заданий по расписанию после закрытия окна.";

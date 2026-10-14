@@ -236,5 +236,118 @@ public sealed class LocalAgentHostTests : IDisposable
             throw new InvalidOperationException("Unreachable");
         }
     }
+    private sealed class DeniedThenBlockingExecutor(Guid deniedId) : IBackupExecutor
+    {
+        public TaskCompletionSource NextStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<string> CreateAsync(BackupJob job, string work, CancellationToken token)
+        {
+            if (job.Id == deniedId) throw new UnauthorizedAccessException("fixture access denied");
+            NextStarted.TrySetResult();
+            await Task.Delay(Timeout.Infinite, token);
+            throw new InvalidOperationException("Unreachable");
+        }
+    }
+    private static async Task<LocalAgentState> WaitForState(LocalAgentControlStore control, Func<LocalAgentState, bool> predicate)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (true)
+        {
+            var state = await control.ReadAsync(timeout.Token);
+            if (state is not null && predicate(state)) return state;
+            await Task.Delay(50, timeout.Token);
+        }
+    }
+    [Fact]
+    public async Task DeniedBackupShowsWarningWhileAgentExecutesNextJob()
+    {
+        var first = (await CreateJob()) with { ScheduleKind = ScheduleKind.SystemStartup };
+        var second = first with { Id = Guid.NewGuid(), Name = "Следующее задание" };
+        await new JobStore(Path.Combine(directory, "jobs.json")).SaveAsync([first, second]);
+        var executor = new DeniedThenBlockingExecutor(first.Id);
+        using var shutdown = new CancellationTokenSource();
+        var task = new LocalAgentHost(directory, executor, new NoCredentials()).RunAsync(
+            pollInterval: TimeSpan.FromMilliseconds(50), cancellationToken: shutdown.Token);
+        try
+        {
+            await executor.NextStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var state = await WaitForState(new LocalAgentControlStore(directory), s => s.Warning?.Contains("fixture access denied") == true);
+            Assert.Equal(LocalAgentPhase.Running, state.Phase);
+            Assert.False(task.IsCompleted);
+            var failed = (await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync()).Single(r => r.JobId == first.Id);
+            Assert.Equal(BackupRunStatus.Failed, failed.Status);
+            Assert.Null(failed.Backup);
+            Assert.Empty(await new BackupCatalog(Path.Combine(directory, "copies.json")).ReadAsync());
+        }
+        finally { shutdown.Cancel(); Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(5))); }
+    }
+    [Fact]
+    public async Task UnwritableSettingsWaitForRecoveryWithoutExecutingDefaults()
+    {
+        var job = (await CreateJob()) with { ScheduleKind = ScheduleKind.SystemStartup };
+        await new JobStore(Path.Combine(directory, "jobs.json")).SaveAsync([job]);
+        var settingsPath = Path.Combine(directory, "agent.json");
+        Directory.CreateDirectory(settingsPath); // Deterministic write failure on both Linux and Windows.
+        var executor = new BlockingExecutor(); using var shutdown = new CancellationTokenSource();
+        var task = new LocalAgentHost(directory, executor, new NoCredentials()).RunAsync(
+            pollInterval: TimeSpan.FromMilliseconds(50), cancellationToken: shutdown.Token);
+        try
+        {
+            var control = new LocalAgentControlStore(directory);
+            var state = await WaitForState(control, s => s.Warning?.Contains("Настройки агента") == true);
+            Assert.Equal(LocalAgentPhase.Running, state.Phase);
+            Assert.False(executor.Started.Task.IsCompleted);
+            Assert.False(task.IsCompleted);
+            Directory.Delete(settingsPath);
+            await executor.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await WaitForState(control, s => s.Warning is null);
+        }
+        finally { shutdown.Cancel(); Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(5))); }
+    }
+    [Fact]
+    public async Task StateWriteFailureKeepsAgentAliveAndFullStopWorksWithoutWritableState()
+    {
+        var job = (await CreateJob()) with { ScheduleKind = ScheduleKind.SystemStartup };
+        await new JobStore(Path.Combine(directory, "jobs.json")).SaveAsync([job]);
+        var statePath = Path.Combine(directory, "local-agent.json");
+        Directory.CreateDirectory(statePath);
+        var executor = new BlockingExecutor(); using var shutdown = new CancellationTokenSource();
+        var task = new LocalAgentHost(directory, executor, new NoCredentials()).RunAsync(
+            pollInterval: TimeSpan.FromMilliseconds(50), cancellationToken: shutdown.Token);
+        try
+        {
+            await executor.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(1200);
+            Assert.False(task.IsCompleted);
+            Directory.Delete(statePath);
+            var control = new LocalAgentControlStore(directory);
+            var state = await WaitForState(control, s => s.Warning?.Contains("Управление агентом") == true);
+            Assert.Equal(LocalAgentPhase.Running, state.Phase);
+            await WaitForState(control, s => s.Warning is null);
+            await control.RequestStopAsync(state.SessionId);
+            File.Delete(statePath); Directory.CreateDirectory(statePath);
+            Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(BackupRunStatus.Cancelled, Assert.Single(await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync()).Status);
+            Assert.False(new BackupEngineCoordinator(directory).IsHeldElsewhere());
+        }
+        finally { shutdown.Cancel(); await task.WaitAsync(TimeSpan.FromSeconds(5)); }
+    }
+    [Fact]
+    public async Task UnwritableProgressIsVisibleAsWarningWithoutCancellingTheBackup()
+    {
+        var job = (await CreateJob()) with { ScheduleKind = ScheduleKind.SystemStartup };
+        await new JobStore(Path.Combine(directory, "jobs.json")).SaveAsync([job]);
+        Directory.CreateDirectory(Path.Combine(directory, "backup-progress.json"));
+        var executor = new BlockingExecutor(); using var shutdown = new CancellationTokenSource();
+        var task = new LocalAgentHost(directory, executor, new NoCredentials()).RunAsync(
+            pollInterval: TimeSpan.FromMilliseconds(50), cancellationToken: shutdown.Token);
+        try
+        {
+            await executor.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var state = await WaitForState(new LocalAgentControlStore(directory), s => s.Warning?.Contains("Состояние выполнения задания") == true);
+            Assert.Equal(LocalAgentPhase.Running, state.Phase); Assert.False(task.IsCompleted);
+            Assert.Equal(BackupRunStatus.Running, Assert.Single(await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync()).Status);
+        }
+        finally { shutdown.Cancel(); Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(5))); }
+    }
     public void Dispose() => Directory.Delete(directory, true);
 }

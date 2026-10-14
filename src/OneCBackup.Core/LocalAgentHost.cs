@@ -8,15 +8,17 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
     {
         DiagnosticLog.Current.Write(DiagnosticEvent.AgentStarted);
         using var lease = new BackupEngineCoordinator(directory).Acquire();
-        var settings = await new AgentSettingsStore(Path.Combine(directory, "agent.json")).LoadAsync(cancellationToken);
-        if (settings.Mode != AgentMode.Standalone)
+        var warnings = new AgentRuntimeWarnings();
+        AgentSettings? settings = null;
+        try { settings = await new AgentSettingsStore(Path.Combine(directory, "agent.json")).LoadAsync(cancellationToken); }
+        catch (Exception error) when (runJobId is null && AgentRuntimeWarnings.Recoverable(error)) { warnings.Set("Настройки агента", error); }
+        if (settings is not null && settings.Mode != AgentMode.Standalone)
             throw new NotSupportedException("Локальный фоновый агент пока поддерживает только автономный режим.");
         var store = new JobStore(Path.Combine(directory, "jobs.json"), useLocalTime: true);
-        var jobs = await store.LoadAsync(cancellationToken);
+        var jobs = runJobId is not null ? await store.LoadAsync(cancellationToken) : [];
         var manual = runJobId is Guid id ? jobs.SingleOrDefault(job => job.Id == id)
             ?? throw new InvalidDataException("Задание не найдено.") : null;
         var history = new BackupRunHistory(Path.Combine(directory, "runs.json"));
-        await history.RecoverInterruptedAsync(cancellationToken);
         var storage = new RoutedBackupStorage(credentials, Path.Combine(directory, "ftp-verification"));
         var catalog = new BackupCatalog(Path.Combine(directory, "copies.json"));
         var progressStore = new BackupProgressStore(directory);
@@ -26,12 +28,14 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         var runner = new LocalBackupRunner(executor, new BackupCompletion(storage, catalog), history, Path.Combine(directory, "work"), progress: snapshot =>
         {
             lock (runGate) runningId = snapshot.Finished ? null : snapshot.RunId;
-            progressStore.Write(snapshot);
+            try { progressStore.Write(snapshot); warnings.Set("Состояние выполнения задания", null); }
+            catch (Exception error) when (AgentRuntimeWarnings.Recoverable(error)) { warnings.Set("Состояние выполнения задания", error); }
         });
         var control = new LocalAgentControlStore(directory);
         var now = DateTimeOffset.UtcNow;
         var state = new LocalAgentState(Guid.NewGuid(), Environment.ProcessId, now, now, LocalAgentPhase.Running) { CanCancelCurrentRun = true };
-        await control.WriteAsync(state, cancellationToken);
+        try { await control.WriteAsync(state, cancellationToken); }
+        catch (Exception error) when (manual is null && AgentRuntimeWarnings.Recoverable(error)) { warnings.Set("Управление агентом", error); }
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         string? lastError = null;
         string? monitorError = null;
@@ -42,7 +46,8 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             lock (runGate) { runningCancellation = runCancellation; runningId = null; }
             try { lastRun = await runner.RunAsync(job, runCancellation.Token); }
             finally { lock (runGate) { runningCancellation = null; runningId = null; } }
-            Volatile.Write(ref lastError, lastRun.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded ? lastRun.Error : null);
+            Volatile.Write(ref lastError, lastRun.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded ? job.Name + ": " + lastRun.Error
+                : lastRun.Warnings?.Count > 0 ? job.Name + ": " + lastRun.Warnings[0] : null);
             if (report is not null) await report(lastRun);
         });
 
@@ -51,30 +56,63 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
             while (await timer.WaitForNextTickAsync(lifetime.Token))
             {
-                if (await control.StopRequestedAsync(state.SessionId, lifetime.Token))
+                try
                 {
-                    await control.WriteAsync(state with { Phase = LocalAgentPhase.Stopping, UpdatedUtc = DateTimeOffset.UtcNow }, CancellationToken.None);
-                    DiagnosticLog.Current.Write(DiagnosticEvent.AgentStopRequested);
-                    lifetime.Cancel();
-                    return;
+                    if (await control.StopRequestedAsync(state.SessionId, lifetime.Token))
+                    {
+                        try { await control.WriteAsync(state with { Phase = LocalAgentPhase.Stopping, UpdatedUtc = DateTimeOffset.UtcNow }, CancellationToken.None); }
+                        catch (Exception error) when (AgentRuntimeWarnings.Recoverable(error)) { warnings.Set("Управление агентом", error); }
+                        finally { DiagnosticLog.Current.Write(DiagnosticEvent.AgentStopRequested); lifetime.Cancel(); }
+                        return;
+                    }
+                    var cancel = await control.ReadCancelRunAsync(lifetime.Token);
+                    if (cancel?.SessionId == state.SessionId)
+                    {
+                        lock (runGate)
+                            if (cancel.RunId == runningId) runningCancellation?.Cancel();
+                    }
+                    warnings.Set("Чтение команд агента", null);
                 }
-                var cancel = await control.ReadCancelRunAsync(lifetime.Token);
-                if (cancel?.SessionId == state.SessionId)
+                catch (Exception error) when (!lifetime.IsCancellationRequested && AgentRuntimeWarnings.Recoverable(error))
+                { warnings.Set("Чтение команд агента", error); }
+                try
                 {
-                    lock (runGate)
-                        if (cancel.RunId == runningId) runningCancellation?.Cancel();
+                    var notices = new[] { warnings.Summary, Volatile.Read(ref lastError), Volatile.Read(ref monitorError) }.Where(text => !string.IsNullOrEmpty(text)).ToArray();
+                    await control.WriteAsync(state with { UpdatedUtc = DateTimeOffset.UtcNow, Error = Volatile.Read(ref lastError),
+                        MonitoringError = Volatile.Read(ref monitorError), Warning = notices.Length == 0 ? null : string.Join("\n", notices) }, lifetime.Token);
+                    warnings.Set("Управление агентом", null);
                 }
-                await control.WriteAsync(state with { UpdatedUtc = DateTimeOffset.UtcNow, Error = Volatile.Read(ref lastError),
-                    MonitoringError = Volatile.Read(ref monitorError) }, lifetime.Token);
+                catch (Exception error) when (!lifetime.IsCancellationRequested && AgentRuntimeWarnings.Recoverable(error))
+                { warnings.Set("Управление агентом", error); }
             }
         }
 
         var controlTask = ControlLoop();
+        async Task InitializeExecutionAsync()
+        {
+            while (true)
+            {
+                lifetime.Token.ThrowIfCancellationRequested();
+                try
+                {
+                    settings ??= await new AgentSettingsStore(Path.Combine(directory, "agent.json")).LoadAsync(lifetime.Token);
+                    if (settings.Mode != AgentMode.Standalone) throw new NotSupportedException("Локальный фоновый агент поддерживает только автономный режим.");
+                    await history.RecoverInterruptedAsync(lifetime.Token);
+                    warnings.Set("Настройки агента", null); warnings.Set("История запусков", null);
+                    return;
+                }
+                catch (Exception error) when (manual is null && !lifetime.IsCancellationRequested && AgentRuntimeWarnings.Recoverable(error))
+                { warnings.Set(settings is null ? "Настройки агента" : "История запусков", error); }
+                await Task.Delay(pollInterval ?? TimeSpan.FromSeconds(30), lifetime.Token);
+            }
+        }
+        var initialized = InitializeExecutionAsync();
         async Task MonitorLoop()
         {
+            await initialized;
             var monitorStore = new ExternalBackupMonitorStore(Path.Combine(directory, "external-monitors.json"));
             var poller = new ExternalBackupPoller(monitorStore,
-                new ExternalBackupOutbox(Path.Combine(directory, "external-backups.json")), settings,
+                new ExternalBackupOutbox(Path.Combine(directory, "external-backups.json")), settings!,
                 new ExternalBackupPollingStatusStore(directory));
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
             var failures = new Dictionary<Guid, string>();
@@ -98,9 +136,20 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                 catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.MonitoringFailed, DiagnosticLevel.Error, ex); Volatile.Write(ref monitorError, "Мониторинг SQL: " + ex.Message); }
             } while (await timer.WaitForNextTickAsync(lifetime.Token));
         }
-        var executionTask = manual is null
-            ? dispatcher.RunScheduleAsync(_ => Task.CompletedTask, lifetime.Token, pollInterval)
-            : dispatcher.ExecuteAsync(manual, lifetime.Token);
+        async Task ExecuteLoop()
+        {
+            await initialized;
+            if (manual is not null) { await dispatcher.ExecuteAsync(manual, lifetime.Token); return; }
+            await dispatcher.RunScheduleAsync(results =>
+            {
+                warnings.Set("Запуск по расписанию", results.FirstOrDefault(result => result.Error is not null)?.Error);
+                return Task.CompletedTask;
+            }, lifetime.Token, pollInterval, reportWarning: error =>
+            {
+                warnings.Set("Чтение расписания", error); return Task.CompletedTask;
+            });
+        }
+        var executionTask = ExecuteLoop();
         var monitoringTask = manual is null ? MonitorLoop() : Task.CompletedTask;
         Exception? failure = null;
         try
@@ -119,9 +168,10 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) { failure ??= ex; }
             var error = failure?.Message ?? (manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? lastRun.Error : null);
-            await control.WriteAsync(state with { UpdatedUtc = DateTimeOffset.UtcNow,
+            try { await control.WriteAsync(state with { UpdatedUtc = DateTimeOffset.UtcNow,
                 Phase = error is null ? LocalAgentPhase.Stopped : LocalAgentPhase.Faulted, Error = error,
-                MonitoringError = Volatile.Read(ref monitorError) }, CancellationToken.None);
+                MonitoringError = Volatile.Read(ref monitorError), Warning = warnings.Summary }, CancellationToken.None); }
+            catch (Exception writeError) when (AgentRuntimeWarnings.Recoverable(writeError)) { warnings.Set("Запись состояния агента", writeError); }
         }
         DiagnosticLog.Current.Write(DiagnosticEvent.AgentStopped, failure is null ? DiagnosticLevel.Info : DiagnosticLevel.Error);
         return failure is not null || manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? 1 : 0;

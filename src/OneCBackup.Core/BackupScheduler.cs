@@ -12,16 +12,22 @@ public sealed class BackupScheduler(StartupBackupSchedule? startup = null)
         Func<BackupJob, CancellationToken, Task> execute,
         Func<IReadOnlyList<ScheduledExecution>, Task> report,
         TimeSpan? pollInterval = null, TimeProvider? timeProvider = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, Func<Exception?, Task>? reportWarning = null)
     {
         var clock = timeProvider ?? TimeProvider.System;
         using var timer = new PeriodicTimer(pollInterval ?? TimeSpan.FromSeconds(30), clock);
         do
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var jobs = await loadJobs(cancellationToken);
-            var results = await RunDueAsync(jobs, clock.GetUtcNow(), execute, cancellationToken);
-            if (results.Count != 0) await report(results);
+            try
+            {
+                var jobs = await loadJobs(cancellationToken);
+                var results = await RunDueAsync(jobs, clock.GetUtcNow(), execute, cancellationToken);
+                if (results.Count != 0) await report(results);
+                if (reportWarning is not null) await reportWarning(null);
+            }
+            catch (Exception error) when (!cancellationToken.IsCancellationRequested && reportWarning is not null && AgentRuntimeWarnings.Recoverable(error))
+            { await reportWarning(error); }
         } while (await timer.WaitForNextTickAsync(cancellationToken));
     }
 
@@ -47,11 +53,19 @@ public sealed class BackupScheduler(StartupBackupSchedule? startup = null)
                     pending.Remove(job.Id);
                     cancellationToken.ThrowIfCancellationRequested();
                     if (startup is null) throw new InvalidOperationException("Не задана история запусков при загрузке системы.");
-                    if (!await startup.TryConsumeAsync(job.Id, cancellationToken)) continue;
                     Exception? startupError = null;
-                    try { await execute(job, cancellationToken); }
+                    try
+                    {
+                        if (!await startup.TryConsumeAsync(job.Id, cancellationToken)) continue;
+                    }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-                    catch (Exception ex) { startupError = ex; }
+                    catch (Exception ex) when (AgentRuntimeWarnings.Recoverable(ex)) { startupError = ex; }
+                    if (startupError is null)
+                    {
+                        try { await execute(job, cancellationToken); }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                        catch (Exception ex) { startupError = ex; }
+                    }
                     results.Add(new ScheduledExecution(job.Id, now, startupError));
                     continue;
                 }
