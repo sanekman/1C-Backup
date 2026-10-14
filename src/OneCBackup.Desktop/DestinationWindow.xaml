@@ -19,6 +19,7 @@
     <Button Content="Подключить Google Drive…" Click="GoogleDriveConnect_Click" HorizontalAlignment="Left"/>
     <TextBlock x:Name="GoogleDriveStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,10"/>
    </StackPanel>
+   <StackPanel x:Name="RemotePanel" Visibility="Collapsed"><Button Content="Импортировать подключение шлюза…" Click="RemoteImport_Click" HorizontalAlignment="Left"/><TextBlock x:Name="RemoteStatus" TextWrapping="Wrap" Margin="0,6,0,10"/><TextBlock Text="В основном задании нужно включить пароль архива. Папка копий задаётся в контейнере." TextWrapping="Wrap"/></StackPanel>
    <StackPanel x:Name="FtpPanel" Visibility="Collapsed">
     <TextBlock Text="FTP-сервер (без ftp://)" /><TextBox x:Name="FtpHost" Margin="0,4,0,10" />
     <TextBlock Text="Порт" /><TextBox x:Name="FtpPort" Text="21" Margin="0,4,0,10" />

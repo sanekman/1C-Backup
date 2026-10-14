@@ -632,8 +632,12 @@
         "dependencies": {
           "FluentFTP": "[55.0.0, )",
           "Microsoft.Data.SqlClient": "[6.1.7, )",
+          "OneCBackup.Remote": "[0.1.0-dev, )",
           "SharpZipLib": "[1.4.2, )"
         }
+      },
+      "onecbackup.remote": {
+        "type": "Project"
       },
       "onecbackup.server": {
         "type": "Project",

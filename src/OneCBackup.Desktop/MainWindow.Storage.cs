@@ -22,7 +22,9 @@ public partial class MainWindow
         { RejectWizard("Можно указать не более 8 хранилищ, включая основное.", 1, AddStorageButton); return; }
         var dialog = new DestinationWindow(ftpCredentials) { Owner = this };
         if (dialog.ShowDialog() == true && dialog.Result is not null)
-        { additionalDestinations.Add(dialog.Result); AdditionalStorageList.SelectedItem = dialog.Result; EditorFieldChanged(sender, e); }
+        { additionalDestinations.Add(dialog.Result); AdditionalStorageList.SelectedItem = dialog.Result;
+            if (dialog.Result.StorageKind == StorageKind.RemoteGateway) { EncryptArchive.IsChecked = true; ArchiveCopies.IsChecked = true; }
+            EditorFieldChanged(sender, e); }
     }
 
     private void EditStorage_Click(object sender, RoutedEventArgs e)
@@ -30,7 +32,9 @@ public partial class MainWindow
         if (!editorOpen || persisting || AdditionalStorageList.SelectedItem is not BackupDestination destination) return;
         var dialog = new DestinationWindow(ftpCredentials, destination) { Owner = this };
         if (dialog.ShowDialog() == true && dialog.Result is not null)
-        { additionalDestinations[additionalDestinations.IndexOf(destination)] = dialog.Result; AdditionalStorageList.SelectedItem = dialog.Result; EditorFieldChanged(sender, e); }
+        { additionalDestinations[additionalDestinations.IndexOf(destination)] = dialog.Result; AdditionalStorageList.SelectedItem = dialog.Result;
+            if (dialog.Result.StorageKind == StorageKind.RemoteGateway) { EncryptArchive.IsChecked = true; ArchiveCopies.IsChecked = true; }
+            EditorFieldChanged(sender, e); }
     }
 
     private void RemoveStorage_Click(object sender, RoutedEventArgs e)

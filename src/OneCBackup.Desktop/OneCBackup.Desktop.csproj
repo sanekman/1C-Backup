@@ -16,6 +16,7 @@
     <Resource Include="Assets/one-c-backup.ico" />
     <Resource Include="Assets/one-c-backup-tray.ico" />
     <Content Include="../../docs/notifications.md" Link="Help/notifications.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../docs/storage-bridge.md" Link="Help/storage-bridge.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="../OneCBackup.Core/OneCBackup.Core.csproj" />
   </ItemGroup>
 </Project>

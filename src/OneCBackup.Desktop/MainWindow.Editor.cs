@@ -197,7 +197,7 @@ public partial class MainWindow
             ReviewFormat.Text = format + " · " + shortMethod;
             ReviewFormat.ToolTip = ReviewFormat.Text + platformDescription;
             static string StorageLabel(StorageKind kind, bool tls) => kind switch
-            { StorageKind.GoogleDrive => "Google Drive", StorageKind.Ftp => tls ? "FTPS" : "FTP", StorageKind.NetworkShare => "Сеть", _ => "Диск" };
+            { StorageKind.GoogleDrive => "Google Drive", StorageKind.RemoteGateway => "Шлюз", StorageKind.Ftp => tls ? "FTPS" : "FTP", StorageKind.NetworkShare => "Сеть", _ => "Диск" };
             var storageSummaries = new[] { StorageLabel((StorageKind)Storage.SelectedValue, FtpTls.IsChecked == true) + " — " + KeepLast.Text.Trim() }
                 .Concat(additionalDestinations.Select(destination => StorageLabel(destination.StorageKind, destination.Ftp?.UseTls == true)
                     + " — " + (destination.KeepLast?.ToString(CultureInfo.InvariantCulture) ?? KeepLast.Text.Trim())));
@@ -296,6 +296,8 @@ public partial class MainWindow
             var job = new BackupJob { Name = "check", Source = "check", DestinationDirectory = Destination.Text.Trim(), StorageKind = (StorageKind)Storage.SelectedValue,
                 TemporaryDirectory = temporary,
                 GoogleDrive = Storage.SelectedValue is StorageKind.GoogleDrive ? googleDriveSettings : null,
+                RemoteGateway = Storage.SelectedValue is StorageKind.RemoteGateway ? remoteGatewaySettings : null,
+                ArchiveCopies = EncryptArchive.IsChecked == true, ArchivePasswordKey = EncryptArchive.IsChecked == true ? archivePasswordKey : null,
                 AdditionalDestinations = additionalDestinations.Count == 0 ? null : additionalDestinations.ToArray(),
                 Ftp = Storage.SelectedValue is StorageKind.Ftp ? new FtpSettings { Host = FtpHost.Text.Trim(), Port = ftpPort, UseTls = FtpTls.IsChecked == true,
                     CredentialKey = FtpCredentialKey.Text.Trim() } : null };

@@ -14,7 +14,7 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
     private readonly string prefix;
     private static WindowsServiceCredentialCache? serviceCache;
     public static void SetServiceCache(WindowsServiceCredentialCache? cache) => serviceCache = cache;
-    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV" or "GoogleDrive" or "Notifications") && serviceCache is not null;
+    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV" or "GoogleDrive" or "Notifications" or "RemoteGateway") && serviceCache is not null;
     public async Task ExportForServiceAsync(string key, CancellationToken token = default)
     {
         var value = await GetAsync(key, token);

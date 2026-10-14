@@ -98,7 +98,8 @@ public partial class MainWindow : Window
             [StorageKind.LocalDirectory] = "Локальный диск",
             [StorageKind.NetworkShare] = "Сетевая папка (UNC)",
             [StorageKind.Ftp] = "FTP / FTPS",
-            [StorageKind.GoogleDrive] = "Google Drive"
+            [StorageKind.GoogleDrive] = "Google Drive",
+            [StorageKind.RemoteGateway] = "Шлюз хранилища (Proxmox)"
         };
         Storage.SelectedValue = StorageKind.LocalDirectory;
         Schedule.ItemsSource = new Dictionary<ScheduleKind, string>
@@ -138,6 +139,8 @@ public partial class MainWindow : Window
                 backgroundTimer.Start();
                 UpdateRunControls();
                 await InitializeServiceAsync();
+                await InitializeRemoteHubAsync();
+                if (!SmokeMode) hubTask = new OneCBackup.Remote.EmbeddedHub(DesktopPaths.DataDirectory).RunAsync(warning => Dispatcher.BeginInvoke(new Action(() => { if (warning is not null) HubStatus.Text = warning; })), hubShutdown.Token);
                 _ = InitializeUpdatesAsync();
                 if (Application.Current is App app)
                 {
@@ -155,7 +158,7 @@ public partial class MainWindow : Window
             }
         };
         backgroundTimer.Tick += async (_, _) => { await RefreshBackgroundStateAsync(); await PollNotificationsAsync(); };
-        Closed += (_, _) => { notificationCancellation.Cancel(); notificationClient.Dispose(); updateTimer.Stop(); updateCancellation?.Cancel(); DisposeTray(); backgroundTimer.Stop(); launchedAgent?.Dispose(); };
+        Closed += (_, _) => { hubShutdown.Cancel(); notificationCancellation.Cancel(); notificationClient.Dispose(); updateTimer.Stop(); updateCancellation?.Cancel(); DisposeTray(); backgroundTimer.Stop(); launchedAgent?.Dispose(); };
     }
 
     private async void Save_Click(object sender, RoutedEventArgs e)
@@ -211,6 +214,7 @@ public partial class MainWindow : Window
             FullBackupEvery = int.TryParse(FullBackupEvery.Text, out var every) && every is >= 1 and <= 365 ? every : 7,
             ArchivePasswordKey = EncryptArchive.IsChecked == true ? archivePasswordKey : null, StorageKind = storageKind,
             GoogleDrive = storageKind == StorageKind.GoogleDrive ? googleDriveSettings : null,
+            RemoteGateway = storageKind == StorageKind.RemoteGateway ? remoteGatewaySettings : null,
             ScheduleKind = scheduleKind, DaysOfWeek = SelectedDays(),
             OneC = oneC,
             OneCMethod = oneCMethod,
@@ -343,6 +347,7 @@ public partial class MainWindow : Window
         FileBackupModePicker.SelectedValue = job.FileBackupMode;
         FullBackupEvery.Text = job.FullBackupEvery.ToString(CultureInfo.InvariantCulture);
         googleDriveSettings = job.GoogleDrive;
+        remoteGatewaySettings = job.RemoteGateway; UpdateRemoteGatewayStatus();
         googleDriveFolder = job.StorageKind == StorageKind.GoogleDrive ? job.DestinationDirectory : null;
         Destination.Text = job.DestinationDirectory;
         UpdateGoogleDriveStatus();
@@ -392,6 +397,7 @@ public partial class MainWindow : Window
         Storage.SelectedValue = StorageKind.LocalDirectory;
         FtpHost.Clear(); FtpPort.Text = "21"; FtpTls.IsChecked = true; FtpCredentialKey.Clear();
         googleDriveSettings = null; googleDriveFolder = null; UpdateGoogleDriveStatus();
+        remoteGatewaySettings = null; UpdateRemoteGatewayStatus();
         Schedule.SelectedValue = ScheduleKind.Daily; SetDays(WeekDays.Monday);
         UpdateSchedulePreview();
         UpdateOneCControls();
@@ -1154,16 +1160,17 @@ public partial class MainWindow : Window
         if (FtpPanel is not null)
             FtpPanel.Visibility = Storage.SelectedValue is StorageKind.Ftp ? Visibility.Visible : Visibility.Collapsed;
         if (DestinationBrowseButton is not null)
-            DestinationBrowseButton.Visibility = Storage.SelectedValue is StorageKind.Ftp or StorageKind.GoogleDrive ? Visibility.Collapsed : Visibility.Visible;
+            DestinationBrowseButton.Visibility = Storage.SelectedValue is StorageKind.Ftp or StorageKind.GoogleDrive or StorageKind.RemoteGateway ? Visibility.Collapsed : Visibility.Visible;
         if (GoogleDrivePanel is not null)
         {
             var cloud = Storage.SelectedValue is StorageKind.GoogleDrive;
             if (cloud && googleDriveFolder is not null) Destination.Text = googleDriveFolder;
             else if (!cloud && googleDriveFolder is not null && Destination.Text == googleDriveFolder) Destination.Clear();
             GoogleDrivePanel.Visibility = cloud ? Visibility.Visible : Visibility.Collapsed;
-            StorageDestinationLabel.Visibility = StorageDestinationPanel.Visibility = cloud ? Visibility.Collapsed : Visibility.Visible;
+            StorageDestinationLabel.Visibility = StorageDestinationPanel.Visibility = cloud || Storage.SelectedValue is StorageKind.RemoteGateway ? Visibility.Collapsed : Visibility.Visible;
             UpdateGoogleDriveStatus();
         }
+        if (RemoteGatewayPanel is not null) { RemoteGatewayPanel.Visibility = Storage.SelectedValue is StorageKind.RemoteGateway ? Visibility.Visible : Visibility.Collapsed; UpdateRemoteGatewayStatus(); }
     }
 
     private void UpdateArchivePasswordStatus()

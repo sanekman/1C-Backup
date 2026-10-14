@@ -1,0 +1,23 @@
+services:
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/storage/Dockerfile
+    user: "${STORAGE_UID:-1000}:${STORAGE_GID:-1000}"
+    volumes:
+      - "${STORAGE_CONFIG_DIRECTORY:?Set STORAGE_CONFIG_DIRECTORY}/gateway.json:/config/gateway.json:ro"
+      - "${STORAGE_CONFIG_DIRECTORY}/gateway.pfx:/config/gateway.pfx:ro"
+      - "${STORAGE_CONFIG_DIRECTORY}/agent.pem:/config/agent.pem:ro"
+      - "${STORAGE_CONFIG_DIRECTORY}/access-token.txt:/config/access-token.txt:ro"
+      - "${STORAGE_CONFIG_DIRECTORY}/certificate-password.txt:/config/certificate-password.txt:ro"
+      - "${STORAGE_DATA_DIRECTORY:?Set STORAGE_DATA_DIRECTORY}:/backups"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}

@@ -11,6 +11,8 @@ public sealed record BackupDestination
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public GoogleDriveSettings? GoogleDrive { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RemoteGatewaySettings? RemoteGateway { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? KeepLast { get; init; }
 
     [JsonIgnore]
@@ -20,12 +22,13 @@ public sealed record BackupDestination
         StorageKind.NetworkShare => "Сетевая папка",
         StorageKind.Ftp => (Ftp?.UseTls == true ? "FTPS" : "FTP") + " · " + Ftp?.Host + ":" + Ftp?.Port,
         StorageKind.GoogleDrive => "Google Drive · " + GoogleDrive?.FolderName,
+        StorageKind.RemoteGateway => "Удалённый шлюз · " + RemoteGateway?.GatewayId.ToString("N")[..8],
         _ => "Неизвестное хранилище"
     }) + (StorageKind == StorageKind.GoogleDrive ? "" : " · " + DestinationDirectory) + (KeepLast is { } count ? " · копий: " + count : " · как в основном хранилище");
 
     public BackupJob ApplyTo(BackupJob job) => job with
     {
-        StorageKind = StorageKind, DestinationDirectory = DestinationDirectory, Ftp = Ftp, GoogleDrive = GoogleDrive,
+        StorageKind = StorageKind, DestinationDirectory = DestinationDirectory, Ftp = Ftp, GoogleDrive = GoogleDrive, RemoteGateway = RemoteGateway,
         KeepLast = KeepLast ?? job.KeepLast,
         AdditionalDestinations = null
     };

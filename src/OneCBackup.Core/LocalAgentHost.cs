@@ -40,6 +40,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         string? lastError = null;
         string? monitorError = null;
         string? notificationError = null;
+        string? hubError = null;
         BackupRun? lastRun = null;
         var dispatcher = new LocalBackupDispatcher(store, async (job, token) =>
         {
@@ -78,7 +79,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                 { warnings.Set("Чтение команд агента", error); }
                 try
                 {
-                    var notices = new[] { warnings.Summary, Volatile.Read(ref lastError), Volatile.Read(ref monitorError), Volatile.Read(ref notificationError) }.Where(text => !string.IsNullOrEmpty(text)).ToArray();
+                    var notices = new[] { warnings.Summary, Volatile.Read(ref lastError), Volatile.Read(ref monitorError), Volatile.Read(ref notificationError), Volatile.Read(ref hubError) }.Where(text => !string.IsNullOrEmpty(text)).ToArray();
                     await control.WriteAsync(state with { UpdatedUtc = DateTimeOffset.UtcNow, Error = Volatile.Read(ref lastError),
                         MonitoringError = Volatile.Read(ref monitorError), Warning = notices.Length == 0 ? null : string.Join("\n", notices) }, lifetime.Token);
                     warnings.Set("Управление агентом", null);
@@ -162,6 +163,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             while (await timer.WaitForNextTickAsync(lifetime.Token));
         }
         var notificationTask = manual is null ? NotificationLoop() : Task.CompletedTask;
+        var hubTask = manual is null ? new OneCBackup.Remote.EmbeddedHub(directory).RunAsync(warning => Volatile.Write(ref hubError, warning), lifetime.Token) : Task.CompletedTask;
         Exception? failure = null;
         try
         {
@@ -175,7 +177,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         finally
         {
             lifetime.Cancel();
-            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask); }
+            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) { failure ??= ex; }
             var error = failure?.Message ?? (manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? lastRun.Error : null);

@@ -10,7 +10,8 @@ public interface IFtpCredentialStore
 /// <summary>Selects storage from each immutable job. Credentials are never part of the job document.</summary>
 public sealed class RoutedBackupStorage(IFtpCredentialStore credentials, string verificationDirectory,
     Func<NetworkCredential, string, IBackupStorage>? ftpFactory = null, IFtpCredentialStore? googleCredentials = null,
-    Func<GoogleDriveCredentials, IBackupStorage>? googleFactory = null) : IBackupStorage
+    Func<GoogleDriveCredentials, IBackupStorage>? googleFactory = null,
+    Func<RemoteGatewaySettings, CancellationToken, Task<OneCBackup.Remote.ClientPairing>>? remoteConnections = null) : IBackupStorage
 {
     private readonly FileBackupStorage files = new();
     private static readonly HttpClient googleHttp = GoogleDriveClient.CreateHttpClient();
@@ -22,12 +23,22 @@ public sealed class RoutedBackupStorage(IFtpCredentialStore credentials, string 
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         if (job.StorageKind == StorageKind.Ftp) await ResolveAsync(job, cancellationToken);
         if (job.StorageKind == StorageKind.GoogleDrive) await (await ResolveAsync(job, cancellationToken)).PrepareAsync(job, cancellationToken);
+        if (job.StorageKind == StorageKind.RemoteGateway) await (await ResolveAsync(job, cancellationToken)).PrepareAsync(job, cancellationToken);
     }
 
     private async Task<IBackupStorage> ResolveAsync(BackupJob job, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (job.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare) return files;
+        if (job.StorageKind == StorageKind.RemoteGateway)
+        {
+            if (job.RemoteGateway is null || job.Validate().Count != 0) throw new InvalidDataException("Некорректное подключение шлюза.");
+            var pairing = remoteConnections is not null ? await remoteConnections(job.RemoteGateway, cancellationToken)
+                : OperatingSystem.IsWindows() ? await new WindowsRemoteGatewayConnections(Path.GetDirectoryName(Path.GetFullPath(verificationDirectory))!).GetAsync(job.RemoteGateway, cancellationToken)
+                : throw new PlatformNotSupportedException("Импорт подключения основного приложения доступен в Windows.");
+            var local = Uri.TryCreate(pairing.Endpoint, UriKind.Absolute, out var address) && address.Scheme == "ws" && address.IsLoopback;
+            return new RemoteGatewayBackupStorage(new OneCBackup.Remote.RemoteStorageClient(pairing, allowLocalEndpoint: local));
+        }
         if (job.StorageKind == StorageKind.GoogleDrive)
         {
             if (job.GoogleDrive is null || job.Validate().Count != 0) throw new InvalidDataException("Некорректное хранилище Google Drive.");

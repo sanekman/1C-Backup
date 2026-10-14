@@ -22,6 +22,8 @@ public sealed record BackupJob
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public GoogleDriveSettings? GoogleDrive { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RemoteGatewaySettings? RemoteGateway { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<BackupDestination>? AdditionalDestinations { get; init; }
 
     [JsonIgnore]
@@ -106,6 +108,11 @@ public sealed record BackupJob
             else errors.AddRange(GoogleDrive.Validate());
             if (!GoogleDriveSettings.IsId(destination)) errors.Add("Подключите папку Google Drive.");
         }
+        if (StorageKind == StorageKind.RemoteGateway)
+        {
+            if (RemoteGateway is null) errors.Add("Подключите шлюз хранилища."); else errors.AddRange(RemoteGateway.Validate());
+            if (string.IsNullOrWhiteSpace(ArchivePasswordKey)) errors.Add("Для удалённого шлюза задайте пароль архива.");
+        }
         if (AdditionalDestinations is not null)
         {
             if (AdditionalDestinations.Count > 7) errors.Add("Можно указать не более 8 хранилищ для одного задания.");
@@ -123,7 +130,7 @@ public sealed record BackupJob
                 try
                 {
                     var identities = StorageJobs.Select(target => target.StorageKind == StorageKind.Ftp
-                        ? StorageAddress.Identity(target with { Ftp = target.Ftp! with { UseTls = false } }) : target.StorageKind == StorageKind.GoogleDrive ? StorageAddress.Identity(target) : "file:" + (OperatingSystem.IsWindows()
+                        ? StorageAddress.Identity(target with { Ftp = target.Ftp! with { UseTls = false } }) : target.StorageKind is StorageKind.GoogleDrive or StorageKind.RemoteGateway ? StorageAddress.Identity(target) : "file:" + (OperatingSystem.IsWindows()
                             ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.DestinationDirectory)).ToUpperInvariant()
                             : Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.DestinationDirectory))));
                     if (identities.Distinct(StringComparer.Ordinal).Count() != AdditionalDestinations.Count + 1)

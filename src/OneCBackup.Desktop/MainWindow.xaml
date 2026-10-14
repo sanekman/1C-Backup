@@ -305,6 +305,12 @@
     <Button x:Name="GoogleDriveConnectButton" Content="Подключить Google Drive…" Click="GoogleDriveConnect_Click" HorizontalAlignment="Left"/>
     <TextBlock x:Name="GoogleDriveStatus" Text="Аккаунт пока не подключён." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0"/>
    </StackPanel>
+   <StackPanel x:Name="RemoteGatewayPanel" Visibility="Collapsed" Margin="0,4,0,10">
+    <TextBlock Text="Шлюз хранилища (контейнер в Proxmox)" FontWeight="SemiBold" />
+    <TextBlock x:Name="RemoteGatewayStatus" TextWrapping="Wrap" Margin="0,4,0,6" />
+    <Button Content="Импортировать подключение…" Click="RemoteGatewayImport_Click" HorizontalAlignment="Left" />
+    <TextBlock Text="Копии передаются по защищённому каналу и хранятся в архивах с паролем. Папку на диске или NAS задайте в контейнере." TextWrapping="Wrap" Margin="0,6,0,0" />
+   </StackPanel>
    <StackPanel x:Name="FtpPanel" Visibility="Collapsed">
     <TextBlock Text="FTP-сервер (без ftp://)" /><TextBox x:Name="FtpHost" Margin="0,4,0,10" />
     <TextBlock Text="Порт" /><TextBox x:Name="FtpPort" Text="21" Margin="0,4,0,10" />
@@ -579,6 +585,12 @@
  <TextBlock Text="Используйте этот режим вместо фонового агента, если копирование должно идти только пока открыта программа." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
  <WrapPanel Margin="0,10,0,0"><Button x:Name="StartScheduleButton" Content="Запустить в окне" Click="StartSchedule_Click" IsEnabled="False" /><Button x:Name="StopScheduleButton" Content="Остановить" Margin="8,0,0,0" Click="StopSchedule_Click" IsEnabled="False" /></WrapPanel>
  <TextBlock x:Name="SchedulerStatus" Text="Расписание в окне выключено." TextWrapping="Wrap" Margin="0,8,0,0" /></StackPanel></Expander>
+    <Expander Header="Публичный узел для шлюзов хранилища" Margin="0,16,0,0"><StackPanel Margin="0,10,0,0">
+     <TextBlock Text="Основная программа или фоновый агент могут обслуживать подключения шлюзов. Нужны доступный из интернета HTTPS-адрес, сертификат и поддержка WebSocket. Публикация: Caddy / IIS / Apache." TextWrapping="Wrap"/>
+     <WrapPanel Margin="0,8,0,0"><Button Content="Импортировать hub.json…" Click="HubImport_Click"/><Button Content="Выключить узел" Margin="8,0,0,0" Click="HubDisable_Click"/></WrapPanel>
+     <Button Content="Инструкция: Proxmox, HTTPS, IIS и Apache" Click="StorageBridgeHelp_Click" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+     <TextBlock x:Name="HubStatus" Text="Узел выключен по умолчанию." TextWrapping="Wrap" Margin="0,8,0,0"/>
+    </StackPanel></Expander>
     <Expander Header="Оповещения: Telegram и MAX" Margin="0,16,0,0"><StackPanel Margin="0,10,0,0">
      <TextBlock Text="Получайте результаты копирования в мессенджере. Отправка сообщений не останавливает резервное копирование." TextWrapping="Wrap"/>
      <Button Content="Настроить оповещения" Click="Notifications_Click" HorizontalAlignment="Left" Margin="0,8,0,0"/>
