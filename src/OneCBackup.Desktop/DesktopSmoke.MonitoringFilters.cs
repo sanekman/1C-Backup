@@ -22,7 +22,10 @@ internal static partial class DesktopSmoke
         await WaitUntil(() => window.SmokeReady && Control<ComboBox>("Sources").Items.Count == 2, "Второй источник не сохранился.");
         var second = (ExternalBackupMonitor)Control<ComboBox>("Sources").SelectedValue;
         window.UpdateLayout();
-        var sourceText = FindDescendant<TextBlock>(Control<ComboBox>("Sources"));
+        var sourcePicker = Control<ComboBox>("Sources");
+        sourcePicker.ApplyTemplate();
+        var selectedSourcePresenter = (ContentPresenter)sourcePicker.Template.FindName("SelectionPresenter", sourcePicker);
+        var sourceText = FindDescendant<TextBlock>(selectedSourcePresenter);
         if (sourceText is null || !sourceText.Text.StartsWith(second.Id.ToString("N")[..8]))
             throw new InvalidOperationException("Список ручного опроса не различает одинаково названные источники.");
         var outbox = new ExternalBackupOutbox(Path.Combine(DesktopPaths.DataDirectory, "external-backups.json"));
