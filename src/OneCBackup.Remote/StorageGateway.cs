@@ -13,7 +13,8 @@ public sealed class StorageGateway(GatewayOptions options, bool allowLocalEndpoi
         RemoteConfiguration.CheckEndpoint(options.Endpoint, allowLocalEndpoint);
         if (options.GatewayId == Guid.Empty || options.QuotaBytes < 1 || !Path.IsPathFullyQualified(options.DataDirectory)) throw new InvalidDataException("Invalid gateway configuration");
         Directory.CreateDirectory(options.DataDirectory); NoLink(options.DataDirectory);
-        using var own = X509CertificateLoader.LoadPkcs12FromFile(options.CertificateFile, RemoteConfiguration.Secret(options.CertificatePasswordFile), X509KeyStorageFlags.EphemeralKeySet);
+        using var own = X509CertificateLoader.LoadPkcs12FromFile(options.CertificateFile, RemoteConfiguration.Secret(options.CertificatePasswordFile),
+            OperatingSystem.IsWindows() ? X509KeyStorageFlags.DefaultKeySet : X509KeyStorageFlags.EphemeralKeySet);
         using var peer = X509Certificate2.CreateFromPem(File.ReadAllText(options.PeerCertificateFile));
         while (!token.IsCancellationRequested)
         {

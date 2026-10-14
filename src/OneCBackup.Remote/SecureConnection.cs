@@ -67,7 +67,10 @@ public static class SecureConnection
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token); timeout.CancelAfter(TimeSpan.FromSeconds(20));
             await ConnectSocketAsync(socket, Endpoint(pairing.Endpoint, "/remote/client/" + pairing.GatewayId), timeout.Token);
-            using var own = X509CertificateLoader.LoadPkcs12(Convert.FromBase64String(pairing.Certificate), pairing.CertificatePassword, X509KeyStorageFlags.EphemeralKeySet);
+            // Schannel needs an accessible key container. DefaultKeySet creates temporary persisted keys
+            // owned by this account and removes them on disposal; Linux containers keep keys in memory.
+            using var own = X509CertificateLoader.LoadPkcs12(Convert.FromBase64String(pairing.Certificate), pairing.CertificatePassword,
+                OperatingSystem.IsWindows() ? X509KeyStorageFlags.DefaultKeySet : X509KeyStorageFlags.EphemeralKeySet);
             using var peer = X509CertificateLoader.LoadCertificate(Convert.FromBase64String(pairing.PeerCertificate));
             await stream.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = "onec-gateway",
                 AllowRenegotiation = false,

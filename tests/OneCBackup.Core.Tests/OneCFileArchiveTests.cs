@@ -89,7 +89,7 @@ public sealed class OneCFileArchiveTests : IDisposable
         await Assert.Single(zip.Entries).Open().CopyToAsync(output);
         Assert.Equal(before, output.ToArray());
         Assert.True(activeSession.CanWrite);
-        var saved = Assert.Single(await new BackupRunHistory(Path.Combine(root, "history.json")).ReadAsync());
+        var saved = Assert.Single(await new BackupRunHistory(Path.Combine(root, "history.json")).ReadAsync(), run => run.RunId == result.RunId);
         Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, saved.Warnings!);
     }
 
