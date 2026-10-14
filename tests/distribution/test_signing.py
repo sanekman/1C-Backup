@@ -54,9 +54,10 @@ class SigningTests(unittest.TestCase):
                 self.assertEqual('SHA256', commands[0][commands[0].index('/fd') + 1])
                 self.assertEqual('SHA256', commands[0][commands[0].index('/td') + 1])
                 self.assertEqual(exe.resolve(), Path(commands[0][-1]))
-                self.assertEqual(['signtool.exe', 'verify', '/pa', '/all', '/tw', str(exe)], commands[1])
+                self.assertEqual(['signtool.exe', 'verify', '/pa', '/all', '/tw'], commands[1][:-1])
+                self.assertEqual(exe.resolve(), Path(commands[1][-1]))
                 self.assertIn('TimeStamperCertificate', commands[2][-1])
-                self.assertEqual(str(exe), run.call_args_list[2].kwargs['env']['ONECBACKUP_VERIFY_SIGNED_FILE'])
+                self.assertEqual(exe.resolve(), Path(run.call_args_list[2].kwargs['env']['ONECBACKUP_VERIFY_SIGNED_FILE']))
 
     def test_untrusted_signature_never_reports_success(self):
         from types import SimpleNamespace

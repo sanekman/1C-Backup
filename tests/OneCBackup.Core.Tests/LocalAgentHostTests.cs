@@ -320,7 +320,9 @@ public sealed class LocalAgentHostTests : IDisposable
             Assert.False(task.IsCompleted);
             Directory.Delete(statePath);
             var control = new LocalAgentControlStore(directory);
-            var state = await WaitForState(control, s => s.Warning?.Contains("Управление агентом") == true);
+            // Recovery warning may be cleared by the next heartbeat before a busy CI reader polls.
+            // Require a newly writable running state; persistent warning visibility is covered separately.
+            var state = await WaitForState(control, s => s.Phase == LocalAgentPhase.Running);
             Assert.Equal(LocalAgentPhase.Running, state.Phase);
             await WaitForState(control, s => s.Warning is null);
             await control.RequestStopAsync(state.SessionId);
