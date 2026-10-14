@@ -53,7 +53,7 @@ class SigningTests(unittest.TestCase):
                 self.assertEqual('A' * 40, commands[0][commands[0].index('/sha1') + 1])
                 self.assertEqual('SHA256', commands[0][commands[0].index('/fd') + 1])
                 self.assertEqual('SHA256', commands[0][commands[0].index('/td') + 1])
-                self.assertEqual(str(exe), commands[0][-1])
+                self.assertEqual(exe.resolve(), Path(commands[0][-1]))
                 self.assertEqual(['signtool.exe', 'verify', '/pa', '/all', '/tw', str(exe)], commands[1])
                 self.assertIn('TimeStamperCertificate', commands[2][-1])
                 self.assertEqual(str(exe), run.call_args_list[2].kwargs['env']['ONECBACKUP_VERIFY_SIGNED_FILE'])
