@@ -142,6 +142,12 @@ internal static partial class DesktopSmoke
             await WaitUntil(() => window.SmokeReady, "Копирование доступных файлов не завершилось.");
         }
         var partial = (await catalog.ReadAsync()).Single(record => record.JobId == job.Id && record.Backup.FileSnapshot?.IsIncomplete == true);
+        await WaitUntil(() => Control<TextBlock>("SelectedJobSummary").Text.Contains("Копия создана, есть предупреждения"),
+            "Результат копирования с пропусками не обновился.");
+        var summaryBrush = Control<TextBlock>("SelectedJobSummary").Foreground as System.Windows.Media.SolidColorBrush;
+        var warningBrush = (System.Windows.Media.SolidColorBrush)window.FindResource("WarningBrush");
+        if (summaryBrush?.Color != warningBrush.Color)
+            throw new InvalidOperationException("Успешная копия с предупреждениями окрашена как ошибка.");
         if (!File.Exists(first.Backup.Location) || !File.Exists(latest.Backup.Location))
             throw new InvalidOperationException("Неполная копия удалила предыдущую файловую цепочку.");
         Click("CheckLatestCopiesButton");

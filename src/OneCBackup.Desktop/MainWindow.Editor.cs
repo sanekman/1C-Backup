@@ -365,8 +365,9 @@ public partial class MainWindow
         if (!running && latest is not null)
         {
             resultText += " · " + (latest.FinishedUtc ?? latest.StartedUtc).ToLocalTime().ToString("dd.MM HH:mm");
-            SelectedJobSummary.Foreground = latest.Status == BackupRunStatus.Succeeded && latest.Warnings?.Count is not > 0
-                ? (System.Windows.Media.Brush)FindResource("SuccessBrush") : (System.Windows.Media.Brush)FindResource("ErrorBrush");
+            var brush = latest.Status == BackupRunStatus.Succeeded
+                ? latest.Warnings?.Count > 0 ? "WarningBrush" : "SuccessBrush" : "ErrorBrush";
+            SelectedJobSummary.Foreground = (System.Windows.Media.Brush)FindResource(brush);
         }
         SelectedJobSummary.Text = resultText + "\n" + nextText;
     }
