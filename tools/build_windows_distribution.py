@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -211,6 +212,41 @@ def distribution_version(publish):
     return versions[0]
 
 
+def verify_pkcs_asset(publish, package_folders=None):
+    """Reject a runtime-pack fallback or a DLL that differs from the restored patched package."""
+    package = "System.Security.Cryptography.Pkcs"
+    asset = package + ".dll"
+    versions = []
+    for project in ["OneCBackup.Desktop", "OneCBackup.Agent"]:
+        deps = json.loads((publish / (project + ".deps.json")).read_text())
+        names = [name for name in deps["libraries"] if name.startswith(package + "/")]
+        if len(names) != 1:
+            raise RuntimeError(project + " must use the patched PKCS package instead of the runtime-pack DLL")
+        version = names[0].split("/", 1)[1]
+        match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+        if match is None or tuple(map(int, match.groups())) < (10, 0, 13):
+            raise RuntimeError("PKCS package must be at least 10.0.13")
+        active = [entry for target in deps["targets"].values() if (entry := target.get(names[0]))]
+        if not any(any(Path(path).name == asset for kind in ["runtime", "runtimeTargets"]
+                       for path in entry.get(kind, {})) for entry in active):
+            raise RuntimeError(project + " does not load the patched PKCS runtime asset")
+        versions.append(version)
+    if len(set(versions)) != 1:
+        raise RuntimeError("Desktop and agent PKCS versions differ")
+    if package_folders is None:
+        assets = Path(__file__).resolve().parents[1] / "src/OneCBackup.Core/obj/project.assets.json"
+        package_folders = json.loads(assets.read_text())["packageFolders"]
+    restored = [path for folder in package_folders
+                for path in (Path(folder) / package.lower() / versions[0]).rglob(asset)
+                if path.is_file()]
+    if not restored:
+        raise RuntimeError("Restore the patched PKCS package before packaging")
+    packaged_hash = hashlib.sha256((publish / asset).read_bytes()).digest()
+    if not any(hashlib.sha256(path.read_bytes()).digest() == packaged_hash for path in restored):
+        raise RuntimeError("Packaged PKCS DLL differs from the restored patched package")
+    print("Verified packaged PKCS DLL:", versions[0])
+
+
 def package(publish, artifacts):
     required = ["OneCBackup.Desktop.exe", "OneCBackup.Desktop.dll", "OneCBackup.Core.dll",
                 "OneCBackup.Agent.exe", "OneCBackup.Agent.dll", "OneCBackup.Agent.runtimeconfig.json", "OneCBackup.Agent.deps.json",
@@ -228,6 +264,7 @@ def package(publish, artifacts):
     if not {"Microsoft.NETCore.App", "Microsoft.WindowsDesktop.App"}.issubset(frameworks):
         raise RuntimeError("The distribution does not include the .NET and Windows Desktop runtimes")
     version = distribution_version(publish)
+    verify_pkcs_asset(publish)
     from windows_signing import sign_and_verify
     signed = sign_and_verify([publish / name for name in
         ("OneCBackup.Desktop.exe", "OneCBackup.Agent.exe", "OneCBackup.Desktop.dll", "OneCBackup.Agent.dll", "OneCBackup.Core.dll")])
