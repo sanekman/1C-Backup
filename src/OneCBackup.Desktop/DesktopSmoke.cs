@@ -866,7 +866,8 @@ internal static partial class DesktopSmoke
                 (successfulRun with { Status = BackupRunStatus.Cancelled }, "Запуск отменён"),
                 (successfulRun with { Status = BackupRunStatus.Interrupted }, "Завершение запуска не записано"),
                 (successfulRun with { Status = BackupRunStatus.Running, FinishedUtc = null }, "ещё не имеет результата"),
-                (successfulRun with { Warnings = new[] { "Проверка предупреждения об очистке" } }, "есть предупреждения")
+                (successfulRun with { Warnings = new[] { "Проверка предупреждения об очистке" } }, "Копия создана с предупреждениями"),
+                (successfulRun with { Warnings = new[] { "Не удалось скопировать: изменившийся файл.xlsx" } }, "могли быть пропущены файлы")
             })
             {
                 var grid = Control<DataGrid>("RunHistory");
