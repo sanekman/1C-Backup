@@ -3,9 +3,10 @@ import argparse,hashlib,json,re,subprocess,tarfile,tempfile,os
 from pathlib import Path
 
 def main():
- parser=argparse.ArgumentParser();parser.add_argument('--version',default='0.1.0-alpha.1');args=parser.parse_args()
+ repository=Path(__file__).resolve().parents[1]
+ parser=argparse.ArgumentParser();parser.add_argument('--version',default=(repository/'deploy/storage/VERSION').read_text().strip());args=parser.parse_args()
  if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+',args.version):raise ValueError('Invalid version')
- repository=Path(__file__).resolve().parents[1];artifacts=repository/'artifacts'
+ artifacts=repository/'artifacts'
  archive=artifacts/('OneCBackup-Storage-'+args.version+'-linux-x64.tar.gz');checksum=archive.with_suffix('.gz.sha256')
  with archive.open('rb') as file:digest=hashlib.file_digest(file,'sha256').hexdigest()
  if digest!=checksum.read_text().split()[0] or archive.stat().st_size>95*1024*1024:raise ValueError('Package checksum/size mismatch')
@@ -13,11 +14,14 @@ def main():
   members=file.getmembers()
   if any(not member.name.startswith('OneCBackup-Storage/') or '..' in member.name.split('/') or not (member.isfile() or member.isdir()) for member in members):raise ValueError('Invalid archive')
   if file.extractfile('OneCBackup-Storage/VERSION.txt').read().decode().strip()!=args.version:raise ValueError('Wrong package version')
+  runtime=json.load(file.extractfile('OneCBackup-Storage/OneCBackup.StorageBridge.runtimeconfig.json'))
+  frameworks={item['name']:item['version'] for item in runtime['runtimeOptions']['includedFrameworks']}
+  if frameworks!={'Microsoft.NETCore.App':'10.0.13','Microsoft.AspNetCore.App':'10.0.13'}:raise ValueError('Unexpected package runtime')
  branch='distribution/storage-linux-x64-'+args.version
  def git(*command,environment=None,input=None):return subprocess.check_output(['git',*command],cwd=repository,env=environment,input=input).decode().strip()
  if git('ls-remote','--heads','origin','refs/heads/'+branch):raise RuntimeError('Distribution branch already exists; no overwrite permitted')
  source=git('rev-parse','HEAD')
- report={'version':args.version,'sha256':digest,'bytes':archive.stat().st_size,'source_revision':source,'platform':'linux-x64','component':'storage-gateway'}
+ report={'version':args.version,'sha256':digest,'bytes':archive.stat().st_size,'source_revision':source,'platform':'linux-x64','component':'storage-gateway','dotnet_runtime':'10.0.13','sdk':'10.0.402'}
  metadata=artifacts/'storage-manifest.json';metadata.write_text(json.dumps(report,indent=2)+'\n')
  files=[archive,checksum,metadata,repository/'docs/storage-bridge.md']
  with tempfile.TemporaryDirectory(prefix='storage-index-') as directory:
@@ -30,6 +34,8 @@ def main():
   git('push','origin',commit+':refs/heads/'+branch)
  root='https://github.com/sanekman/1C-Backup/blob/'+branch+'/storage/'
  notes='''# Шлюз хранилища 1C-Backup '''+args.version+'''
+
+SDK 10.0.402; самодостаточный пакет и Docker-образ используют .NET / ASP.NET Core 10.0.13. Предыдущие теги и дистрибутивы сохраняются; версия образа совпадает с версией выпуска.
 
 Агент-посредник для диска/NAS в локальной сети за NAT: Debian 12 LXC Proxmox или Docker внутри Linux VM. Исходящее WSS, отдельный взаимный TLS, проверка размера/SHA-256, квота, скачивание и безопасное удаление. Публичный узел может работать в Windows-программе alpha.13 или отдельным контейнером; HTTPS публикуется через Caddy, IIS, Apache. Включены инструкции Let’s Encrypt и установки из GitHub.
 

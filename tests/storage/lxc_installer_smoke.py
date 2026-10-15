@@ -1,10 +1,12 @@
 """Test the native LXC installer in disposable Debian 12, with an explicit systemctl recorder (not a systemd test)."""
-import hashlib,json,subprocess,tempfile,uuid
+import argparse,hashlib,json,re,subprocess,tempfile,uuid
 from pathlib import Path
 
 def main():
  repository=Path(__file__).resolve().parents[2]
- archive=repository/'artifacts/OneCBackup-Storage-0.1.0-alpha.1-linux-x64.tar.gz'
+ parser=argparse.ArgumentParser();parser.add_argument('--version',default=(repository/'deploy/storage/VERSION').read_text().strip());args=parser.parse_args()
+ if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+',args.version):raise ValueError('Invalid version')
+ archive=repository/('artifacts/OneCBackup-Storage-'+args.version+'-linux-x64.tar.gz')
  image='onec-storage-debian12-'+uuid.uuid4().hex[:12]
  name='onec-storage-install-'+uuid.uuid4().hex[:12]
  with tempfile.TemporaryDirectory(prefix='onec-lxc-installer-') as directory:
@@ -21,8 +23,8 @@ cat >/usr/local/bin/systemctl <<'SH'
 printf '%s\\n' "$*" >>/tmp/systemctl-calls.txt
 SH
 chmod +x /usr/local/bin/systemctl
-bash /setup/install-lxc.sh --archive /packages/OneCBackup-Storage-0.1.0-alpha.1-linux-x64.tar.gz --storage /backups --endpoint wss://relay.example.com
-bash /setup/install-lxc.sh --archive /packages/OneCBackup-Storage-0.1.0-alpha.1-linux-x64.tar.gz --storage /backups
+bash /setup/install-lxc.sh --archive /packages/PACKAGE_ARCHIVE --storage /backups --endpoint wss://relay.example.com
+bash /setup/install-lxc.sh --archive /packages/PACKAGE_ARCHIVE --storage /backups
 test -x /opt/onec-backup-storage/current/OneCBackup.StorageBridge
 test -f /etc/systemd/system/onec-backup-storage.service
 test ! -f /etc/onec-backup-storage/agent.pfx
@@ -39,6 +41,7 @@ assert len(glob.glob('/root/onec-backup-storage-pairing.*/client-pairing.json'))
 assert os.stat('/etc/onec-backup-storage/gateway.json').st_mode & 0o777 == 0o600
 PY
 '''
+   command=command.replace('PACKAGE_ARCHIVE',archive.name)
    result=subprocess.run(['docker','exec',name,'bash','-c',command],capture_output=True,text=True)
    if result.returncode:raise RuntimeError('Installer failed: '+result.stdout[-1500:]+result.stderr[-2000:])
    print(json.dumps({'Success':True,'Debian12PackageAndDependencies':True,'RepeatInstallationKeepsPairing':True,

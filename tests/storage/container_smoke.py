@@ -8,7 +8,7 @@ def main():
  project=repository/'src/OneCBackup.StorageBridge'
  names=['onec-storage-'+uuid.uuid4().hex[:12] for _ in range(4)]
  network,hub,edge,gateway=names
- image=os.environ.get('STORAGE_TEST_IMAGE','onec-storage-bridge:0.1.0-alpha.1')
+ image=os.environ.get('STORAGE_TEST_IMAGE','onec-storage-bridge:ci')
  containers=[]
  with tempfile.TemporaryDirectory(prefix='onec-storage-test-') as temporary:
   root=Path(temporary);config=root/'config';data=root/'data';data.mkdir()

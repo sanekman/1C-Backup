@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
 using OneCBackup.Core;
@@ -34,7 +35,7 @@ var report = new {
     update.DistributionBranch, Bytes = installer.Length, Sha256 = sha256,
     CompleteProgress = progress[^1], VerifiedCacheReused = true, CurrentVersionNotOfferedAgain = true,
     PartialFilesRemaining = 0, Retries = retries, Runtime = Environment.Version.ToString(),
-    SourceRevision = typeof(GitHubApplicationUpdates).Assembly.GetName().Version?.ToString()
+    SourceRevision = typeof(GitHubApplicationUpdates).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
 };
 var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
 await File.WriteAllTextAsync(Path.Combine(directory, "result.json"), json, timeout.Token);

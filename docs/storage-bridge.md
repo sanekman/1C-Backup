@@ -1,4 +1,6 @@
-# Шлюз хранилища для Proxmox — 0.1.0-alpha.1
+# Шлюз хранилища для Proxmox — 0.1.0-alpha.2
+
+Выпуск собран SDK 10.0.402 и использует .NET / ASP.NET Core 10.0.13. Версия пакета, установщика и Docker-образа задаётся в `deploy/storage/VERSION`; при сборке по тегу она должна совпадать с `storage-v…`. Публикация занятого Docker-тега запрещена; старый выпуск `storage-v0.1.0-alpha.1` сохраняется.
 
 Контейнер находится в локальной сети рядом с диском или NAS. Он подключается **наружу** к публичному HTTPS-узлу и записывает полученные копии в подключённую папку. Входящие порты, белый IP и сертификат Let’s Encrypt самому шлюзу не нужны. Сетевое соединение внутри ретранслятора дополнительно защищено взаимным TLS агента и шлюза.
 
@@ -25,7 +27,7 @@ pct enter 120
 ```bash
 apt-get update
 apt-get install -y git ca-certificates
-git clone --depth 1 --single-branch --branch storage-v0.1.0-alpha.1 \
+git clone --depth 1 --single-branch --branch storage-v0.1.0-alpha.2 \
   https://github.com/sanekman/1C-Backup.git
 cd 1C-Backup
 bash deploy/storage/install-from-github.sh \
@@ -52,10 +54,10 @@ journalctl -u onec-backup-storage -f
 Docker предпочтительно устанавливать в Linux VM Proxmox. Исходники из того же тега:
 
 ```bash
-docker build -f deploy/storage/Dockerfile -t onec-storage-bridge:0.1.0-alpha.1 .
+docker build -f deploy/storage/Dockerfile --build-arg VERSION=0.1.0-alpha.2 -t onec-storage-bridge:0.1.0-alpha.2 .
 mkdir -m 700 storage-config
 docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD/storage-config:/config" onec-storage-bridge:0.1.0-alpha.1 \
+  -v "$PWD/storage-config:/config" onec-storage-bridge:0.1.0-alpha.2 \
   initialize /config wss://relay.ВАШ-ДОМЕН
 export STORAGE_CONFIG_DIRECTORY="$PWD/storage-config"
 export STORAGE_DATA_DIRECTORY=/mnt/nas/backups
