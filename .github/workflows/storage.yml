@@ -5,6 +5,11 @@ on:
     tags: ['storage-v*-alpha.*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      prepare_release:
+        description: Prepare a new immutable distribution and draft release after verification
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -73,3 +78,43 @@ jobs:
           build-args: VERSION=${{ needs.verify.outputs.version }}
           push: true
           tags: ghcr.io/sanekman/1c-backup-storage:${{ needs.verify.outputs.version }}
+  prepare-release:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && inputs.prepare_release
+    runs-on: ubuntu-latest
+    permissions: {contents: write}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      STORAGE_VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: storage-linux-x64
+          path: artifacts
+      - name: Refuse to replace an existing release or tag
+        shell: bash
+        run: |
+          existing_tag=$(git ls-remote --tags origin "refs/tags/storage-v$STORAGE_VERSION")
+          [[ -z "$existing_tag" ]] || { echo 'Storage tag already exists; no overwrite permitted'; exit 1; }
+          existing_release=$(gh api --paginate repos/sanekman/1C-Backup/releases --jq ".[] | select(.tag_name == \"storage-v$STORAGE_VERSION\") | .id")
+          [[ -z "$existing_release" ]] || { echo 'Storage release already exists; no overwrite permitted'; exit 1; }
+      - name: Prepare immutable distribution and draft
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 tools/publish_storage_distribution.py --version "$STORAGE_VERSION"
+          package="artifacts/OneCBackup-Storage-$STORAGE_VERSION-linux-x64.tar.gz"
+          gh release create "storage-v$STORAGE_VERSION" "$package" "$package.sha256" artifacts/storage-manifest.json \
+            --draft --prerelease --target "$GITHUB_SHA" \
+            --title "1C-Backup Storage $STORAGE_VERSION — Linux x64 / .NET 10.0.13" \
+            --notes-file artifacts/storage-release-notes.md
+          gh release view "storage-v$STORAGE_VERSION" --json url,isDraft,tagName > artifacts/storage-draft-release.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: storage-release-preparation
+          path: |
+            artifacts/storage-manifest.json
+            artifacts/storage-release-notes.md
+            artifacts/storage-draft-release.json
