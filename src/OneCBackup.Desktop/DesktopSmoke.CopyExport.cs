@@ -24,12 +24,15 @@ internal static partial class DesktopSmoke
         var original = await File.ReadAllBytesAsync(row.Location);
         var destination = Path.Combine(DesktopPaths.DataDirectory, "saved-copy.zip");
         var observedPhases = new HashSet<BackupExportPhase>();
+        var cancellationRequested = false;
         window.CopyExportProgressObserved = value =>
         {
             var first = observedPhases.Add(value.Phase);
             if (Control<System.Windows.Controls.Border>("CopyExportProgressPanel").Visibility != Visibility.Visible)
                 throw new InvalidOperationException("Ход сохранения не виден во время операции.");
-            if (value.Phase == BackupExportPhase.Verifying && !Control<TextBlock>("CopyExportProgressLabel").Text.Contains("SHA-256"))
+            var label = Control<TextBlock>("CopyExportProgressLabel").Text;
+            if (value.Phase == BackupExportPhase.Verifying && !label.Contains("SHA-256")
+                && !(cancellationRequested && label.StartsWith("Отмена:")))
                 throw new InvalidOperationException("Проверка SHA-256 не выделена в отдельный этап.");
             if (first && value.Phase is BackupExportPhase.Transferring or BackupExportPhase.Verifying)
                 screenshot(value.Phase == BackupExportPhase.Transferring ? "copy-export-progress-transfer" : "copy-export-progress-sha256");
@@ -73,6 +76,7 @@ internal static partial class DesktopSmoke
             var cancelledFile = Path.Combine(DesktopPaths.DataDirectory, "cancelled-export.zip");
             window.CopyExportDialogOverride = dialog => { dialog.FileName = cancelledFile; return true; };
             Control<Button>("ExportCopyButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            cancellationRequested = true;
             Control<Button>("CancelCopyVerificationButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitUntil(() => window.SmokeReady, "Отмена сохранения не завершилась.");
             var cancelled = Control<TextBlock>("Status").Text.Contains("Сохранение отменено");
