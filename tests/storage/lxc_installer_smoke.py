@@ -21,8 +21,28 @@ mkdir -p /usr/local/bin
 cat >/usr/local/bin/systemctl <<'SH'
 #!/bin/sh
 printf '%s\\n' "$*" >>/tmp/systemctl-calls.txt
+if [ "$1" = restart ] && [ ! -f /tmp/initial-restart-rejected ]; then
+ touch /tmp/initial-restart-rejected
+ exit 1
+fi
 SH
 chmod +x /usr/local/bin/systemctl
+if bash /setup/install-lxc.sh --archive /packages/PACKAGE_ARCHIVE --storage /backups --endpoint wss://relay.example.com; then
+ echo 'The first service restart failure was ignored' >&2
+ exit 1
+fi
+test ! -e /opt/onec-backup-storage/current
+test ! -L /opt/onec-backup-storage/current
+test ! -f /etc/systemd/system/onec-backup-storage.service
+python3 - <<'PY'
+import hashlib,json
+from pathlib import Path
+root=Path('/etc/onec-backup-storage')
+pairing=list(Path('/root').glob('onec-backup-storage-pairing.*/client-pairing.json'))
+assert len(pairing)==1
+paths=[root/name for name in ['gateway.pfx','agent.pem','access-token.txt','certificate-password.txt']]+pairing
+Path('/tmp/initial-secrets.json').write_text(json.dumps({str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}))
+PY
 bash /setup/install-lxc.sh --archive /packages/PACKAGE_ARCHIVE --storage /backups --endpoint wss://relay.example.com
 bash /setup/install-lxc.sh --archive /packages/PACKAGE_ARCHIVE --storage /backups
 test -x /opt/onec-backup-storage/current/OneCBackup.StorageBridge
@@ -32,7 +52,9 @@ test ! -f /etc/onec-backup-storage/client-pairing.json
 runuser -u onecbackup-storage -- test -r /etc/onec-backup-storage/gateway.pfx
 runuser -u onecbackup-storage -- test -w /backups
 python3 - <<'PY'
-import json,glob,os
+import json,glob,os,hashlib
+for path,expected in json.load(open('/tmp/initial-secrets.json')).items():
+ assert hashlib.sha256(open(path,'rb').read()).hexdigest()==expected
 with open('/etc/onec-backup-storage/gateway.json') as file: value=json.load(file)
 assert value['DataDirectory']=='/backups'
 assert value['CertificateFile']=='/etc/onec-backup-storage/gateway.pfx'
@@ -46,6 +68,7 @@ PY
    if result.returncode:raise RuntimeError('Installer failed: '+result.stdout[-1500:]+result.stderr[-2000:])
    print(json.dumps({'Success':True,'Debian12PackageAndDependencies':True,'RepeatInstallationKeepsPairing':True,
     'ConfigurationPermissionsChecked':True,'PrivateAgentPairingKeptOutsideGatewayService':True,
+    'FailedInitialActivationCanBeRetriedWithoutReplacingPairing':True,
     'NativeSystemdOrProxmoxTested':False}))
   finally:
    subprocess.run(['docker','rm','-f',name],capture_output=True)

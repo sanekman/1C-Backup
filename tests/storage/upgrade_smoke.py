@@ -44,6 +44,17 @@ mkdir -p /usr/local/bin
 cat >/usr/local/bin/systemctl <<'SH'
 #!/bin/sh
 printf '%s\\n' "$*" >>/tmp/systemctl-calls.txt
+if [ "$1" = is-active ] && [ -f /tmp/service-inactive ]; then exit 3; fi
+if [ "$1" = is-enabled ] && [ -f /tmp/service-disabled ]; then exit 1; fi
+if [ "$1" = enable ]; then rm -f /tmp/service-disabled; fi
+if [ "$1" = disable ]; then touch /tmp/service-disabled; fi
+if [ "$1" = stop ]; then touch /tmp/service-inactive; fi
+if [ "$1" = restart ]; then
+ readlink /opt/onec-backup-storage/current >>/tmp/restart-versions.txt
+ if [ -f /tmp/fail-restart-once ]; then rm /tmp/fail-restart-once; exit 1; fi
+ if [ -f /tmp/fail-recovery-once ]; then rm /tmp/fail-recovery-once; exit 1; fi
+ rm -f /tmp/service-inactive
+fi
 SH
 chmod +x /usr/local/bin/systemctl
 bash /old-install.sh --archive "/previous/$1" --storage /backups --endpoint wss://relay.example.com
@@ -72,7 +83,6 @@ PY
                     'bash', '/setup/install-lxc.sh', '--archive', archive]
                 run(['docker', 'exec', container, *command, '--storage', '/backups'])
 
-            install(current, args.from_github)
             verify = """import hashlib,json,os,sys
 from pathlib import Path
 before=json.loads(Path('/tmp/before.json').read_text())
@@ -96,6 +106,59 @@ assert Path('/opt/onec-backup-storage/current/VERSION.txt').read_text().strip()=
             def check(expected):
                 run(['docker', 'exec', container, 'python3', '-c', verify, expected])
 
+            old_version = run(['docker', 'exec', container, 'python3', '-c',
+                               "import json;print(json.load(open('/tmp/before.json'))['old_version'])"]).stdout.strip()
+            locked_install = """import fcntl,subprocess,sys
+from pathlib import Path
+root=Path('/run/onec-backup-storage-installer');root.mkdir(mode=0o700,exist_ok=True)
+calls=Path('/tmp/systemctl-calls.txt').read_bytes()
+with (root/'lock').open('w') as lock:
+ fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+ result=subprocess.run(['bash','/setup/install-lxc.sh','--archive',sys.argv[1],'--storage','/backups'],capture_output=True,text=True)
+ assert result.returncode!=0 and 'Another storage installation' in result.stderr
+assert Path('/tmp/systemctl-calls.txt').read_bytes()==calls
+"""
+            run(['docker', 'exec', container, 'python3', '-c', locked_install, current])
+            check(old_version)
+            failed_restart = """import subprocess,sys
+from pathlib import Path
+unit=Path('/etc/systemd/system/onec-backup-storage.service')
+before=unit.read_bytes()
+Path('/tmp/fail-restart-once').touch()
+result=subprocess.run(['bash','/setup/install-lxc.sh','--archive',sys.argv[1],'--storage','/backups-rejected'],capture_output=True,text=True)
+assert result.returncode!=0, 'The simulated restart failure was ignored'
+assert not Path('/tmp/fail-restart-once').exists()
+assert unit.read_bytes()==before, 'Previous service unit changed after failure'
+"""
+            run(['docker', 'exec', container, 'python3', '-c', failed_restart, current])
+            check(old_version)
+            last_restart = run(['docker', 'exec', container, 'tail', '-1', '/tmp/restart-versions.txt']).stdout.strip()
+            if not last_restart.endswith('/' + old_version):
+                raise AssertionError('Failed upgrade did not restart the previous installation')
+            run(['docker', 'exec', container, 'touch', '/tmp/service-inactive', '/tmp/service-disabled'])
+            run(['docker', 'exec', container, 'python3', '-c', failed_restart, current])
+            check(old_version)
+            run(['docker', 'exec', container, 'test', '-f', '/tmp/service-inactive'])
+            run(['docker', 'exec', container, 'test', '-f', '/tmp/service-disabled'])
+            run(['docker', 'exec', container, 'systemctl', 'enable', 'onec-backup-storage.service'])
+            run(['docker', 'exec', container, 'systemctl', 'restart', 'onec-backup-storage.service'])
+            run(['docker', 'exec', container, 'touch', '/tmp/fail-recovery-once'])
+            run(['docker', 'exec', container, 'python3', '-c', failed_restart, current])
+            check(old_version)
+            retained_snapshots = """import shutil,stat
+from pathlib import Path
+stages=list(Path('/opt/onec-backup-storage').glob('stage.*'))
+assert len(stages)==1
+stage=stages[0]
+assert stat.S_IMODE(stage.stat().st_mode)==0o700
+assert (stage/'gateway.before').read_bytes()==Path('/etc/onec-backup-storage/gateway.json').read_bytes()
+assert (stage/'unit.before').read_bytes()==Path('/etc/systemd/system/onec-backup-storage.service').read_bytes()
+assert (stage/'current.before').is_symlink()
+shutil.rmtree(stage)
+"""
+            run(['docker', 'exec', container, 'python3', '-c', retained_snapshots])
+            run(['docker', 'exec', container, 'systemctl', 'restart', 'onec-backup-storage.service'])
+            install(current, args.from_github)
             check(version)
             install(current)
             check(version)
@@ -113,8 +176,6 @@ assert Path('/tmp/systemctl-calls.txt').read_bytes()==calls
 """
             run(['docker', 'exec', container, 'python3', '-c', conflict, current])
             check(version)
-            old_version = run(['docker', 'exec', container, 'python3', '-c',
-                               "import json;print(json.load(open('/tmp/before.json'))['old_version'])"]).stdout.strip()
             install('/previous/' + args.previous_archive.name)
             check(old_version)
             install(current)
@@ -123,6 +184,9 @@ assert Path('/tmp/systemctl-calls.txt').read_bytes()==calls
                               'InstallFromGitHub': args.from_github, 'DataAndPairingPreserved': True,
                               'ConfigurationPermissionsPreserved': True, 'RepeatInstallVerified': True,
                               'ConflictingSameVersionRejectedBeforeRestart': True,
+                              'FailedServiceRestartRestoresPreviousInstallation': True,
+                              'InactiveAndDisabledServiceStatePreservedOnFailure': True,
+                              'ConcurrentInstallationRejected': True, 'FailedRecoveryKeepsPrivateSnapshots': True,
                               'RollbackAndUpgradeVerified': True, 'NativeSystemdOrProxmoxTested': False}))
         finally:
             subprocess.run(['docker', 'rm', '-f', container], capture_output=True)

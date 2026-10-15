@@ -2,14 +2,18 @@
 set -euo pipefail
 umask 077
 archive=""; endpoint=""; data=""
+usage() { echo 'Usage: install-lxc.sh --archive PACKAGE.tar.gz --storage /mnt/nas/backups [--endpoint wss://relay.domain]' >&2; exit "${1:-2}"; }
+require_value() { [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || { echo "Option $1 requires a value." >&2; usage; }; }
 while (($#)); do
  case "$1" in
-  --archive) archive="$2"; shift 2;;
-  --endpoint) endpoint="$2"; shift 2;;
-  --storage) data="$2"; shift 2;;
-  *) echo 'Usage: install-lxc.sh --archive PACKAGE.tar.gz --storage /mnt/nas/backups [--endpoint wss://relay.domain]' >&2; exit 2;;
+  --archive) require_value "$@"; archive="$2"; shift 2;;
+  --endpoint) require_value "$@"; endpoint="$2"; shift 2;;
+  --storage) require_value "$@"; data="$2"; shift 2;;
+  -h|--help) usage 0;;
+  *) usage;;
  esac
 done
+[[ -n "$archive" && -n "$data" ]] || usage
 [[ $(id -u) == 0 ]] || { echo 'Run inside a Debian 12 LXC as root.' >&2; exit 1; }
 source /etc/os-release
 [[ "$ID" == debian && "$VERSION_ID" == 12 && $(uname -m) == x86_64 ]] || { echo 'This installer supports Debian 12 x64.' >&2; exit 1; }
@@ -21,12 +25,69 @@ actual=$(sha256sum "$archive"); actual=${actual%% *}
 if [[ ! -f /etc/onec-backup-storage/gateway.json ]]; then
  [[ "$endpoint" == wss://* ]] || { echo 'Initial installation requires --endpoint wss://YOUR-DOMAIN.' >&2; exit 1; }
 fi
+command -v flock >/dev/null || { echo 'Install util-linux (flock) before running the installer.' >&2; exit 1; }
+install -d -m 700 /run/onec-backup-storage-installer
+exec 9>/run/onec-backup-storage-installer/lock
+flock -n 9 || { echo 'Another storage installation is already running.' >&2; exit 1; }
 apt-get update
 apt-get install -y ca-certificates libicu72 libssl3 zlib1g libstdc++6 python3
 getent passwd onecbackup-storage >/dev/null || useradd --system --home-dir /var/lib/onec-backup-storage --shell /usr/sbin/nologin onecbackup-storage
 install -d -m 755 /opt/onec-backup-storage
 stage=$(mktemp -d /opt/onec-backup-storage/stage.XXXXXXXX)
-trap 'rm -rf "$stage"' EXIT
+current_link=/opt/onec-backup-storage/current
+service_unit=/etc/systemd/system/onec-backup-storage.service
+activation_started=false; had_current=false; had_unit=false
+was_active=false; was_enabled=false
+restart_attempted=false; enable_attempted=false; reload_attempted=false
+# Copy into the destination filesystem before renaming: /opt and /etc may be separate mounts.
+replace_path() {
+ local saved="$1" destination="$2" temporary
+ temporary=$(mktemp -d "$(dirname -- "$destination")/.onec-replace.XXXXXXXX") || return 1
+ if cp -a -- "$saved" "$temporary/item" && mv -Tf -- "$temporary/item" "$destination"; then
+  rmdir -- "$temporary"
+ else
+  rm -rf -- "$temporary"
+  return 1
+ fi
+}
+finish_installation() {
+ local installation_status=$? rollback_failed=false
+ trap - EXIT
+ set +e
+ if [[ "$installation_status" -ne 0 && "$activation_started" == true ]]; then
+  if [[ "$restart_attempted" == true ]]; then
+   systemctl stop onec-backup-storage.service || rollback_failed=true
+  fi
+  if [[ "$enable_attempted" == true && "$was_enabled" == false ]]; then
+   systemctl disable onec-backup-storage.service || rollback_failed=true
+  fi
+  replace_path "$stage/gateway.before" /etc/onec-backup-storage/gateway.json || rollback_failed=true
+  if [[ "$had_current" == true ]]; then
+   replace_path "$stage/current.before" "$current_link" || rollback_failed=true
+  else
+   rm -f -- "$current_link" || rollback_failed=true
+  fi
+  if [[ "$had_unit" == true ]]; then
+   replace_path "$stage/unit.before" "$service_unit" || rollback_failed=true
+  else
+   rm -f -- "$service_unit" || rollback_failed=true
+  fi
+  if [[ "$reload_attempted" == true ]]; then
+   systemctl daemon-reload || rollback_failed=true
+  fi
+  if [[ "$restart_attempted" == true && "$was_active" == true ]]; then
+   systemctl restart onec-backup-storage.service && systemctl is-active --quiet onec-backup-storage.service || rollback_failed=true
+  fi
+  if [[ "$rollback_failed" == true ]]; then
+   echo "Activation and recovery failed. Recovery snapshots retained at $stage; check the storage service before retrying." >&2
+   exit "$installation_status"
+  fi
+  echo 'Activation failed. Previous configuration, version link and service unit restored; backup data was kept.' >&2
+ fi
+ rm -rf -- "$stage"
+ exit "$installation_status"
+}
+trap finish_installation EXIT
 python3 - "$archive" "$stage" <<'PY'
 import sys,tarfile,shutil,os
 from pathlib import Path,PurePosixPath
@@ -65,6 +126,17 @@ chown -R onecbackup-storage:onecbackup-storage /etc/onec-backup-storage
 chmod 700 /etc/onec-backup-storage; chmod 600 /etc/onec-backup-storage/*
 if [[ ! -d "$data" ]]; then install -d -m 700 -o onecbackup-storage -g onecbackup-storage "$data"; fi
 runuser -u onecbackup-storage -- test -w "$data" || { echo 'Storage is not writable by onecbackup-storage. Set NAS/mount permissions; existing data ownership was not changed.' >&2; exit 1; }
+cp -a -- /etc/onec-backup-storage/gateway.json "$stage/gateway.before"
+if [[ -e "$current_link" || -L "$current_link" ]]; then
+ [[ -L "$current_link" ]] || { echo 'The current installation must be a symlink; nothing activated.' >&2; exit 1; }
+ cp -a -- "$current_link" "$stage/current.before"; had_current=true
+fi
+if [[ -e "$service_unit" || -L "$service_unit" ]]; then
+ cp -a -- "$service_unit" "$stage/unit.before"; had_unit=true
+ if systemctl is-active --quiet onec-backup-storage.service; then was_active=true; fi
+ if systemctl is-enabled --quiet onec-backup-storage.service; then was_enabled=true; fi
+fi
+activation_started=true
 python3 - "$data" <<'PY'
 import json,sys,os
 path='/etc/onec-backup-storage/gateway.json'
@@ -77,8 +149,9 @@ os.replace(path+'.tmp',path)
 PY
 chown onecbackup-storage:onecbackup-storage /etc/onec-backup-storage/gateway.json
 chmod 600 /etc/onec-backup-storage/gateway.json
-ln -sfn "$target" /opt/onec-backup-storage/current
-cat >/etc/systemd/system/onec-backup-storage.service <<'UNIT'
+ln -s -- "$target" "$stage/current.next"
+mv -Tf -- "$stage/current.next" "$current_link"
+cat >"$stage/unit.next" <<'UNIT'
 [Unit]
 Description=1C-Backup storage gateway
 Wants=network-online.target
@@ -96,8 +169,14 @@ UMask=0077
 [Install]
 WantedBy=multi-user.target
 UNIT
+replace_path "$stage/unit.next" "$service_unit"
+reload_attempted=true
 systemctl daemon-reload
+enable_attempted=true
 systemctl enable onec-backup-storage.service
+restart_attempted=true
 systemctl restart onec-backup-storage.service
+systemctl is-active --quiet onec-backup-storage.service
+activation_started=false
 echo 'Installed. Import the client pairing file printed during initialization into Windows; import hub.json into the public endpoint.'
 echo 'Connection: journalctl -u onec-backup-storage.service -f'
