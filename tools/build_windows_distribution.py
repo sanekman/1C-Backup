@@ -213,38 +213,40 @@ def distribution_version(publish):
 
 
 def verify_pkcs_asset(publish, package_folders=None):
-    """Reject a runtime-pack fallback or a DLL that differs from the restored patched package."""
+    """Verify the selected DLL against its patched NuGet package or Microsoft runtime pack."""
     package = "System.Security.Cryptography.Pkcs"
     asset = package + ".dll"
-    versions = []
+    owners = []
     for project in ["OneCBackup.Desktop", "OneCBackup.Agent"]:
         deps = json.loads((publish / (project + ".deps.json")).read_text())
-        names = [name for name in deps["libraries"] if name.startswith(package + "/")]
+        names = {name for target in deps.get("targets", {}).values() for name, entry in target.items()
+                 if any(Path(path).name == asset for kind in ["runtime", "runtimeTargets"] for path in entry.get(kind, {}))}
         if len(names) != 1:
-            raise RuntimeError(project + " must use the patched PKCS package instead of the runtime-pack DLL")
-        version = names[0].split("/", 1)[1]
+            raise RuntimeError(project + " does not load a single PKCS runtime asset: " + str(sorted(names)))
+        owner = next(iter(names))
+        identifier, version = owner.split("/", 1)
+        allowed = [package, "runtimepack.Microsoft.AspNetCore.App.Runtime.win-x64",
+                   "runtimepack.Microsoft.WindowsDesktop.App.Runtime.win-x64", "runtimepack.Microsoft.NETCore.App.Runtime.win-x64"]
+        if identifier not in allowed or owner not in deps["libraries"]:
+            raise RuntimeError("Unknown PKCS runtime owner: " + owner)
         match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
         if match is None or tuple(map(int, match.groups())) < (10, 0, 13):
             raise RuntimeError("PKCS package must be at least 10.0.13")
-        active = [entry for target in deps["targets"].values() if (entry := target.get(names[0]))]
-        if not any(any(Path(path).name == asset for kind in ["runtime", "runtimeTargets"]
-                       for path in entry.get(kind, {})) for entry in active):
-            raise RuntimeError(project + " does not load the patched PKCS runtime asset")
-        versions.append(version)
-    if len(set(versions)) != 1:
-        raise RuntimeError("Desktop and agent PKCS versions differ")
+        owners.append(owner)
+    if len({owner.split("/", 1)[1] for owner in owners}) != 1:
+        raise RuntimeError("Desktop and agent PKCS runtime versions differ")
     if package_folders is None:
         assets = Path(__file__).resolve().parents[1] / "src/OneCBackup.Core/obj/project.assets.json"
         package_folders = json.loads(assets.read_text())["packageFolders"]
-    restored = [path for folder in package_folders
-                for path in (Path(folder) / package.lower() / versions[0]).rglob(asset)
+    restored = [path for owner in set(owners) for folder in package_folders
+                for path in (Path(folder) / owner.removeprefix("runtimepack.").lower()).rglob(asset)
                 if path.is_file()]
     if not restored:
         raise RuntimeError("Restore the patched PKCS package before packaging")
     packaged_hash = hashlib.sha256((publish / asset).read_bytes()).digest()
     if not any(hashlib.sha256(path.read_bytes()).digest() == packaged_hash for path in restored):
         raise RuntimeError("Packaged PKCS DLL differs from the restored patched package")
-    print("Verified packaged PKCS DLL:", versions[0])
+    print("Verified packaged PKCS DLL:", ", ".join(sorted(set(owners))))
 
 
 def package(publish, artifacts):

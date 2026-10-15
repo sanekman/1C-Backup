@@ -39,8 +39,41 @@ class PackagedPkcsTests(unittest.TestCase):
         self.verify()
 
     def test_framework_fallback_is_rejected_even_when_nuget_restore_was_clean(self):
-        (self.publish / "OneCBackup.Desktop.deps.json").write_text(json.dumps({"libraries": {}}))
-        with self.assertRaisesRegex(RuntimeError, "runtime-pack"):
+        self.runtime_pack("10.0.12")
+        with self.assertRaisesRegex(RuntimeError, "at least"):
+            self.verify()
+
+    def runtime_pack(self, version):
+        name = "runtimepack.Microsoft.AspNetCore.App.Runtime.win-x64/" + version
+        runtime = {"runtime": {self.asset: {}}}
+        for project in ["OneCBackup.Desktop", "OneCBackup.Agent"]:
+            (self.publish / (project + ".deps.json")).write_text(json.dumps({
+                "libraries": {name: {}}, "targets": {"net10.0/win-x64": {name: runtime}}}))
+
+    def test_patched_microsoft_runtime_pack_can_supply_the_dll(self):
+        self.runtime_pack("10.0.13")
+        restored = self.cache / "microsoft.aspnetcore.app.runtime.win-x64/10.0.13/runtimes/win-x64/lib/net10.0"
+        restored.mkdir(parents=True)
+        (restored / self.asset).write_bytes(b"patched runtime pack fixture")
+        (self.publish / self.asset).write_bytes(b"patched runtime pack fixture")
+        self.verify()
+
+    def test_patched_runtime_metadata_cannot_hide_an_old_dll(self):
+        self.runtime_pack("10.0.13")
+        restored = self.cache / "microsoft.aspnetcore.app.runtime.win-x64/10.0.13/runtimes/win-x64/lib/net10.0"
+        restored.mkdir(parents=True)
+        (restored / self.asset).write_bytes(b"patched runtime pack fixture")
+        with self.assertRaisesRegex(RuntimeError, "differs"):
+            self.verify()
+
+    def test_desktop_and_agent_can_resolve_same_patched_version_from_different_packs(self):
+        self.runtime_pack("10.0.13")
+        self.deps("OneCBackup.Agent")
+        self.verify()
+
+    def test_desktop_and_agent_cannot_disagree_on_runtime_version(self):
+        self.deps("OneCBackup.Agent", version="10.0.14")
+        with self.assertRaisesRegex(RuntimeError, "versions differ"):
             self.verify()
 
     def test_stale_dll_cannot_be_shipped_under_patched_dependency_metadata(self):
