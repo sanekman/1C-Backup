@@ -5,5 +5,5 @@
   <ImplicitUsings>enable</ImplicitUsings>
   <Nullable>enable</Nullable>
  </PropertyGroup>
- <ItemGroup><PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.12" /><ProjectReference Include="../OneCBackup.Core/OneCBackup.Core.csproj" /></ItemGroup>
+ <ItemGroup><PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.13" /><ProjectReference Include="../OneCBackup.Core/OneCBackup.Core.csproj" /></ItemGroup>
 </Project>

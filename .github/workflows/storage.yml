@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
-        with: {dotnet-version: 10.0.401}
+        with: {dotnet-version: 10.0.402}
       - run: dotnet test tests/OneCBackup.Core.Tests --filter 'FullyQualifiedName~RemoteGatewayTests|FullyQualifiedName~RemoteProtocolSafetyTests'
       - run: docker build -f deploy/storage/Dockerfile -t onec-storage-bridge:0.1.0-alpha.1 .
       - run: python3 tests/storage/container_smoke.py

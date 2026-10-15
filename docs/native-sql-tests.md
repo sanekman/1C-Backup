@@ -22,7 +22,7 @@ LocalDB подключается через локальный именован�
 
 ## Ручной запуск на Windows
 
-Нужны .NET SDK 10.0.401, Python 3.12, SQL Server LocalDB и PostgreSQL с утилитами `initdb`, `pg_ctl`, `psql`, `pg_dump`, `pg_restore`. В PowerShell из корня репозитория:
+Нужны .NET SDK 10.0.402, Python 3.12, SQL Server LocalDB и PostgreSQL с утилитами `initdb`, `pg_ctl`, `psql`, `pg_dump`, `pg_restore`. В PowerShell из корня репозитория:
 
 ```powershell
 $env:ONECBACKUP_NATIVE_SQL = '1'
