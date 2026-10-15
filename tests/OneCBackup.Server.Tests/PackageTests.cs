@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using Xunit;
 
 namespace OneCBackup.Server.Tests;
@@ -33,7 +34,11 @@ public sealed class PackageTests(ServerFixture fixture) : IClassFixture<ServerFi
             HttpsCertificatePath = Path.Combine(fixture.Root, "certificate.pfx"), HttpsCertificatePasswordFile = Path.Combine(fixture.Root, "certificate-password.txt") } }));
         Process Start(bool migration)
         {
-            var info = new ProcessStartInfo(executable) { WorkingDirectory = fixture.Root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            var info = new ProcessStartInfo(executable) {
+                WorkingDirectory = fixture.Root, UseShellExecute = false,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+            };
             info.ArgumentList.Add("--Server:ConfigFile"); info.ArgumentList.Add(configurationFile);
             if (migration) info.ArgumentList.Add("--migrate");
             return Process.Start(info)!;

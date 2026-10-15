@@ -9,7 +9,7 @@ namespace OneCBackup.Desktop;
 public partial class MainWindow
 {
     private static string FileSnapshotDetails(FileBackupSnapshot? snapshot) => snapshot is null ? "" : snapshot.IsIncomplete
-        ? "Неполная файловая копия: часть источника недоступна. Список пропусков находится в индексе архива.\n" : snapshot.IsFull
+        ? "Неполная файловая копия: некоторые файлы не скопированы. Список пропусков находится в индексе архива. Остальные файлы доступны для восстановления.\n" : snapshot.IsFull
         ? "Файловая копия: полная. Для восстановления достаточно этого архива.\n"
         : $"Файловая копия: инкрементная. Для восстановления нужны полная основа и все изменения в этом хранилище. Архивов в цепочке: {snapshot.Depth + 1}.\n";
     private void FileBackupMode_Changed(object sender, SelectionChangedEventArgs e) => UpdateFileBackupControls();
