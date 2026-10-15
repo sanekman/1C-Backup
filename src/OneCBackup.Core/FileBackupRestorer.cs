@@ -39,12 +39,13 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
             FileBackupPaths.RequireOutside(job.Source, work, "Временная папка восстановления должна находиться вне исходных данных.");
         if (Directory.Exists(stage) || File.Exists(stage) || Directory.Exists(work) || File.Exists(work))
             throw new IOException("Временная папка восстановления уже существует.");
+        RejectAncestorReparse(work);
         var ownsStage = false; var ownsWork = false;
         FileBackupManifest? final = null;
         try
         {
-            Directory.CreateDirectory(work); ownsWork = true;
-            Directory.CreateDirectory(stage); ownsStage = true;
+            PrivateBackupDirectory.Create(work); ownsWork = true;
+            PrivateBackupDirectory.Create(stage); ownsStage = true;
             var archiveNumber = 0;
             foreach (var record in chain)
             {

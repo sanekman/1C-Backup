@@ -918,6 +918,8 @@ public partial class MainWindow : Window
             CopyVerificationStatus.Text = row.Record.Backup.FileSnapshot is null
                 ? "Размер и SHA256 совпадают с журналом: " + row.DisplayLocation + ". Проверка не заменяет пробное восстановление базы."
                 : $"Файловая цепочка проверена: архивов {checkedArchives}, размер и SHA-256 совпадают. Для проверки содержимого используйте «Восстановить файлы…».";
+            if (row.Record.Backup.FileSnapshot?.IsIncomplete == true)
+                CopyVerificationStatus.Text += "\n" + BackupCopyRow.IncompleteWarning;
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         { outcome = BackupVerificationOutcome.Cancelled; CopyVerificationStatus.Text = "Проверка отменена: " + row.DisplayLocation; }

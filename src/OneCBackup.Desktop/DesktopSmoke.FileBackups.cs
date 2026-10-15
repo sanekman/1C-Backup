@@ -128,6 +128,50 @@ internal static partial class DesktopSmoke
             || beforeCatalog != JsonSerializer.Serialize(await catalog.ReadAsync()) || beforeHistory != JsonSerializer.Serialize(await history.ReadAsync()))
             throw new InvalidOperationException("Восстановленная цепочка или неизменность журнала не подтверждены.");
         screenshot("files-incremental-restored-compact");
+
+        // A verified archive can still omit source files. Exercise the real source sharing
+        // failure, manual verification, latest-copy audit, and restore warning together.
+        var blocked = Path.Combine(source, "blocked.txt");
+        await File.WriteAllTextAsync(blocked, "must be reported as skipped");
+        Click("JobsNavigation");
+        Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(item => item.Id == job.Id);
+        await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled, "Запуск неполной копии не готов.");
+        using (var locked = new FileStream(blocked, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Click("RunButton");
+            await WaitUntil(() => window.SmokeReady, "Копирование доступных файлов не завершилось.");
+        }
+        var partial = (await catalog.ReadAsync()).Single(record => record.JobId == job.Id && record.Backup.FileSnapshot?.IsIncomplete == true);
+        if (!File.Exists(first.Backup.Location) || !File.Exists(latest.Backup.Location))
+            throw new InvalidOperationException("Неполная копия удалила предыдущую файловую цепочку.");
+        Click("CheckLatestCopiesButton");
+        await WaitUntil(() => window.SmokeReady, "Проверка последней неполной копии не завершилась.");
+        if (!Control<Expander>("StorageCheckResults").IsExpanded
+            || !Control<Expander>("StorageCheckResults").Header.ToString()!.Contains("Неполных копий: 1")
+            || !Control<TextBox>("StorageCheckDetails").Text.Contains(BackupCopyRow.IncompleteWarning))
+            throw new InvalidOperationException("Проверка последних копий скрыла предупреждение о пропусках.");
+        screenshot("files-partial-audit-compact");
+        Click("CopiesNavigation");
+        await WaitUntil(() => window.SmokeReady, "Каталог неполной копии не загрузился.");
+        Control<ComboBox>("CopyJobFilter").SelectedValue = job.Id;
+        Control<DataGrid>("Copies").SelectedItem = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Single(row => row.Record.Id == partial.Id);
+        await WaitUntil(() => window.SmokeReady && Control<Button>("VerifyCopyButton").IsEnabled, "Проверка неполной копии недоступна.");
+        Click("VerifyCopyButton");
+        await WaitUntil(() => window.SmokeReady, "Ручная проверка неполной копии не завершилась.");
+        var checkedPartial = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Single(row => row.Record.Id == partial.Id);
+        if (!Control<TextBlock>("CopyVerificationStatus").Text.Contains(BackupCopyRow.IncompleteWarning)
+            || !checkedPartial.CheckSummary.StartsWith("С пропусками") || checkedPartial.CheckColor != "#92400E"
+            || !checkedPartial.CheckHelp.Contains(BackupCopyRow.IncompleteWarning))
+            throw new InvalidOperationException("Проверка целостности показала неполную копию как полную.");
+        var partialParent = Path.Combine(fixture, "partial-restores"); Directory.CreateDirectory(partialParent);
+        await window.RestoreSelectedFilesAsync(partialParent);
+        var partialDirectory = Directory.GetDirectories(partialParent).Single();
+        if (File.Exists(Path.Combine(partialDirectory, "blocked.txt"))
+            || await File.ReadAllTextAsync(Path.Combine(partialDirectory, "stable.txt")) != "unchanged"
+            || !Control<TextBlock>("CopyVerificationStatus").Text.Contains("blocked.txt")
+            || !Control<TextBlock>("CopyVerificationStatus").Text.Contains("исходная копия неполная"))
+            throw new InvalidOperationException("Восстановление неполной копии потеряло доступные файлы или предупреждение о пропусках.");
+        screenshot("files-partial-restored-compact");
         window.Width = 1100; window.Height = 740;
     }
 }

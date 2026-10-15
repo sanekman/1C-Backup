@@ -6,18 +6,22 @@ namespace OneCBackup.Desktop;
 public sealed record BackupCopyRow(BackupRecord Record, string JobName,
     BackupVerificationEntry? Verification = null, bool VerificationUnavailable = false)
 {
+    internal const string IncompleteWarning = "Копия неполная: некоторые файлы пропущены при создании. Проверка целостности не возвращает эти файлы. Список пропусков находится в индексе архива.";
     private BackupVerificationEntry? CurrentCheck => Verification is not null && Verification.Matches(Record) ? Verification : null;
     public string CheckSummary => VerificationUnavailable ? "Нет данных" : CurrentCheck is not { } check ? "Не проверена"
-        : (check.Outcome switch { BackupVerificationOutcome.Verified => "Успех", BackupVerificationOutcome.Failed => "Ошибка", _ => "Отмена" })
+        : (check.Outcome switch { BackupVerificationOutcome.Verified when Record.Backup.FileSnapshot?.IsIncomplete == true => "С пропусками",
+                BackupVerificationOutcome.Verified => "Успех", BackupVerificationOutcome.Failed => "Ошибка", _ => "Отмена" })
             + " · " + check.CheckedUtc.ToLocalTime().ToString("dd.MM HH:mm");
     public string CheckColor => VerificationUnavailable ? "#92400E" : CurrentCheck?.Outcome switch
-    { BackupVerificationOutcome.Verified => "#166534", BackupVerificationOutcome.Failed => "#B91C1C", _ => "#64748B" };
+    { BackupVerificationOutcome.Verified when Record.Backup.FileSnapshot?.IsIncomplete == true => "#92400E",
+        BackupVerificationOutcome.Verified => "#166534", BackupVerificationOutcome.Failed => "#B91C1C", _ => "#64748B" };
     public string CheckHelp => VerificationUnavailable ? "Не удалось прочитать сохранённые результаты проверок. Проверить файл можно отдельно."
         : CurrentCheck is not { } check ? "Эту копию ещё не проверяли кнопками проверки целостности."
         : $"Последняя проверка: {check.CheckedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n"
             + (check.Origin == BackupVerificationOrigin.Manual ? "Проверка выбранной копии." : "Проверка последних копий задания.")
             + "\n" + (check.Outcome == BackupVerificationOutcome.Verified ? "Размер и SHA-256 совпали с каталогом."
                 : check.Outcome == BackupVerificationOutcome.Cancelled ? "Проверка отменена; целостность не подтверждена." : "Проверка не пройдена; подробности: " + check.Error)
+            + (Record.Backup.FileSnapshot?.IsIncomplete == true ? "\n" + IncompleteWarning : "")
             + "\nЭто результат на указанное время. Он не подтверждает наличие файла сейчас и не заменяет пробное восстановление.";
     public string CompactStorage => (StorageCategory switch { "google" => "Google Drive", "ftp" => Location.StartsWith("ftps:", StringComparison.OrdinalIgnoreCase) ? "FTPS" : "FTP", "network" => "Сеть", _ => "Диск" }) + " · " + SizeDescription
         + (Record.Backup.FileSnapshot?.IsIncomplete == true ? " · Неполная" : "");

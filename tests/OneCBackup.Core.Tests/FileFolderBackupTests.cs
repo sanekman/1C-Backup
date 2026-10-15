@@ -1,5 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using OneCBackup.Core;
 using Xunit;
 
@@ -316,6 +318,68 @@ public sealed class FileFolderBackupTests : IDisposable
 
     private sealed class RestoreProgress(Action<FileRestoreProgress> observe) : IProgress<FileRestoreProgress>
     { public void Report(FileRestoreProgress value) => observe(value); }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EncryptedRestoreKeepsPlaintextPrivateUntilPublishingOrCancellation(bool cancel)
+    {
+        Directory.CreateDirectory(Path.Combine(Source, "nested"));
+        await File.WriteAllTextAsync(Path.Combine(Source, "nested", "secret.txt"), "private fixture data");
+        var passwords = new Passwords(); var job = Job with { ArchivePasswordKey = "fixture-key" };
+        var record = await Run(job, passwords);
+        using var cancellation = new CancellationTokenSource();
+        var inspected = false;
+        var progress = new RestoreProgress(value =>
+        {
+            if (value.Phase == FileRestorePhase.VerifyingFiles)
+            {
+                var stage = Assert.Single(Directory.GetDirectories(RestoreParent, ".onec-restore-*.partial"));
+                var work = Assert.Single(Directory.GetDirectories(job.TemporaryDirectory!, "file-restore-*"));
+                AssertPrivateDirectory(stage); AssertPrivateDirectory(work);
+                Assert.Equal("private fixture data", File.ReadAllText(Path.Combine(stage, "nested", "secret.txt")));
+                inspected = true;
+            }
+            if (cancel && value.Phase == FileRestorePhase.Publishing) cancellation.Cancel();
+        });
+        if (cancel)
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Restorer(passwords)
+                .RestoreAsync(record, job, RestoreParent, cancellation.Token, progress: progress));
+            Assert.Empty(Directory.GetFileSystemEntries(RestoreParent));
+        }
+        else
+        {
+            var restored = await Restorer(passwords).RestoreAsync(record, job, RestoreParent, progress: progress);
+            AssertPrivateDirectory(restored.Directory);
+            Assert.Equal("private fixture data", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "nested", "secret.txt")));
+        }
+        Assert.True(inspected);
+        Assert.Empty(Directory.GetDirectories(job.TemporaryDirectory!, "file-restore-*"));
+    }
+
+    private static void AssertPrivateDirectory(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var allowed = new HashSet<string> { identity.User!.Value,
+                new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null).Value };
+            var acl = new DirectoryInfo(path).GetAccessControl();
+            Assert.True(acl.AreAccessRulesProtected);
+            var rules = acl.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
+            Assert.NotEmpty(rules);
+            var ownerHasFullControl = false;
+            foreach (var rule in rules)
+            {
+                Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+                Assert.Contains(rule.IdentityReference.Value, allowed);
+                ownerHasFullControl |= rule.IdentityReference.Value == identity.User.Value && rule.FileSystemRights.HasFlag(FileSystemRights.FullControl);
+            }
+            Assert.True(ownerHasFullControl);
+        }
+        else Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(path));
+    }
 
     [Fact]
     public async Task PointAndLatestAuditDetectMissingOrCorruptFullBasisEvenWhenIncrementIsIntact()

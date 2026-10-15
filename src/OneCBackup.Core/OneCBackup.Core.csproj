@@ -8,6 +8,8 @@
     <ProjectReference Include="../OneCBackup.Remote/OneCBackup.Remote.csproj" />
     <PackageReference Include="FluentFTP" Version="55.0.0" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.7" />
+    <!-- SqlClient otherwise selects 9.0.11, affected by the 2026 PKCS parsing advisories. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.21" />
     <PackageReference Include="SharpZipLib" Version="1.4.2" />
   </ItemGroup>
 </Project>

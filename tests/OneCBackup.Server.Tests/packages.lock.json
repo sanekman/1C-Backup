@@ -571,8 +571,8 @@
       },
       "System.Security.Cryptography.Pkcs": {
         "type": "Transitive",
-        "resolved": "9.0.11",
-        "contentHash": "YS2YqtN6fFjlTDIQI+ucjbbrEvwMn796r+VLTQRr/5Oy6g+i+m7nIou83KnJCnAcKna2I+5eVJRks6SoHSpetQ=="
+        "resolved": "9.0.21",
+        "contentHash": "KD+oHoYIxwNCajjVe58WVwq9cRpum+Pg3tRveDRtkcaw6w3oc7sNBoMRtb5P5OehI3bgv1ucMpgjf8lpj5J96A=="
       },
       "System.Security.Cryptography.ProtectedData": {
         "type": "Transitive",
@@ -633,7 +633,8 @@
           "FluentFTP": "[55.0.0, )",
           "Microsoft.Data.SqlClient": "[6.1.7, )",
           "OneCBackup.Remote": "[0.1.0-dev, )",
-          "SharpZipLib": "[1.4.2, )"
+          "SharpZipLib": "[1.4.2, )",
+          "System.Security.Cryptography.Pkcs": "[9.0.21, )"
         }
       },
       "onecbackup.remote": {

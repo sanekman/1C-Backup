@@ -1,6 +1,4 @@
 using System.Security.Cryptography;
-using System.Security.AccessControl;
-using System.Security.Principal;
 using ICSharpCode.SharpZipLib.Zip;
 
 namespace OneCBackup.Core;
@@ -93,7 +91,7 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
         var staging = Path.Combine(Path.GetFullPath(workDirectory), "source-stage-" + Guid.NewGuid().ToString("N"));
         try
         {
-            CreatePrivateStaging(staging);
+            PrivateBackupDirectory.Create(staging);
             await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.Asynchronous))
             {
                 using (var zip = new ZipOutputStream(output) { IsStreamOwner = false, Password = password, UseZip64 = UseZip64.Dynamic })
@@ -163,21 +161,6 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
             throw new FileBackupSourceException("Файл изменился во время копирования: " + item.RelativePath);
         await output.FlushAsync(token);
         return new(item.RelativePath, plannedLength, Convert.ToHexStringLower(hash.GetHashAndReset()), new(modified));
-    }
-    private static void CreatePrivateStaging(string path)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            using var identity = WindowsIdentity.GetCurrent();
-            var acl = new DirectorySecurity(); acl.SetAccessRuleProtection(true, false);
-            var inheritance = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
-            acl.AddAccessRule(new FileSystemAccessRule(identity.User!, FileSystemRights.FullControl,
-                inheritance, PropagationFlags.None, AccessControlType.Allow));
-            acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
-                FileSystemRights.FullControl, inheritance, PropagationFlags.None, AccessControlType.Allow));
-            new DirectoryInfo(path).Create(acl);
-        }
-        else Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
     private static ZipEntry Entry(string name, long length, string? password) => new(name)
     { Size = length, AESKeySize = password is null ? 0 : 256, DateTime = DateTime.UtcNow };

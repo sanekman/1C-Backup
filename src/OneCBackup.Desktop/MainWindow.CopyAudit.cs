@@ -25,10 +25,16 @@ public partial class MainWindow
             var checker = new LatestBackupAudit(backupStorage, catalog);
             var report = await Task.Run(() => checker.CheckAsync(job, cancellation.Token));
             var passed = report.Destinations.Count(result => result.Status == BackupAuditStatus.Verified);
+            var incomplete = report.Destinations.Count(result => result.Record?.Backup.FileSnapshot?.IsIncomplete == true);
             var all = !report.Cancelled && passed == report.Destinations.Count;
             StorageCheckResults.Header = Status.Text = report.Cancelled ? "Проверка копий отменена: " + job.Name
                 : all ? $"Все последние копии проверены: {passed} — {job.Name}"
                 : $"Проверено последних копий: {passed} из {report.Destinations.Count} — {job.Name}";
+            if (incomplete > 0)
+            {
+                Status.Text += $" · Неполных копий: {incomplete}";
+                StorageCheckResults.Header = Status.Text;
+            }
             var details = new List<string> { "Задание: " + job.Name };
             details.AddRange(report.Destinations.OrderBy(result => result.Status == BackupAuditStatus.Verified).Select(result =>
                 result.Destination + "\n" + (result.Status == BackupAuditStatus.Verified ? result.Record?.Backup.FileSnapshot is { } snapshot
@@ -36,12 +42,13 @@ public partial class MainWindow
                     : "Размер и SHA-256 совпадают."
                     : result.Status == BackupAuditStatus.Missing ? "Нет зарегистрированной копии."
                     : result.Status == BackupAuditStatus.Cancelled ? "Отменено или не проверено." : "Ошибка проверки.")
+                + (result.Record?.Backup.FileSnapshot?.IsIncomplete == true ? "\n" + BackupCopyRow.IncompleteWarning : "")
                 + (result.Record is null ? "" : "\nКопия: " + result.Record.Backup.Location
                     + "\nСоздана: " + result.Record.CompletedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))
                 + (result.Error is null ? "" : "\n" + result.Error)));
             details.Add("Проверены только последние зарегистрированные копии в текущих хранилищах. Проверка не изменяет файлы, каталог, историю запусков или правила хранения. Совпадение SHA-256 не заменяет пробное восстановление базы.");
             StorageCheckDetails.Text = string.Join("\n\n", details);
-            StorageCheckResults.IsExpanded = !all;
+            StorageCheckResults.IsExpanded = !all || incomplete > 0;
             var attempted = report.Destinations.Where(result => result.Record is not null && result.CheckedUtc is not null)
                 .Select(result => BackupVerificationEntry.Create(result.Record!, result.Status switch
                 { BackupAuditStatus.Verified => BackupVerificationOutcome.Verified,
