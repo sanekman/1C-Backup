@@ -1,0 +1,10 @@
+{
+  "version": "0.1.0-alpha.2",
+  "sha256": "b27c5663c9368d2844b7829729f44f0dd6c678052776acd2d8bc0250036433f5",
+  "bytes": 47687603,
+  "source_revision": "15ce97d6e9c7004d8832042c899d7e5b2a4e89ff",
+  "platform": "linux-x64",
+  "component": "storage-gateway",
+  "dotnet_runtime": "10.0.13",
+  "sdk": "10.0.402"
+}
