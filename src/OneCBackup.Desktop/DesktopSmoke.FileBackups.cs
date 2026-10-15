@@ -156,6 +156,8 @@ internal static partial class DesktopSmoke
         Control<ComboBox>("CopyJobFilter").SelectedValue = job.Id;
         Control<DataGrid>("Copies").SelectedItem = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Single(row => row.Record.Id == partial.Id);
         await WaitUntil(() => window.SmokeReady && Control<Button>("VerifyCopyButton").IsEnabled, "Проверка неполной копии недоступна.");
+        if (!Control<TextBlock>("SelectedCopyPath").Text.StartsWith("Неполная копия"))
+            throw new InvalidOperationException("Подпись выбранной копии скрывает пропущенные файлы.");
         Click("VerifyCopyButton");
         await WaitUntil(() => window.SmokeReady, "Ручная проверка неполной копии не завершилась.");
         var checkedPartial = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Single(row => row.Record.Id == partial.Id);
