@@ -82,7 +82,8 @@ class SigningTests(unittest.TestCase):
             exe = root / '1C-Backup-0.1.0-test-windows-x64-setup.exe'
             def compile_fixture(*args, **kwargs): exe.write_bytes(b'MZfixture')
             def sign_fixture(files):
-                self.assertEqual([exe], files)
+                self.assertEqual(1, len(files))
+                self.assertTrue(exe.samefile(files[0]))
                 exe.write_bytes(exe.read_bytes() + b'fixture signature')
                 return True
             with patch.object(module.subprocess, 'run', side_effect=compile_fixture), patch.object(signing, 'sign_and_verify', side_effect=sign_fixture):
