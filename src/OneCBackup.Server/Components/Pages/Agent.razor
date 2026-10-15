@@ -1,0 +1,39 @@
+@page "/agents/{Id:guid}"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+<PageTitle>Карточка агента — 1C-Backup</PageTitle>
+<a href="./">← Агенты</a>
+@if (Data is { } agent)
+{
+    <h1>@agent.Name</h1>
+    <section class="card narrow">
+        <dl><dt>ID</dt><dd class="mono">@agent.AgentId</dd>
+            <dt>Версия</dt><dd>@(agent.AgentVersion ?? "Ещё не получена")</dd>
+            <dt>Зарегистрирован</dt><dd>@Home.Time(agent.RegisteredUtc)</dd>
+            <dt>Последняя связь, время сервера</dt><dd>@Home.Time(agent.ReceivedUtc)</dd>
+            <dt>Последняя отметка времени агента</dt><dd>@Home.Time(agent.SentUtc)</dd>
+            <dt>Ревизия на сервере</dt><dd>@agent.DesiredRevision</dd>
+            <dt>Ревизия, сообщённая агентом</dt><dd>@(agent.ReportedRevision?.ToString() ?? "Нет сигнала")</dd>
+            <dt>Исполнитель копирования</dt><dd>@(agent.ReceivedUtc is null ? "Нет данных" : agent.BackupExecutionAvailable ? "Агент сообщает готовность" : "Агент сообщает, что недоступен")</dd>
+        </dl>
+        <p class="muted">Данные актуальны на время последнего сигнала. Готовность исполнителя не подтверждает успешное создание копии.</p>
+        @if (agent.Revoked) { <p class="error">Доступ отозван. Сервер не принимает этот агентский токен. Принятое локальное расписание само по себе не отменяется.</p> }
+        else
+        {
+            <details><summary>Отозвать доступ к серверу</summary><p>Агент перестанет получать настройки и отправлять состояние. Это не удаляет локальные копии и не останавливает уже принятую конфигурацию.</p>
+                <form action="@("management/agents/" + agent.AgentId + "/revoke")" method="post"><AntiforgeryToken /><button type="submit" class="danger">Отозвать доступ</button></form>
+            </details>
+        }
+    </section>
+}
+else { <h1>Агент не найден</h1> }
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private AgentRecord? Data;
+    protected override async Task OnParametersSetAsync()
+    {
+        Data = await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted);
+        if (Data is null) Http.HttpContext.Response.StatusCode = 404;
+    }
+}

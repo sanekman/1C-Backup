@@ -1,0 +1,41 @@
+name: Verify published update download
+on:
+  push:
+    branches: ['feature/**']
+    paths: ['.github/workflows/update-download.yml', 'tests/updates/**']
+  workflow_dispatch:
+    inputs:
+      previous_version:
+        description: Installed version to check from
+        default: '0.2.0-alpha.16'
+        required: true
+      expected_version:
+        description: Expected published version (empty selects latest)
+        required: false
+permissions:
+  contents: read
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: {dotnet-version: 10.0.402}
+      - name: Download with the production update client
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_VERSION: ${{ inputs.previous_version || '0.2.0-alpha.16' }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          if [[ -n "$EXPECTED_VERSION" ]]; then
+            dotnet run --project tests/updates/PublishedUpdateProbe.csproj -- "$PREVIOUS_VERSION" "$EXPECTED_VERSION"
+          else
+            dotnet run --project tests/updates/PublishedUpdateProbe.csproj -- "$PREVIOUS_VERSION"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: published-update-download-result
+          path: artifacts/update-download/result.json
