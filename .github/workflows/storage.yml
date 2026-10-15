@@ -46,6 +46,19 @@ jobs:
       - run: python3 tests/storage/lxc_installer_smoke.py --version "$STORAGE_VERSION"
         env:
           STORAGE_VERSION: ${{ steps.version.outputs.version }}
+      - name: Verify upgrade, rollback and preservation of the first release
+        shell: bash
+        env:
+          STORAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git clone --depth 1 --single-branch --no-tags --branch distribution/storage-linux-x64-0.1.0-alpha.1 \
+            https://github.com/sanekman/1C-Backup.git artifacts/storage-previous
+          git clone --depth 1 --single-branch --no-tags --branch storage-v0.1.0-alpha.1 \
+            https://github.com/sanekman/1C-Backup.git artifacts/storage-previous-source
+          python3 tests/storage/upgrade_smoke.py \
+            --previous-archive artifacts/storage-previous/storage/OneCBackup-Storage-0.1.0-alpha.1-linux-x64.tar.gz \
+            --previous-installer artifacts/storage-previous-source/deploy/storage/install-lxc.sh \
+            --archive "artifacts/OneCBackup-Storage-$STORAGE_VERSION-linux-x64.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
           name: storage-linux-x64

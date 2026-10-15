@@ -3,6 +3,8 @@ services:
     build:
       context: ../..
       dockerfile: deploy/storage/Dockerfile
+      args:
+        VERSION: "${STORAGE_VERSION:?Set STORAGE_VERSION from deploy/storage/VERSION}"
     user: "${STORAGE_UID:-1000}:${STORAGE_GID:-1000}"
     volumes:
       - "${STORAGE_CONFIG_DIRECTORY:?Set STORAGE_CONFIG_DIRECTORY}/gateway.json:/config/gateway.json:ro"

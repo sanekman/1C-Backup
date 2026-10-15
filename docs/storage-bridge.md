@@ -49,24 +49,30 @@ journalctl -u onec-backup-storage -f
 
 При повторной установке того же проверенного пакета настройки и сопряжение сохраняются. Для обновления получите новый исходный тег/установщик и пакет; версии размещаются отдельно под `/opt/onec-backup-storage`, затем меняется ссылка `current`. Старые версии и данные автоматически не удаляются. Первоначальный установщик поддерживает Debian 12 x64; реальный systemd/Proxmox нужно проверить на вашем хосте.
 
+Переход alpha.1 → alpha.2 проверен штатным `install-from-github.sh` в Debian 12: данные, сертификаты, секреты, конфигурация и файл сопряжения сохранились. Проверены повторная установка, откат на сохранённую alpha.1 и возврат на alpha.2. Пакет с другой контрольной суммой при том же номере версии отклоняется до перезапуска службы. Эти проверки используют запись вызовов `systemctl`; работа настоящего systemd в Proxmox остаётся отдельной проверкой.
+
 ## Docker внутри Linux VM
 
 Docker предпочтительно устанавливать в Linux VM Proxmox. Исходники из того же тега:
 
 ```bash
-docker build -f deploy/storage/Dockerfile --build-arg VERSION=0.1.0-alpha.2 -t onec-storage-bridge:0.1.0-alpha.2 .
+export STORAGE_VERSION="$(cat deploy/storage/VERSION)"
+docker build -f deploy/storage/Dockerfile --build-arg VERSION="$STORAGE_VERSION" -t "onec-storage-bridge:$STORAGE_VERSION" .
 mkdir -m 700 storage-config
 docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD/storage-config:/config" onec-storage-bridge:0.1.0-alpha.2 \
+  -v "$PWD/storage-config:/config" "onec-storage-bridge:$STORAGE_VERSION" \
   initialize /config wss://relay.ВАШ-ДОМЕН
 export STORAGE_CONFIG_DIRECTORY="$PWD/storage-config"
 export STORAGE_DATA_DIRECTORY=/mnt/nas/backups
 export STORAGE_UID="$(id -u)" STORAGE_GID="$(id -g)"
-docker compose -f deploy/storage/compose.yaml up -d --build
+docker compose -f deploy/storage/compose.yaml build --build-arg VERSION="$STORAGE_VERSION"
+docker compose -f deploy/storage/compose.yaml up -d --no-build
 docker compose -f deploy/storage/compose.yaml logs -f
 ```
 
 `STORAGE_UID`/`STORAGE_GID` должны иметь доступ на запись к папке NAS. Compose монтирует только необходимые ключи шлюза и открытый сертификат агента; client-pairing.json и закрытый ключ агента в контейнер не передаются. Файлы данных хранятся вне writable layer контейнера. Доступ к конфигурации, секретам и Docker daemon ограничьте владельцем.
+
+`STORAGE_VERSION` берётся из того же файла версии, что и Linux-пакет. Явные `build --build-arg VERSION=…` и `up --no-build` работают также с неизменяемым исходным тегом `storage-v0.1.0-alpha.2`: в его Compose-файлах переменная ещё не передаётся автоматически, поэтому `up --build` собирает версию `0.1.0-dev`. В текущих исходниках Compose требует версию и передаёт её в сборку. Опубликованный образ GHCR уже имеет правильную версию.
 
 ## Подключение в Windows
 
@@ -91,7 +97,9 @@ export STORAGE_CONFIG_DIRECTORY=/opt/onec-relay-config
 export STORAGE_DOMAIN=relay.ВАШ-ДОМЕН
 export ACME_EMAIL=ваша-почта@example.com
 export STORAGE_UID="$(id -u)" STORAGE_GID="$(id -g)"
-docker compose -f deploy/storage/compose.hub.yaml up -d --build
+export STORAGE_VERSION="$(cat deploy/storage/VERSION)"
+docker compose -f deploy/storage/compose.hub.yaml build --build-arg VERSION="$STORAGE_VERSION"
+docker compose -f deploy/storage/compose.hub.yaml up -d --no-build
 ```
 
 DNS A/AAAA должен указывать на публичный узел. Разрешите входящий TCP 80 и 443; удалите ошибочную AAAA-запись, если IPv6 не доступен. Caddy получает сертификат именно у Let’s Encrypt и продлевает его автоматически. Тома `caddy-data` и `caddy-config` сохраняйте при обновлении: в них находятся ключи ACME/сертификаты. Бэкенд слушает только loopback в общей с Caddy сетевой области.

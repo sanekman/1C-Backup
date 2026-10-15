@@ -5,6 +5,7 @@ from pathlib import Path
 def main():
  repository=Path(__file__).resolve().parents[2]
  dotnet=os.environ.get('STORAGE_TEST_DOTNET','dotnet')
+ initializer=os.environ.get('STORAGE_TEST_INITIALIZER')
  project=repository/'src/OneCBackup.StorageBridge'
  names=['onec-storage-'+uuid.uuid4().hex[:12] for _ in range(4)]
  network,hub,edge,gateway=names
@@ -15,7 +16,9 @@ def main():
   with socket.socket() as available: available.bind(('127.0.0.1',0));port=available.getsockname()[1]
   def run(command,**kwargs):return subprocess.run(command,check=True,capture_output=True,text=True,**kwargs)
   def docker(*args):return run(['docker',*args])
-  run([dotnet,'run','--project',str(project),'--','initialize',str(config),'wss://localhost:'+str(port)])
+  initialize=[initializer] if initializer else [dotnet,'run','--project',str(project),'--']
+  run([*initialize,'initialize',str(config),'wss://localhost:'+str(port)])
+  if initializer:run([dotnet,'build',str(project)])
   options=json.loads((config/'gateway.json').read_text());options['Endpoint']='wss://hub:8443'
   (config/'gateway.json').write_text(json.dumps(options))
   run(['openssl','req','-x509','-newkey','rsa:2048','-days','2','-nodes','-subj','/CN=localhost',
@@ -68,7 +71,7 @@ def main():
    client('delete',str(config/'client-pairing.json'),job,object_id,str(result['Length']),result['Sha256'])
    assert not list(data.rglob('*.bin'))
    print(json.dumps({'Success':True,'ContainerGateway':True,'HttpsReverseProxy':True,'MutualTls':True,
-    'VerifiedUploadDownloadDelete':True,'RestartKeepsCopy':True,'LetsEncryptIssuanceTested':False}))
+    'VerifiedUploadDownloadDelete':True,'RestartKeepsCopy':True,'ExternalPairingInitializer':bool(initializer),'LetsEncryptIssuanceTested':False}))
   except Exception:
    for name in containers:
     logs=subprocess.run(['docker','logs',name],capture_output=True,text=True)
