@@ -28,7 +28,6 @@ function Login {
     $token=[Net.WebUtility]::HtmlDecode([regex]::Match($page.Content,'name="__RequestVerificationToken"[^>]*value="([^"]+)"').Groups[1].Value)
     # Invoke-WebRequest follows the successful relative redirect and returns the authenticated panel.
     $panel=Invoke-WebRequest -UseBasicParsing 'https://localhost:7443/session/login' -Method Post -WebSession $session -Body @{name='admin';password=$password;__RequestVerificationToken=$token}
-    if ($panel.BaseResponse.ResponseUri.AbsolutePath -eq '/login') { throw 'Administrator login failed.' }
     $management=Invoke-WebRequest -UseBasicParsing 'https://localhost:7443/api/v1/management/session' -WebSession $session
     if (($management.Content | ConvertFrom-Json).name -ne 'admin') { throw 'Administrator session not authenticated.' }
 }

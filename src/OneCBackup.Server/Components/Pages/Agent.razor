@@ -18,14 +18,14 @@
         @if (DateTimeOffset.UtcNow - monitoring.ReceivedUtc > TimeSpan.FromSeconds(Settings.OfflineAfterSeconds))
         { <p class="error">Нет свежих данных от агента. Показаны последние полученные сведения.</p> }
         @if (monitoring.Snapshot.Progress is { } progress)
-        { <p class="badge pending">Выполняется: @progress.Stage · @(progress.Percent?.ToString() ?? "—")% · @Home.Time(progress.UpdatedUtc)</p> }
+        { <p class="badge pending">Выполняется: @Stage(progress.Stage) · @(progress.Percent?.ToString() ?? "—")% · @Home.Time(progress.UpdatedUtc)</p> }
         @if (monitoring.Snapshot.Sources is { Count: > 0 } sources)
         {
             <h2>Внешние SQL-копии</h2>
             @foreach (var source in sources)
             {
                 var latest = Latest.FirstOrDefault(r=>r.JobId==source.MonitorId);
-                <p><strong>@source.Name</strong> · @source.Kind · @(source.Enabled ? source.Failed ? "Ошибка чтения истории" : "Опрос включён" : "Отключён")
+                <p><strong>@source.Name</strong> · @Source(source.Kind) · @(source.Enabled ? source.Failed ? "Ошибка чтения истории" : "Опрос включён" : "Отключён")
                     <small>Последний опрос: @Home.Time(source.PolledUtc). Последняя копия: @(latest is null ? "Нет данных" : Status(latest)) · @Home.Time(latest?.FinishedUtc).</small></p>
             }
         }
@@ -33,7 +33,7 @@
         @foreach (var job in monitoring.Snapshot.Jobs)
         {
             var last = Latest.FirstOrDefault(r=>r.JobId==job.JobId);
-            <tr><td>@job.Name<small>@job.SourceKind · хранилищ: @job.DestinationCount</small></td>
+            <tr><td>@job.Name<small>@Source(job.SourceKind) · хранилищ: @job.DestinationCount</small></td>
             <td>@(job.Enabled ? job.Schedule : "Отключено")</td>
             <td>@(last is null ? "Результатов ещё нет" : Status(last))<small>@Home.Time(last?.FinishedUtc)</small></td>
             <td>@Home.Time(Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.FinishedUtc)</td>
@@ -52,7 +52,7 @@
             <p>Начало: @Home.Time(run.StartedUtc). Конец: @Home.Time(run.FinishedUtc). Предупреждений: @run.WarningCount.</p>
             @if (run.CopyKind is not null) { <p>Тип копии: @(run.CopyKind == "Full" ? "Полная" : "Инкрементная").</p> }
             @if (run.Incomplete) { <p class="error">Копия неполная: часть файлов пропущена. Для непрочитанных файлов может требоваться прежняя версия из цепочки.</p> }
-            @if (run.Evidence is { } evidence) { <p>Подтверждение внешней копии: @evidence. Данные получены из внешнего источника; агент не выполнял доставку этой копии.</p> }
+            @if (run.Evidence is { } evidence) { <p>Подтверждение внешней копии: @Evidence(evidence). Данные получены из внешнего источника; агент не выполнял доставку этой копии.</p> }
             @foreach (var destination in run.Destinations)
             { <p>Хранилище @(destination.Index + 1): @(destination.Succeeded ? run.Evidence is not null ? "Зафиксировано во внешнем источнике" : "Доставлено и проверено" : run.Evidence is not null ? "Внешний источник сообщает ошибку" : "Ошибка доставки") · @destination.Bytes байт @(destination.Incomplete ? "· неполная копия" : "")</p> }
             </details>
@@ -89,6 +89,17 @@ else { <h1>Агент не найден</h1> }
     private MonitoredRunPage? Runs;
     private IReadOnlyList<MonitoredRun> Latest = [];
     private IReadOnlyList<MonitoredRun> Successful = [];
+    private static string Source(string value) => value switch
+    { "FilesAndFolders"=>"Файлы и папки", "OneCFile"=>"Файловая база 1С", "SqlServer"=>"SQL Server", "PostgreSql"=>"PostgreSQL", "WebDav"=>"WebDAV / Nextcloud", "SqlServerHistory"=>"История SQL Server", "PostgreSqlReports"=>"Отчёты PostgreSQL", _=>value };
+    private static string Evidence(string value) => value switch
+    { "SqlServerMsdbHistory"=>"История SQL Server (msdb)", "PgRestoreCatalogChecked"=>"Каталог дампа PostgreSQL проверен", "PostgreSqlScriptFailure"=>"Ошибка скрипта PostgreSQL", _=>"Отчёт внешнего источника" };
+    private static string Stage(string value) => value switch
+    {
+        "ConnectingSource"=>"Подключение к источнику", "PreparingStorage"=>"Подготовка хранилищ", "CreatingBackup"=>"Создание копии", "ScanningSource"=>"Поиск файлов",
+        "ProcessingFiles"=>"Обработка файлов", "DownloadingFile"=>"Скачивание файла", "ArchivingFile" or "Archiving" or "ArchivingFiles"=>"Создание архива",
+        "DownloadingAndArchivingFiles"=>"Скачивание и архивация", "ConnectingStorage"=>"Подключение к хранилищу", "CopyingToStorage"=>"Доставка копии",
+        "Verifying"=>"Проверка копии", "Retention"=>"Очистка старых копий", "Waiting"=>"Ожидание", _=>value
+    };
     private static string Status(MonitoredRun r) => r.Incomplete ? "Неполная копия" : r.Status switch
     { "Succeeded" => r.WarningCount > 0 ? "С предупреждениями" : "Успешно", "Failed" => "Ошибка", "PartiallySucceeded"=>"Частичная доставка", "Cancelled"=>"Отменено", _=>"Прервано" };
     protected override async Task OnParametersSetAsync()
