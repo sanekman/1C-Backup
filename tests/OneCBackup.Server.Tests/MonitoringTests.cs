@@ -67,10 +67,23 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
         var settings=new ServerMonitoringSettings(server.Address.ToString(),agent.AgentId,"monitor",Convert.ToHexString(SHA256.HashData(cert.RawData)));
         await ServerMonitoringDispatcher.SaveSettingsAsync(root,settings);
         var secrets=new Credentials { Value="invalid-token" };
-        await Assert.ThrowsAsync<HttpRequestException>(()=>new ServerMonitoringDispatcher(root,secrets).PollAsync());
-        Assert.False(File.Exists(Path.Combine(root,"server-monitoring-receipts.json")));
-        secrets.Value=agent.Token;
-        await new ServerMonitoringDispatcher(root,secrets).PollAsync();
+        var failed = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recovered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var stop = new CancellationTokenSource();
+        var loop = new ServerMonitoringDispatcher(root,secrets).RunAsync(error =>
+        {
+            if (error is not null) failed.TrySetResult(error);
+            else if (failed.Task.IsCompleted) recovered.TrySetResult();
+        },stop.Token,TimeSpan.FromMilliseconds(25));
+        try
+        {
+            Assert.IsType<HttpRequestException>(await failed.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.False(File.Exists(Path.Combine(root,"server-monitoring-receipts.json")));
+            Assert.False(loop.IsCompleted);
+            secrets.Value=agent.Token;
+            await recovered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally { stop.Cancel(); await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>loop); }
         await new ServerMonitoringDispatcher(root,secrets).PollAsync();
         Assert.Equal(before,await File.ReadAllBytesAsync(Path.Combine(root,"jobs.json")));
         var reports=await server.Store.RunsAsync(agent.AgentId,0,default); Assert.Single(reports.Runs);

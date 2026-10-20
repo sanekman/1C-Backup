@@ -73,6 +73,16 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
     // One cursor per destination + enrollment: switching servers never loses history on the new server.
     private sealed record Receipts(string Address, Guid AgentId, string CredentialKey, HashSet<Guid> Runs, Dictionary<Guid,DateTimeOffset>? RetryAfter = null);
     private readonly AgentJsonFile<Receipts> receipts = new(Path.Combine(directory,"server-monitoring-receipts.json"));
+    public async Task RunAsync(Action<Exception?> warning, CancellationToken token=default, TimeSpan? interval=null)
+    {
+        using var timer=new PeriodicTimer(interval ?? TimeSpan.FromSeconds(15));
+        do
+        {
+            try { await PollAsync(token); warning(null); }
+            catch(OperationCanceledException) when(token.IsCancellationRequested) { throw; }
+            catch(Exception error) { warning(error); }
+        } while(await timer.WaitForNextTickAsync(token));
+    }
     public async Task PollAsync(CancellationToken token = default)
     {
         var settings = await configuration.ReadAsync(token);

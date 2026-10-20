@@ -171,7 +171,7 @@ public partial class MainWindow
         {
             Status.Text = exit ? "Полный выход: останавливается копирование и записываются результаты…" : "Останавливается автоматическое копирование…";
             schedulerCancellation?.Cancel();
-            if (exit) { activeRun?.Cancel(); copyVerification?.Cancel(); }
+            if (exit) { CancelQueuedManualRuns(); activeRun?.Cancel(); copyVerification?.Cancel(); }
             var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
             while (schedulingTask is not null || exit && (updateBusy || savingUpdatePreferences || activeRun is not null || manualPending || copyVerification is not null || persisting || jobFileTransfer))
             {

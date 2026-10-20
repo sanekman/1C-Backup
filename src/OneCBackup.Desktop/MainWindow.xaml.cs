@@ -471,7 +471,7 @@ public partial class MainWindow : Window
         PreviousStepButton.IsEnabled = ready && canSave && idle && wizardStep > 0;
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
         JobsSummary.Text = $"Всего: {jobs.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}";
-        RunButton.IsEnabled = ready && canSave && idle && engineAvailable && !editorOpen && Jobs.SelectedItem is BackupJob;
+        UpdateManualRunControl();
         CheckStorageButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
         CheckSourceButton.IsEnabled = CheckStorageButton.IsEnabled;
         CheckSourceButton.ToolTip = !engineAvailable || schedulingTask is not null
@@ -548,6 +548,7 @@ public partial class MainWindow : Window
         {
             backgroundBusy = engine.IsHeldElsewhere();
             backgroundState = await backgroundControl.ReadAsync();
+            await RefreshManualRequestsAsync();
             await RefreshBackupProgressAsync();
             if (launchedAgent is not null && launchedAgent.HasExited)
             {
@@ -997,14 +998,10 @@ public partial class MainWindow : Window
 
     private async void Run_Click(object sender, RoutedEventArgs e)
     {
-        if (!canSave || editorOpen || activeRun is not null || copyVerification is not null || Jobs.SelectedItem is not BackupJob job) return;
+        if (!RunButton.IsEnabled || Jobs.SelectedItem is not BackupJob job) return;
         if (job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.PlatformDump && job.OneC is null)
         { Status.Text = "Укажите путь к 1cv8.exe и сохраните задание перед запуском."; return; }
-        manualPending = true;
-        UpdateRunControls();
-        try { await dispatcher.ExecuteAsync(job); }
-        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось запустить задание: " + ex.Message; }
-        finally { manualPending = false; UpdateRunControls(); }
+        await RunManualAsync(job);
     }
 
     private async Task ExecuteJobAsync(BackupJob job, CancellationToken cancellationToken)

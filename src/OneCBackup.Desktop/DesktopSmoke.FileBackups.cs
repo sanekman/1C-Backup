@@ -62,8 +62,27 @@ internal static partial class DesktopSmoke
         Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(item => item.Id == job.Id);
         var catalog = new BackupCatalog(Path.Combine(DesktopPaths.DataDirectory, "copies.json"));
         var history = new BackupRunHistory(Path.Combine(DesktopPaths.DataDirectory, "runs.json"));
-        await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled, "Ручной запуск файлов не готов после остановки агента.");
-        Click("RunButton"); await WaitUntil(() => window.SmokeReady, "Полная файловая копия не завершилась.");
+        // A separate host owns the engine, as a background process or Windows service would.
+        // This saved job has its schedule disabled and must still accept a manual command.
+        using (var stopHost = new CancellationTokenSource())
+        {
+            var host = Task.Run(() => new LocalAgentHost(DesktopPaths.DataDirectory,
+                new DatabaseBackupExecutor(new BackupProcessRunner()), new WindowsFtpCredentialStore())
+                .RunAsync(cancellationToken: stopHost.Token));
+            try
+            {
+                await WaitUntil(() => window.SmokeBackgroundManualReady
+                    && Control<Button>("RunButton").IsEnabled, "Фоновый агент блокирует ручное задание без расписания.");
+                Click("RunButton");
+                if (Control<Button>("RunButton").IsEnabled) throw new InvalidOperationException("Повторный щелчок дублирует принятый ручной запуск.");
+                await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled,
+                    "Агент не подтвердил завершение ручного копирования.");
+                if (host.IsCompleted) throw new InvalidOperationException("Ручной запуск остановил фоновый агент.");
+                screenshot("manual-job-with-background-schedule");
+            }
+            finally { stopHost.Cancel(); await host.WaitAsync(TimeSpan.FromSeconds(10)); }
+        }
+        await WaitUntil(() => Control<Button>("CheckStorageButton").IsEnabled, "Окно не освободило исполнитель после остановки агента.");
         var first = (await catalog.ReadAsync()).Single(record => record.JobId == job.Id);
         if (first.Backup.FileSnapshot?.IsFull != true) throw new InvalidOperationException("Первая копия не полная.");
         await File.WriteAllTextAsync(Path.Combine(source, "change.txt"), "after"); File.Delete(Path.Combine(source, "remove.txt"));
