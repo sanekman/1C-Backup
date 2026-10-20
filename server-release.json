@@ -1,0 +1,26 @@
+{
+  "version": "0.1.0-preview.2",
+  "sourceCommit": "9b64fc236dc1b02e08c3b5a61f5e9b29f89ff6aa",
+  "runtime": "10.0.13",
+  "minimumMonitoringAgent": "0.2.0-alpha.20",
+  "assets": [
+    {
+      "name": "1C-Backup-Server-0.1.0-preview.2-windows-x64-setup.exe",
+      "bytes": 88641551,
+      "sha256": "169a830b05052d1df4f1aa4a6f8d088d6adfc4f707bbdb4058705de1c54827d9",
+      "url": "https://github.com/sanekman/1C-Backup/releases/download/server-v0.1.0-preview.2/1C-Backup-Server-0.1.0-preview.2-windows-x64-setup.exe"
+    },
+    {
+      "name": "1C-Backup-server-win-x64.zip",
+      "bytes": 49835970,
+      "sha256": "f6830a4c0956c14b043c4b524bc886c7e27da0991f7f7115dd678f9f8e4000b1",
+      "url": "https://github.com/sanekman/1C-Backup/releases/download/server-v0.1.0-preview.2/1C-Backup-server-win-x64.zip"
+    },
+    {
+      "name": "1C-Backup-server-linux-x64.tar.gz",
+      "bytes": 48904617,
+      "sha256": "711f2c7383bf4f206d26605af19f21a4b1f8b5b4ea0c8b3f1a43bdf980e58378",
+      "url": "https://github.com/sanekman/1C-Backup/releases/download/server-v0.1.0-preview.2/1C-Backup-server-linux-x64.tar.gz"
+    }
+  ]
+}
