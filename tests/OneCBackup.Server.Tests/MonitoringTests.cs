@@ -62,6 +62,7 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
         var before=await File.ReadAllBytesAsync(Path.Combine(root,"jobs.json"));
         var run=new BackupRun(Guid.NewGuid(),job.Id,job.Name,DateTimeOffset.UtcNow.AddMinutes(-1),DateTimeOffset.UtcNow,BackupRunStatus.Failed,"private-path",Error:"password=must-not-be-sent");
         await new BackupRunHistory(Path.Combine(root,"runs.json")).SaveAsync(run);
+        new BackupProgressStore(root).Write(new(run.RunId,job.Id,job.Name,Environment.ProcessId,1,DateTimeOffset.UtcNow,new(BackupStage.Archiving),[]));
         using var cert=X509CertificateLoader.LoadPkcs12FromFile(Path.Combine(server.Root,"certificate.pfx"),File.ReadAllText(Path.Combine(server.Root,"certificate-password.txt")));
         var settings=new ServerMonitoringSettings(server.Address.ToString(),agent.AgentId,"monitor",Convert.ToHexString(SHA256.HashData(cert.RawData)));
         await ServerMonitoringDispatcher.SaveSettingsAsync(root,settings);
@@ -75,6 +76,7 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
         var reports=await server.Store.RunsAsync(agent.AgentId,0,default); Assert.Single(reports.Runs);
         var json=JsonSerializer.Serialize(reports); Assert.DoesNotContain("must-not-be-sent",json); Assert.DoesNotContain("private-path",json);
         Assert.Equal(0,(await server.Store.MonitoringAsync(agent.AgentId,default))!.Snapshot.PendingRuns);
+        Assert.Null((await server.Store.MonitoringAsync(agent.AgentId,default))!.Snapshot.Progress);
     }
     [ServerFact]
     public async Task PinnedTlsAcceptsOnlyTheSpecifiedServerCertificate()

@@ -27,6 +27,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: python -m unittest discover -s tests/server -p "test_*.py"
       - run: dotnet restore tests/OneCBackup.Server.Tests --locked-mode
       - run: dotnet build tests/OneCBackup.Server.Tests --no-restore -m:1 -nr:false
       - if: runner.os == 'Linux'

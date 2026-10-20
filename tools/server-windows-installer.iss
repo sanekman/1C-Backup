@@ -105,7 +105,7 @@ begin
     if not ExistingConfiguration and (PasswordFile = '') then begin
       if WizardSilent then RaiseException('Для первой тихой установки задайте /ADMINPASSWORDFILE=<защищённый файл>.');
       PasswordFile := ExpandConstant('{tmp}\administrator-password.txt');
-      if not SaveStringToUTF8File(PasswordFile, Credentials.Values[1], False) then RaiseException('Не удалось подготовить пароль.');
+      if not SaveStringToFile(PasswordFile, UTF8Encode(Credentials.Values[1]), False) then RaiseException('Не удалось подготовить пароль.');
     end;
     Args := '-InstallDirectory "' + ExpandConstant('{app}') + '" -ServerName "' + Credentials.Values[0] + '"';
     if PasswordFile <> '' then Args := Args + ' -AdministratorPasswordFile "' + PasswordFile + '"';
