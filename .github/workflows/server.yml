@@ -61,6 +61,14 @@ jobs:
       - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }}
       - if: runner.os == 'Linux'
         run: python3 tests/server/compose_smoke.py
+      - if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setupLog = Join-Path $env:ProgramData 'OneCBackupServer/setup.log'
+          if (Test-Path $setupLog) {
+            Copy-Item $setupLog artifacts/server-tests/windows-setup.log
+            Get-Content $setupLog
+          }
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -73,6 +81,8 @@ jobs:
             artifacts/server-tests/*.trx
             artifacts/server-tests/compose-result.json
             artifacts/server-tests/windows-installer-result.json
+            artifacts/server-tests/windows-installer-*.log
+            artifacts/server-tests/windows-setup.log
           retention-days: 14
       - if: always() && runner.os == 'Linux'
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci

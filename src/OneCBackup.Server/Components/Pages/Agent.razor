@@ -65,7 +65,7 @@
             <dt>Версия</dt><dd>@(Monitoring?.Snapshot.AgentVersion ?? agent.AgentVersion ?? "Ещё не получена")</dd>
             <dt>Зарегистрирован</dt><dd>@Home.Time(agent.RegisteredUtc)</dd>
             <dt>Последняя связь, время сервера</dt><dd>@Home.Time(Monitoring?.ReceivedUtc ?? agent.ReceivedUtc)</dd>
-            <dt>Последняя отметка времени агента</dt><dd>@Home.Time(agent.SentUtc)</dd>
+            <dt>Последняя отметка времени агента</dt><dd>@Home.Time(Monitoring?.Snapshot.SentUtc ?? agent.SentUtc)</dd>
             <dt>Ревизия на сервере</dt><dd>@agent.DesiredRevision</dd>
             <dt>Ревизия, сообщённая агентом</dt><dd>@(agent.ReportedRevision?.ToString() ?? "Нет сигнала")</dd>
             <dt>Исполнитель копирования</dt><dd>@(agent.ReceivedUtc is null ? "Нет данных" : agent.BackupExecutionAvailable ? "Агент сообщает готовность" : "Агент сообщает, что недоступен")</dd>

@@ -33,6 +33,7 @@ public sealed class ServerMonitoringClient : IDisposable
             ServerCertificateCustomValidationCallback = (_, cert, _, errors) => cert is not null &&
                 (settings.CertificateSha256.Length == 0 ? errors == SslPolicyErrors.None :
                 (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) == SslPolicyErrors.None &&
+                DateTime.UtcNow >= cert.NotBefore.ToUniversalTime() && DateTime.UtcNow <= cert.NotAfter.ToUniversalTime() &&
                 CryptographicOperations.FixedTimeEquals(SHA256.HashData(cert.RawData),Convert.FromHexString(settings.CertificateSha256)))
         }) { BaseAddress = new(settings.Address.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(20) };
     }

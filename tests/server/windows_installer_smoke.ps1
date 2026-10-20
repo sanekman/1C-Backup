@@ -8,8 +8,14 @@ if (Test-Path $root) { throw 'Installer smoke requires a clean disposable machin
 $secret=Join-Path $env:TEMP ('onec-server-smoke-'+[Guid]::NewGuid().ToString('N')+'.txt')
 $password=[Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N')
 [IO.File]::WriteAllText($secret,$password,(New-Object Text.UTF8Encoding($false)))
+New-Item -ItemType Directory -Path 'artifacts/server-tests' -Force | Out-Null
 function Install-Server {
-    $process=Start-Process -FilePath $Installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/ADMINPASSWORDFILE="'+$secret+'"')) -Wait -PassThru
+    $log=Join-Path (Get-Location).Path ('artifacts/server-tests/windows-installer-'+[Guid]::NewGuid().ToString('N')+'.log')
+    $process=Start-Process -FilePath $Installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG="'+$log+'"'),('/ADMINPASSWORDFILE="'+$secret+'"')) -PassThru
+    if (!$process.WaitForExit(240000)) {
+        & taskkill.exe /PID $process.Id /T /F | Out-Null
+        throw 'Installer exceeded the four-minute phase timeout.'
+    }
     if ($process.ExitCode -ne 0) { throw ('Installer failed: '+$process.ExitCode) }
 }
 function Health {
@@ -60,6 +66,10 @@ try {
     Login
     New-Item -ItemType Directory -Path 'artifacts/server-tests' -Force | Out-Null
     @{ installed=$true; https=$true; administratorLogin=$true; reinstallPreservesData=$true; serviceRestart=$true; uninstallPreservesDatabase=$true; reinstallAfterUninstall=$true } | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-installer-result.json'
+} catch {
+    if (Test-Path (Join-Path $root 'setup.log')) { Get-Content (Join-Path $root 'setup.log') }
+    Get-Service OneCBackupServer,OneCBackupServerDatabase -ErrorAction SilentlyContinue | Select-Object Name,Status | Format-Table
+    throw
 } finally {
     Remove-Item -LiteralPath $secret -ErrorAction SilentlyContinue
 }

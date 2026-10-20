@@ -22,7 +22,7 @@
             <div class="table-scroll"><table><thead><tr><th>Компьютер</th><th>Связь</th><th>Последняя связь</th><th>Настройки</th></tr></thead><tbody>
             @foreach (var agent in data.Agents)
             {
-                <tr><td><a href="@("agents/" + agent.AgentId)">@agent.Name</a><small>@(agent.AgentVersion ?? "Версия ещё не получена")</small></td>
+                <tr><td><a href="@("agents/" + agent.AgentId)">@agent.Name</a><small>@(Versions.GetValueOrDefault(agent.AgentId) ?? agent.AgentVersion ?? "Версия ещё не получена")</small></td>
                     <td><span class="badge @(agent.Revoked ? "bad" : Online(agent) ? "good" : "pending")">@State(agent)</span></td>
                     <td>@Time(LastSeen(agent))</td>
                     <td><small>На сервере: @agent.DesiredRevision</small><small>Сообщено агентом: @(agent.ReportedRevision?.ToString() ?? "—")</small></td></tr>
@@ -42,9 +42,10 @@
         Overview = await Store.OverviewAsync(Settings.OfflineAfterSeconds,Http.HttpContext!.RequestAborted);
         Data = await Store.AgentsAsync(Page, Http.HttpContext!.RequestAborted);
         foreach (var agent in Data.Agents)
-            if (await Store.MonitoringAsync(agent.AgentId,Http.HttpContext.RequestAborted) is { } m) MonitoringTimes[agent.AgentId]=m.ReceivedUtc;
+            if (await Store.MonitoringAsync(agent.AgentId,Http.HttpContext.RequestAborted) is { } m) { MonitoringTimes[agent.AgentId]=m.ReceivedUtc; Versions[agent.AgentId]=m.Snapshot.AgentVersion; }
     }
     private readonly Dictionary<Guid, DateTimeOffset> MonitoringTimes = [];
+    private readonly Dictionary<Guid, string> Versions = [];
     private DateTimeOffset? LastSeen(AgentRecord agent) => MonitoringTimes.TryGetValue(agent.AgentId,out var time) && (agent.ReceivedUtc is null || time > agent.ReceivedUtc) ? time : agent.ReceivedUtc;
     private bool Online(AgentRecord agent) => LastSeen(agent) is { } time && DateTimeOffset.UtcNow - time < TimeSpan.FromSeconds(Settings.OfflineAfterSeconds);
     private string State(AgentRecord agent) => agent.Revoked ? "Доступ отозван" : LastSeen(agent) is null ? "Ожидает первого сигнала" : Online(agent) ? "На связи" : "Нет связи";
