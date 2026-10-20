@@ -7,9 +7,9 @@ using NpgsqlTypes;
 namespace OneCBackup.Server;
 
 /// <summary>Parameterized PostgreSQL operations. Invitation consumption, registration and audit commit together.</summary>
-public sealed class ServerStore(NpgsqlDataSource source)
+public sealed partial class ServerStore(NpgsqlDataSource source)
 {
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
     private readonly PasswordHasher<ServerUser> passwords = new();
     private static NpgsqlCommand Command(NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql,
         params (string Name, object? Value)[] values)
@@ -33,6 +33,13 @@ public sealed class ServerStore(NpgsqlDataSource source)
             using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("OneCBackup.Server.Migrations.001-foundation.sql")!;
             using var reader = new StreamReader(script); var sql = await reader.ReadToEndAsync(token);
             await using var migration = Command(connection, transaction, sql + "\nINSERT INTO server_schema(version) VALUES(1);");
+            await migration.ExecuteNonQueryAsync(token);
+        }
+        if (version < 2)
+        {
+            using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("OneCBackup.Server.Migrations.002-monitoring.sql")!;
+            using var reader = new StreamReader(script);
+            await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
             await migration.ExecuteNonQueryAsync(token);
         }
         await transaction.CommitAsync(token);
@@ -104,25 +111,25 @@ public sealed class ServerStore(NpgsqlDataSource source)
             || request.Name.Length > 128 || request.Name.Any(char.IsControl)) throw new ServerRequestException(400, "invalid_enrollment");
         await using var connection = await source.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(token);
-        Guid invitationId;
+        Guid invitationId; bool replaceRevoked;
         await using (var cmd = Command(connection, transaction,
             "SELECT id,agent_id FROM server_invitations WHERE token_hash=@hash AND expires_utc>now() AND consumed_utc IS NULL FOR UPDATE", ("hash", ServerTokens.Hash(request.InvitationCode))))
         {
             await using var reader = await cmd.ExecuteReaderAsync(token);
             if (!await reader.ReadAsync(token)) throw new ServerRequestException(403, "invitation_unavailable");
-            invitationId = reader.GetGuid(0);
+            invitationId = reader.GetGuid(0); replaceRevoked = !reader.IsDBNull(1) && reader.GetGuid(1) == request.AgentId;
             if (!reader.IsDBNull(1) && reader.GetGuid(1) != request.AgentId) throw new ServerRequestException(403, "invitation_agent_mismatch");
         }
         var bearer = ServerTokens.Create();
         try
         {
-            await using var insert = Command(connection, transaction, "INSERT INTO server_agents(id,name,token_hash) VALUES(@id,@name,@hash)",
-                ("id", request.AgentId), ("name", request.Name.Trim()), ("hash", ServerTokens.Hash(bearer)));
-            await insert.ExecuteNonQueryAsync(token);
+            await using var insert = Command(connection, transaction, "INSERT INTO server_agents(id,name,token_hash) VALUES(@id,@name,@hash) ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash,revoked=false,name=excluded.name WHERE server_agents.revoked AND @replace",
+                ("id", request.AgentId), ("name", request.Name.Trim()), ("hash", ServerTokens.Hash(bearer)), ("replace",replaceRevoked));
+            if (await insert.ExecuteNonQueryAsync(token)!=1) throw new ServerRequestException(409,"agent_already_registered");
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation) { throw new ServerRequestException(409, "agent_already_registered"); }
         var document = JsonSerializer.Serialize(new { agentId = request.AgentId, revision = 1, jobs = Array.Empty<object>(), protocolVersion = 1 });
-        await using (var config = Command(connection, transaction, "INSERT INTO server_configurations(agent_id,revision,document) VALUES(@id,1,@doc::jsonb)", ("id", request.AgentId), ("doc", document))) await config.ExecuteNonQueryAsync(token);
+        await using (var config = Command(connection, transaction, "INSERT INTO server_configurations(agent_id,revision,document) VALUES(@id,1,@doc::jsonb) ON CONFLICT(agent_id) DO NOTHING", ("id", request.AgentId), ("doc", document))) await config.ExecuteNonQueryAsync(token);
         await using (var consume = Command(connection, transaction, "UPDATE server_invitations SET consumed_utc=now() WHERE id=@id", ("id", invitationId))) await consume.ExecuteNonQueryAsync(token);
         await AuditAsync(connection, transaction, null, request.AgentId, "AgentEnrolled", token);
         await transaction.CommitAsync(token);

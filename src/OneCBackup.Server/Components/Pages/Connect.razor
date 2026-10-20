@@ -1,5 +1,6 @@
 @page "/connect"
 @attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerOptions Settings
 @inject ServerStore Store
 @inject ServerLog Log
 @inject IHttpContextAccessor Http
@@ -10,6 +11,9 @@
     @if (Created is { } invitation)
     {
         <h2>Приглашение готово</h2>
+        <p>В Windows-программе откройте «Мониторинг на сервере Windows → Подключить по приглашению» и перенесите эти поля.</p>
+        <label>Адрес сервера<input readonly value="@ServerAddress" /></label>
+        @if (Fingerprint is not null) { <label>SHA-256 сертификата<textarea readonly rows="2">@Fingerprint</textarea></label> }
         <p>Код действует до <strong>@invitation.ExpiresUtc.ToString("dd.MM.yyyy HH:mm 'UTC'")</strong> и может быть использован один раз. Скопируйте его сейчас: при повторном открытии он не показывается.</p>
         <label>Код приглашения<textarea readonly rows="2" aria-label="Код приглашения">@invitation.Code</textarea></label>
         <p class="muted">Передайте код только администратору подключаемого компьютера. Это временное разрешение на регистрацию, не пароль пользователя.</p>
@@ -17,7 +21,7 @@
     }
     else
     {
-        <p class="muted">Создайте код для регистрации через API. Подключение из окна Windows-программы будет добавлено отдельно.</p>
+        <p class="muted">Создайте одноразовый код и введите его в Windows-программе агента. Текущие задания и расписания сохранятся.</p>
         @if (Error is not null) { <p class="error" role="alert">@Error</p> }
         <form method="post" @formname="invitation" @onsubmit="Create">
             <AntiforgeryToken />
@@ -30,9 +34,21 @@
     }
 </section>
 @code {
+    [SupplyParameterFromQuery] public Guid? AgentId { get; set; }
     [SupplyParameterFromForm] public InviteForm? Model { get; set; }
+    private string ServerAddress => $"https://{Http.HttpContext!.Request.Host}{Http.HttpContext.Request.PathBase}/";
+    private string? Fingerprint
+    {
+        get
+        {
+            if (Settings.HttpsCertificatePath is not { } path) return null;
+            using var cert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12FromFile(path,
+                Settings.HttpsCertificatePasswordFile is { } password ? ServerHost.ReadSecret(password) : null);
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(cert.RawData));
+        }
+    }
     private Invitation? Created; private string? Error;
-    protected override void OnInitialized() => Model ??= new();
+    protected override void OnInitialized() => Model ??= new() { AgentId = AgentId?.ToString() };
     private async Task Create()
     {
         if (!string.IsNullOrWhiteSpace(Model!.AgentId) && !Guid.TryParse(Model.AgentId, out _)) { Error = "ID агента должен быть UUID. Оставьте поле пустым для нового агента."; return; }

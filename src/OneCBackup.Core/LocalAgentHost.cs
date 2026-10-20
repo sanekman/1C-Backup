@@ -162,6 +162,18 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             do { Volatile.Write(ref notificationError, await notifications.PollAsync(lifetime.Token)); }
             while (await timer.WaitForNextTickAsync(lifetime.Token));
         }
+        async Task ServerMonitoringLoop()
+        {
+            var sender = new ServerMonitoringDispatcher(directory,credentials);
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+            do
+            {
+                try { await sender.PollAsync(lifetime.Token); warnings.Set("Сервер мониторинга",null); }
+                catch (Exception error) when (!lifetime.IsCancellationRequested && AgentRuntimeWarnings.Recoverable(error))
+                { warnings.Set("Сервер мониторинга",error); }
+            } while (await timer.WaitForNextTickAsync(lifetime.Token));
+        }
+        var serverMonitoringTask = manual is null ? ServerMonitoringLoop() : Task.CompletedTask;
         var notificationTask = manual is null ? NotificationLoop() : Task.CompletedTask;
         var hubTask = manual is null ? new OneCBackup.Remote.EmbeddedHub(directory).RunAsync(warning => Volatile.Write(ref hubError, warning), lifetime.Token) : Task.CompletedTask;
         Exception? failure = null;
@@ -177,7 +189,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         finally
         {
             lifetime.Cancel();
-            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask); }
+            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask, serverMonitoringTask); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) { failure ??= ex; }
             var error = failure?.Message ?? (manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? lastRun.Error : null);

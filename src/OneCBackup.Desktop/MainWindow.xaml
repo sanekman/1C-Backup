@@ -598,7 +598,12 @@
      <Button Content="Настроить оповещения" Click="Notifications_Click" HorizontalAlignment="Left" Margin="0,8,0,0"/>
      <TextBlock x:Name="NotificationsStatus" TextWrapping="Wrap" Margin="0,8,0,0"/>
     </StackPanel></Expander>
-    <Expander Header="Подключение к серверу управления" Margin="0,16,0,0"><StackPanel Margin="0,10,0,0">
+    <Expander Header="Мониторинг на сервере Windows" Margin="0,16,0,0"><StackPanel Margin="0,10,0,0">
+     <TextBlock Text="Результаты копирования, неполные копии, хранилища и состояние компьютера в общей веб-панели. Локальное расписание сохраняется." TextWrapping="Wrap"/>
+     <WrapPanel Margin="0,10,0,0"><Button Content="Подключить по приглашению…" Click="ConnectServerMonitoring_Click"/><Button Content="Отключить" Margin="8,0,0,0" Click="DisconnectServerMonitoring_Click"/></WrapPanel>
+     <TextBlock x:Name="ServerMonitoringStatus" Text="Для работы без открытого окна включите фоновый агент или службу Windows." TextWrapping="Wrap" Margin="0,8,0,0"/>
+    </StackPanel></Expander>
+    <Expander Header="Дополнительно: управление через сервер (в разработке)" Margin="0,16,0,0"><StackPanel Margin="0,10,0,0">
     <TextBlock x:Name="AgentIdentity" Margin="0,0,0,8" />
     <ComboBox x:Name="AgentModePicker" Width="300" HorizontalAlignment="Left" DisplayMemberPath="Value" SelectedValuePath="Key"
      SelectionChanged="AgentMode_Changed" Margin="0,0,0,8" />

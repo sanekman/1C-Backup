@@ -28,6 +28,8 @@ def main():
     (output / "VERSION.txt").write_text(version + "\n", encoding="utf-8")
     (output / "START-HERE.md").write_text((repository / "docs/server-start.md").read_text(encoding="utf-8"), encoding="utf-8")
     shutil.copy(repository / "deploy/server/server.env.example", output)
+    if args.runtime == "win-x64":
+        shutil.copytree(repository / "deploy/server/windows", output / "windows")
     if args.runtime == "linux-x64":
         shutil.copy(repository / "deploy/server/onec-backup-server.service", output)
     dependency = json.loads((output / "OneCBackup.Server.deps.json").read_text(encoding="utf-8"))

@@ -18,7 +18,7 @@ jobs:
           - os: windows-latest
             runtime: win-x64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -47,6 +47,16 @@ jobs:
         run: |
           $env:ONECBACKUP_SERVER_TEST_PACKAGE_DIR = Join-Path $PWD 'artifacts/server/win-x64'
           python tests/server/run_windows.py --package
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: Invoke-WebRequest 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile artifacts/server/vc_redist.x64.exe
+      - if: runner.os == 'Windows'
+        run: python tools/build_server_windows_installer.py
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem artifacts/server/1C-Backup-Server-*-windows-x64-setup.exe).FullName
+          & tests/server/windows_installer_smoke.ps1 -Installer $installer
       - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }}
       - if: runner.os == 'Linux'
         run: python3 tests/server/compose_smoke.py
@@ -55,11 +65,13 @@ jobs:
         with:
           name: server-${{ matrix.runtime }}-verification
           path: |
+            artifacts/server/1C-Backup-Server-*.exe
             artifacts/server/*.zip
             artifacts/server/*.tar.gz
             artifacts/server/*.sha256
             artifacts/server-tests/*.trx
             artifacts/server-tests/compose-result.json
+            artifacts/server-tests/windows-installer-result.json
           retention-days: 14
       - if: always() && runner.os == 'Linux'
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci

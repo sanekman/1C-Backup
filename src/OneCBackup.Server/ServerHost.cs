@@ -46,7 +46,7 @@ public static class ServerHost
             builder.Services.AddSingleton<X509Certificate2>(_ => cert);
             builder.WebHost.ConfigureKestrel(options => options.ConfigureHttpsDefaults(https => https.ServerCertificate = cert));
         }
-        builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 64 * 1024);
+        builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 1024 * 1024);
         builder.Host.UseWindowsService(options => options.ServiceName = "OneCBackupServer").UseSystemd();
         builder.Logging.ClearProviders(); // Application logs use typed events; no raw framework/database exception strings.
         var keys = Path.Combine(settings.DataDirectory, "keys");
@@ -81,6 +81,8 @@ public static class ServerHost
         if (settings.PathBase is not null) app.UsePathBase(settings.PathBase);
         app.Use(async (context, next) =>
         {
+            if (HttpMethods.IsGet(context.Request.Method) && (context.Request.Path == "/" || context.Request.Path == "/system" || context.Request.Path.StartsWithSegments("/agents")))
+                context.Response.Headers["Refresh"] = "30";
             context.Response.Headers.CacheControl = "no-store";
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             context.Response.Headers["Referrer-Policy"] = "no-referrer";
@@ -172,8 +174,14 @@ public static class ServerHost
         });
         agents.MapPost("/heartbeat", async (Guid agentId, HeartbeatRequest request, ServerStore store, CancellationToken token) =>
         { await store.HeartbeatAsync(agentId, request, token); return Results.NoContent(); });
+        agents.MapPut("/monitoring", async (Guid agentId, Monitoring.MonitoringSnapshot request, ServerStore store, CancellationToken token) =>
+        { await store.SaveMonitoringAsync(agentId, request, token); return Results.NoContent(); });
+        agents.MapPost("/runs", async (Guid agentId, Monitoring.MonitoredRun request, ServerStore store, CancellationToken token) =>
+        { await store.SaveRunAsync(agentId, request, token); return Results.NoContent(); });
         var management = app.MapGroup("/api/v1/management").RequireAuthorization(ServerAuthentication.Administrator);
         management.MapGet("/session", (HttpContext context, IAntiforgery anti) => Results.Json(new { name = context.User.Identity!.Name, csrfToken = anti.GetAndStoreTokens(context).RequestToken }));
+        management.MapGet("/agents/{id:guid}/monitoring", async (Guid id, ServerStore store, CancellationToken token) => Results.Json(await store.MonitoringAsync(id,token)));
+        management.MapGet("/agents/{id:guid}/runs", async (Guid id, int? page, ServerStore store, CancellationToken token) => Results.Json(await store.RunsAsync(id,page ?? 0,token)));
         management.MapGet("/agents", async (int? page, ServerStore store, CancellationToken token) => Results.Json(await store.AgentsAsync(page ?? 0, token)));
         management.MapGet("/agents/{id:guid}", async (Guid id, ServerStore store, CancellationToken token) => await store.AgentAsync(id, token) is { } agent ? Results.Json(agent) : Results.NotFound());
         management.MapPost("/invitations", async (InviteRequest request, HttpContext context, IAntiforgery anti, ServerStore store, ServerLog log) =>

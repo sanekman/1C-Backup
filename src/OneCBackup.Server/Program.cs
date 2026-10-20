@@ -5,13 +5,13 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 WebApplication? app = null;
 try
 {
-    var initialize = args.Contains("--initialize"); var migrate = args.Contains("--migrate");
-    app = ServerHost.Build(args.Where(arg => arg is not "--initialize" and not "--migrate").ToArray());
+    var initialize = args.Contains("--initialize"); var migrate = args.Contains("--migrate"); var provision = args.Contains("--provision");
+    app = ServerHost.Build(args.Where(arg => arg is not "--initialize" and not "--migrate" and not "--provision").ToArray());
     var store = app.Services.GetRequiredService<ServerStore>();
-    if (initialize || migrate)
+    if (initialize || migrate || provision)
     {
         await store.MigrateAsync();
-        if (initialize)
+        if (initialize || provision && !await store.ReadyAsync())
         {
             var settings = app.Services.GetRequiredService<ServerOptions>();
             if (settings.BootstrapUser is null || settings.BootstrapPasswordFile is null) throw new ServerRequestException(400, "bootstrap_configuration_required");

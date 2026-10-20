@@ -1,0 +1,35 @@
+@page "/system"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject ServerOptions Settings
+@inject IHttpContextAccessor Http
+<PageTitle>Состояние сервера — 1C-Backup</PageTitle>
+<h1>Состояние сервера</h1>
+<section class="card"><dl>
+<dt>База данных</dt><dd>@(Ready ? "Доступна, схема актуальна" : "Недоступна / требуется миграция")</dd>
+<dt>Версия схемы</dt><dd>@ServerStore.SchemaVersion</dd>
+<dt>Время сервера (UTC)</dt><dd>@Home.Time(DateTimeOffset.UtcNow)</dd>
+<dt>Работает с (UTC)</dt><dd>@Home.Time(new DateTimeOffset(System.Diagnostics.Process.GetCurrentProcess().StartTime).ToUniversalTime())</dd>
+<dt>Свободно на диске данных</dt><dd>@Disk</dd>
+<dt>HTTPS-сертификат до (UTC)</dt><dd>@CertificateExpiry</dd>
+<dt>Память процесса</dt><dd>@(Environment.WorkingSet / 1024 / 1024) МБ</dd>
+</dl>
+<p>Проверка готовности: <a href="health/ready">health/ready</a>. Панель обновляется каждые 30 секунд.</p>
+<p class="muted">Данные сервера и база должны входить в ваше системное резервное копирование. Установщик сохраняет их при обновлении и удалении программы.</p></section>
+@code {
+    private bool Ready;
+    private string Disk = "Нет данных";
+    private string CertificateExpiry = "Завершается на обратном прокси / системном endpoint";
+    protected override async Task OnInitializedAsync()
+    {
+        Ready = await Store.ReadyAsync(Http.HttpContext!.RequestAborted);
+        try { var drive = new DriveInfo(Path.GetPathRoot(Settings.DataDirectory)!); Disk=$"{drive.AvailableFreeSpace / 1024 / 1024 / 1024} ГБ"; } catch (IOException) { }
+        if (Settings.HttpsCertificatePath is { } path)
+        {
+            using var cert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12FromFile(path,
+                Settings.HttpsCertificatePasswordFile is { } file ? ServerHost.ReadSecret(file) : null);
+            CertificateExpiry = Home.Time(new DateTimeOffset(cert.NotAfter).ToUniversalTime());
+            if (cert.NotAfter.ToUniversalTime() < DateTime.UtcNow.AddDays(30)) CertificateExpiry += " — требуется обновить сертификат";
+        }
+    }
+}
