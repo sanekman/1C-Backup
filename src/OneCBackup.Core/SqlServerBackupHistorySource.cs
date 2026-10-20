@@ -23,7 +23,7 @@ public sealed class SqlServerBackupHistorySource(Func<ExternalBackupMonitor, DbC
         CancellationToken cancellationToken = default)
     {
         monitor.Validate();
-        if (monitor.Kind != ExternalBackupSourceKind.SqlServerHistory) throw new ArgumentException("Нужен источник SQL Server.");
+        if (monitor.Kind != ExternalBackupSourceKind.SqlServerHistory) throw new ArgumentException("Нужен источник MS SQL.");
         await using var connection = connectionFactory?.Invoke(monitor) ?? new SqlConnection(new SqlConnectionStringBuilder
         {
             DataSource = monitor.SqlServer, InitialCatalog = "msdb", IntegratedSecurity = true,

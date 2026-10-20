@@ -36,7 +36,7 @@ public partial class ExternalMonitoringWindow : Window
         InitializeComponent();
         SourceKind.ItemsSource = new Dictionary<ExternalBackupSourceKind, string>
         {
-            [ExternalBackupSourceKind.SqlServerHistory] = "SQL Server: история msdb",
+            [ExternalBackupSourceKind.SqlServerHistory] = "MS SQL: история msdb",
             [ExternalBackupSourceKind.PostgreSqlReports] = "PostgreSQL: отчёты скрипта"
         };
         SourceKind.SelectedValue = ExternalBackupSourceKind.SqlServerHistory;

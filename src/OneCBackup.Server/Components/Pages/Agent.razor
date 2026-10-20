@@ -90,9 +90,9 @@ else { <h1>Агент не найден</h1> }
     private IReadOnlyList<MonitoredRun> Latest = [];
     private IReadOnlyList<MonitoredRun> Successful = [];
     private static string Source(string value) => value switch
-    { "FilesAndFolders"=>"Файлы и папки", "OneCFile"=>"Файловая база 1С", "SqlServer"=>"SQL Server", "PostgreSql"=>"PostgreSQL", "WebDav"=>"WebDAV / Nextcloud", "SqlServerHistory"=>"История SQL Server", "PostgreSqlReports"=>"Отчёты PostgreSQL", _=>value };
+    { "FilesAndFolders"=>"Файлы и папки", "OneCFile"=>"Файловая база 1С", "SqlServer"=>"MS SQL", "PostgreSql"=>"PostgreSQL", "WebDav"=>"WebDAV / Nextcloud", "SqlServerHistory"=>"История MS SQL", "PostgreSqlReports"=>"Отчёты PostgreSQL", _=>value };
     private static string Evidence(string value) => value switch
-    { "SqlServerMsdbHistory"=>"История SQL Server (msdb)", "PgRestoreCatalogChecked"=>"Каталог дампа PostgreSQL проверен", "PostgreSqlScriptFailure"=>"Ошибка скрипта PostgreSQL", _=>"Отчёт внешнего источника" };
+    { "SqlServerMsdbHistory"=>"История MS SQL (msdb)", "PgRestoreCatalogChecked"=>"Каталог дампа PostgreSQL проверен", "PostgreSqlScriptFailure"=>"Ошибка скрипта PostgreSQL", _=>"Отчёт внешнего источника" };
     private static string Stage(string value) => value switch
     {
         "ConnectingSource"=>"Подключение к источнику", "PreparingStorage"=>"Подготовка хранилищ", "CreatingBackup"=>"Создание копии", "ScanningSource"=>"Поиск файлов",

@@ -22,7 +22,7 @@
    </WrapPanel>
    <TextBlock Text="Имя базы (пусто — все базы источника)" /><TextBox x:Name="Database" Margin="0,4,0,10" />
    <StackPanel x:Name="SqlPanel">
-    <TextBlock Text="SQL Server (например SERVER\INSTANCE). Windows-аутентификация текущего пользователя, проверка TLS-сертификата." TextWrapping="Wrap" />
+    <TextBlock Text="MS SQL (например SERVER\INSTANCE). Windows-аутентификация текущего пользователя, проверка TLS-сертификата." TextWrapping="Wrap" />
     <TextBox x:Name="SqlServer" Margin="0,4,0,10" />
     <WrapPanel>
      <StackPanel Width="200"><TextBlock Text="История за дней" /><TextBox x:Name="Days" Text="30" Margin="0,4,0,10" /></StackPanel>

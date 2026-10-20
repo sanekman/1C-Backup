@@ -13,11 +13,11 @@ public sealed record SqlServerBackupSettings
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(Server)) errors.Add("Укажите SQL Server.");
+        if (string.IsNullOrWhiteSpace(Server)) errors.Add("Укажите MS SQL.");
         var path = ServerBackupDirectory ?? "";
         if (!(path.StartsWith('/') || path.StartsWith(@"\\") ||
             (path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] == '\\')))
-            errors.Add("Укажите полный каталог копий на стороне SQL Server.");
+            errors.Add("Укажите полный каталог копий на стороне MS SQL.");
         if (string.IsNullOrWhiteSpace(AgentReadDirectory) || !Path.IsPathFullyQualified(AgentReadDirectory))
             errors.Add("Укажите полный локальный или UNC-путь к этому каталогу для чтения агентом.");
         if (TimeoutMinutes is < 1 or > 10080) errors.Add("Время копирования SQL должно быть от 1 до 10080 минут.");
@@ -68,8 +68,8 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
 
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
-        if (job.Kind != DatabaseKind.SqlServer) throw new ArgumentException("Нужно задание SQL Server.");
-        var settings = job.SqlServer ?? throw new InvalidDataException("Укажите настройки подключения SQL Server.");
+        if (job.Kind != DatabaseKind.SqlServer) throw new ArgumentException("Нужно задание MS SQL.");
+        var settings = job.SqlServer ?? throw new InvalidDataException("Укажите настройки подключения MS SQL.");
         var errors = job.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         Directory.CreateDirectory(workDirectory);
@@ -115,7 +115,7 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
             return Path.GetFullPath(readablePath);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        { throw new TimeoutException("Превышено время копирования SQL Server."); }
+        { throw new TimeoutException("Превышено время копирования MS SQL."); }
     }
 
     private static void AddParameter(DbCommand command, string name, string value)

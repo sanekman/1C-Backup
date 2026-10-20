@@ -25,12 +25,12 @@ public sealed record ExternalBackupMonitor
         if (PollIntervalSeconds is < 15 or > 86400)
             throw new InvalidDataException("Интервал опроса источника должен быть от 15 до 86400 секунд.");
         if (Kind == ExternalBackupSourceKind.SqlServerHistory && string.IsNullOrWhiteSpace(SqlServer))
-            throw new InvalidDataException("Укажите экземпляр SQL Server.");
+            throw new InvalidDataException("Укажите экземпляр MS SQL.");
         if (Kind == ExternalBackupSourceKind.PostgreSqlReports && !Path.IsPathFullyQualified(ReportDirectory))
             throw new InvalidDataException("Укажите полный путь к каталогу отчётов PostgreSQL.");
         try { TimeZoneInfo.FindSystemTimeZoneById(TimeZoneId); }
         catch (Exception ex) when (ex is ArgumentException or TimeZoneNotFoundException or InvalidTimeZoneException)
-        { throw new InvalidDataException("Укажите часовой пояс SQL Server.", ex); }
+        { throw new InvalidDataException("Укажите часовой пояс MS SQL.", ex); }
     }
 }
 
@@ -47,7 +47,7 @@ public sealed record ExternalBackupObservation(string SourceKey, string Instance
     [System.Text.Json.Serialization.JsonIgnore]
     public string EvidenceDescription => Evidence switch
     {
-        "SqlServerMsdbHistory" => "История SQL Server",
+        "SqlServerMsdbHistory" => "История MS SQL",
         "PgRestoreCatalogChecked" => "Каталог дампа проверен",
         "PostgreSqlScriptFailure" => "Ошибка скрипта PostgreSQL",
         _ => Evidence

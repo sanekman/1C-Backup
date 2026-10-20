@@ -142,7 +142,7 @@ public partial class MainWindow
         if (step is 2 or 3) UpdateSchedulePreview();
         if (step == 3)
         {
-            var type = Kind.SelectedItem switch { DatabaseKind.SqlServer => "Microsoft SQL Server", DatabaseKind.PostgreSql => "PostgreSQL", DatabaseKind.FilesAndFolders => "Файлы и папки", DatabaseKind.WebDav => "Файлы WebDAV", _ => "Файловая 1С" };
+            var type = Kind.SelectedItem switch { DatabaseKind.SqlServer => "MS SQL", DatabaseKind.PostgreSql => "PostgreSQL", DatabaseKind.FilesAndFolders => "Файлы и папки", DatabaseKind.WebDav => "Файлы WebDAV", _ => "Файловая 1С" };
             var method = Kind.SelectedItem is DatabaseKind.OneCFile
                 ? OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive ? "ZIP файла базы, без платформы" : "Выгрузка .dt через платформу 1С"
                 : Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav

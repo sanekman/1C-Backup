@@ -106,7 +106,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         token.ThrowIfCancellationRequested();
         if (value is not int result || result != 1)
             return new(false, "База недоступна или нет права BACKUP DATABASE. Проверьте имя базы и права текущего пользователя Windows.");
-        return new(true, "Подключение к SQL Server, доступ к базе и право BACKUP DATABASE проверены. Копия не создавалась. Права службы на серверную папку, сопоставление путей, VERIFYONLY и восстановление проверяются отдельно.");
+        return new(true, "Подключение к MS SQL, доступ к базе и право BACKUP DATABASE проверены. Копия не создавалась. Права службы на серверную папку, сопоставление путей, VERIFYONLY и восстановление проверяются отдельно.");
     }
 
     private async Task<SourceCheckReport> CheckPostgreSqlAsync(BackupJob job, CancellationToken token)

@@ -14,7 +14,7 @@
      <Setter Property="Text" Value="{Binding}" />
      <Style.Triggers>
       <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.OneCFile}"><Setter Property="Text" Value="Файловая 1С" /></DataTrigger>
-      <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.SqlServer}"><Setter Property="Text" Value="SQL Server" /></DataTrigger>
+      <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.SqlServer}"><Setter Property="Text" Value="MS SQL" /></DataTrigger>
       <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.PostgreSql}"><Setter Property="Text" Value="PostgreSQL" /></DataTrigger>
       <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.FilesAndFolders}"><Setter Property="Text" Value="Файлы и папки" /></DataTrigger>
       <DataTrigger Binding="{Binding}" Value="{x:Static core:DatabaseKind.WebDav}"><Setter Property="Text" Value="Файлы WebDAV" /></DataTrigger>
@@ -60,7 +60,7 @@
    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
    <StackPanel Margin="0,0,0,8">
     <TextBlock x:Name="PageTitle" Text="Задания резервного копирования" FontSize="22" FontWeight="SemiBold" />
-    <TextBlock x:Name="PageDescription" Text="Файлы и папки · WebDAV · 1С · SQL Server · PostgreSQL" Foreground="{DynamicResource MutedBrush}" Margin="0,7,0,0" />
+    <TextBlock x:Name="PageDescription" Text="Файлы и папки · WebDAV · 1С · MS SQL · PostgreSQL" Foreground="{DynamicResource MutedBrush}" Margin="0,7,0,0" />
    </StackPanel>
    <Border Grid.Row="1" Style="{StaticResource Card}" Padding="8" Margin="0,0,0,8">
     <DockPanel>
@@ -268,14 +268,14 @@
      TextWrapping="Wrap" Margin="0,0,0,10" />
    </StackPanel>
    <StackPanel x:Name="SqlBackupPanel" Visibility="Collapsed">
-    <TextBlock Text="SQL Server (Windows-аутентификация)" /><TextBox x:Name="SqlBackupServer" Margin="0,4,0,10" />
-    <TextBlock Text="Папка копий на SQL-сервере" TextWrapping="Wrap" /><TextBox x:Name="SqlServerDirectory" Margin="0,4,0,10" />
+    <TextBlock Text="MS SQL (Windows-аутентификация)" /><TextBox x:Name="SqlBackupServer" Margin="0,4,0,10" />
+    <TextBlock Text="Папка копий на сервере MS SQL" TextWrapping="Wrap" /><TextBox x:Name="SqlServerDirectory" Margin="0,4,0,10" />
     <TextBlock Text="Эта папка со стороны вашего компьютера" TextWrapping="Wrap" /><DockPanel Margin="0,4,0,10">
     <Button DockPanel.Dock="Right" Content="…" Tag="SqlAgentDirectory" Click="BrowsePath_Click" Margin="6,0,0,0" Padding="10,6" ToolTip="Выбрать путь" />
     <TextBox x:Name="SqlAgentDirectory" />
    </DockPanel>
     <Expander Header="Дополнительно: ограничение времени" Margin="0,0,0,10"><StackPanel><TextBlock Text="Ограничение времени, минут" /><TextBox x:Name="SqlBackupTimeout" Text="120" Margin="0,4,0,10" /></StackPanel></Expander>
-    <TextBlock Text="SQL-сервер создаёт файл .bak. Укажите путь, по которому этот компьютер сможет прочитать его, например \\server\backups."
+    <TextBlock Text="Сервер MS SQL создаёт файл .bak. Укажите путь, по которому этот компьютер сможет прочитать его, например \\server\backups."
      TextWrapping="Wrap" Margin="0,0,0,10" />
    </StackPanel>
    <StackPanel x:Name="PostgresBackupPanel" Visibility="Collapsed">
@@ -333,7 +333,7 @@
    </DockPanel>
    <TextBlock Text="Выберите HDD для выгрузки, ZIP и проверки FTP. Пустое поле — стандартная папка приложения. После успеха временные файлы удаляются; при ошибке остаются."
     TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,0,0,4" />
-   <TextBlock x:Name="SqlTemporaryHint" Text="Исходный .bak создаётся в «Каталоге на SQL-сервере» — выберите HDD также там. ZIP формируется во временной папке агента."
+   <TextBlock x:Name="SqlTemporaryHint" Text="Исходный .bak создаётся в «Каталоге на сервере MS SQL» — выберите HDD также там. ZIP формируется во временной папке агента."
     Visibility="Collapsed" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,0,0,4" />
 <Expander x:Name="ArchiveOptions" Header="Архивация и пароль" Margin="0,8,0,0"><StackPanel Margin="0,10,0,0">   <CheckBox x:Name="ArchiveCopies" Content="Архивировать копии в ZIP" Margin="0,0,0,8" />
    <CheckBox x:Name="EncryptArchive" Content="Шифровать ZIP паролем (AES-256)" Margin="0,0,0,8" Checked="Encryption_Changed" Unchecked="Encryption_Changed" />
@@ -534,7 +534,7 @@
      <Expander Header="Установка службы" Margin="0,8,0,8"><StackPanel>
       <TextBlock Text="Пользователь службы" Margin="0,8,0,4" />
       <ComboBox x:Name="ServiceAccount" IsEditable="True" IsTextSearchEnabled="False" Margin="0,0,0,6" AutomationProperties.Name="Выберите или введите пользователя службы Windows" />
-      <TextBlock Text="Выберите из списка или введите КОМПЬЮТЕР\пользователь / ДОМЕН\пользователь. Выбранный пользователь получит доступ к заданиям и сохранённым паролям. Доступ к базам, SQL Server и сетевым папкам должен быть у него отдельно." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
+      <TextBlock Text="Выберите из списка или введите КОМПЬЮТЕР\пользователь / ДОМЕН\пользователь. Выбранный пользователь получит доступ к заданиям и сохранённым паролям. Доступ к базам, MS SQL и сетевым папкам должен быть у него отдельно." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
       <TextBlock x:Name="ServiceAccountHint" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,4,0,6" />
       <TextBlock Text="Пароль Windows (не PIN). Установка и удаление потребуют подтверждения администратора. При смене пароля переустановите службу." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
       <PasswordBox x:Name="ServicePassword" MaxLength="512" Margin="0,8,0,8" AutomationProperties.Name="Пароль учётной записи Windows для службы" />
