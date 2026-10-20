@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
+@inject ServerOptions Settings
 <header>
-    <a class="brand" href="./">1C-Backup <span>Сервер управления</span></a>
+    <a class="brand" href="./">@Settings.DisplayName <span>1C-Backup · мониторинг</span></a>
     <AuthorizeView>
         <Authorized><nav><a href="./">Агенты</a><a href="connect">Подключить агент</a><a href="system">Сервер</a>
             <form action="session/logout" method="post"><AntiforgeryToken /><button class="quiet" type="submit">Выйти</button></form></nav></Authorized>

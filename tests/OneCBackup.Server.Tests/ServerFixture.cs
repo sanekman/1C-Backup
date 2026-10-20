@@ -69,13 +69,16 @@ public sealed class ServerFixture : IAsyncLifetime
         adminCsrf = info.RootElement.GetProperty("csrfToken").GetString()!;
         Administrator.DefaultRequestHeaders.Add("X-CSRF-TOKEN", adminCsrf);
     }
-    public WebApplication Build(string? prefix = null, bool plainHttp = false, bool automaticForwarding = false, bool trustedProxy = false)
+    public WebApplication Build(string? prefix = null, bool plainHttp = false, bool automaticForwarding = false, bool trustedProxy = false,
+        string? displayName = null, string? publicAddress = null)
     {
         var repository = Environment.GetEnvironmentVariable("ONECBACKUP_TEST_REPOSITORY") ?? FindRepository();
         List<string> args = ["--Server:ConnectionStringFile", Path.Combine(Root, "connection.txt"), "--Server:DataDirectory", Path.Combine(Root, "data"),
             "--Server:HttpsCertificatePath", Path.Combine(Root, "certificate.pfx"), "--Server:HttpsCertificatePasswordFile", Path.Combine(Root, "certificate-password.txt"),
             "--contentRoot", Path.Combine(repository, "src", "OneCBackup.Server"), "--urls", (plainHttp ? "http" : "https") + "://127.0.0.1:0"];
         if (prefix is not null) args.AddRange(["--Server:PathBase", prefix]);
+        if (displayName is not null) args.AddRange(["--Server:DisplayName", displayName]);
+        if (publicAddress is not null) args.AddRange(["--Server:PublicAddress", publicAddress]);
         if (automaticForwarding) args.AddRange(["--ForwardedHeaders_Enabled", "true"]);
         if (trustedProxy) args.AddRange(["--Server:TrustedProxies:0", "127.0.0.1"]);
         return ServerHost.Build(args.ToArray());

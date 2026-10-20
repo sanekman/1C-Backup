@@ -28,7 +28,7 @@ public static class ServerHost
             builder.Configuration.AddJsonFile(extraConfiguration, optional: false, reloadOnChange: false).AddEnvironmentVariables().AddCommandLine(args);
         }
         var settings = builder.Configuration.GetSection("Server").Get<ServerOptions>() ?? new();
-        if (!Path.IsPathFullyQualified(settings.DataDirectory) || settings.OfflineAfterSeconds is < 30 or > 86400
+        if (!settings.HasValidIdentity() || !Path.IsPathFullyQualified(settings.DataDirectory) || settings.OfflineAfterSeconds is < 30 or > 86400
             || settings.PathBase is not null && (settings.PathBase.Length < 2 || !settings.PathBase.StartsWith('/') || settings.PathBase.EndsWith('/')
                 || settings.PathBase.Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch is not '/' and not '-' and not '_')))
             throw new ServerRequestException(400, "invalid_server_options");

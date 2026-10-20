@@ -3,7 +3,10 @@
 param(
     [Parameter(Mandatory=$true)][string]$InstallDirectory,
     [string]$DataDirectory = (Join-Path $env:ProgramData 'OneCBackupServer'),
-    [string]$ServerName = $env:COMPUTERNAME,
+    [string]$ServerName = '1C-Backup Server',
+    [string]$ServerAddress = ('https://'+$env:COMPUTERNAME+':7443/'),
+    [string]$ServerNameFile,
+    [string]$ServerAddressFile,
     [string]$AdministratorPasswordFile
 )
 $ErrorActionPreference = 'Stop'
@@ -21,7 +24,8 @@ function Random-Password {
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
     try { $rng.GetBytes($bytes); return [Convert]::ToBase64String($bytes) } finally { $rng.Dispose() }
 }
-if ($ServerName -notmatch '^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$') { throw 'Invalid server DNS name.' }
+if ($ServerNameFile) { $ServerName=[IO.File]::ReadAllText($ServerNameFile) }
+if ($ServerAddressFile) { $ServerAddress=[IO.File]::ReadAllText($ServerAddressFile) }
 $InstallDirectory = [IO.Path]::GetFullPath($InstallDirectory)
 $DataDirectory = [IO.Path]::GetFullPath($DataDirectory)
 $config = Join-Path $DataDirectory 'server.json'
@@ -41,6 +45,15 @@ $stage = 'configuration'
 function Step([string]$Name) { $script:stage=$Name; Add-Content -LiteralPath (Join-Path $DataDirectory 'setup.log') -Encoding UTF8 -Value ((Get-Date).ToUniversalTime().ToString('o')+' '+$Name) }
 try {
     if (!(Test-Path $config)) {
+        if ([string]::IsNullOrWhiteSpace($ServerName) -or $ServerName.Length -gt 128 -or $ServerName -match '[\x00-\x1f\x7f]') { throw 'Server display name must contain 1 to 128 characters.' }
+        $address=$null
+        if ($ServerAddress -match '[\s\\]' -or ![Uri]::TryCreate($ServerAddress,[UriKind]::Absolute,[ref]$address) -or
+            $address.Scheme -ne 'https' -or $address.HostNameType -notin @([UriHostNameType]::Dns,[UriHostNameType]::IPv4,[UriHostNameType]::IPv6) -or
+            $address.UserInfo -or $address.Query -or $address.Fragment -or $address.Port -lt 1 -or $address.Host -in @('0.0.0.0','[::]')) { throw 'Enter an absolute HTTPS server address without login, query or fragment.' }
+        $pathBase=$address.AbsolutePath.TrimEnd('/')
+        if ($pathBase -and $pathBase -notmatch '^/[a-zA-Z0-9/_-]+$') { throw 'The address path may contain letters, digits, slash, hyphen and underscore.' }
+        $listenPort=$address.Port
+        $ServerAddress=$address.AbsoluteUri.TrimEnd('/')+'/'
         if (Test-Path $pgData) { throw 'Existing database found without configuration. Preserve it and recover server.json before reinstalling.' }
         if (!(Test-Path -LiteralPath $AdministratorPasswordFile -PathType Leaf)) { throw 'Administrator password file is required for first installation.' }
         $adminPassword = [IO.File]::ReadAllText($AdministratorPasswordFile).TrimEnd("`r","`n")
@@ -48,6 +61,8 @@ try {
         # Reserve fixed private PostgreSQL port; do not connect to or modify another installation.
         $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback,15433)
         try { $listener.Start() } finally { $listener.Stop() }
+        $httpsListener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Any,$listenPort)
+        try { $httpsListener.Start() } finally { $httpsListener.Stop() }
         $databasePassword = Random-Password
         $dbPasswordPath = Join-Path $DataDirectory 'database-password.txt'
         Write-Private $dbPasswordPath $databasePassword
@@ -59,8 +74,12 @@ try {
         Step 'https-certificate'
         $certificatePassword = Random-Password
         Write-Private (Join-Path $DataDirectory 'certificate-password.txt') $certificatePassword
-        $names = @('localhost',$ServerName,$env:COMPUTERNAME) | Select-Object -Unique
-        $cert = New-SelfSignedCertificate -DnsName $names -CertStoreLocation 'Cert:\LocalMachine\My' -KeyLength 3072 -HashAlgorithm SHA256 -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(5) -FriendlyName '1C-Backup Server'
+        $names = @('localhost',$address.DnsSafeHost,$env:COMPUTERNAME) | Select-Object -Unique
+        $san = foreach ($name in $names) {
+            $ip=$null
+            if ([Net.IPAddress]::TryParse($name,[ref]$ip)) { 'IPAddress='+$name } else { 'DNS='+$name }
+        }
+        $cert = New-SelfSignedCertificate -Type SSLServerAuthentication -Subject 'CN=localhost' -TextExtension ('2.5.29.17={text}'+($san -join '&')) -CertStoreLocation 'Cert:\LocalMachine\My' -KeyLength 3072 -HashAlgorithm SHA256 -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(5) -FriendlyName $ServerName
         Export-PfxCertificate -Cert $cert -FilePath (Join-Path $DataDirectory 'server.pfx') -Password (ConvertTo-SecureString $certificatePassword -AsPlainText -Force) | Out-Null
         Export-Certificate -Cert $cert -FilePath (Join-Path $DataDirectory 'server.cer') | Out-Null
         # Trust only on this machine. Remote agents use the explicit SHA-256 pin from the panel.
@@ -69,16 +88,35 @@ try {
         Remove-Item -LiteralPath ('Cert:\LocalMachine\My\'+$cert.Thumbprint)
         Write-Private (Join-Path $DataDirectory 'administrator-password.txt') $adminPassword
         $settings = @{
-            AllowedHosts = ($names -join ';'); Urls = 'https://0.0.0.0:7443'
+            AllowedHosts = ((@($names)+@($address.Host) | Select-Object -Unique) -join ';'); Urls = ('https://+:'+$listenPort)
             Server = @{
+                DisplayName = $ServerName; PublicAddress = $ServerAddress; PathBase = $(if ($pathBase) { $pathBase } else { $null })
                 DataDirectory = (Join-Path $DataDirectory 'data'); ConnectionStringFile = (Join-Path $DataDirectory 'connection-string.txt')
                 HttpsCertificatePath = (Join-Path $DataDirectory 'server.pfx'); HttpsCertificatePasswordFile = (Join-Path $DataDirectory 'certificate-password.txt')
                 BootstrapUser = 'admin'; BootstrapPasswordFile = (Join-Path $DataDirectory 'administrator-password.txt')
             }
         }
         Write-Private $config ($settings | ConvertTo-Json -Depth 5)
-        Write-Private (Join-Path $DataDirectory 'panel-url.txt') ("https://"+$ServerName+':7443/')
     }
+    # Older installations have only panel-url.txt; preserve their address, database and certificate.
+    $configuration = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json
+    $migrated=$false
+    if (!$configuration.Server.PSObject.Properties['DisplayName']) {
+        $configuration.Server | Add-Member -NotePropertyName DisplayName -NotePropertyValue $ServerName
+        $migrated=$true
+    }
+    if (!$configuration.Server.PSObject.Properties['PublicAddress']) {
+        $oldAddress=Join-Path $DataDirectory 'panel-url.txt'
+        $publicAddress=if (Test-Path $oldAddress) { [IO.File]::ReadAllText($oldAddress).Trim() } else { $ServerAddress }
+        $configuration.Server | Add-Member -NotePropertyName PublicAddress -NotePropertyValue $publicAddress
+        $migrated=$true
+    }
+    if ($migrated) { Write-Private $config ($configuration | ConvertTo-Json -Depth 5) }
+    Write-Private (Join-Path $DataDirectory 'panel-url.txt') $configuration.Server.PublicAddress
+    $listenAddress=[Uri]($configuration.Urls -replace '://[+*]:','://localhost:')
+    $listenPort=$listenAddress.Port
+    $pathBase=if ($configuration.Server.PSObject.Properties['PathBase']) { $configuration.Server.PathBase } else { '' }
+    $readyAddress='https://localhost:'+$listenPort+$pathBase+'/health/ready'
     if (!(Get-Service -Name $pgService -ErrorAction SilentlyContinue)) {
         Run-Native (Join-Path $pg 'pg_ctl.exe') @('register','-N',$pgService,'-D',$pgData,'-U','NT AUTHORITY\NetworkService','-S','auto')
 
@@ -106,7 +144,7 @@ try {
     Run-Native 'sc.exe' @('failure',$serverService,'reset=','86400','actions=','restart/10000/restart/30000/restart/60000')
     Run-Native 'sc.exe' @('failure',$pgService,'reset=','86400','actions=','restart/10000/restart/30000/restart/60000')
     if (!(Get-NetFirewallRule -Name 'OneCBackupServer-Https' -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -Name 'OneCBackupServer-Https' -DisplayName '1C-Backup Server HTTPS' -Direction Inbound -Protocol TCP -LocalPort 7443 -Program $exe -Profile Domain,Private -Action Allow | Out-Null
+        New-NetFirewallRule -Name 'OneCBackupServer-Https' -DisplayName '1C-Backup Server HTTPS' -Direction Inbound -Protocol TCP -LocalPort $listenPort -Program $exe -Profile Domain,Private -Action Allow | Out-Null
     }
     Step 'server-service'
     Start-Service -Name $serverService
@@ -114,7 +152,7 @@ try {
     # Positive HTTPS readiness using OS trust; TLS validation is never disabled.
     $ready = $false
     for ($attempt=0; $attempt -lt 30; $attempt++) {
-        try { $response=Invoke-WebRequest -UseBasicParsing -Uri 'https://localhost:7443/health/ready' -TimeoutSec 3; if ($response.StatusCode -eq 200) { $ready=$true; break } } catch { }
+        try { $response=Invoke-WebRequest -UseBasicParsing -Uri $readyAddress -TimeoutSec 3; if ($response.StatusCode -eq 200) { $ready=$true; break } } catch { }
         Start-Sleep -Seconds 2
     }
     if (!$ready) { throw 'The Windows services were installed but HTTPS readiness failed. See the server logs.' }

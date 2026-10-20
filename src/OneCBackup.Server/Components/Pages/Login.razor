@@ -1,8 +1,10 @@
 @page "/login"
 @attribute [AllowAnonymous]
-<PageTitle>Вход — 1C-Backup</PageTitle>
+@inject ServerOptions Settings
+<PageTitle>Вход — @Settings.DisplayName</PageTitle>
 <section class="card login">
     <h1>Вход на сервер</h1>
+    <p><strong>@Settings.DisplayName</strong></p>
     <p class="muted">Войдите под учётной записью администратора сервера.</p>
     @if (Failed == "1") { <p class="error" role="alert">Не удалось войти. Проверьте имя и пароль.</p> }
     <form action="session/login" method="post">

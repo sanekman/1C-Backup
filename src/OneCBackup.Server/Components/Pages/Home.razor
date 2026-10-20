@@ -3,7 +3,7 @@
 @inject ServerStore Store
 @inject ServerOptions Settings
 @inject IHttpContextAccessor Http
-<PageTitle>Агенты — 1C-Backup</PageTitle>
+<PageTitle>Агенты — @Settings.DisplayName</PageTitle>
 <div class="heading"><div><h1>Агенты</h1><p class="muted">Компьютеры, подключённые к этому серверу.</p></div><a class="button" href="connect">Подключить агент</a></div>
 @if (Overview is { } overview)
 {

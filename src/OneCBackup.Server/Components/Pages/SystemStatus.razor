@@ -3,9 +3,11 @@
 @inject ServerStore Store
 @inject ServerOptions Settings
 @inject IHttpContextAccessor Http
-<PageTitle>Состояние сервера — 1C-Backup</PageTitle>
+<PageTitle>Состояние сервера — @Settings.DisplayName</PageTitle>
 <h1>Состояние сервера</h1>
 <section class="card"><dl>
+<dt>Имя сервера</dt><dd>@Settings.DisplayName</dd>
+<dt>Адрес подключения</dt><dd>@(Settings.PublicAddress ?? "Определяется по адресу открытой панели")</dd>
 <dt>База данных</dt><dd>@(Ready ? "Доступна, схема актуальна" : "Недоступна / требуется миграция")</dd>
 <dt>Версия схемы</dt><dd>@ServerStore.SchemaVersion</dd>
 <dt>Время сервера (UTC)</dt><dd>@Home.Time(DateTimeOffset.UtcNow)</dd>

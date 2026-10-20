@@ -29,6 +29,15 @@ public static class ServerTokens
 
 public sealed class ServerOptions
 {
+    public string DisplayName { get; init; } = "1C-Backup Server";
+    public string? PublicAddress { get; init; }
+    public bool HasValidIdentity() => !string.IsNullOrWhiteSpace(DisplayName) && DisplayName.Length <= 128
+        && !DisplayName.Any(char.IsControl) && (PublicAddress is null || ValidPublicAddress(PublicAddress));
+    public static bool ValidPublicAddress(string value) => !value.Any(ch => char.IsWhiteSpace(ch) || char.IsControl(ch) || ch == '\\')
+        && Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps
+        && uri.HostNameType is UriHostNameType.Dns or UriHostNameType.IPv4 or UriHostNameType.IPv6
+        && uri.Host is not "0.0.0.0" and not "[::]" && uri.Port is >= 1 and <= 65535
+        && uri.UserInfo.Length == 0 && uri.Query.Length == 0 && uri.Fragment.Length == 0;
     public string ConnectionString { get; init; } = "";
     public string? ConnectionStringFile { get; init; }
     public string? DatabasePasswordFile { get; init; }

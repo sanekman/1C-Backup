@@ -74,7 +74,7 @@ def main():
     # Large offline installers stay in release assets (not Git blobs).
     tree = api('git/trees', {'tree': [{'path': 'server-release.json', 'mode': '100644', 'type': 'blob', 'content': content}]})
     commit = api('git/commits', {'message': 'Immutable server distribution ' + version, 'tree': tree['sha'], 'parents': []})
-    notes = ('Windows: скачайте setup.exe, укажите имя сервера и пароль администратора; PostgreSQL 17, .NET 10.0.13, HTTPS и службы Windows входят в пакет. '
+    notes = ('Windows: скачайте setup.exe, задайте понятное имя системы мониторинга, полный HTTPS-адрес подключения и пароль администратора; PostgreSQL 17, .NET 10.0.13, HTTPS и службы Windows входят в пакет. '
              'В панели: связь с агентами, задания, прогресс, история, неполные копии, результаты хранилищ и внешние SQL-копии. '
              'Для подключения требуется клиент 0.2.0-alpha.20 или новее. Локальное расписание сохраняется. '
              'Проверены установка с нуля, вход, переустановка, перезапуск служб и сохранение БД при удалении. '

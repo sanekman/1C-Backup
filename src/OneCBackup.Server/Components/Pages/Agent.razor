@@ -4,7 +4,7 @@
 @inject ServerOptions Settings
 @inject ServerStore Store
 @inject IHttpContextAccessor Http
-<PageTitle>Карточка агента — 1C-Backup</PageTitle>
+<PageTitle>Карточка агента — @Settings.DisplayName</PageTitle>
 <a href="./">← Агенты</a>
 @if (Data is { } agent)
 {
