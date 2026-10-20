@@ -8,10 +8,11 @@ namespace OneCBackup.Desktop;
 
 public partial class MainWindow
 {
-    private static string FileSnapshotDetails(FileBackupSnapshot? snapshot) => snapshot is null ? "" : snapshot.IsIncomplete
-        ? "Неполная файловая копия: некоторые файлы не скопированы. Список пропусков находится в индексе архива. Остальные файлы доступны для восстановления.\n" : snapshot.IsFull
+    private static string FileSnapshotDetails(FileBackupSnapshot? snapshot) => snapshot is null ? "" :
+        (snapshot.IsIncomplete ? "Копия неполная: свежие версии некоторых файлов не скопированы. Список пропусков находится в индексе архива. Для них доступны прежние версии из цепочки, если они были скопированы ранее.\n" : "")
+        + (snapshot.IsFull
         ? "Файловая копия: полная. Для восстановления достаточно этого архива.\n"
-        : $"Файловая копия: инкрементная. Для восстановления нужны полная основа и все изменения в этом хранилище. Архивов в цепочке: {snapshot.Depth + 1}.\n";
+        : $"Файловая копия: инкрементная. Для восстановления нужны полная основа и все изменения в этом хранилище. Архивов в цепочке: {snapshot.Depth + 1}.\n");
     private void FileBackupMode_Changed(object sender, SelectionChangedEventArgs e) => UpdateFileBackupControls();
     private void UpdateFileBackupControls()
     {
@@ -52,7 +53,8 @@ public partial class MainWindow
             Status.Text = $"Файлы восстановлены в новую папку. Файлов: {result.Files}; архивов: {result.Archives}.";
             if (result.SkippedPaths is { Count: > 0 } skipped)
             {
-                CopyVerificationStatus.Text += "\nПредупреждение: исходная копия неполная. Не скопировано: " + string.Join(", ", skipped.Take(100));
+                CopyVerificationStatus.Text += "\nПредупреждение: исходная копия неполная. Не удалось скопировать свежие версии: " + string.Join(", ", skipped.Take(100))
+                    + ". Если в цепочке были прежние версии этих файлов, восстановлены они.";
                 Status.Text += " Предупреждение: исходная копия неполная.";
             }
         }

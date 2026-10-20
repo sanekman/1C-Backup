@@ -889,7 +889,7 @@ public partial class MainWindow : Window
         if (copyVerification is null) CopyVerificationStatus.Text = "";
         CopyDetails.Visibility = Copies.SelectedItem is BackupCopyRow ? Visibility.Visible : Visibility.Collapsed;
         SelectedCopyPath.Text = Copies.SelectedItem is BackupCopyRow selectedCopy ? selectedCopy.Record.Backup.FileSnapshot is { } fileSnapshot
-            ? (fileSnapshot.IsIncomplete ? "Неполная копия · 1 архив" : fileSnapshot.IsFull ? "Полная копия · 1 архив"
+            ? (fileSnapshot.IsIncomplete ? "Неполная копия · " : "") + (fileSnapshot.IsFull ? "Полная копия · 1 архив"
                 : $"Инкрементная копия · архивов для восстановления: {fileSnapshot.Depth + 1}") + " · " + selectedCopy.DisplayLocation
             : selectedCopy.DisplayLocation : "";
         CopyDetails.Text = Copies.SelectedItem is BackupCopyRow row

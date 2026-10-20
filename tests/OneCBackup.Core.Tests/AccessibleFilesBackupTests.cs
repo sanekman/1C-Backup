@@ -65,7 +65,7 @@ public sealed class AccessibleFilesBackupTests : IDisposable
         Assert.Empty(manifest.Files); Assert.True(manifest.GetSnapshot().IsIncomplete); Assert.Equal(new[] { "locked.txt" }, manifest.SkippedPaths);
     }
     [Fact]
-    public async Task PartialDoesNotDeleteGoodCopiesOrConsumeGoodQuotaAndNextIncrementalStartsFull()
+    public async Task PartialDoesNotDeleteGoodCopiesOrConsumeGoodQuotaAndNextIncrementalContinues()
     {
         var file = Path.Combine(job.Source, "available.txt"); await File.WriteAllTextAsync(file, "v1");
         var first = await Runner().RunAsync(job);
@@ -77,7 +77,7 @@ public sealed class AccessibleFilesBackupTests : IDisposable
         Assert.True(File.Exists(first.Backup!.Location)); Assert.True(File.Exists(second.Backup.Location));
         Assert.Equal(3, (await catalog.ReadAsync()).Count);
         var recovered = await Runner().RunAsync(job);
-        Assert.True(recovered.Backup!.FileSnapshot!.IsFull); Assert.False(recovered.Backup.FileSnapshot.IsIncomplete);
+        Assert.False(recovered.Backup!.FileSnapshot!.IsFull); Assert.False(recovered.Backup.FileSnapshot.IsIncomplete);
         Assert.True(File.Exists(partial.Backup.Location)); Assert.True(File.Exists(second.Backup.Location));
         await File.WriteAllTextAsync(file, "v3"); var incremental = await Runner().RunAsync(job);
         Assert.False(incremental.Backup!.FileSnapshot!.IsFull);

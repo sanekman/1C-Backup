@@ -6,7 +6,7 @@ namespace OneCBackup.Desktop;
 public sealed record BackupCopyRow(BackupRecord Record, string JobName,
     BackupVerificationEntry? Verification = null, bool VerificationUnavailable = false)
 {
-    internal const string IncompleteWarning = "Копия неполная: некоторые файлы пропущены при создании. Проверка целостности не возвращает эти файлы. Список пропусков находится в индексе архива.";
+    internal const string IncompleteWarning = "Копия неполная: свежие версии некоторых файлов пропущены при создании. В инкрементной цепочке могут сохраняться прежние версии. Проверка целостности не подтверждает полноту копии. Список пропусков находится в индексе архива.";
     private BackupVerificationEntry? CurrentCheck => Verification is not null && Verification.Matches(Record) ? Verification : null;
     public string CheckSummary => VerificationUnavailable ? "Нет данных" : CurrentCheck is not { } check ? "Не проверена"
         : (check.Outcome switch { BackupVerificationOutcome.Verified when Record.Backup.FileSnapshot?.IsIncomplete == true => "С пропусками",

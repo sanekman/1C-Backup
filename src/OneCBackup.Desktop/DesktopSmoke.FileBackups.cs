@@ -142,6 +142,8 @@ internal static partial class DesktopSmoke
             await WaitUntil(() => window.SmokeReady, "Копирование доступных файлов не завершилось.");
         }
         var partial = (await catalog.ReadAsync()).Single(record => record.JobId == job.Id && record.Backup.FileSnapshot?.IsIncomplete == true);
+        if (partial.Backup.FileSnapshot!.IsFull || partial.Backup.FileSnapshot.ParentSnapshotId != latest.Backup.FileSnapshot!.SnapshotId)
+            throw new InvalidOperationException("Ошибка отдельного файла превратила инкремент в полную копию.");
         await WaitUntil(() => Control<TextBlock>("SelectedJobSummary").Text.Contains("Копия создана, есть предупреждения"),
             "Результат копирования с пропусками не обновился.");
         var summaryBrush = Control<TextBlock>("SelectedJobSummary").Foreground as System.Windows.Media.SolidColorBrush;
@@ -164,6 +166,9 @@ internal static partial class DesktopSmoke
         await WaitUntil(() => window.SmokeReady && Control<Button>("VerifyCopyButton").IsEnabled, "Проверка неполной копии недоступна.");
         if (!Control<TextBlock>("SelectedCopyPath").Text.StartsWith("Неполная копия"))
             throw new InvalidOperationException("Подпись выбранной копии скрывает пропущенные файлы.");
+        if (!Control<TextBlock>("SelectedCopyPath").Text.Contains("Инкрементная копия")
+            || !Control<TextBlock>("SelectedCopyPath").Text.Contains($"архивов для восстановления: {partial.Backup.FileSnapshot.Depth + 1}"))
+            throw new InvalidOperationException("Подпись неполного инкремента скрывает зависимости восстановления.");
         Click("VerifyCopyButton");
         await WaitUntil(() => window.SmokeReady, "Ручная проверка неполной копии не завершилась.");
         var checkedPartial = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Single(row => row.Record.Id == partial.Id);

@@ -158,7 +158,7 @@ public sealed class FileFolderBackupTests : IDisposable
     }
 
     [Fact]
-    public async Task SourceAccessFailureKeepsPreviousCopyAndPreventsUnsafeIncrementalBase()
+    public async Task SourceAccessFailureKeepsPreviousCopyAndContinuesIncrementalPlan()
     {
         var file = Path.Combine(Source, "a.txt"); await File.WriteAllTextAsync(file, "content"); var first = await Run();
         await using (var held = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
@@ -171,7 +171,7 @@ public sealed class FileFolderBackupTests : IDisposable
             Assert.True(records.Single(record => record.Backup.Location == result.Backup!.Location).Backup.FileSnapshot!.IsIncomplete);
         }
         Assert.True(File.Exists(first.Backup.Location));
-        Assert.True((await Run()).Backup.FileSnapshot!.IsFull);
+        Assert.False((await Run()).Backup.FileSnapshot!.IsFull);
     }
 
     [Fact]

@@ -38,7 +38,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 IBackupExecutor selectedExecutor = job.Kind switch
                 {
                     DatabaseKind.FilesAndFolders => fileAccessWrapper?.Invoke(new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords))
-                        ?? new AccessibleFilesBackupExecutor(new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords), completion.Passwords),
+                        ?? new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords),
                     DatabaseKind.WebDav => new WebDavBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, webDavClientFactory),
                     _ => executor
                 };
@@ -57,6 +57,8 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 {
                     log.Write(DiagnosticEvent.SourceItemsSkipped, DiagnosticLevel.Warning, values: new(Count: skipped.Count));
                     warnings.Add("Копия неполная: не удалось прочитать файлов / папок: " + skipped.Count + ".");
+                    if (fileManifest.ParentSnapshotId is not null)
+                        warnings.Add("Для пропущенных файлов сохранены последние доступные версии из предыдущих архивов, если они были скопированы ранее. Полные и инкрементные копии продолжаются по заданному плану.");
                     warnings.AddRange(skipped.Take(100).Select(path => "Не удалось скопировать (недоступен, занят, изменился или ошибка чтения): " + path));
                     if (skipped.Count > 100) warnings.Add("Полный список пропусков: onec-backup-manifest.json внутри архива.");
                 }

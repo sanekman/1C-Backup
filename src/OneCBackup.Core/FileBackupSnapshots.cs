@@ -13,7 +13,7 @@ public sealed record FileBackupSnapshot(Guid SnapshotId, Guid FullSnapshotId, Gu
     public bool IsFull => ParentSnapshotId is null;
     public void Validate()
     {
-        if (IsIncomplete && !IsFull || SnapshotId == Guid.Empty || FullSnapshotId == Guid.Empty || !FileBackupManifest.IsHash(SourceIdentity)
+        if (SnapshotId == Guid.Empty || FullSnapshotId == Guid.Empty || !FileBackupManifest.IsHash(SourceIdentity)
             || !FileBackupManifest.IsHash(ManifestSha256) || Depth is < 0 or >= 365
             || (IsFull ? Depth != 0 || FullSnapshotId != SnapshotId
                 : ParentSnapshotId == Guid.Empty || ParentSnapshotId == SnapshotId || FullSnapshotId == SnapshotId || Depth == 0))
@@ -66,12 +66,12 @@ public sealed record FileBackupManifest
     }
     public void Validate()
     {
-        if (Application != "1C-Backup" || FormatVersion is not (1 or 2) || Files is null || Directories is null
+        if (Application != "1C-Backup" || FormatVersion is not (1 or 2 or 3) || Files is null || Directories is null
             || ChangedFiles is null || DeletedFiles is null || Files.Count > MaximumItems || Directories.Count > MaximumItems
             || ChangedFiles.Count > MaximumItems || DeletedFiles.Count > MaximumItems)
             throw new InvalidDataException("Некорректный формат или слишком большой индекс файловой копии.");
         var incomplete = SkippedPaths?.Count > 0;
-        if ((FormatVersion == 2) != incomplete || SkippedPaths?.Count > MaximumItems)
+        if ((FormatVersion >= 2) != incomplete || SkippedPaths?.Count > MaximumItems || FormatVersion == 2 && ParentSnapshotId is not null)
             throw new InvalidDataException("Некорректная отметка неполной копии.");
         var skipped = new HashSet<string>(SkippedPaths ?? [], StringComparer.OrdinalIgnoreCase);
         if (SkippedPaths is not null)
@@ -92,7 +92,9 @@ public sealed record FileBackupManifest
             if (file.WebDavETag is not null && (file.WebDavETag.Length > 1024 || file.WebDavETag.Any(char.IsControl)))
                 throw new InvalidDataException("Некорректный ETag файла WebDAV.");
             ValidateRelativePath(file.Path);
-            if (IsSkipped(file.Path, skipped))
+            // Format 3 may retain an older version from the parent, or contain
+            // readable children of a directory whose enumeration was incomplete.
+            if (FormatVersion != 3 && IsSkipped(file.Path, skipped))
                 throw new InvalidDataException("Пропущенный путь содержит скопированные файлы.");
             if (!names.Add(file.Path)) throw new InvalidDataException("Повторяющийся путь в индексе копии.");
         }
@@ -111,13 +113,13 @@ public sealed record FileBackupManifest
         foreach (var path in ChangedFiles)
         {
             ValidateRelativePath(path);
-            if (!names.Contains(path) || !changed.Add(path)) throw new InvalidDataException("Некорректный список изменённых файлов.");
+            if (!names.Contains(path) || !changed.Add(path) || skipped.Contains(path)) throw new InvalidDataException("Некорректный список изменённых файлов.");
         }
         var deleted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var path in DeletedFiles)
         {
             ValidateRelativePath(path);
-            if (names.Contains(path) || !deleted.Add(path)) throw new InvalidDataException("Некорректный список удалённых файлов.");
+            if (names.Contains(path) || !deleted.Add(path) || IsSkipped(path, skipped)) throw new InvalidDataException("Некорректный список удалённых файлов.");
         }
         if (ParentSnapshotId is null && (changed.Count != Files.Count || deleted.Count != 0)
             || SourceIsFile && (Files.Count != 1 && !(incomplete && Files.Count == 0) || Directories.Count != 0))

@@ -1,10 +1,8 @@
-using System.Security.Cryptography;
-using ICSharpCode.SharpZipLib.Zip;
-
 namespace OneCBackup.Core;
 
 public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSnapshotStore snapshots,
-    IArchivePasswordStore? passwords = null, Func<string, Stream>? openSource = null) : IBackupExecutor
+    IArchivePasswordStore? passwords = null, Func<string, Stream>? openSource = null,
+    Func<string, IEnumerable<string>>? enumerateSource = null) : IBackupExecutor
 {
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
@@ -13,103 +11,13 @@ public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSn
         var source = Path.GetFullPath(job.Source);
         var isFile = File.Exists(source);
         if (!isFile && !Directory.Exists(source)) throw new FileNotFoundException("Не найден исходный файл или папка.");
-        FileBackupPaths.RejectReparse(source);
         if (!isFile)
-        {
-            FileBackupPaths.RequireOutside(source, workDirectory, "Временная папка должна находиться вне исходной папки.");
             FileBackupPaths.RequireOutside(source, snapshots.DirectoryPath, "Исходная папка содержит рабочий профиль программы. Выберите отдельную папку с данными.");
-            foreach (var target in job.StorageJobs.Where(target => (target.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare)))
-                FileBackupPaths.RequireOutside(source, target.DestinationDirectory, "Хранилища должны находиться вне исходной папки.");
-        }
-        var sourceIdentity = FileBackupManifest.IdentifySource(source, isFile);
-        var password = await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, cancellationToken);
-        var previous = await FileBackupBases.ReadAsync(job, sourceIdentity, catalog, snapshots, cancellationToken);
-        BackupProgressContext.Report(BackupStage.ScanningSource);
-        var scan = FileBackupSourceException.Read(() => FileBackupPaths.Scan(source, isFile, cancellationToken));
-        var lengths = scan.Files.ToDictionary(file => file.RelativePath, file =>
-        { cancellationToken.ThrowIfCancellationRequested(); return FileBackupSourceException.Read(() => new FileInfo(file.FullPath).Length); }, StringComparer.Ordinal);
-        var archiveProgress = new FileArchiveProgress(lengths.Values.Sum());
-        archiveProgress.Report();
-        var oldFiles = previous?.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase)
-            ?? new Dictionary<string, FileBackupEntry>(StringComparer.OrdinalIgnoreCase);
-        var id = Guid.NewGuid();
-        var destination = Path.Combine(Path.GetFullPath(workDirectory), BackupFileName.Create(job, $".files-{(previous is null ? "full" : "incremental")}.zip", uniqueId: id));
-        Directory.CreateDirectory(workDirectory);
-        var temporary = destination + ".partial";
-        var files = new List<FileBackupEntry>(); var changed = new List<string>();
-        try
-        {
-            await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.Asynchronous))
-            {
-                var zip = new ZipOutputStream(output) { IsStreamOwner = false, Password = password, UseZip64 = UseZip64.Dynamic };
-                Exception? sourceFailure = null;
-                try
-                {
-                    zip.SetLevel(6);
-                    foreach (var item in scan.Files)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        FileBackupSourceException.Read(() => { FileBackupPaths.RejectReparse(item.FullPath); return true; });
-                        await using var input = new FileBackupSourceStream(FileBackupSourceException.Read(() => openSource?.Invoke(item.FullPath)
-                            ?? new FileStream(item.FullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan)),
-                            item.RelativePath, lengths[item.RelativePath]);
-                        var modified = new DateTimeOffset(FileBackupSourceException.Read(() => File.GetLastWriteTimeUtc(item.FullPath)));
-                        var length = input.Length;
-                        if (length != lengths[item.RelativePath]) throw new FileBackupSourceException("Размер файла изменился после сканирования: " + item.RelativePath);
-                        var hash = Convert.ToHexStringLower(await SHA256.HashDataAsync(input, cancellationToken));
-                        var descriptor = new FileBackupEntry(item.RelativePath, length, hash, modified);
-                        files.Add(descriptor);
-                        if (!oldFiles.TryGetValue(item.RelativePath, out var old) || old.Sha256 != hash || old.Length != length || old.Path != item.RelativePath)
-                        {
-                            changed.Add(item.RelativePath); input.Position = 0;
-                            zip.PutNextEntry(Entry("data/" + item.RelativePath, length, password));
-                            await archiveProgress.CopyAsync(input, zip, cancellationToken, hash);
-                            zip.CloseEntry();
-                        }
-                        archiveProgress.Advance(length);
-                        if (input.Length != length || FileBackupSourceException.Read(() => File.GetLastWriteTimeUtc(item.FullPath)) != modified.UtcDateTime)
-                            throw new FileBackupSourceException("Файл изменился во время копирования: " + item.RelativePath);
-                    }
-                    var currentPaths = files.Select(file => file.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    var manifest = new FileBackupManifest { SnapshotId = id, FullSnapshotId = previous?.FullSnapshotId ?? id,
-                        ParentSnapshotId = previous?.SnapshotId, SourceIdentity = sourceIdentity, SourceIsFile = isFile,
-                        Depth = previous is null ? 0 : previous.Depth + 1, Files = files, Directories = scan.Directories,
-                        ChangedFiles = changed, DeletedFiles = oldFiles.Keys.Where(path => !currentPaths.Contains(path)).Order(StringComparer.Ordinal).ToArray() };
-                    manifest.Validate();
-                    await FileBackupZip.WriteManifestAsync(zip, manifest, password, cancellationToken); zip.Finish();
-                }
-                catch (FileBackupSourceException error) { sourceFailure = error; throw; }
-                catch (OperationCanceledException error) { sourceFailure = error; throw; }
-                finally
-                {
-                    try { zip.Dispose(); }
-                    // Finishing an aborted entry can report a ZIP size mismatch.
-                    // Preserve the source failure so the fallback can retry safely.
-                    catch (ZipException) when (sourceFailure is not null) { }
-                }
-                await output.FlushAsync(cancellationToken); output.Flush(true);
-            }
-            BackupProgressContext.Report(BackupStage.Verifying);
-            var after = FileBackupSourceException.Read(() => FileBackupPaths.Scan(source, isFile, cancellationToken));
-            if (!scan.Files.Select(file => file.RelativePath).SequenceEqual(after.Files.Select(file => file.RelativePath))
-                || !scan.Directories.SequenceEqual(after.Directories))
-                throw new FileBackupSourceException("Состав исходной папки изменился во время копирования.");
-            foreach (var file in files)
-            {
-                var path = isFile ? source : FileBackupPaths.Resolve(source, file.Path);
-                var info = new FileInfo(path);
-                if (FileBackupSourceException.Read(() => info.Length) != file.Length || info.LastWriteTimeUtc != file.LastWriteUtc.UtcDateTime)
-                    throw new FileBackupSourceException("Файл изменился во время копирования: " + file.Path);
-            }
-            await FileBackupZip.VerifyAsync(temporary, password, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested(); File.Move(temporary, destination);
-            return destination;
-        }
-        finally { File.Delete(temporary); }
+        var previous = await FileBackupBases.ReadAsync(job, FileBackupManifest.IdentifySource(source, isFile),
+            catalog, snapshots, cancellationToken);
+        return await new AccessibleFilesBackupExecutor(this, passwords, enumerateSource, openSource)
+            .CreateSnapshotAsync(job, workDirectory, cancellationToken, previous);
     }
-
-    private static ZipEntry Entry(string name, long length, string? password) => new(name)
-    { Size = length, AESKeySize = password is null ? 0 : 256, DateTime = DateTime.UtcNow };
 }
 
 internal sealed record FileBackupSourceFile(string FullPath, string RelativePath);
