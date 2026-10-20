@@ -56,7 +56,7 @@ end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := (PageID = Credentials.ID) and ExistingConfiguration;
+  Result := (PageID = Credentials.ID) and (ExistingConfiguration or WizardSilent);
 end;
 
 function ValidServerName(Value: String): Boolean;
@@ -70,7 +70,7 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if (CurPageID = Credentials.ID) and not ExistingConfiguration then begin
+  if (CurPageID = Credentials.ID) and not ExistingConfiguration and not WizardSilent then begin
     Result := (Length(Credentials.Values[1]) >= 12) and (Length(Credentials.Values[1]) <= 256) and
       (Credentials.Values[1] = Credentials.Values[2]) and ValidServerName(Credentials.Values[0]);
     if not Result then MsgBox('Укажите имя сервера и одинаковый пароль от 12 до 256 символов.', mbError, MB_OK);
