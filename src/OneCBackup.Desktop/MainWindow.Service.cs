@@ -48,6 +48,8 @@ public partial class MainWindow
             var owned = info?.Matches(ServiceExecutable, DesktopPaths.DataDirectory) == true;
             ServiceStatus.Text = info is null ? "Служба не установлена." : owned ? "Служба: " + info.Description + " · " + info.Account
                 : "Служба установлена для другой папки программы или профиля.";
+            if (info is null && !ApplicationUpdateHandoff.IsInstalled())
+                ServiceStatus.Text += " Для установки службы используйте установщик Windows.";
             InstallServiceButton.IsEnabled = ready && !serviceManaging && info is null && ApplicationUpdateHandoff.IsInstalled();
             RemoveServiceButton.IsEnabled = ready && !serviceManaging && owned && info!.State == 1;
             StartServiceButton.IsEnabled = ready && !serviceManaging && owned && info!.State == 1;

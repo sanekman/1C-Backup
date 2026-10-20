@@ -369,7 +369,12 @@ public partial class MainWindow
                 ? latest.Warnings?.Count > 0 ? "WarningBrush" : "SuccessBrush" : "ErrorBrush";
             SelectedJobSummary.Foreground = (System.Windows.Media.Brush)FindResource(brush);
         }
-        SelectedJobSummary.Text = resultText + "\n" + nextText;
+        var filePlan = !job.IsFileSnapshot ? "" : job.FileBackupMode == FileBackupMode.Full ? "Полная при каждом запуске"
+            : job.FullBackupDayOfWeek is { } day
+                ? "Инкрементная · Полная: " + CultureInfo.GetCultureInfo("ru-RU").DateTimeFormat.GetDayName(day)
+                    + "; при пропуске — при ближайшем запуске"
+                : $"Инкрементная · до {job.FullBackupEvery} архивов в цепочке";
+        SelectedJobSummary.Text = resultText + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
     }
 
     private async void ShowLatestCopy_Click(object sender, RoutedEventArgs e)

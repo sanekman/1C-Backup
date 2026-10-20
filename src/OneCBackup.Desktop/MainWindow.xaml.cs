@@ -556,6 +556,7 @@ public partial class MainWindow : Window
         {
             backgroundBusy = engine.IsHeldElsewhere();
             backgroundState = await backgroundControl.ReadAsync();
+            UpdateManualRunControl();
             await RefreshManualRequestsAsync();
             await RefreshBackupProgressAsync();
             if (launchedAgent is not null && launchedAgent.HasExited)
@@ -736,7 +737,7 @@ public partial class MainWindow : Window
         {
             "history" => ("История запусков", "Результаты запусков и ошибки. Время — на этом компьютере."),
             "copies" => ("Резервные копии", "Зарегистрированные копии всех заданий, расположение файлов и проверка целостности."),
-            "agent" => ("Настройки программы", "Оформление, фоновая работа и запуск при входе в Windows."),
+            "agent" => ("Настройки программы", "Основное, фоновая работа, обновления, подключения и помощь."),
             _ => ("Задания резервного копирования", "Файлы и папки · WebDAV · 1С · MS SQL · PostgreSQL")
         };
     }

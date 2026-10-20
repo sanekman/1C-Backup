@@ -26,6 +26,9 @@ internal static partial class DesktopSmoke
         await store.SaveAsync([..saved, job]);
         using var shutdown = new CancellationTokenSource();
         MainWindow? reopened = null;
+        var firstRecovery = new TaskCompletionSource<IReadOnlyList<LocalManualRunHandle>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var laterRecovery = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recoveryCalls = 0;
         var host = Task.Run(() => new LocalAgentHost(DesktopPaths.DataDirectory, new WaitingManualExecutor(), new WindowsFtpCredentialStore())
             .RunAsync(cancellationToken: shutdown.Token));
         try
@@ -39,12 +42,26 @@ internal static partial class DesktopSmoke
                 await Task.Delay(25, timeout.Token);
             while ((await queue.PendingAsync(timeout.Token)).Any(r => r.RequestId == request.RequestId))
                 await Task.Delay(25, timeout.Token);
-            reopened = new MainWindow { SmokeMode = true, Width = 900, Height = 580 };
+            reopened = new MainWindow { SmokeMode = true, Width = 900, Height = 580,
+                ManualQueueRecoveryOverride = async session =>
+                {
+                    if (++recoveryCalls == 1) return await firstRecovery.Task;
+                    await laterRecovery.Task;
+                    return await queue.OutstandingAsync(session);
+                } };
             reopened.Show();
-            await WaitUntil(() => reopened.SmokeReady && reopened.SmokeBackgroundManualReady, "Повторно открытое окно не загрузило состояние агента.");
+            await WaitUntil(() => recoveryCalls == 1, "Повторное окно не начало восстановление очереди.");
             var grid = (DataGrid)reopened.FindName("Jobs");
             grid.SelectedItem = grid.Items.OfType<BackupJob>().Single(j => j.Id == job.Id);
             var runButton = (Button)reopened.FindName("RunButton");
+            if (runButton.IsEnabled || !runButton.ToolTip.ToString()!.Contains("Проверяется очередь"))
+                throw new InvalidOperationException("Ручной запуск доступен до восстановления очереди.");
+            firstRecovery.SetException(new IOException("Temporary queue enumeration failure"));
+            await WaitUntil(() => recoveryCalls >= 2, "После ошибки окно не повторило восстановление очереди.");
+            if (runButton.IsEnabled)
+                throw new InvalidOperationException("Ошибка восстановления очереди разрешила повторный запуск.");
+            laterRecovery.SetResult(true);
+            await WaitUntil(() => reopened.SmokeReady && reopened.SmokeBackgroundManualReady, "Повторно открытое окно не загрузило состояние агента.");
             if (runButton.IsEnabled || !runButton.ToolTip.ToString()!.Contains("уже принят"))
                 throw new InvalidOperationException("Повторно открытое окно допускает дублирование принятого ручного запуска.");
             screenshot("manual-queue-reopened-window", reopened);
@@ -53,6 +70,7 @@ internal static partial class DesktopSmoke
         }
         finally
         {
+            firstRecovery.TrySetResult([]); laterRecovery.TrySetResult(true);
             reopened?.Close();
             shutdown.Cancel();
             await host.WaitAsync(TimeSpan.FromSeconds(10));

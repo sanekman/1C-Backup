@@ -512,121 +512,126 @@
      </DataGrid>
     </DockPanel>
    </Border>
-   <ScrollViewer x:Name="AgentView" Grid.Row="2" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
-    <Border Style="{StaticResource Card}" MaxWidth="700" HorizontalAlignment="Left">
-   <StackPanel Margin="24">
-    <Button Content="Выйти полностью — остановить агент и закрыть окно" Click="ExitFully_Click" HorizontalAlignment="Left" Margin="0,0,0,14" />
-    <TextBlock Text="Оформление" FontSize="18" FontWeight="SemiBold" />
-    <TextBlock Text="По умолчанию тема следует настройкам Windows." Margin="0,6,0,4" Foreground="{DynamicResource MutedBrush}" />
-    <ComboBox x:Name="ThemePicker" SelectedValuePath="Tag" SelectionChanged="Theme_Changed" Margin="0,0,0,18" AutomationProperties.Name="Тема оформления">
-     <ComboBoxItem Content="Как в системе" Tag="System" /><ComboBoxItem Content="Светлая" Tag="Light" /><ComboBoxItem Content="Тёмная" Tag="Dark" />
-    </ComboBox>
-    <StackPanel Margin="0,0,0,18">
-     <TextBlock Text="О программе" FontSize="18" FontWeight="SemiBold" />
-     <TextBox x:Name="BuildInfo" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Padding="0" Margin="0,8,0,10" AutomationProperties.Name="Версия и сведения о сборке" />
-     <WrapPanel>
-      <Button x:Name="CopyBuildInfoButton" Content="Скопировать сведения" Click="CopyBuildInfo_Click" Margin="0,0,8,6" />
-      <Button x:Name="ExportDiagnosticsButton" Content="Сохранить диагностику…" Click="ExportDiagnostics_Click" Margin="0,0,0,6" />
-     </WrapPanel>
-     <TextBlock Text="Только версия, сборка и система. Настройки баз и пароли не копируются." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0" />
-     <TextBlock x:Name="BuildInfoStatus" TextWrapping="Wrap" Margin="0,6,0,0" />
-    </StackPanel>
-    <StackPanel Margin="0,0,0,18">
-     <TextBlock Text="Служба Windows" FontSize="18" FontWeight="SemiBold" />
-     <TextBlock Text="Выполняет задания до входа в Windows под выбранной учётной записью. Использует существующие задания и историю. Для сети указывайте UNC-пути: подключённые буквы дисков службе недоступны." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,8" />
-     <TextBlock x:Name="ServiceStatus" Text="Состояние проверяется…" TextWrapping="Wrap" />
-     <Expander Header="Установка службы" Margin="0,8,0,8"><StackPanel>
-      <TextBlock Text="Пользователь службы" Margin="0,8,0,4" />
-      <ComboBox x:Name="ServiceAccount" IsEditable="True" IsTextSearchEnabled="False" Margin="0,0,0,6" AutomationProperties.Name="Выберите или введите пользователя службы Windows" />
-      <TextBlock Text="Выберите из списка или введите КОМПЬЮТЕР\пользователь / ДОМЕН\пользователь. Выбранный пользователь получит доступ к заданиям и сохранённым паролям. Доступ к базам, MS SQL и сетевым папкам должен быть у него отдельно." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
-      <TextBlock x:Name="ServiceAccountHint" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,4,0,6" />
-      <TextBlock Text="Пароль Windows (не PIN). Установка и удаление потребуют подтверждения администратора. При смене пароля переустановите службу." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
-      <PasswordBox x:Name="ServicePassword" MaxLength="512" Margin="0,8,0,8" AutomationProperties.Name="Пароль учётной записи Windows для службы" />
-      <Button x:Name="InstallServiceButton" Content="Установить службу…" IsEnabled="False" HorizontalAlignment="Left" Click="InstallService_Click" />
-     </StackPanel></Expander>
-     <WrapPanel><Button x:Name="StartServiceButton" Content="Запустить" IsEnabled="False" Click="StartService_Click" Margin="0,0,8,6" />
-      <Button x:Name="StopServiceButton" Content="Остановить" IsEnabled="False" Click="StopService_Click" Margin="0,0,8,6" />
-      <Button x:Name="RemoveServiceButton" Content="Удалить службу…" IsEnabled="False" Click="RemoveService_Click" Margin="0,0,0,6" /></WrapPanel>
-     <TextBlock Text="Перед удалением программы удалите службу здесь. Сохранённые пароли для службы дополнительно защищены шифрованием Windows и правами доступа." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
-    </StackPanel>
-    <StackPanel Margin="0,0,0,18">
-     <TextBlock Text="Обновления" FontSize="18" FontWeight="SemiBold" />
-     <CheckBox x:Name="AutomaticUpdateChecks" Content="Проверять новые версии автоматически" IsChecked="True" Click="UpdatePreference_Click" Margin="0,10,0,6" />
-     <CheckBox x:Name="UpdateOnExit" Content="Обновлять при полном выходе из программы" Click="UpdatePreference_Click" Margin="0,0,0,6" />
-     <CheckBox x:Name="IncludePreviewUpdates" Content="Получать предварительные версии" IsChecked="True" Click="UpdatePreference_Click" Margin="0,0,0,10" />
-     <TextBlock Text="Автообновление скачивает новую версию и устанавливает её при «Выйти полностью», после остановки агента. Windows запросит права администратора. Задания и копии сохраняются." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,0,0,10" />
-     <WrapPanel><Button x:Name="CheckUpdatesButton" IsEnabled="False" Content="Проверить обновления" Click="CheckUpdates_Click" Margin="0,0,8,6" />
-      <Button x:Name="InstallUpdateButton" Content="Обновить и перезапустить" Click="InstallUpdate_Click" IsEnabled="False" Margin="0,0,8,6" />
-      <Button x:Name="UpdateReleaseButton" Content="Страница версии" Click="OpenUpdateRelease_Click" IsEnabled="False" Margin="0,0,8,6" />
-      <Button x:Name="CancelUpdateButton" Content="Отменить" Click="CancelUpdate_Click" Visibility="Collapsed" Margin="0,0,0,6" /></WrapPanel>
-     <ProgressBar x:Name="UpdateProgress" Height="8" Minimum="0" Maximum="100" Visibility="Collapsed" Margin="0,4,0,8" />
-     <TextBlock x:Name="UpdateResultStatus" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,6" />
-     <TextBlock x:Name="UpdateStatus" Text="Обновления ещё не проверялись." TextWrapping="Wrap" Margin="0,0,0,6" />
-     <Expander x:Name="UpdateAccessPanel" Header="Доступ к закрытому репозиторию GitHub" IsEnabled="False"><StackPanel Margin="0,8,0,0">
-      <TextBlock Text="Для sanekman/1C-Backup нужен GitHub-токен с доступом к репозиторию и правом Contents: Read. Он хранится в диспетчере учётных данных Windows." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
-      <Button Content="Создать токен на GitHub" Click="CreateUpdateToken_Click" HorizontalAlignment="Left" Margin="0,8,0,4" />
-      <TextBlock Text="Выберите репозиторий sanekman/1C-Backup и разрешение Contents: Read." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
-      <PasswordBox x:Name="GitHubUpdateToken" Margin="0,8,0,8" MaxLength="1024" AutomationProperties.Name="Токен GitHub для обновлений" />
-      <WrapPanel><Button Content="Сохранить токен" Click="SaveUpdateToken_Click" Margin="0,0,8,6" /><Button Content="Удалить токен" Click="DeleteUpdateToken_Click" Margin="0,0,0,6" /></WrapPanel>
-      <TextBlock x:Name="UpdateTokenStatus" Text="Токен не сохранён." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
-     </StackPanel></Expander>
-    </StackPanel>
-    <StackPanel Margin="0,0,0,18">
-     <TextBlock Text="Диагностика" FontSize="18" FontWeight="SemiBold" />
-     <TextBlock Text="Возникла проблема? Сохраните ZIP и отправьте его для анализа вместе с примерным временем ошибки." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,10" />
-     <Button x:Name="OpenLogsButton" Content="Открыть папку логов" Click="OpenLogs_Click" HorizontalAlignment="Left" Margin="0,0,0,6" />
-     <TextBlock Text="Логи окна и агента: до 14 дней и 50 МБ. В ZIP нет паролей, настроек подключения, исходных файлов и копий. Отправка выполняется вами вручную." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
-     <TextBlock x:Name="DiagnosticsStatus" TextWrapping="Wrap" Margin="0,6,0,0" />
-    </StackPanel>
-    <Border>
-     <StackPanel>
-      <TextBlock Text="Фоновая работа" FontSize="18" FontWeight="SemiBold" />
-      <CheckBox x:Name="AgentStartup" Content="Запускать агент со значком в трее при входе в Windows" Margin="0,12,0,12" />
-      <Button x:Name="SaveStartupButton" Content="Сохранить автозапуск" HorizontalAlignment="Left" Click="SaveStartup_Click" IsEnabled="False" />
-      <TextBlock x:Name="StartupStatus" Text="Запуск от имени текущего пользователя. После переноса папки программы сохраните автозапуск заново. Это не служба Windows: работа без входа пользователя пока не поддерживается." TextWrapping="Wrap" Margin="0,10,0,0" Foreground="{DynamicResource MutedBrush}" />
-     </StackPanel>
-    </Border>
-
-<Expander Header="Дополнительно: расписание только при открытом окне" Margin="0,18,0,0"><StackPanel Margin="0,10,0,0">
- <TextBlock Text="Используйте этот режим вместо фонового агента, если копирование должно идти только пока открыта программа." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
- <WrapPanel Margin="0,10,0,0"><Button x:Name="StartScheduleButton" Content="Запустить в окне" Click="StartSchedule_Click" IsEnabled="False" /><Button x:Name="StopScheduleButton" Content="Остановить" Margin="8,0,0,0" Click="StopSchedule_Click" IsEnabled="False" /></WrapPanel>
- <TextBlock x:Name="SchedulerStatus" Text="Расписание в окне выключено." TextWrapping="Wrap" Margin="0,8,0,0" /></StackPanel></Expander>
-    <Expander Header="Публичный узел для шлюзов хранилища" Margin="0,16,0,0"><StackPanel Margin="0,10,0,0">
-     <TextBlock Text="Основная программа или фоновый агент могут обслуживать подключения шлюзов. Нужны доступный из интернета HTTPS-адрес, сертификат и поддержка WebSocket. Публикация: Caddy / IIS / Apache." TextWrapping="Wrap"/>
-     <WrapPanel Margin="0,8,0,0"><Button Content="Импортировать hub.json…" Click="HubImport_Click"/><Button Content="Выключить узел" Margin="8,0,0,0" Click="HubDisable_Click"/></WrapPanel>
-     <Button Content="Инструкция: Proxmox, HTTPS, IIS и Apache" Click="StorageBridgeHelp_Click" HorizontalAlignment="Left" Margin="0,8,0,0"/>
-     <TextBlock x:Name="HubStatus" Text="Узел выключен по умолчанию." TextWrapping="Wrap" Margin="0,8,0,0"/>
-    </StackPanel></Expander>
-    <Expander Header="Оповещения: Telegram и MAX" Margin="0,16,0,0"><StackPanel Margin="0,10,0,0">
-     <TextBlock Text="Получайте результаты копирования в мессенджере. Отправка сообщений не останавливает резервное копирование." TextWrapping="Wrap"/>
-     <Button Content="Настроить оповещения" Click="Notifications_Click" HorizontalAlignment="Left" Margin="0,8,0,0"/>
-     <TextBlock x:Name="NotificationsStatus" TextWrapping="Wrap" Margin="0,8,0,0"/>
-    </StackPanel></Expander>
-    <Expander Header="Мониторинг на сервере Windows" Margin="0,16,0,0"><StackPanel Margin="0,10,0,0">
-     <TextBlock Text="Результаты копирования, неполные копии, хранилища и состояние компьютера в общей веб-панели. Локальное расписание сохраняется." TextWrapping="Wrap"/>
-     <WrapPanel Margin="0,10,0,0"><Button Content="Подключить по приглашению…" Click="ConnectServerMonitoring_Click"/><Button Content="Отключить" Margin="8,0,0,0" Click="DisconnectServerMonitoring_Click"/></WrapPanel>
-     <TextBlock x:Name="ServerMonitoringStatus" Text="Для работы без открытого окна включите фоновый агент или службу Windows." TextWrapping="Wrap" Margin="0,8,0,0"/>
-    </StackPanel></Expander>
-    <Expander Header="Дополнительно: управление через сервер (в разработке)" Margin="0,16,0,0"><StackPanel Margin="0,10,0,0">
-    <TextBlock x:Name="AgentIdentity" Margin="0,0,0,8" />
-    <ComboBox x:Name="AgentModePicker" Width="300" HorizontalAlignment="Left" DisplayMemberPath="Value" SelectedValuePath="Key"
-     SelectionChanged="AgentMode_Changed" Margin="0,0,0,8" />
-    <StackPanel x:Name="ServerPanel" Visibility="Collapsed">
-     <TextBlock Text="Адрес сервера управления (HTTPS, например https://backup.example.com/)" />
-     <TextBox x:Name="ServerAddress" Margin="0,4,0,8" />
-     <TextBlock Text="Идентификатор учётных данных агента (без токена или пароля)" />
-     <TextBox x:Name="AgentCredentialKey" Margin="0,4,0,8" />
-     <TextBlock Text="Интервал связи с сервером, секунд" /><TextBox x:Name="SyncInterval" Text="60" Width="120" HorizontalAlignment="Left" Margin="0,4,0,8" />
-    </StackPanel>
-    <Button x:Name="SaveAgentSettingsButton" Content="Сохранить режим агента" HorizontalAlignment="Left" Padding="12,6" Click="SaveAgentSettings_Click" IsEnabled="False" />
-    <TextBlock Text="Сервер управления ещё разрабатывается. Для локального копирования подключение к нему не требуется."
-     TextWrapping="Wrap" Margin="0,8,0,0" />
-    </StackPanel></Expander>
-
-   </StackPanel>
-
-    </Border>
-   </ScrollViewer>
+   <Grid x:Name="AgentView" Grid.Row="2" Visibility="Collapsed">
+    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+    <WrapPanel Margin="0,0,0,4" AutomationProperties.Name="Разделы настроек">
+     <Button x:Name="GeneralSettingsButton" FontSize="14" Content="Основное" CommandParameter="general" Tag="Active" Style="{StaticResource PrimaryButton}" Click="SettingsSection_Click" Padding="14,10" Margin="0,0,8,8" />
+     <Button x:Name="BackgroundSettingsButton" FontSize="14" Content="Фоновая работа" CommandParameter="background" Click="SettingsSection_Click" Padding="14,10" Margin="0,0,8,8" />
+     <Button x:Name="UpdatesSettingsButton" FontSize="14" Content="Обновления" CommandParameter="updates" Click="SettingsSection_Click" Padding="14,10" Margin="0,0,8,8" />
+     <Button x:Name="ConnectionsSettingsButton" FontSize="14" Content="Подключения" CommandParameter="connections" Click="SettingsSection_Click" Padding="14,10" Margin="0,0,8,8" />
+     <Button x:Name="HelpSettingsButton" FontSize="14" Content="Помощь" CommandParameter="help" Click="SettingsSection_Click" Padding="14,10" Margin="0,0,0,8" />
+    </WrapPanel>
+    <ScrollViewer x:Name="SettingsContentScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+     <Border Style="{StaticResource Card}" MaxWidth="760" HorizontalAlignment="Stretch">
+      <Grid Margin="24" TextBlock.FontSize="14">
+       <StackPanel x:Name="GeneralSettingsSection">
+        <TextBlock Text="Основные настройки" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock Text="Для начала работы достаточно создать задание и выбрать папку для копий." TextWrapping="Wrap" Margin="0,8,0,20" Foreground="{DynamicResource MutedBrush}" />
+        <TextBlock Text="Тема оформления" FontSize="16" FontWeight="SemiBold" />
+        <ComboBox x:Name="ThemePicker" SelectedValuePath="Tag" SelectionChanged="Theme_Changed" Margin="0,8,0,20" MaxWidth="340" HorizontalAlignment="Left" MinWidth="220" AutomationProperties.Name="Тема оформления">
+         <ComboBoxItem Content="Как в Windows" Tag="System" /><ComboBoxItem Content="Светлая" Tag="Light" /><ComboBoxItem Content="Тёмная" Tag="Dark" />
+        </ComboBox>
+        <Button Content="Перейти к заданиям" Click="JobsNavigation_Click" HorizontalAlignment="Left" />
+       </StackPanel>
+       <StackPanel x:Name="BackgroundSettingsSection" Visibility="Collapsed">
+        <TextBlock Text="Копирование без открытого окна" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
+        <TextBlock Text="Выберите, когда агент должен запускаться сам." Margin="0,8,0,20" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+        <TextBlock Text="После входа в Windows" FontSize="16" FontWeight="SemiBold" />
+        <CheckBox x:Name="AgentStartup" Content="Запускать агент при входе в Windows" Margin="0,10,0,10" />
+        <Button x:Name="SaveStartupButton" Content="Сохранить автозапуск" HorizontalAlignment="Left" Click="SaveStartup_Click" IsEnabled="False" />
+        <TextBlock x:Name="StartupStatus" Text="Агент продолжит работать после закрытия окна программы." TextWrapping="Wrap" Margin="0,10,0,20" Foreground="{DynamicResource MutedBrush}" />
+        <TextBlock Text="Без входа в Windows" FontSize="16" FontWeight="SemiBold" />
+        <TextBlock Text="Служба запускает задания даже после перезагрузки, пока никто не вошёл в систему." TextWrapping="Wrap" Margin="0,8,0,8" Foreground="{DynamicResource MutedBrush}" />
+        <TextBlock x:Name="ServiceStatus" Text="Состояние проверяется…" TextWrapping="Wrap" />
+        <Expander x:Name="ServiceSetupPanel" Header="Установить или настроить службу" Margin="0,12,0,12"><StackPanel Margin="0,10,0,0">
+         <TextBlock Text="Пользователь Windows" />
+         <ComboBox x:Name="ServiceAccount" IsEditable="True" IsTextSearchEnabled="False" Margin="0,6,0,10" AutomationProperties.Name="Выберите или введите пользователя службы Windows" />
+         <TextBlock Text="Пароль пользователя Windows" />
+         <PasswordBox x:Name="ServicePassword" MaxLength="512" Margin="0,6,0,12" AutomationProperties.Name="Пароль учётной записи Windows для службы" />
+         <Button x:Name="InstallServiceButton" Content="Установить службу…" IsEnabled="False" HorizontalAlignment="Left" Click="InstallService_Click" />
+         <WrapPanel Margin="0,12,0,0"><Button x:Name="StartServiceButton" Content="Запустить" IsEnabled="False" Click="StartService_Click" Margin="0,0,8,6" />
+          <Button x:Name="StopServiceButton" Content="Остановить" IsEnabled="False" Click="StopService_Click" Margin="0,0,8,6" />
+          <Button x:Name="RemoveServiceButton" Content="Удалить службу…" IsEnabled="False" Click="RemoveService_Click" Margin="0,0,0,6" /></WrapPanel>
+         <Expander Header="Требования к пользователю и доступу" Margin="0,8,0,0"><StackPanel Margin="0,8,0,0">
+          <TextBlock Text="Укажите пароль Windows, не PIN. Установка потребует прав администратора. Можно выбрать местного пользователя или ввести ДОМЕН\пользователь. Ему нужны права на базы, MS SQL и сетевые папки. Для сети используйте UNC-путь, например \\server\backups." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
+          <TextBlock x:Name="ServiceAccountHint" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0" />
+          <TextBlock Text="При смене пароля переустановите службу. Перед удалением программы удалите службу здесь. Сохранённые пароли защищены средствами Windows." TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}" />
+         </StackPanel></Expander>
+        </StackPanel></Expander>
+        <Expander Header="Копировать только при открытом окне" Margin="0,8,0,0"><StackPanel Margin="0,10,0,0">
+         <TextBlock Text="Этот режим работает вместо фонового агента и останавливается при закрытии окна." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
+         <WrapPanel Margin="0,10,0,0"><Button x:Name="StartScheduleButton" Content="Запустить в окне" Click="StartSchedule_Click" IsEnabled="False" /><Button x:Name="StopScheduleButton" Content="Остановить" Margin="8,0,0,0" Click="StopSchedule_Click" IsEnabled="False" /></WrapPanel>
+         <TextBlock x:Name="SchedulerStatus" Text="Расписание в окне выключено." TextWrapping="Wrap" Margin="0,8,0,0" />
+        </StackPanel></Expander>
+       </StackPanel>
+       <StackPanel x:Name="UpdatesSettingsSection" Visibility="Collapsed">
+        <TextBlock Text="Обновления программы" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock x:Name="UpdateStatus" Text="Обновления ещё не проверялись." TextWrapping="Wrap" Margin="0,10,0,14" />
+        <WrapPanel><Button x:Name="CheckUpdatesButton" IsEnabled="False" Content="Проверить обновления" Click="CheckUpdates_Click" Margin="0,0,8,8" />
+         <Button x:Name="InstallUpdateButton" Content="Обновить и перезапустить" Click="InstallUpdate_Click" IsEnabled="False" Margin="0,0,8,8" />
+         <Button x:Name="UpdateReleaseButton" Content="Что нового" Click="OpenUpdateRelease_Click" IsEnabled="False" Margin="0,0,8,8" />
+         <Button x:Name="CancelUpdateButton" Content="Отменить" Click="CancelUpdate_Click" Visibility="Collapsed" Margin="0,0,0,8" /></WrapPanel>
+        <ProgressBar x:Name="UpdateProgress" Height="8" Minimum="0" Maximum="100" Visibility="Collapsed" Margin="0,4,0,8" />
+        <TextBlock x:Name="UpdateResultStatus" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,10" />
+        <CheckBox x:Name="AutomaticUpdateChecks" Content="Проверять новые версии автоматически" IsChecked="True" Click="UpdatePreference_Click" Margin="0,10,0,10" />
+        <CheckBox x:Name="UpdateOnExit" Content="Устанавливать обновление при полном выходе" Click="UpdatePreference_Click" Margin="0,0,0,12" />
+        <Expander Header="Дополнительные параметры"><StackPanel Margin="0,10,0,0">
+         <CheckBox x:Name="IncludePreviewUpdates" Content="Получать предварительные версии" IsChecked="True" Click="UpdatePreference_Click" Margin="0,0,0,12" />
+         <TextBlock Text="Обновление сохраняет задания и копии. Перед установкой агент останавливается; Windows запросит права администратора." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,12" />
+         <Expander x:Name="UpdateAccessPanel" Header="Доступ к закрытому GitHub" IsEnabled="False"><StackPanel Margin="0,8,0,0">
+          <TextBlock Text="Только для закрытого репозитория: токен GitHub с правом Contents: Read для sanekman/1C-Backup. Он хранится в диспетчере учётных данных Windows." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
+          <Button Content="Создать токен на GitHub" Click="CreateUpdateToken_Click" HorizontalAlignment="Left" Margin="0,10,0,10" />
+          <PasswordBox x:Name="GitHubUpdateToken" Margin="0,0,0,10" MaxLength="1024" AutomationProperties.Name="Токен GitHub для обновлений" />
+          <WrapPanel><Button Content="Сохранить токен" Click="SaveUpdateToken_Click" Margin="0,0,8,6" /><Button Content="Удалить токен" Click="DeleteUpdateToken_Click" Margin="0,0,0,6" /></WrapPanel>
+          <TextBlock x:Name="UpdateTokenStatus" Text="Токен не сохранён." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0" />
+         </StackPanel></Expander>
+        </StackPanel></Expander>
+       </StackPanel>
+       <StackPanel x:Name="ConnectionsSettingsSection" Visibility="Collapsed">
+        <TextBlock Text="Подключения" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock Text="Дополнительные возможности. Для обычного копирования подключать сервер не нужно." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,20" />
+        <TextBlock Text="Мониторинг на сервере" FontSize="16" FontWeight="SemiBold" />
+        <WrapPanel Margin="0,10,0,0"><Button x:Name="ConnectServerMonitoringButton" Content="Подключить по приглашению…" Click="ConnectServerMonitoring_Click"/><Button Content="Отключить" Margin="8,0,0,0" Click="DisconnectServerMonitoring_Click"/></WrapPanel>
+        <TextBlock x:Name="ServerMonitoringStatus" Text="Сервер показывает результаты и состояние компьютеров в общей панели." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,20" />
+        <TextBlock Text="Оповещения в Telegram и MAX" FontSize="16" FontWeight="SemiBold" />
+        <Button Content="Настроить оповещения" Click="Notifications_Click" HorizontalAlignment="Left" Margin="0,10,0,0"/>
+        <TextBlock x:Name="NotificationsStatus" TextWrapping="Wrap" Margin="0,10,0,20"/>
+        <Expander Header="Для опытных пользователей"><StackPanel Margin="0,10,0,0">
+         <Expander Header="Публичный узел для шлюзов хранилища"><StackPanel Margin="0,10,0,0">
+          <TextBlock Text="Нужны публичный HTTPS-адрес, сертификат и WebSocket. Основная программа или агент обслуживают подключения шлюзов." TextWrapping="Wrap" />
+          <WrapPanel Margin="0,10,0,0"><Button Content="Импортировать hub.json…" Click="HubImport_Click"/><Button Content="Выключить узел" Margin="8,0,0,0" Click="HubDisable_Click"/></WrapPanel>
+          <Button Content="Инструкция по подключению шлюзов" Click="StorageBridgeHelp_Click" HorizontalAlignment="Left" Margin="0,10,0,0"/>
+          <TextBlock x:Name="HubStatus" Text="Узел выключен по умолчанию." TextWrapping="Wrap" Margin="0,10,0,0"/>
+         </StackPanel></Expander>
+         <Expander Header="Управление через сервер — в разработке" Margin="0,12,0,0"><StackPanel Margin="0,10,0,0">
+          <TextBlock x:Name="AgentIdentity" Margin="0,0,0,10" />
+          <ComboBox x:Name="AgentModePicker" Width="300" HorizontalAlignment="Left" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="AgentMode_Changed" Margin="0,0,0,10" />
+          <StackPanel x:Name="ServerPanel" Visibility="Collapsed">
+           <TextBlock Text="HTTPS-адрес сервера управления" /><TextBox x:Name="ServerAddress" Margin="0,6,0,10" />
+           <TextBlock Text="Идентификатор учётных данных агента" /><TextBox x:Name="AgentCredentialKey" Margin="0,6,0,10" />
+           <TextBlock Text="Интервал связи, секунд" /><TextBox x:Name="SyncInterval" Text="60" Width="120" HorizontalAlignment="Left" Margin="0,6,0,10" />
+          </StackPanel>
+          <Button x:Name="SaveAgentSettingsButton" Content="Сохранить режим агента" HorizontalAlignment="Left" Click="SaveAgentSettings_Click" IsEnabled="False" />
+          <TextBlock Text="Для локального копирования этот режим не требуется." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0" />
+         </StackPanel></Expander>
+        </StackPanel></Expander>
+       </StackPanel>
+       <StackPanel x:Name="HelpSettingsSection" Visibility="Collapsed">
+        <TextBlock Text="Помощь и диагностика" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock Text="Возникла проблема? Сохраните отчёт и передайте его вместе с примерным временем ошибки." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,14" />
+        <WrapPanel><Button x:Name="ExportDiagnosticsButton" Content="Сохранить диагностику…" Click="ExportDiagnostics_Click" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" />
+         <Button x:Name="OpenLogsButton" Content="Открыть логи" Click="OpenLogs_Click" Margin="0,0,0,8" /></WrapPanel>
+        <TextBlock x:Name="DiagnosticsStatus" TextWrapping="Wrap" Margin="0,0,0,8" />
+        <Expander Header="Что входит в отчёт" Margin="0,0,0,14"><TextBlock Text="Версия программы, сведения о системе и логи. Пароли, настройки подключения, исходные файлы и копии не входят. Отправка выполняется вами вручную. Логи хранятся до 14 дней и 50 МБ." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0" /></Expander>
+        <WrapPanel><Button x:Name="CopyBuildInfoButton" Content="Скопировать версию для поддержки" Click="CopyBuildInfo_Click" Margin="0,0,0,8" /></WrapPanel>
+        <TextBlock x:Name="BuildInfoStatus" TextWrapping="Wrap" Margin="0,0,0,8" />
+        <Expander Header="Версия и сведения о сборке" Margin="0,0,0,14"><TextBox x:Name="BuildInfo" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Padding="0" Margin="0,10,0,0" AutomationProperties.Name="Версия и сведения о сборке" /></Expander>
+        <Expander Header="Завершение работы"><Button Content="Выйти полностью — остановить агент и закрыть окно" Click="ExitFully_Click" HorizontalAlignment="Left" Margin="0,10,0,0" /></Expander>
+       </StackPanel>
+      </Grid>
+     </Border>
+    </ScrollViewer>
+   </Grid>
    <Border Grid.Row="3" Background="{DynamicResource StatusSurfaceBrush}" CornerRadius="6" Padding="8" Margin="0,10,0,0">
     <ScrollViewer MaxHeight="64" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><TextBlock x:Name="Status" Text="Загрузка настроек…" TextWrapping="Wrap" Foreground="{DynamicResource StatusTextBrush}" /></ScrollViewer>
    </Border>

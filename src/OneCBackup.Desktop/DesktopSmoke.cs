@@ -226,13 +226,15 @@ internal static partial class DesktopSmoke
             var expectedRevision = Environment.GetEnvironmentVariable("GITHUB_SHA");
             if (expectedRevision is not null && ApplicationBuildInfo.Revision != expectedRevision)
                 throw new InvalidOperationException("Идентификатор сборки не соответствует исходному коду.");
-            Click("AgentNavigation");
+            await VerifySettingsSectionsAsync(window, label => Screenshot(label));
+            Click("AgentNavigation"); Click("HelpSettingsButton");
             Click("CopyBuildInfoButton");
             if (Clipboard.GetText() != ApplicationBuildInfo.SupportText || Control<TextBox>("BuildInfo").Text != Clipboard.GetText()
                 || !Control<TextBlock>("BuildInfoStatus").Text.Contains("скопированы"))
                 throw new InvalidOperationException("Сведения о программе не скопированы полностью.");
             File.WriteAllText(Path.Combine(output, "build-info.json"), JsonSerializer.Serialize(new
             { version = ApplicationBuildInfo.Version, revision = ApplicationBuildInfo.Revision, supportText = Clipboard.GetText() }));
+            Click("GeneralSettingsButton");
             if (Control<ComboBox>("ThemePicker").SelectedValue as string != "System")
                 throw new InvalidOperationException("Первый запуск не использует системную тему.");
             Control<ComboBox>("ThemePicker").SelectedValue = "Dark";
@@ -254,6 +256,7 @@ internal static partial class DesktopSmoke
                 || (Control<PasswordBox>("ServicePassword").Background as SolidColorBrush)?.Color != lightSurface.Color)
                 throw new InvalidOperationException("Светлая тема или фон уже созданного поля не обновились.");
             Screenshot("settings-light");
+            Click("BackgroundSettingsButton");
             var serviceAccount = Control<ComboBox>("ServiceAccount");
             for (DependencyObject? parent = serviceAccount; parent is not null; parent = LogicalTreeHelper.GetParent(parent))
                 if (parent is Expander expander) expander.IsExpanded = true;
@@ -276,6 +279,7 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Ручной ввод пользователя службы не передан для установки.");
             Screenshot("service-account-manual");
             Control<ComboBox>("ThemePicker").SelectedValue = "System";
+            Click("HelpSettingsButton");
             Screenshot("about-program");
             Click("JobsNavigation");
             Click("FirstJobButton");
@@ -822,6 +826,7 @@ internal static partial class DesktopSmoke
                 Screenshot("compact-" + navigation);
                 if (navigation == "AgentNavigation")
                 {
+                    Click("HelpSettingsButton");
                     AssertVisibleFooter("CopyBuildInfoButton");
                     Click("CopyBuildInfoButton");
                     if (Clipboard.GetText() != ApplicationBuildInfo.SupportText)

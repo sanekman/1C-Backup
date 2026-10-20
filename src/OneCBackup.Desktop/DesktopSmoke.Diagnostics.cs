@@ -24,8 +24,8 @@ internal static partial class DesktopSmoke
         var catalog = new BackupCatalog(Path.Combine(DesktopPaths.DataDirectory, "copies.json"));
         var beforeJobs = JsonSerializer.Serialize(await store.LoadAsync()); var beforeRuns = JsonSerializer.Serialize(await history.ReadAsync());
         var beforeCopies = JsonSerializer.Serialize(await catalog.ReadAsync());
-        Click("AgentNavigation"); Control<ScrollViewer>("AgentView").ScrollToTop(); window.Width = 900; window.Height = 580; window.UpdateLayout();
-        var button = Control<Button>("ExportDiagnosticsButton"); var scroll = Control<ScrollViewer>("AgentView");
+        Click("AgentNavigation"); Click("HelpSettingsButton"); Control<ScrollViewer>("SettingsContentScroll").ScrollToTop(); window.Width = 900; window.Height = 580; window.UpdateLayout();
+        var button = Control<Button>("ExportDiagnosticsButton"); var scroll = Control<ScrollViewer>("SettingsContentScroll");
         var point = button.TranslatePoint(new Point(), scroll);
         if (point.Y < 0 || point.Y + button.ActualHeight > scroll.ActualHeight + 1) throw new InvalidOperationException("Кнопка диагностики скрыта в компактных настройках.");
         screenshot("diagnostics-settings-compact");

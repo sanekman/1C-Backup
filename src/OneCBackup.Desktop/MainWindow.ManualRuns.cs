@@ -11,9 +11,13 @@ public partial class MainWindow
     private Guid? restoredManualSession;
     private bool submittingManualRun;
 
-    private bool BackgroundAcceptsManualRuns => backgroundBusy && !backgroundStarting
+    internal Func<Guid, Task<IReadOnlyList<LocalManualRunHandle>>>? ManualQueueRecoveryOverride { get; set; }
+
+    private bool BackgroundManualSessionLive => backgroundBusy && !backgroundStarting
         && backgroundState is { Phase: LocalAgentPhase.Running, CanRunManually: true }
         && DateTimeOffset.UtcNow - backgroundState.UpdatedUtc < TimeSpan.FromSeconds(10);
+
+    private bool BackgroundAcceptsManualRuns => BackgroundManualSessionLive && restoredManualSession == backgroundState?.SessionId;
 
     private void UpdateManualRunControl()
     {
@@ -25,6 +29,7 @@ public partial class MainWindow
             && !submittingManualRun && !backgroundStarting && (!backgroundBusy || BackgroundAcceptsManualRuns)
             && selected is not null && !queued;
         RunButton.ToolTip = queued ? "Ручной запуск этого задания уже принят. Другие задания можно добавить в очередь."
+            : BackgroundManualSessionLive && !BackgroundAcceptsManualRuns ? "Проверяется очередь ручных запусков. До завершения проверки запуск недоступен."
             : backgroundBusy && !BackgroundAcceptsManualRuns ? "Дождитесь готовности агента. Если используется старая версия, обновите и перезапустите агент."
             : "Выполнить сохранённое задание вручную. Если копирование уже идёт, задание дождётся своей очереди. Расписание продолжит работать.";
     }
@@ -65,9 +70,9 @@ public partial class MainWindow
 
     private async Task RefreshManualRequestsAsync()
     {
-        if(BackgroundAcceptsManualRuns && backgroundState is { } state && restoredManualSession!=state.SessionId)
+        if(BackgroundManualSessionLive && backgroundState is { } state && restoredManualSession!=state.SessionId)
         {
-            foreach(var request in await manualQueue.OutstandingAsync(state.SessionId)) backgroundManualRuns[request.RequestId]=request;
+            foreach(var request in await (ManualQueueRecoveryOverride?.Invoke(state.SessionId) ?? manualQueue.OutstandingAsync(state.SessionId))) backgroundManualRuns[request.RequestId]=request;
             restoredManualSession=state.SessionId;
         }
         foreach (var request in await manualQueue.PendingAsync())

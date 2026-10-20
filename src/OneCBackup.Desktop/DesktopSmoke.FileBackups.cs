@@ -63,6 +63,8 @@ internal static partial class DesktopSmoke
         if (job.Kind != DatabaseKind.FilesAndFolders || job.FileBackupMode != FileBackupMode.Incremental || job.FullBackupEvery != 3 || job.FullBackupDayOfWeek != DayOfWeek.Friday)
             throw new InvalidOperationException("Файловые настройки потеряны при сохранении.");
         Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(item => item.Id == job.Id);
+        if (!Control<TextBlock>("SelectedJobSummary").Text.Contains("Полная: пятница"))
+            throw new InvalidOperationException("Карточка задания не показывает день полной копии.");
         Click("EditJobButton");
         if ((int?)Control<ComboBox>("FullBackupDayPicker").SelectedValue != (int)DayOfWeek.Friday
             || Control<TextBox>("FullBackupEvery").IsEnabled)
@@ -75,6 +77,8 @@ internal static partial class DesktopSmoke
         job = (await store.LoadAsync()).Single(item => item.Id == job.Id);
         if (job.FullBackupDayOfWeek is not null) throw new InvalidOperationException("Отмена выбора дня не сохранена.");
         Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(item => item.Id == job.Id);
+        if (!Control<TextBlock>("SelectedJobSummary").Text.Contains("до 3 архивов в цепочке"))
+            throw new InvalidOperationException("Карточка задания не обновила план полной копии.");
         var catalog = new BackupCatalog(Path.Combine(DesktopPaths.DataDirectory, "copies.json"));
         var history = new BackupRunHistory(Path.Combine(DesktopPaths.DataDirectory, "runs.json"));
         // A separate host owns the engine, as a background process or Windows service would.
