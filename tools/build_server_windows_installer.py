@@ -14,12 +14,14 @@ def main():
     parser.add_argument('--compiler', default=r'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')
     parser.add_argument('--vc-redist',type=Path,default=Path('artifacts/server/vc_redist.x64.exe'))
     args = parser.parse_args()
+    from windows_signing import configured, sign_and_verify
+    configured()
     if not args.vc_redist.is_file():
         raise RuntimeError('The offline package requires the Microsoft VC++ x64 redistributable.')
     import tempfile
     with tempfile.TemporaryDirectory(prefix='onec-redist-verify-') as temporary:
         script=Path(temporary)/'verify.ps1'
-        script.write_text("param([string]$Path)\n$s=Get-AuthenticodeSignature -LiteralPath $Path; if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw 'Invalid Microsoft redistributable signature' }\n")
+        script.write_text("param([string]$Path)\n$env:PSModulePath=Join-Path $PSHOME 'Modules'\n$s=Get-AuthenticodeSignature -LiteralPath $Path; if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw 'Invalid Microsoft redistributable signature' }\n")
         subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-File',str(script),str(args.vc_redist.resolve())],check=True)
 
     source = args.source.resolve()
@@ -51,6 +53,7 @@ def main():
     if installer.exists():
         raise FileExistsError('Refusing to overwrite an existing installer: '+str(installer))
     subprocess.run([args.compiler,'/Qp','/DSourceFolder='+str(source),'/DOutputFolder='+str(output),'/DAppVersion='+version,str(Path(__file__).with_name('server-windows-installer.iss'))],check=True)
+    sign_and_verify([installer])
     with installer.open('rb') as stream:
         if stream.read(2)!=b'MZ':
             raise RuntimeError('Installer is not a Windows executable')

@@ -139,7 +139,8 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
         var finish=new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(o.FinishedAt,DateTimeKind.Unspecified),zone));
         return new(report.ReportId,report.MonitorId,Label(monitors.FirstOrDefault(m=>m.Id==report.MonitorId)?.Name ?? "Внешняя SQL-копия"),start,finish,
             o.Outcome==ExternalBackupOutcome.Completed ? "Succeeded" : "Failed",0,false,null,
-            [new(0,o.Outcome==ExternalBackupOutcome.Completed,(long)Math.Clamp(o.SizeBytes ?? 0,0,long.MaxValue),false)]);
+            [new(0,o.Outcome==ExternalBackupOutcome.Completed,(long)Math.Clamp(o.SizeBytes ?? 0,0,long.MaxValue),false)],
+            o.Evidence is "SqlServerMsdbHistory" or "PgRestoreCatalogChecked" or "PostgreSqlScriptFailure" ? o.Evidence : "ExternalReport");
     }
     public static MonitoredRun ToReport(BackupRun r)
     {

@@ -11,7 +11,7 @@ public sealed record MonitoredJob(Guid JobId, string Name, string SourceKind, bo
 public sealed record MonitoredDestination(int Index, bool Succeeded, long Bytes, bool Incomplete);
 public sealed record MonitoredRun(Guid RunId, Guid JobId, string JobName, DateTimeOffset StartedUtc,
     DateTimeOffset FinishedUtc, string Status, int WarningCount, bool Incomplete, string? CopyKind,
-    IReadOnlyList<MonitoredDestination> Destinations);
+    IReadOnlyList<MonitoredDestination> Destinations, string? Evidence = null);
 public sealed record MonitoredProgress(Guid RunId, Guid JobId, string Stage, int? Percent, DateTimeOffset UpdatedUtc);
 public sealed record MonitoredSource(Guid MonitorId, string Name, string Kind, bool Enabled, DateTimeOffset? PolledUtc, bool Failed);
 public sealed record MonitoringSnapshot(DateTimeOffset SentUtc, string AgentVersion, IReadOnlyList<MonitoredJob> Jobs,
@@ -34,6 +34,7 @@ public static class MonitoringValidation
         && Text(r.JobName,256) && r.StartedUtc != default && r.FinishedUtc >= r.StartedUtc
         && r.StartedUtc.Offset == TimeSpan.Zero && r.FinishedUtc.Offset == TimeSpan.Zero
         && r.Status is "Succeeded" or "Failed" or "Cancelled" or "Interrupted" or "PartiallySucceeded"
+        && r.Evidence is null or "SqlServerMsdbHistory" or "PgRestoreCatalogChecked" or "PostgreSqlScriptFailure" or "ExternalReport"
         && r.WarningCount >= 0 && (r.CopyKind is null or "Full" or "Incremental")
         && r.Destinations is { Count: <= 100 } && r.Destinations.All(d=> d is not null && d.Index >= 0 && d.Bytes >= 0)
         && r.Destinations.Select(d=>d.Index).Distinct().Count() == r.Destinations.Count;

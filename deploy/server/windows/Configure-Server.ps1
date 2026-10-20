@@ -7,6 +7,8 @@ param(
     [string]$AdministratorPasswordFile
 )
 $ErrorActionPreference = 'Stop'
+# A parent PowerShell 7 process may pass incompatible module paths to Windows PowerShell 5.1.
+if ($PSVersionTable.PSEdition -eq 'Desktop') { $env:PSModulePath=Join-Path $PSHOME 'Modules' }
 Set-StrictMode -Version Latest
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 function Run-Native([string]$Executable, [string[]]$Arguments) {

@@ -52,8 +52,9 @@
             <p>Начало: @Home.Time(run.StartedUtc). Конец: @Home.Time(run.FinishedUtc). Предупреждений: @run.WarningCount.</p>
             @if (run.CopyKind is not null) { <p>Тип копии: @(run.CopyKind == "Full" ? "Полная" : "Инкрементная").</p> }
             @if (run.Incomplete) { <p class="error">Копия неполная: часть файлов пропущена. Для непрочитанных файлов может требоваться прежняя версия из цепочки.</p> }
+            @if (run.Evidence is { } evidence) { <p>Подтверждение внешней копии: @evidence. Данные получены из внешнего источника; агент не выполнял доставку этой копии.</p> }
             @foreach (var destination in run.Destinations)
-            { <p>Хранилище @(destination.Index + 1): @(destination.Succeeded ? "Доставлено и проверено" : "Ошибка доставки") · @destination.Bytes байт @(destination.Incomplete ? "· неполная копия" : "")</p> }
+            { <p>Хранилище @(destination.Index + 1): @(destination.Succeeded ? run.Evidence is not null ? "Зафиксировано во внешнем источнике" : "Доставлено и проверено" : run.Evidence is not null ? "Внешний источник сообщает ошибку" : "Ошибка доставки") · @destination.Bytes байт @(destination.Incomplete ? "· неполная копия" : "")</p> }
             </details>
         }
         <div class="pagination">@if (RunPage > 0) { <a href="@($"agents/{Id}?runPage={RunPage-1}")">← Новее</a> } @if (history.Runs.Count == history.PageSize) { <a href="@($"agents/{Id}?runPage={RunPage+1}")">Старее →</a> }</div>

@@ -75,3 +75,23 @@ jobs:
           retention-days: 14
       - if: always() && runner.os == 'Linux'
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/server-v')
+    needs: server
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: server-*-verification
+          path: artifacts/server-release
+          merge-multiple: true
+      - run: python tools/publish_server_release.py --artifacts artifacts/server-release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

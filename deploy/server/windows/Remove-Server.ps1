@@ -1,4 +1,6 @@
 $ErrorActionPreference='Stop'
+# A parent PowerShell 7 process may pass incompatible module paths to Windows PowerShell 5.1.
+if ($PSVersionTable.PSEdition -eq 'Desktop') { $env:PSModulePath=Join-Path $PSHOME 'Modules' }
 & (Join-Path $PSScriptRoot 'Stop-Server.ps1')
 foreach ($name in @('OneCBackupServer','OneCBackupServerDatabase')) {
     if (Get-Service -Name $name -ErrorAction SilentlyContinue) {
