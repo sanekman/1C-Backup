@@ -7,7 +7,8 @@ public partial class MainWindow
     internal bool SmokeBackgroundManualReady => BackgroundAcceptsManualRuns;
     private readonly LocalManualRunQueue manualQueue = new(DesktopPaths.DataDirectory);
     private readonly Dictionary<Guid, CancellationTokenSource> localManualRuns = [];
-    private readonly Dictionary<Guid, LocalManualRunRequest> backgroundManualRuns = [];
+    private readonly Dictionary<Guid, LocalManualRunHandle> backgroundManualRuns = [];
+    private Guid? restoredManualSession;
     private bool submittingManualRun;
 
     private bool BackgroundAcceptsManualRuns => backgroundBusy && !backgroundStarting
@@ -38,7 +39,7 @@ public partial class MainWindow
             try
             {
                 var request = await manualQueue.EnqueueAsync(backgroundState!.SessionId, job.Id);
-                backgroundManualRuns[request.RequestId] = request;
+                backgroundManualRuns[request.RequestId] = new(request.RequestId,request.SessionId,request.JobId);
                 Status.Text = "Ручной запуск передан агенту: " + job.Name + ". Если копирование уже идёт, задание дождётся своей очереди.";
             }
             catch (Exception error) { ReportManualRunError(error); }
@@ -64,11 +65,25 @@ public partial class MainWindow
 
     private async Task RefreshManualRequestsAsync()
     {
+        if(BackgroundAcceptsManualRuns && backgroundState is { } state && restoredManualSession!=state.SessionId)
+        {
+            foreach(var request in await manualQueue.OutstandingAsync(state.SessionId)) backgroundManualRuns[request.RequestId]=request;
+            restoredManualSession=state.SessionId;
+        }
         foreach (var request in await manualQueue.PendingAsync())
-            if (request.SessionId == backgroundState?.SessionId) backgroundManualRuns.TryAdd(request.RequestId, request);
+            if (request.SessionId == backgroundState?.SessionId) backgroundManualRuns.TryAdd(request.RequestId, new(request.RequestId,request.SessionId,request.JobId));
         foreach (var request in backgroundManualRuns.Values.ToArray())
         {
-            var receipt = await manualQueue.ReadReceiptAsync(request.RequestId);
+            LocalManualRunReceipt? receipt;
+            try { receipt = await manualQueue.ReadReceiptAsync(request.RequestId); }
+            catch(Exception error) when(error is System.IO.IOException or UnauthorizedAccessException or System.Text.Json.JsonException or System.IO.InvalidDataException)
+            {
+                // Keep this job guarded against a duplicate click, but still refresh all other requests.
+                Status.Text="Не удалось прочитать подтверждение ручного запуска. Проверьте историю перед повторным запуском.";
+                if(backgroundState?.SessionId!=request.SessionId || !backgroundBusy
+                    || backgroundState.Phase is LocalAgentPhase.Stopped or LocalAgentPhase.Faulted) backgroundManualRuns.Remove(request.RequestId);
+                continue;
+            }
             if (receipt is { Phase: not LocalManualRunPhase.Accepted })
             {
                 backgroundManualRuns.Remove(request.RequestId);
@@ -88,6 +103,6 @@ public partial class MainWindow
 
     private void CancelQueuedManualRuns()
     {
-        foreach (var cancellation in localManualRuns.Values) cancellation.Cancel();
+        foreach (var cancellation in localManualRuns.Values.ToArray()) cancellation.Cancel();
     }
 }

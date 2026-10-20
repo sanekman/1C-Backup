@@ -167,65 +167,86 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         async Task ManualRequestLoop()
         {
             await initialized;
-            var queue=new LocalManualRunQueue(directory);
-            var pendingReceipts=new Dictionary<Guid,LocalManualRunReceipt>();
+            var queue = new LocalManualRunQueue(directory);
+            var pendingReceipts = new Dictionary<Guid, LocalManualRunReceipt>();
+            var failures = new Dictionary<Guid, (DateTimeOffset RetryAfter, Exception Error)>();
             async Task FlushReceipt(LocalManualRunReceipt receipt)
             {
-                pendingReceipts[receipt.RequestId]=receipt;
-                await queue.WriteReceiptAsync(receipt,CancellationToken.None);
+                pendingReceipts[receipt.RequestId] = receipt;
+                await queue.WriteReceiptAsync(receipt, CancellationToken.None);
                 pendingReceipts.Remove(receipt.RequestId);
             }
-            using var timer=new PeriodicTimer(TimeSpan.FromMilliseconds(250));
+            async Task TryCommand(Guid id, Func<Task> action)
+            {
+                if (failures.TryGetValue(id, out var failed) && failed.RetryAfter > DateTimeOffset.UtcNow) return;
+                try { await action(); failures.Remove(id); }
+                catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { throw; }
+                catch (Exception error)
+                {
+                    failures[id] = (DateTimeOffset.UtcNow.AddSeconds(2), error);
+                    warnings.Set("Очередь ручных запусков", error);
+                }
+            }
+            async Task HandleRequest(LocalManualRunRequest request)
+            {
+                lifetime.Token.ThrowIfCancellationRequested();
+                var receipt = new LocalManualRunReceipt(request.RequestId, request.SessionId, request.JobId, LocalManualRunPhase.Accepted);
+                if (request.SessionId != state.SessionId)
+                {
+                    await FlushReceipt(receipt with { Phase = LocalManualRunPhase.Rejected, Error = "Сеанс агента завершён. Повторите ручной запуск." });
+                    queue.Consume(request.RequestId); return;
+                }
+                LocalManualRunReceipt? existing;
+                try { existing = await queue.ReadReceiptAsync(request.RequestId, lifetime.Token); }
+                catch (Exception error) when (error is System.Text.Json.JsonException or InvalidDataException)
+                {
+                    await FlushReceipt(receipt with { Phase = LocalManualRunPhase.Rejected, Error = "Подтверждение команды повреждено. Проверьте историю перед повторным запуском." });
+                    queue.Consume(request.RequestId); return;
+                }
+                if (existing is { Phase: not LocalManualRunPhase.Accepted }) { queue.Consume(request.RequestId); return; }
+                var job = (await store.LoadAsync(lifetime.Token)).FirstOrDefault(j => j.Id == request.JobId);
+                if (job is null)
+                {
+                    await FlushReceipt(receipt with { Phase = LocalManualRunPhase.Rejected, Error = "Сохранённое задание не найдено." });
+                    queue.Consume(request.RequestId); return;
+                }
+                // Never run without a durable acceptance; remove the command before execution to avoid replay.
+                await queue.WriteReceiptAsync(receipt, lifetime.Token);
+                queue.Consume(request.RequestId);
+                LocalManualRunReceipt completedReceipt;
+                try
+                {
+                    await dispatcher.ExecuteAsync(job, lifetime.Token);
+                    lifetime.Token.ThrowIfCancellationRequested();
+                    completedReceipt = receipt with { Phase = LocalManualRunPhase.Finished };
+                    warnings.Set("Ручной запуск", null);
+                }
+                catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+                { await FlushReceipt(receipt with { Phase = LocalManualRunPhase.Interrupted, Error = "Агент остановлен. Проверьте историю запусков." }); throw; }
+                catch (Exception error)
+                {
+                    completedReceipt = receipt with { Phase = LocalManualRunPhase.Rejected, Error = "Запуск не завершён. Проверьте историю и журнал агента." };
+                    warnings.Set("Ручной запуск", error);
+                }
+                await FlushReceipt(completedReceipt);
+            }
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
             do
             {
                 try
                 {
-                    foreach(var receipt in pendingReceipts.Values.ToArray()) await FlushReceipt(receipt);
-                    foreach(var request in await queue.PendingAsync(lifetime.Token))
-                    {
-                        lifetime.Token.ThrowIfCancellationRequested();
-                        var receipt=new LocalManualRunReceipt(request.RequestId,request.SessionId,request.JobId,LocalManualRunPhase.Accepted);
-                        if(request.SessionId!=state.SessionId)
-                        {
-                            await FlushReceipt(receipt with { Phase=LocalManualRunPhase.Rejected,Error="Сеанс агента завершён. Повторите ручной запуск." });
-                            queue.Consume(request.RequestId); continue;
-                        }
-                        LocalManualRunReceipt? existing;
-                        try { existing=await queue.ReadReceiptAsync(request.RequestId,lifetime.Token); }
-                        catch(Exception error) when(error is System.Text.Json.JsonException or InvalidDataException)
-                        {
-                            await FlushReceipt(receipt with { Phase=LocalManualRunPhase.Rejected,Error="Подтверждение команды повреждено. Проверьте историю перед повторным запуском." });
-                            queue.Consume(request.RequestId); continue;
-                        }
-                        if(existing is { Phase: not LocalManualRunPhase.Accepted }) { queue.Consume(request.RequestId); continue; }
-                        var job=(await store.LoadAsync(lifetime.Token)).FirstOrDefault(j=>j.Id==request.JobId);
-                        if(job is null)
-                        {
-                            await FlushReceipt(receipt with { Phase=LocalManualRunPhase.Rejected,Error="Сохранённое задание не найдено." });
-                            queue.Consume(request.RequestId); continue;
-                        }
-                        // Consume before execution: a lost final acknowledgement must never execute a backup twice.
-                        await queue.WriteReceiptAsync(receipt,lifetime.Token);
-                        queue.Consume(request.RequestId);
-                        LocalManualRunReceipt completedReceipt;
-                        try
-                        {
-                            await dispatcher.ExecuteAsync(job,lifetime.Token);
-                            lifetime.Token.ThrowIfCancellationRequested();
-                            completedReceipt=receipt with { Phase=LocalManualRunPhase.Finished };
-                            warnings.Set("Ручной запуск",null);
-                        }
-                        catch(OperationCanceledException) when(lifetime.IsCancellationRequested)
-                        { await FlushReceipt(receipt with { Phase=LocalManualRunPhase.Interrupted,Error="Агент остановлен. Проверьте историю запусков." }); throw; }
-                        catch(Exception error)
-                        { completedReceipt=receipt with { Phase=LocalManualRunPhase.Rejected,Error="Запуск не завершён. Проверьте историю и журнал агента." }; warnings.Set("Ручной запуск",error); }
-                        await FlushReceipt(completedReceipt);
-                    }
-                    warnings.Set("Очередь ручных запусков",null);
+                    foreach (var receipt in pendingReceipts.Values.ToArray())
+                        await TryCommand(receipt.RequestId, () => FlushReceipt(receipt));
+                    var requests = await queue.PendingAsync(lifetime.Token);
+                    var outstanding = requests.Select(r => r.RequestId).Concat(pendingReceipts.Keys).ToHashSet();
+                    foreach (var removed in failures.Keys.Where(id => !outstanding.Contains(id)).ToArray()) failures.Remove(removed);
+                    foreach (var request in requests)
+                        await TryCommand(request.RequestId, () => HandleRequest(request));
+                    warnings.Set("Очередь ручных запусков", failures.Values.Select(f => f.Error).FirstOrDefault());
                 }
-                catch(OperationCanceledException) when(lifetime.IsCancellationRequested) { throw; }
-                catch(Exception error) { warnings.Set("Очередь ручных запусков",error); }
-            } while(await timer.WaitForNextTickAsync(lifetime.Token));
+                catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { throw; }
+                catch (Exception error) { warnings.Set("Очередь ручных запусков", error); }
+            } while (await timer.WaitForNextTickAsync(lifetime.Token));
         }
         var manualRequestsTask = manual is null ? ManualRequestLoop() : Task.CompletedTask;
         var notificationTask = manual is null ? NotificationLoop() : Task.CompletedTask;

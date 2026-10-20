@@ -298,6 +298,82 @@ public sealed class LocalAgentHostTests : IDisposable
         finally { shutdown.Cancel(); Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(5))); }
     }
 
+    [Fact]
+    public async Task UnwritableManualReceiptDoesNotBlockOtherJobsAndRecoversWithoutDuplicates()
+    {
+        var blocked = (await CreateJob()) with { Enabled = false };
+        var other = blocked with { Id = Guid.NewGuid(), Name = "Другое ручное задание" };
+        await new JobStore(Path.Combine(directory, "jobs.json")).SaveAsync([blocked, other]);
+        using var shutdown = new CancellationTokenSource();
+        var task = new LocalAgentHost(directory, new DatabaseBackupExecutor(new BackupProcessRunner()), new NoCredentials())
+            .RunAsync(pollInterval: TimeSpan.FromMilliseconds(50), cancellationToken: shutdown.Token);
+        try
+        {
+            var state = await WaitForState(new LocalAgentControlStore(directory), s => s.CanRunManually);
+            var queue = new LocalManualRunQueue(directory);
+            var first = new LocalManualRunRequest(Guid.NewGuid(), state.SessionId, blocked.Id, DateTimeOffset.UtcNow.AddSeconds(-1));
+            var receiptPath = Path.Combine(directory, "manual-runs", "receipts", first.RequestId.ToString("N") + ".json");
+            Directory.CreateDirectory(receiptPath); // Deterministic individual write failure on Windows and Linux.
+            var pendingPath = Path.Combine(directory, "manual-runs", "pending", first.RequestId.ToString("N") + ".json");
+            Directory.CreateDirectory(Path.GetDirectoryName(pendingPath)!);
+            await File.WriteAllTextAsync(pendingPath, System.Text.Json.JsonSerializer.Serialize(first));
+            var second = await queue.EnqueueAsync(state.SessionId, other.Id);
+            await WaitForReceipt(queue, second.RequestId, LocalManualRunPhase.Finished);
+            var history = new BackupRunHistory(Path.Combine(directory, "runs.json"));
+            Assert.Equal(other.Id, Assert.Single(await history.ReadAsync()).JobId);
+            Assert.Contains(await queue.PendingAsync(), request => request.RequestId == first.RequestId);
+            Assert.False(task.IsCompleted);
+            await WaitForState(new LocalAgentControlStore(directory), s => s.Warning?.Contains("Очередь ручных запусков") == true);
+            Directory.Delete(receiptPath);
+            await WaitForReceipt(queue, first.RequestId, LocalManualRunPhase.Finished);
+            var runs = await history.ReadAsync();
+            Assert.Equal(2, runs.Count);
+            Assert.All(runs, run => Assert.Equal(BackupRunStatus.Succeeded, run.Status));
+            await WaitForState(new LocalAgentControlStore(directory), s => s.Warning is null);
+        }
+        finally { shutdown.Cancel(); Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(5))); }
+    }
+
+    [Fact]
+    public async Task LostFinalReceiptDoesNotBlockNextJobOrRepeatFinishedBackup()
+    {
+        var firstJob = (await CreateJob()) with { Enabled = false };
+        var secondJob = firstJob with { Id = Guid.NewGuid(), Name = "Следующий ручной запуск" };
+        await new JobStore(Path.Combine(directory, "jobs.json")).SaveAsync([firstJob, secondJob]);
+        var id = Guid.NewGuid();
+        var receiptPath = Path.Combine(directory, "manual-runs", "receipts", id.ToString("N") + ".json");
+        var blockedReceipt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var shutdown = new CancellationTokenSource();
+        var task = new LocalAgentHost(directory, new DatabaseBackupExecutor(new BackupProcessRunner()), new NoCredentials())
+            .RunAsync(pollInterval: TimeSpan.FromMilliseconds(50), cancellationToken: shutdown.Token, report: run =>
+            {
+                if (run.JobId == firstJob.Id)
+                {
+                    File.Delete(receiptPath); Directory.CreateDirectory(receiptPath);
+                    blockedReceipt.TrySetResult();
+                }
+                return Task.CompletedTask;
+            });
+        try
+        {
+            var state = await WaitForState(new LocalAgentControlStore(directory), s => s.CanRunManually);
+            var queue = new LocalManualRunQueue(directory);
+            var pendingPath = Path.Combine(directory, "manual-runs", "pending", id.ToString("N") + ".json");
+            Directory.CreateDirectory(Path.GetDirectoryName(pendingPath)!);
+            await File.WriteAllTextAsync(pendingPath, System.Text.Json.JsonSerializer.Serialize(new LocalManualRunRequest(id, state.SessionId, firstJob.Id, DateTimeOffset.UtcNow)));
+            await blockedReceipt.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var second = await queue.EnqueueAsync(state.SessionId, secondJob.Id);
+            await WaitForReceipt(queue, second.RequestId, LocalManualRunPhase.Finished);
+            Directory.Delete(receiptPath);
+            await WaitForReceipt(queue, id, LocalManualRunPhase.Finished);
+            var runs = await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync();
+            Assert.Equal(2, runs.Count);
+            Assert.All(runs, run => Assert.Equal(BackupRunStatus.Succeeded, run.Status));
+            Assert.Single(runs, run => run.JobId == firstJob.Id);
+        }
+        finally { shutdown.Cancel(); Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(5))); }
+    }
+
     private static async Task WaitForReceipt(LocalManualRunQueue queue, Guid id, LocalManualRunPhase phase)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
