@@ -1,0 +1,9 @@
+{
+  "SchemaVersion": 1,
+  "Version": "0.2.0-alpha.22",
+  "Platform": "win-x64",
+  "InstallerKind": "inno",
+  "InstallerFile": "1C-Backup-windows-x64-setup.exe",
+  "Size": 65347879,
+  "Sha256": "7bd0af6fd4f517878709fb911da651580575dbf5dd04d4671b5d2d8fcc7ca283"
+}
