@@ -3,7 +3,7 @@ using ICSharpCode.SharpZipLib.Zip;
 namespace OneCBackup.Core;
 
 public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapshotStore snapshots,
-    IArchivePasswordStore? passwords = null, Func<BackupJob, WebDavClient>? clientFactory = null) : IBackupExecutor
+    IArchivePasswordStore? passwords = null, Func<BackupJob, WebDavClient>? clientFactory = null, TimeProvider? timeProvider = null) : IBackupExecutor
 {
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
@@ -20,7 +20,7 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
         BackupProgressContext.Report(BackupStage.ConnectingSource);
         using var client = clientFactory?.Invoke(job) ?? await WebDavClient.OpenAsync(job, token);
         var password = await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, token);
-        var previous = await FileBackupBases.ReadAsync(job, client.SourceIdentity, catalog, snapshots, token);
+        var previous = await FileBackupBases.ReadAsync(job, client.SourceIdentity, catalog, snapshots, token, timeProvider);
         DiagnosticLog.Current.Write(DiagnosticEvent.SourceEnumerationStarted);
         BackupProgressContext.Report(BackupStage.ScanningSource);
         var scan = await client.ScanAsync(token);

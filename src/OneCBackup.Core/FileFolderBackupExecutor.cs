@@ -2,7 +2,7 @@ namespace OneCBackup.Core;
 
 public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSnapshotStore snapshots,
     IArchivePasswordStore? passwords = null, Func<string, Stream>? openSource = null,
-    Func<string, IEnumerable<string>>? enumerateSource = null) : IBackupExecutor
+    Func<string, IEnumerable<string>>? enumerateSource = null, TimeProvider? timeProvider = null) : IBackupExecutor
 {
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
@@ -14,7 +14,7 @@ public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSn
         if (!isFile)
             FileBackupPaths.RequireOutside(source, snapshots.DirectoryPath, "Исходная папка содержит рабочий профиль программы. Выберите отдельную папку с данными.");
         var previous = await FileBackupBases.ReadAsync(job, FileBackupManifest.IdentifySource(source, isFile),
-            catalog, snapshots, cancellationToken);
+            catalog, snapshots, cancellationToken, timeProvider);
         return await new AccessibleFilesBackupExecutor(this, passwords, enumerateSource, openSource)
             .CreateSnapshotAsync(job, workDirectory, cancellationToken, previous);
     }

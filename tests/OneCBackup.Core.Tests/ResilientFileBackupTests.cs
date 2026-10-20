@@ -30,10 +30,10 @@ public sealed class ResilientFileBackupTests : IDisposable
         return File.WriteAllTextAsync(path, value);
     }
     private LocalBackupRunner Runner(Func<string, Stream>? open = null, Func<string, IEnumerable<string>>? enumerate = null,
-        IArchivePasswordStore? passwords = null)
+        IArchivePasswordStore? passwords = null, TimeProvider? timeProvider = null)
         => new(new Unused(), new(storage, catalog, passwords), history, Path.Combine(root, "work"),
             fileAccessWrapper: normal => new FileFolderBackupExecutor(catalog, new(Path.Combine(root, "file-snapshots")),
-                passwords, openSource: open, enumerateSource: enumerate));
+                passwords, openSource: open, enumerateSource: enumerate, timeProvider: timeProvider), timeProvider: timeProvider);
     private static FileBackupManifest Manifest(BackupRun run)
     {
         Assert.True(run.Status == BackupRunStatus.Succeeded, run.Error);
@@ -56,6 +56,25 @@ public sealed class ResilientFileBackupTests : IDisposable
             if (started) throw new IOException("source failed after some bytes");
             started = true; return base.ReadAsync(buffer[..Math.Min(buffer.Length, 2)], token);
         }
+    }
+    [Fact]
+    public async Task IncompleteIncrementAndIncompleteWeeklyFullKeepTheirCalendarPlan()
+    {
+        var clock = new BackupTestClock("2026-10-14T10:00:00Z");
+        var weekly = job with { FullBackupDayOfWeek = DayOfWeek.Monday, FullBackupEvery = 1 };
+        await Write("good.txt", "v1"); await Write("locked.txt", "old");
+        var first = Manifest(await Runner(timeProvider: clock).RunAsync(weekly));
+        Stream Open(string path) => Path.GetFileName(path) == "locked.txt" ? throw new IOException("locked") : File.OpenRead(path);
+        clock.Set("2026-10-15T10:00:00Z"); await Write("good.txt", "v2");
+        var partial = Manifest(await Runner(Open, timeProvider: clock).RunAsync(weekly));
+        Assert.Equal(first.SnapshotId, partial.ParentSnapshotId); Assert.NotEmpty(partial.SkippedPaths!);
+        clock.Set("2026-10-16T10:00:00Z");
+        Assert.Equal(partial.SnapshotId, Manifest(await Runner(timeProvider: clock).RunAsync(weekly)).ParentSnapshotId);
+        clock.Set("2026-10-19T10:00:00Z");
+        var full = Manifest(await Runner(Open, timeProvider: clock).RunAsync(weekly));
+        Assert.Null(full.ParentSnapshotId); Assert.NotEmpty(full.SkippedPaths!);
+        clock.Set("2026-10-20T10:00:00Z");
+        Assert.Equal(full.SnapshotId, Manifest(await Runner(timeProvider: clock).RunAsync(weekly)).ParentSnapshotId);
     }
     [Theory]
     [InlineData(false)]

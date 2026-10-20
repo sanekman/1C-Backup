@@ -85,6 +85,12 @@ public partial class MainWindow : Window
             [AgentMode.Managed] = "Управление через сервер"
         };
         AgentModePicker.SelectedValue = AgentMode.Standalone;
+        FullBackupDayPicker.ItemsSource = new Dictionary<int, string>
+        {
+            [-1] = "По числу архивов", [1] = "Понедельник", [2] = "Вторник", [3] = "Среда",
+            [4] = "Четверг", [5] = "Пятница", [6] = "Суббота", [0] = "Воскресенье"
+        };
+        FullBackupDayPicker.SelectedValue = -1;
         Kind.ItemsSource = Enum.GetValues<DatabaseKind>();
         Kind.SelectedItem = DatabaseKind.OneCFile;
         OneCMethodPicker.ItemsSource = new Dictionary<OneCBackupMethod, string>
@@ -212,6 +218,7 @@ public partial class MainWindow : Window
             ArchiveCopies = ArchiveCopies.IsChecked == true,
             FileBackupMode = FileBackupModePicker.SelectedValue is FileBackupMode mode ? mode : FileBackupMode.Full,
             FullBackupEvery = int.TryParse(FullBackupEvery.Text, out var every) && every is >= 1 and <= 365 ? every : 7,
+            FullBackupDayOfWeek = SelectedFullBackupDay,
             ArchivePasswordKey = EncryptArchive.IsChecked == true ? archivePasswordKey : null, StorageKind = storageKind,
             GoogleDrive = storageKind == StorageKind.GoogleDrive ? googleDriveSettings : null,
             RemoteGateway = storageKind == StorageKind.RemoteGateway ? remoteGatewaySettings : null,
@@ -345,6 +352,7 @@ public partial class MainWindow : Window
         JobName.Text = job.Name; Kind.SelectedItem = job.Kind; Source.Text = job.Source;
         OneCMethodPicker.SelectedValue = job.OneCMethod;
         FileBackupModePicker.SelectedValue = job.FileBackupMode;
+        FullBackupDayPicker.SelectedValue = job.FullBackupDayOfWeek is { } fullDay ? (int)fullDay : -1;
         FullBackupEvery.Text = job.FullBackupEvery.ToString(CultureInfo.InvariantCulture);
         googleDriveSettings = job.GoogleDrive;
         remoteGatewaySettings = job.RemoteGateway; UpdateRemoteGatewayStatus();
@@ -379,7 +387,7 @@ public partial class MainWindow : Window
         webDavCredentialKey = null; WebDavTimeout.Text = "120"; UpdateWebDavCredentialStatus();
         JobName.Clear(); Source.Clear(); Destination.Clear(); Kind.SelectedItem = DatabaseKind.OneCFile;
         TemporaryFolder.Clear();
-        FileBackupModePicker.SelectedValue = FileBackupMode.Full; FullBackupEvery.Text = "7";
+        FileBackupModePicker.SelectedValue = FileBackupMode.Full; FullBackupDayPicker.SelectedValue = -1; FullBackupEvery.Text = "7";
         additionalDestinations.Clear();
         OneCMethodPicker.SelectedValue = OneCBackupMethod.FileArchive;
         AllowOpenOneCDatabase.IsChecked = false;

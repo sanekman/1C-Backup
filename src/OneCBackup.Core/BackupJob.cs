@@ -46,6 +46,8 @@ public sealed record BackupJob
     public PostgreSqlBackupSettings? PostgreSql { get; init; }
     public FileBackupMode FileBackupMode { get; init; } = FileBackupMode.Full;
     public int FullBackupEvery { get; init; } = 7;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DayOfWeek? FullBackupDayOfWeek { get; init; }
     public WebDavSettings? WebDav { get; init; }
 
     [JsonIgnore]
@@ -75,6 +77,7 @@ public sealed record BackupJob
         if (string.IsNullOrWhiteSpace(Name)) errors.Add("Укажите название задания.");
         if (!Enum.IsDefined(Kind)) errors.Add("Неизвестный тип базы данных.");
         if (!Enum.IsDefined(FileBackupMode)) errors.Add("Неизвестный способ копирования файлов.");
+        if (FullBackupDayOfWeek is { } fullDay && !Enum.IsDefined(fullDay)) errors.Add("Выберите корректный день недели для полной копии.");
         if (FullBackupEvery is < 1 or > 365) errors.Add("Полная копия должна создаваться не реже каждой 365-й копии и не чаще каждой первой.");
         if (Kind == DatabaseKind.FilesAndFolders && !Path.IsPathFullyQualified(Source ?? ""))
             errors.Add("Укажите полный путь к файлу или папке.");

@@ -26,8 +26,8 @@ public sealed class WebDavBackupTests : IDisposable
         TemporaryDirectory = Path.Combine(root, "hdd"), ScheduleKind = ScheduleKind.Manual, KeepLast = 1,
         FileBackupMode = FileBackupMode.Incremental, FullBackupEvery = 3 };
     private WebDavClient Client(BackupJob job) => new(job.Source, new NetworkCredential("пользователь", "app-secret"), dav.Handler());
-    private LocalBackupRunner Runner(Action<BackupProgressSnapshot>? progress = null) => new(new Unused(), new BackupCompletion(storage, catalog, new Passwords()),
-        new BackupRunHistory(Path.Combine(root, "runs.json")), Path.Combine(root, "work"), Client, progress: progress);
+    private LocalBackupRunner Runner(Action<BackupProgressSnapshot>? progress = null, TimeProvider? timeProvider = null) => new(new Unused(), new BackupCompletion(storage, catalog, new Passwords()),
+        new BackupRunHistory(Path.Combine(root, "runs.json")), Path.Combine(root, "work"), Client, progress: progress, timeProvider: timeProvider);
     private async Task<BackupRecord> Run(BackupJob? job = null)
     {
         var result = await Runner().RunAsync(job ?? Job); Assert.True(result.Status == BackupRunStatus.Succeeded, result.Error);
@@ -38,6 +38,24 @@ public sealed class WebDavBackupTests : IDisposable
         var parent = Path.Combine(root, "restores"); Directory.CreateDirectory(parent);
         return (await new FileBackupRestorer(storage, catalog, Path.Combine(root, "work"), new Passwords())
             .RestoreAsync(record, job ?? Job, parent)).Directory;
+    }
+    [Fact]
+    public async Task WeeklyFullUsesSamePlanForWebDavAndCatchesUpAfterMissedDay()
+    {
+        dav.Files["stable.txt"] = ("stable", "\"s1\"");
+        var clock = new BackupTestClock("2026-10-14T10:00:00Z");
+        var job = Job with { FullBackupDayOfWeek = DayOfWeek.Monday, FullBackupEvery = 1 };
+        var first = await Runner(timeProvider: clock).RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, first.Status); Assert.True(first.Backup!.FileSnapshot!.IsFull);
+        var inc = await Runner(timeProvider: clock).RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, inc.Status); Assert.False(inc.Backup!.FileSnapshot!.IsFull);
+        clock.Set("2026-10-20T10:00:00Z");
+        var full = await Runner(timeProvider: clock).RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, full.Status); Assert.True(full.Backup!.FileSnapshot!.IsFull);
+        var next = await Runner(timeProvider: clock).RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, next.Status); Assert.False(next.Backup!.FileSnapshot!.IsFull);
+        Assert.Equal("stable", await File.ReadAllTextAsync(Path.Combine(await Restore((await catalog.ReadAsync())
+            .Single(r => r.Backup.Location == next.Backup.Location), job), "stable.txt")));
     }
     [Fact]
     public async Task WholeSourceByteProgressDoesNotSwitchStagesForEachWebDavFile()

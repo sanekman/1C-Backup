@@ -13,7 +13,7 @@ public sealed class BackupJobTransferTests : IDisposable
     {
         Id = Guid.NewGuid(), Name = "Бухгалтерия", Kind = kind, Source = kind == DatabaseKind.WebDav ? "https://dav.example/data/" : kind is DatabaseKind.OneCFile or DatabaseKind.FilesAndFolders ? root : "database",
         WebDav = kind == DatabaseKind.WebDav ? new() { CredentialKey = "dav-binding", TimeoutMinutes = 45 } : null,
-        FileBackupMode = FileBackupMode.Incremental, FullBackupEvery = 12,
+        FileBackupMode = FileBackupMode.Incremental, FullBackupEvery = 12, FullBackupDayOfWeek = DayOfWeek.Friday,
         DestinationDirectory = Path.Combine(root, "copies"), TemporaryDirectory = Path.Combine(root, "work"),
         ArchiveCopies = true, ArchivePasswordKey = "archive-binding", Enabled = true, KeepLast = 7,
         ScheduleKind = ScheduleKind.Weekly, DaysOfWeek = WeekDays.Monday | WeekDays.Friday,

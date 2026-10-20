@@ -171,7 +171,7 @@ public partial class MainWindow
             WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}{platformDescription}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {(Storage.SelectedValue is StorageKind.GoogleDrive ? googleDriveSettings?.FolderName : Destination.Text.Trim())}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nОсновное хранилище: хранить {KeepLast.Text.Trim()} успешных копий";
             WizardSummary.Text += "\n\n" + NextRun.Text;
             if (Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav && FileBackupModePicker.SelectedValue is FileBackupMode.Incremental)
-                WizardSummary.Text += "\nВ цепочке не более " + FullBackupEvery.Text.Trim() + " архивов. Нужные предшествующие архивы сохраняются сверх лимита хранилища.";
+                WizardSummary.Text += "\n" + FullBackupPlanDescription + " Нужные предшествующие архивы сохраняются сверх лимита хранилища.";
             ReviewTechnicalDetails.IsExpanded = false;
             ReviewJobName.Text = JobName.Text.Trim();
             ReviewJobName.ToolTip = ReviewJobName.Text;
@@ -235,7 +235,7 @@ public partial class MainWindow
             if (Kind.SelectedItem is DatabaseKind.FilesAndFolders)
             {
                 if (!Path.IsPathFullyQualified(Source.Text.Trim())) return RejectWizard("Выберите файл или папку либо укажите полный путь.", 0, Source);
-                if (FileBackupModePicker.SelectedValue is FileBackupMode.Incremental
+                if (FileBackupModePicker.SelectedValue is FileBackupMode.Incremental && SelectedFullBackupDay is null
                     && (!int.TryParse(FullBackupEvery.Text, out var every) || every is < 1 or > 365))
                     return RejectWizard("Укажите от 1 до 365 архивов в инкрементной цепочке.", 0, FullBackupEvery);
             }
@@ -246,7 +246,7 @@ public partial class MainWindow
                 if (string.IsNullOrEmpty(webDavCredentialKey)) return RejectWizard("Нажмите «Логин и пароль…» и сохраните подключение WebDAV.", 0, WebDavCredentialsButton);
                 if (!int.TryParse(WebDavTimeout.Text, out var timeout) || timeout is < 1 or > 1440)
                     return RejectWizard("Время ожидания WebDAV: от 1 до 1440 минут.", 0, WebDavTimeout);
-                if (FileBackupModePicker.SelectedValue is FileBackupMode.Incremental
+                if (FileBackupModePicker.SelectedValue is FileBackupMode.Incremental && SelectedFullBackupDay is null
                     && (!int.TryParse(FullBackupEvery.Text, out var every) || every is < 1 or > 365))
                     return RejectWizard("Укажите от 1 до 365 архивов в цепочке.", 0, FullBackupEvery);
             }

@@ -3,7 +3,7 @@ namespace OneCBackup.Core;
 /// <summary>Serializes runs and records failures before returning them to the desktop or service.</summary>
 public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion completion,
     BackupRunHistory history, string workRoot, Func<BackupJob, WebDavClient>? webDavClientFactory = null, DiagnosticLog? diagnosticLog = null, Action<BackupProgressSnapshot>? progress = null,
-    Func<IBackupExecutor, IBackupExecutor>? fileAccessWrapper = null)
+    Func<IBackupExecutor, IBackupExecutor>? fileAccessWrapper = null, TimeProvider? timeProvider = null)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -21,7 +21,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             var clock = System.Diagnostics.Stopwatch.StartNew();
             log.Write(DiagnosticEvent.RunStarted, values: new(Count: job.StorageJobs.Count));
             var work = Path.Combine(Path.GetFullPath(job.TemporaryDirectory ?? workRoot), id.ToString("N"));
-            var run = new BackupRun(id, job.Id, job.Name, DateTimeOffset.UtcNow, null, BackupRunStatus.Running, work)
+            var run = new BackupRun(id, job.Id, job.Name, (timeProvider ?? TimeProvider.System).GetUtcNow(), null, BackupRunStatus.Running, work)
             { Warnings = job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.FileArchive && job.AllowOpenOneCDatabase
                 ? new[] { OneCFileArchiveExecutor.OpenDatabaseWarning } : null };
             // A corrupt or unwritable history prevents starting an untracked operation.
@@ -37,9 +37,9 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 var fileSnapshots = new FileBackupSnapshotStore(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(workRoot))!, "file-snapshots"));
                 IBackupExecutor selectedExecutor = job.Kind switch
                 {
-                    DatabaseKind.FilesAndFolders => fileAccessWrapper?.Invoke(new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords))
-                        ?? new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords),
-                    DatabaseKind.WebDav => new WebDavBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, webDavClientFactory),
+                    DatabaseKind.FilesAndFolders => fileAccessWrapper?.Invoke(new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, timeProvider: timeProvider))
+                        ?? new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, timeProvider: timeProvider),
+                    DatabaseKind.WebDav => new WebDavBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, webDavClientFactory, timeProvider),
                     _ => executor
                 };
                 log.Write(DiagnosticEvent.BackupCreationStarted);
@@ -65,7 +65,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 if (job.AdditionalDestinations?.Count > 0)
                 {
                     var completed = await completion.CompleteManyAsync(job, dump, Path.Combine(work, "archive"),
-                        DateTimeOffset.UtcNow, cancellationToken);
+                        (timeProvider ?? TimeProvider.System).GetUtcNow(), cancellationToken);
                     var copies = completed.Destinations.Where(result => result.Record is not null).ToArray();
                     var failures = completed.Destinations.Where(result => result.Error is not null).ToArray();
                     warnings.AddRange(completed.Destinations.SelectMany(result => (result.Warnings ?? [])
@@ -82,7 +82,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 else
                 {
                     var completed = await completion.CompleteAsync(job, dump, Path.Combine(work, "archive"),
-                        DateTimeOffset.UtcNow, cancellationToken);
+                        (timeProvider ?? TimeProvider.System).GetUtcNow(), cancellationToken);
                     warnings.AddRange(completed.Retention.Failures.Select(f => "Очистка: " + f.Error.Message));
                     warnings.AddRange(completed.Retention.Warnings);
                     run = run with { Status = BackupRunStatus.Succeeded, Backup = completed.Record.Backup };
@@ -105,7 +105,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             { log.Write(DiagnosticEvent.RunCancelled); run = run with { Status = BackupRunStatus.Cancelled, Error = "Операция отменена. Рабочие файлы сохранены." }; }
             catch (Exception ex)
             { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); run = run with { Status = BackupRunStatus.Failed, Error = ex.Message }; }
-            run = run with { FinishedUtc = DateTimeOffset.UtcNow };
+            run = run with { FinishedUtc = (timeProvider ?? TimeProvider.System).GetUtcNow() };
             // Cancellation must not discard the terminal report.
             try { await history.SaveAsync(run, CancellationToken.None); }
             catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }

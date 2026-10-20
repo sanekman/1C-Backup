@@ -36,13 +36,16 @@ internal static partial class DesktopSmoke
             throw new InvalidOperationException("Мастер принял нулевую длину инкрементной цепочки.");
         Control<TextBox>("FullBackupEvery").Text = "3";
         window.Width = 900; window.Height = 580; window.UpdateLayout();
-        foreach (var name in new[] { "FileBackupModePicker", "FullBackupEvery" })
+        foreach (var name in new[] { "FileBackupModePicker", "FullBackupEvery", "FullBackupDayPicker" })
         {
             var element = Control<FrameworkElement>(name); var scroll = Control<ScrollViewer>("EditorScroll");
             var point = element.TranslatePoint(new Point(), scroll);
             if (!element.IsVisible || point.Y < 0 || point.Y + element.ActualHeight > scroll.ActualHeight + 1)
                 throw new InvalidOperationException("Файловый режим не виден без прокрутки в компактном мастере: " + name);
         }
+        Control<ComboBox>("FullBackupDayPicker").SelectedValue = (int)DayOfWeek.Friday;
+        if (Control<TextBox>("FullBackupEvery").IsEnabled)
+            throw new InvalidOperationException("Выбор дня недели не отключил план по числу архивов.");
         screenshot("files-incremental-source-compact");
         Click("NextStepButton");
         Control<TextBox>("Destination").Text = Path.Combine(fixture, "ordinary-copies");
@@ -50,15 +53,27 @@ internal static partial class DesktopSmoke
         Click("NextStepButton");
         Control<TextBox>("KeepLast").Text = "1"; Control<CheckBox>("Enabled").IsChecked = false;
         Click("NextStepButton");
-        if (!Control<TextBox>("WizardSummary").Text.Contains("Инкремент") || !Control<TextBox>("WizardSummary").Text.Contains("3"))
+        if (!Control<TextBox>("WizardSummary").Text.Contains("Инкремент") || !Control<TextBox>("WizardSummary").Text.Contains("Пятница"))
             throw new InvalidOperationException("Итог мастера потерял файловый режим и длину цепочки.");
         screenshot("files-incremental-review-compact");
         Click("SaveButton");
         await WaitUntil(() => window.SmokeReady && Control<Border>("JobListCard").IsVisible, "Файловое задание не сохранено.");
         var store = new JobStore(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"));
         var job = (await store.LoadAsync()).Single(job => job.Name == "Документы — инкрементная копия");
-        if (job.Kind != DatabaseKind.FilesAndFolders || job.FileBackupMode != FileBackupMode.Incremental || job.FullBackupEvery != 3)
+        if (job.Kind != DatabaseKind.FilesAndFolders || job.FileBackupMode != FileBackupMode.Incremental || job.FullBackupEvery != 3 || job.FullBackupDayOfWeek != DayOfWeek.Friday)
             throw new InvalidOperationException("Файловые настройки потеряны при сохранении.");
+        Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(item => item.Id == job.Id);
+        Click("EditJobButton");
+        if ((int?)Control<ComboBox>("FullBackupDayPicker").SelectedValue != (int)DayOfWeek.Friday
+            || Control<TextBox>("FullBackupEvery").IsEnabled)
+            throw new InvalidOperationException("Редактор потерял сохранённый день полной копии.");
+        Control<ComboBox>("FullBackupDayPicker").SelectedValue = -1;
+        if (!Control<TextBox>("FullBackupEvery").IsEnabled)
+            throw new InvalidOperationException("Возврат к числу архивов не включил настройку цепочки.");
+        Click("NextStepButton"); Click("NextStepButton"); Click("NextStepButton"); Click("SaveButton");
+        await WaitUntil(() => window.SmokeReady && Control<Border>("JobListCard").IsVisible, "Изменение плана полной копии не сохранено.");
+        job = (await store.LoadAsync()).Single(item => item.Id == job.Id);
+        if (job.FullBackupDayOfWeek is not null) throw new InvalidOperationException("Отмена выбора дня не сохранена.");
         Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(item => item.Id == job.Id);
         var catalog = new BackupCatalog(Path.Combine(DesktopPaths.DataDirectory, "copies.json"));
         var history = new BackupRunHistory(Path.Combine(DesktopPaths.DataDirectory, "runs.json"));

@@ -13,11 +13,18 @@ public partial class MainWindow
         + (snapshot.IsFull
         ? "Файловая копия: полная. Для восстановления достаточно этого архива.\n"
         : $"Файловая копия: инкрементная. Для восстановления нужны полная основа и все изменения в этом хранилище. Архивов в цепочке: {snapshot.Depth + 1}.\n");
+    private DayOfWeek? SelectedFullBackupDay => FullBackupDayPicker?.SelectedValue is int day && day is >= 0 and <= 6 ? (DayOfWeek)day : null;
+    private string FullBackupPlanDescription => SelectedFullBackupDay is null
+        ? "В цепочке не более " + FullBackupEvery.Text.Trim() + " архивов."
+        : "Полная копия: " + ((KeyValuePair<int, string>)FullBackupDayPicker.SelectedItem).Value
+            + ". Первая копия полная; пропущенный день — полная при ближайшем запуске. Часовой пояс задания. Защитный предел — 365 архивов.";
     private void FileBackupMode_Changed(object sender, SelectionChangedEventArgs e) => UpdateFileBackupControls();
     private void UpdateFileBackupControls()
     {
         if (FileIncrementalOptions is null || FileBackupModePicker is null) return;
         FileIncrementalOptions.Visibility = FileBackupModePicker.SelectedValue is FileBackupMode.Incremental ? Visibility.Visible : Visibility.Collapsed;
+        if (FullBackupDayOptions is not null) FullBackupDayOptions.Visibility = FileIncrementalOptions.Visibility;
+        if (FullBackupEvery is not null) FullBackupEvery.IsEnabled = SelectedFullBackupDay is null;
         if (WizardHeading is null || WizardHint is null || JobEditor is null) return;
         var compactSource = wizardStep == 0 && Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav;
         WizardHeading.Visibility = compactSource ? Visibility.Collapsed : Visibility.Visible;

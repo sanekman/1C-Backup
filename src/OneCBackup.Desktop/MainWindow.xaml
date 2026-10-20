@@ -221,19 +221,23 @@
 
    </StackPanel>
    <StackPanel x:Name="FileBackupPanel" Visibility="Collapsed">
-    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
     <StackPanel><TextBlock Text="Способ копирования" />
     <ComboBox x:Name="FileBackupModePicker" SelectedValuePath="Tag" SelectedIndex="0" SelectionChanged="FileBackupMode_Changed" Margin="0,4,0,8">
      <ComboBoxItem Content="Полная — все файлы" Tag="{x:Static core:FileBackupMode.Full}" />
      <ComboBoxItem Content="Инкрементная — только изменения" Tag="{x:Static core:FileBackupMode.Incremental}" />
     </ComboBox></StackPanel>
-    <StackPanel x:Name="FileIncrementalOptions" Grid.Column="1" Width="170" Margin="12,0,0,0" Visibility="Collapsed">
+    <StackPanel x:Name="FullBackupDayOptions" Grid.Column="1" Width="190" Margin="12,0,0,0" Visibility="Collapsed">
+     <TextBlock Text="Когда делать полную копию" />
+     <ComboBox x:Name="FullBackupDayPicker" SelectedValuePath="Key" DisplayMemberPath="Value" SelectionChanged="FileBackupMode_Changed" Margin="0,4,0,8" />
+    </StackPanel>
+    <StackPanel x:Name="FileIncrementalOptions" Grid.Column="2" Width="145" Margin="12,0,0,0" Visibility="Collapsed">
      <TextBlock Text="Архивов в цепочке" />
-     <TextBox x:Name="FullBackupEvery" Text="7" Margin="0,4,0,8" ToolTip="Полная основа плюс инкрементные архивы, от 1 до 365. Например, 7: полная и до 6 изменений, затем новая полная." />
+     <TextBox x:Name="FullBackupEvery" Text="7" Margin="0,4,0,8" ToolTip="Действует при выборе «По числу архивов». Полная основа плюс инкрементные архивы, от 1 до 365. Например, 7: полная и до 6 изменений, затем новая полная." />
     </StackPanel></Grid>
     <TextBlock x:Name="FileSourceConsistencyHint" Text="Перед копированием закройте программы, изменяющие эти файлы." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,0,0,6" />
     <Expander Header="Как работает копирование" Margin="0,0,0,8">
-     <TextBlock Text="Первая инкрементная копия всегда полная. Число архивов включает полную основу; затем начинается новая полная цепочка. Нужные предшествующие архивы сохраняются даже сверх лимита хранилища. Копируются обычные файлы и пустые папки, без единого снимка открытых файлов. Для баз 1С и SQL выбирайте соответствующий тип задания. Ссылки, права доступа и системные атрибуты не переносятся." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,6,0,0" />
+     <TextBlock Text="Первая инкрементная копия всегда полная. Можно выбрать день недели: следующая полная выполняется при первом запуске в этот день или при ближайшем запуске после пропуска; остальные копии инкрементные. Учитывается часовой пояс задания. Без выбранного дня полные копии идут по числу архивов в цепочке. Защитный предел цепочки — 365 архивов. Нужные предшествующие архивы сохраняются даже сверх лимита хранилища. Копируются обычные файлы и пустые папки, без единого снимка открытых файлов. Для баз 1С и SQL выбирайте соответствующий тип задания. Ссылки, права доступа и системные атрибуты не переносятся." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,6,0,0" />
     </Expander>
    </StackPanel>
     <Expander x:Name="WebDavOptionsPanel" Visibility="Collapsed" Header="Адрес подключения и время ожидания" Margin="0,0,0,6"><StackPanel>
