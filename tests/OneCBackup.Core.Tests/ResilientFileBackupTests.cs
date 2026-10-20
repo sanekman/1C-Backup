@@ -262,4 +262,39 @@ public sealed class ResilientFileBackupTests : IDisposable
         Assert.Throws<InvalidDataException>(() => (manifest with { Files = [], DeletedFiles = ["busy.txt"] }).Validate());
         Assert.Throws<InvalidDataException>(() => (manifest with { SkippedPaths = ["../outside"] }).Validate());
     }
+    [Fact]
+    public async Task CaseCollidingPathsAreReportedRatherThanSilentlyClaimedAsComplete()
+    {
+        await Write("Case.txt", "first"); await Write("case.txt", "second"); await Write("good.txt", "good");
+        IEnumerable<string> Enumerate(string path) =>
+            new[] { "Case.txt", "case.txt", "good.txt" }.Select(name => Path.Combine(path, name));
+        var run = await Runner(enumerate: Enumerate).RunAsync(job); var manifest = Manifest(run);
+        Assert.True(manifest.GetSnapshot().IsIncomplete);
+        Assert.Contains(".", manifest.SkippedPaths!);
+        Assert.Equal(2, manifest.Files.Count);
+        Assert.Equal("good", await File.ReadAllTextAsync(Path.Combine((await Restore(run)).Directory, "good.txt")));
+    }
+    [Fact]
+    public async Task DirectoryCaseRenameWithUnreadableChildKeepsOneRestorableDirectorySpelling()
+    {
+        await Write("Folder/good.txt", "old good"); await Write("Folder/busy.txt", "old busy");
+        Manifest(await Runner().RunAsync(job));
+        var intermediate = Path.Combine(job.Source, "rename-in-progress");
+        Directory.Move(Path.Combine(job.Source, "Folder"), intermediate);
+        Directory.Move(intermediate, Path.Combine(job.Source, "folder"));
+        await Write("folder/good.txt", "new good"); await Write("folder/busy.txt", "new busy");
+        await Write("folder/added.txt", "added");
+        var run = await Runner(path => Path.GetFileName(path) == "busy.txt"
+            ? throw new UnauthorizedAccessException() : File.OpenRead(path)).RunAsync(job);
+        var manifest = Manifest(run);
+        Assert.Equal(new[] { "Folder" }, manifest.Directories);
+        Assert.All(manifest.Files, file => Assert.StartsWith("Folder/", file.Path));
+        var restored = await Restore(run);
+        Assert.Equal("old busy", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "Folder/busy.txt")));
+        Assert.Equal("new good", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "Folder/good.txt")));
+        Assert.Equal("added", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "Folder/added.txt")));
+        var next = await Runner().RunAsync(job);
+        Assert.False(Manifest(next).GetSnapshot().IsIncomplete);
+        Assert.Equal("new busy", await File.ReadAllTextAsync(Path.Combine((await Restore(next)).Directory, "Folder/busy.txt")));
+    }
 }

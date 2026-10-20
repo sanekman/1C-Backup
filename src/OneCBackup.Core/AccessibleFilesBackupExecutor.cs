@@ -26,14 +26,25 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
         var files = new Dictionary<string, FileBackupSourceFile>(StringComparer.OrdinalIgnoreCase);
         var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visited = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var pending = new Stack<string>(retryPaths ?? [source]);
         while (pending.TryPop(out var path))
         {
             token.ThrowIfCancellationRequested();
             var relative = isFile ? Path.GetFileName(source) : Relative(source, path);
             if (relative != ".") FileBackupManifest.ValidateRelativePath(relative);
-            if (!visited.Add(relative)) continue;
+            if (visited.TryGetValue(relative, out var existing))
+            {
+                // The portable manifest cannot represent both case variants.
+                // Preserve the available entry, but mark the parent as incomplete.
+                if (existing != relative)
+                {
+                    var slash = relative.LastIndexOf('/');
+                    skipped.Add(slash < 0 ? "." : relative[..slash]);
+                }
+                continue;
+            }
+            visited.Add(relative, relative);
             try
             {
                 FileBackupPaths.RejectReparse(path);
@@ -76,7 +87,30 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
         }
         var password = await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, passwords, token);
         BackupProgressContext.Report(BackupStage.ScanningSource);
-        var scan = ReadSource(source, isFile, token);
+        // Keep a single directory spelling throughout an incremental chain.
+        // Otherwise an unreadable child can retain "Folder/file" while newly
+        // captured siblings use "folder/other", which is unsafe to restore on Linux.
+        var canonicalDirectories = previous?.Directories.ToDictionary(path => path, path => path, StringComparer.OrdinalIgnoreCase)
+            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string ArchiveDirectory(string path)
+        {
+            if (path == ".") return path;
+            if (canonicalDirectories.TryGetValue(path, out var canonical)) return canonical;
+            var slash = path.LastIndexOf('/');
+            canonical = slash < 0 ? path : ArchiveDirectory(path[..slash]) + path[slash..];
+            canonicalDirectories.Add(path, canonical);
+            return canonical;
+        }
+        string ArchivePath(string path)
+        {
+            var slash = path.LastIndexOf('/');
+            return slash < 0 ? path : ArchiveDirectory(path[..slash]) + path[slash..];
+        }
+        Scan ForArchive(Scan value) => new(value.Files.Select(item => item with { RelativePath = ArchivePath(item.RelativePath) }).ToArray(),
+            value.Directories.Select(ArchiveDirectory).ToArray(),
+            value.Skipped.Select(path => canonicalDirectories.TryGetValue(path, out var canonical) ? canonical : ArchivePath(path)).ToArray());
+        var sourceScan = ReadSource(source, isFile, token);
+        var scan = ForArchive(sourceScan);
         var oldFiles = previous?.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, FileBackupEntry>(StringComparer.OrdinalIgnoreCase);
         var lengths = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
@@ -115,8 +149,8 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
                     // Only failed enumeration paths are revisited; successful entries are never read again.
                     if (scan.Skipped.Count > 0)
                     {
-                        var retriedScan = ReadSource(source, isFile, token, scan.Skipped.Select(path =>
-                            isFile || path == "." ? source : FileBackupPaths.Resolve(source, path)).ToArray());
+                        var retriedScan = ForArchive(ReadSource(source, isFile, token, sourceScan.Skipped.Select(path =>
+                            isFile || path == "." ? source : FileBackupPaths.Resolve(source, path)).ToArray()));
                         directories.UnionWith(retriedScan.Directories);
                         skipped.UnionWith(retriedScan.Skipped);
                         foreach (var item in retriedScan.Files)
