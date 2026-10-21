@@ -12,9 +12,10 @@ namespace OneCBackup.Core;
 public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
 {
     private readonly string prefix;
+    private string CredentialLabel => prefix == "SqlServer" ? "MS SQL" : "FTP";
     private static WindowsServiceCredentialCache? serviceCache;
     public static void SetServiceCache(WindowsServiceCredentialCache? cache) => serviceCache = cache;
-    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV" or "GoogleDrive" or "Notifications" or "RemoteGateway") && serviceCache is not null;
+    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV" or "GoogleDrive" or "Notifications" or "RemoteGateway" or "SqlServer") && serviceCache is not null;
     public async Task ExportForServiceAsync(string key, CancellationToken token = default)
     {
         var value = await GetAsync(key, token);
@@ -25,6 +26,11 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
         var ftp = new WindowsFtpCredentialStore(); var archive = new WindowsFtpCredentialStore("Archive");
         var dav = new WindowsFtpCredentialStore("WebDAV");
         var google = new WindowsFtpCredentialStore("GoogleDrive");
+        var sql = new WindowsFtpCredentialStore("SqlServer");
+        foreach (var key in jobs.Where(job => job.Kind == DatabaseKind.SqlServer
+            && job.SqlServer?.Authentication == SqlServerAuthentication.SqlServer)
+            .Select(job => job.SqlServer?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal))
+            await sql.ExportForServiceAsync(key);
         foreach (var key in jobs.SelectMany(job => job.StorageJobs).Where(job => job.StorageKind == StorageKind.GoogleDrive)
             .Select(job => job.GoogleDrive!.CredentialKey).Distinct(StringComparer.Ordinal))
             await google.ExportForServiceAsync(key);
@@ -56,14 +62,14 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
         {
             var code = Marshal.GetLastWin32Error();
             if (HasServiceCache && serviceCache!.Read(prefix, key) is { } cached) return Task.FromResult(cached);
-            if (code == 1168) throw new InvalidOperationException("Не сохранены учётные данные FTP: " + key);
-            throw new Win32Exception(code, "Не удалось прочитать учётные данные FTP из Windows.");
+            if (code == 1168) throw new InvalidOperationException($"Не сохранены учётные данные {CredentialLabel}: " + key);
+            throw new Win32Exception(code, $"Не удалось прочитать учётные данные {CredentialLabel} из Windows.");
         }
         try
         {
             var credential = Marshal.PtrToStructure<NativeCredential>(pointer);
             if (credential.BlobSize > MaximumBlobSize || credential.BlobSize % 2 != 0)
-                throw new InvalidOperationException("Некорректный формат учётных данных FTP.");
+                throw new InvalidOperationException($"Некорректный формат учётных данных {CredentialLabel}.");
             var bytes = new byte[(int)credential.BlobSize];
             try
             {
@@ -80,21 +86,21 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
     {
         var target = Target(key);
         if (string.IsNullOrWhiteSpace(username) || username.Length > 512 || username.Any(char.IsControl))
-            throw new ArgumentException("Укажите логин FTP длиной до 512 символов.");
+            throw new ArgumentException($"Укажите логин {CredentialLabel} длиной до 512 символов.");
         if (password.IndexOfAny(['\r', '\n', '\0']) >= 0)
-            throw new ArgumentException("Пароль FTP не должен содержать переводы строк или нулевые символы.");
+            throw new ArgumentException($"Пароль {CredentialLabel} не должен содержать переводы строк или нулевые символы.");
         var bytes = Encoding.Unicode.GetBytes(password);
         IntPtr blob = IntPtr.Zero, name = IntPtr.Zero, user = IntPtr.Zero;
         try
         {
-            if (bytes.Length > MaximumBlobSize) throw new ArgumentException("Пароль FTP слишком длинный для диспетчера учётных данных Windows.");
+            if (bytes.Length > MaximumBlobSize) throw new ArgumentException($"Пароль {CredentialLabel} слишком длинный для диспетчера учётных данных Windows.");
             name = Marshal.StringToCoTaskMemUni(target);
             user = Marshal.StringToCoTaskMemUni(username);
             if (bytes.Length != 0) { blob = Marshal.AllocHGlobal(bytes.Length); Marshal.Copy(bytes, 0, blob, bytes.Length); }
             var credential = new NativeCredential { Type = Generic, TargetName = name, Username = user,
                 Blob = blob, BlobSize = (uint)bytes.Length, Persist = 2 /* local machine, current user */ };
             if (!Native.CredWrite(ref credential, 0))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось сохранить учётные данные FTP в Windows.");
+                throw new Win32Exception(Marshal.GetLastWin32Error(), $"Не удалось сохранить учётные данные {CredentialLabel} в Windows.");
             if (HasServiceCache) serviceCache!.Save(prefix, key, new NetworkCredential(username, password));
         }
         finally
@@ -117,7 +123,7 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
         if (Native.CredDelete(Target(key), Generic, 0)) return true;
         var code = Marshal.GetLastWin32Error();
         if (code == 1168) return false;
-        throw new Win32Exception(code, "Не удалось удалить учётные данные FTP из Windows.");
+        throw new Win32Exception(code, $"Не удалось удалить учётные данные {CredentialLabel} из Windows.");
     }
 
     [StructLayout(LayoutKind.Sequential)]

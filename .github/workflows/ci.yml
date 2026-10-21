@@ -88,8 +88,31 @@ jobs:
           path: artifacts/native-sql/*.trx
           retention-days: 14
 
+  native-agent-service:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      ONECBACKUP_NATIVE_SERVICE_TEST: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - run: dotnet publish src/OneCBackup.Agent -c Release -r win-x64 --self-contained true -o artifacts/native-agent/service-bin -m:1 -nr:false
+      - shell: pwsh
+        run: |
+          $agent = Join-Path $PWD 'artifacts/native-agent/service-bin/OneCBackup.Agent.exe'
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- $agent (Join-Path $PWD 'artifacts/native-agent')
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows agent service verification failed' }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-agent-service-verification
+          path: artifacts/native-agent/service-result.json
+          retention-days: 14
+
   package:
-    needs: [verify, native-sql]
+    needs: [verify, native-sql, native-agent-service]
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:

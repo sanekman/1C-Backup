@@ -195,8 +195,7 @@ public partial class MainWindow : Window
         {
             if (!int.TryParse(SqlBackupTimeout.Text, out var timeout))
             { Status.Text = "Укажите целое число минут ожидания SQL-копии."; return; }
-            sql = new SqlServerBackupSettings { Server = SqlBackupServer.Text.Trim(),
-                ServerBackupDirectory = SqlServerDirectory.Text.Trim(), AgentReadDirectory = SqlAgentDirectory.Text.Trim(), TimeoutMinutes = timeout };
+            sql = ReadSqlSettings(timeout);
         }
         if (Kind.SelectedItem is DatabaseKind.PostgreSql)
         {
@@ -343,6 +342,10 @@ public partial class MainWindow : Window
         SqlServerDirectory.Text = job.SqlServer?.ServerBackupDirectory ?? "";
         SqlAgentDirectory.Text = job.SqlServer?.AgentReadDirectory ?? "";
         SqlBackupTimeout.Text = (job.SqlServer?.TimeoutMinutes ?? 120).ToString();
+        sqlCredentialKey = job.SqlServer?.CredentialKey;
+        SqlAuthenticationPicker.SelectedValue = job.SqlServer?.Authentication ?? SqlServerAuthentication.Windows;
+        UpdateSqlCredentialStatus();
+        ResetPostgreSqlTools();
         PgHost.Text = job.PostgreSql?.Host ?? "localhost"; PgPort.Text = (job.PostgreSql?.Port ?? 5432).ToString();
         PgUsername.Text = job.PostgreSql?.Username ?? "postgres";
         PgDumpPath.Text = job.PostgreSql?.PgDumpPath ?? ""; PgRestorePath.Text = job.PostgreSql?.PgRestorePath ?? "";
@@ -396,8 +399,9 @@ public partial class MainWindow : Window
         OneCExecutable.Clear(); OneCTimeout.Text = "120";
         _ = RefreshOneCBasesAsync();
         SqlBackupServer.Clear(); SqlServerDirectory.Clear(); SqlAgentDirectory.Clear(); SqlBackupTimeout.Text = "120";
+        sqlCredentialKey = null; SqlAuthenticationPicker.SelectedValue = SqlServerAuthentication.Windows; UpdateSqlCredentialStatus();
         PgHost.Text = "localhost"; PgPort.Text = "5432"; PgUsername.Text = "postgres";
-        PgDumpPath.Clear(); PgRestorePath.Clear(); PgTimeout.Text = "120";
+        ResetPostgreSqlTools(); PgDumpPath.Clear(); PgRestorePath.Clear(); PgTimeout.Text = "120";
         DailyAt.Text = "23:00"; KeepLast.Text = "7"; Enabled.IsChecked = true;
         archivePasswordKey = null; EncryptArchive.IsChecked = false;
         ArchiveCopies.IsChecked = false;

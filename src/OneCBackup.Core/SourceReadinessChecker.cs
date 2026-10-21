@@ -7,7 +7,8 @@ public sealed record SourceCheckReport(bool Succeeded, string Details, bool Canc
 
 /// <summary>Reads source availability without creating a database backup or running the 1C platform.</summary>
 public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, string defaultWorkRoot,
-    Func<BackupJob, DbConnection>? sqlConnectionFactory = null, Func<BackupJob, WebDavClient>? webDavClientFactory = null)
+    Func<BackupJob, DbConnection>? sqlConnectionFactory = null, Func<BackupJob, WebDavClient>? webDavClientFactory = null,
+    ISqlServerCredentialStore? sqlCredentials = null)
 {
     public async Task<SourceCheckReport> CheckAsync(BackupJob job, CancellationToken cancellationToken = default)
     {
@@ -94,7 +95,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
 
     private async Task<SourceCheckReport> CheckSqlAsync(BackupJob job, CancellationToken token)
     {
-        await using var connection = sqlConnectionFactory?.Invoke(job) ?? SqlServerBackupExecutor.CreateConnection(job);
+        await using var connection = sqlConnectionFactory?.Invoke(job) ?? await SqlServerBackupExecutor.CreateConnectionAsync(job, sqlCredentials, token);
         await connection.OpenAsync(token);
         await using var command = connection.CreateCommand();
         command.CommandTimeout = 20;
@@ -105,7 +106,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         var value = await command.ExecuteScalarAsync(token);
         token.ThrowIfCancellationRequested();
         if (value is not int result || result != 1)
-            return new(false, "База недоступна или нет права BACKUP DATABASE. Проверьте имя базы и права текущего пользователя Windows.");
+            return new(false, "База недоступна или нет права BACKUP DATABASE. Проверьте имя базы и права выбранного пользователя MS SQL.");
         return new(true, "Подключение к MS SQL, доступ к базе и право BACKUP DATABASE проверены. Копия не создавалась. Права службы на серверную папку, сопоставление путей, VERIFYONLY и восстановление проверяются отдельно.");
     }
 

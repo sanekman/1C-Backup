@@ -52,6 +52,11 @@ public partial class MainWindow
                 try { await new WindowsWebDavCredentialStore().GetAsync(imported.WebDav.CredentialKey); }
                 catch { imported = imported with { WebDav = imported.WebDav with { CredentialKey = "" } }; }
             }
+            if (imported.SqlServer is { Authentication: SqlServerAuthentication.SqlServer } sql)
+            {
+                try { await new WindowsSqlServerCredentialStore().GetAsync(sql.CredentialKey!); }
+                catch { imported = imported with { SqlServer = sql with { CredentialKey = null } }; }
+            }
             selectionBeforeEdit = Jobs.SelectedItem as BackupJob;
             LoadJobEditor(imported);
             editingId = null;

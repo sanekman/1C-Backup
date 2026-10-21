@@ -39,6 +39,7 @@ public partial class MainWindow
 
     private void CloseEditor()
     {
+        ++postgresToolSearchGeneration;
         editorOpen = false;
         EditorCard.Visibility = Visibility.Collapsed;
         JobListCard.Visibility = Visibility.Visible;
@@ -170,6 +171,9 @@ public partial class MainWindow
                 ? Path.Combine(DesktopPaths.DataDirectory, "work") + " (по умолчанию)" : TemporaryFolder.Text.Trim();
             WizardSummary.Text = $"{JobName.Text.Trim()}\nБаза: {type}\nИсточник: {Source.Text.Trim()}{connection}\nСпособ: {method}{platformDescription}\nХранилище: {(Storage.SelectedItem as KeyValuePair<StorageKind, string>?)?.Value}{ftpAddress}\nПапка: {(Storage.SelectedValue is StorageKind.GoogleDrive ? googleDriveSettings?.FolderName : Destination.Text.Trim())}{extraDestinations}\nВременная папка: {temporary}\nЗащита: {format}\nЗапуск: {schedule}{zoneDescription}\nОсновное хранилище: хранить {KeepLast.Text.Trim()} успешных копий";
             WizardSummary.Text += "\n\n" + NextRun.Text;
+            if (Kind.SelectedItem is DatabaseKind.SqlServer)
+                WizardSummary.Text += "\nВход в MS SQL: " + (SelectedSqlAuthentication == SqlServerAuthentication.Windows
+                    ? "учётная запись Windows исполнителя" : "сохранённый логин MS SQL");
             if (Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav && FileBackupModePicker.SelectedValue is FileBackupMode.Incremental)
                 WizardSummary.Text += "\n" + FullBackupPlanDescription + " Нужные предшествующие архивы сохраняются сверх лимита хранилища.";
             ReviewTechnicalDetails.IsExpanded = false;
@@ -262,12 +266,19 @@ public partial class MainWindow
             if (Kind.SelectedItem is DatabaseKind.SqlServer)
             {
                 if (!int.TryParse(SqlBackupTimeout.Text, out var timeout)) return RejectWizard("Время ожидания должно быть целым числом минут.", 0, SqlBackupTimeout);
-                var errors = new SqlServerBackupSettings { Server = SqlBackupServer.Text.Trim(), ServerBackupDirectory = SqlServerDirectory.Text.Trim(),
-                    AgentReadDirectory = SqlAgentDirectory.Text.Trim(), TimeoutMinutes = timeout }.Validate();
+                if (SelectedSqlAuthentication == SqlServerAuthentication.SqlServer && string.IsNullOrWhiteSpace(sqlCredentialKey))
+                    return RejectWizard("Нажмите «Задать логин и пароль MS SQL…» и сохраните данные входа.", 0, SqlCredentialsButton);
+                var errors = ReadSqlSettings(timeout).Validate();
                 if (errors.Count != 0) return RejectWizard(string.Join(" ", errors), 0, SqlBackupServer);
             }
             if (Kind.SelectedItem is DatabaseKind.PostgreSql)
             {
+                if (string.IsNullOrWhiteSpace(PgDumpPath.Text) || string.IsNullOrWhiteSpace(PgRestorePath.Text))
+                    return RejectWizard("Нажмите «Найти PostgreSQL на этом компьютере» или выберите pg_dump и pg_restore вручную.", 0, FindPostgreSqlToolsButton);
+                if (!Path.IsPathFullyQualified(PgDumpPath.Text.Trim()))
+                    return RejectWizard("Выберите установленный pg_dump.exe или укажите полный путь к нему.", 0, PgDumpPath);
+                if (!Path.IsPathFullyQualified(PgRestorePath.Text.Trim()))
+                    return RejectWizard("Выберите установленный pg_restore.exe или укажите полный путь к нему.", 0, PgRestorePath);
                 if (!int.TryParse(PgPort.Text, out var port)) return RejectWizard("Порт PostgreSQL должен быть числом от 1 до 65535.", 0, PgPort);
                 if (!int.TryParse(PgTimeout.Text, out var timeout)) return RejectWizard("Время ожидания должно быть целым числом минут.", 0, PgTimeout);
                 var settings = new PostgreSqlBackupSettings { Host = PgHost.Text.Trim(), Port = port, Username = PgUsername.Text.Trim(),

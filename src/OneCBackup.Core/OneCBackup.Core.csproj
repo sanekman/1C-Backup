@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="OneCBackup.Core.Tests" />
     <ProjectReference Include="../OneCBackup.Remote/OneCBackup.Remote.csproj" />
     <PackageReference Include="FluentFTP" Version="55.0.0" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.7" />

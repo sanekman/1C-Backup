@@ -4,16 +4,26 @@ using Microsoft.Data.SqlClient;
 
 namespace OneCBackup.Core;
 
+public enum SqlServerAuthentication { Windows, SqlServer }
+
 public sealed record SqlServerBackupSettings
 {
     public string Server { get; init; } = "";
     public string ServerBackupDirectory { get; init; } = "";
     public string AgentReadDirectory { get; init; } = "";
     public int TimeoutMinutes { get; init; } = 120;
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public SqlServerAuthentication Authentication { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? CredentialKey { get; init; }
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(Server)) errors.Add("Укажите MS SQL.");
+        if (!Enum.IsDefined(Authentication)) errors.Add("Выберите способ входа в MS SQL.");
+        if (Authentication == SqlServerAuthentication.SqlServer &&
+            (string.IsNullOrWhiteSpace(CredentialKey) || CredentialKey.Length > 512 || CredentialKey.Any(char.IsControl)))
+            errors.Add("Сохраните логин и пароль MS SQL в настройках задания.");
         var path = ServerBackupDirectory ?? "";
         if (!(path.StartsWith('/') || path.StartsWith(@"\\") ||
             (path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] == '\\')))
@@ -57,14 +67,37 @@ public sealed class DatabaseBackupExecutor(IBackupProcessRunner processRunner, I
     };
 }
 
-public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? connectionFactory = null) : IBackupExecutor
+public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? connectionFactory = null,
+    ISqlServerCredentialStore? credentials = null) : IBackupExecutor
 {
-    internal static DbConnection CreateConnection(BackupJob job) => new SqlConnection(new SqlConnectionStringBuilder
+    internal static async Task<DbConnection> CreateConnectionAsync(BackupJob job,
+        ISqlServerCredentialStore? credentials = null, CancellationToken token = default)
     {
-        DataSource = job.SqlServer!.Server, InitialCatalog = "master", IntegratedSecurity = true,
-        Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = false, ConnectTimeout = 15,
-        ApplicationName = "1C-Backup"
-    }.ConnectionString);
+        var settings = job.SqlServer ?? throw new InvalidDataException("Укажите настройки подключения MS SQL.");
+        var errors = settings.Validate();
+        if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
+        token.ThrowIfCancellationRequested();
+        var sqlLogin = settings.Authentication == SqlServerAuthentication.SqlServer;
+        var builder = new SqlConnectionStringBuilder
+        {
+            DataSource = settings.Server, InitialCatalog = "master", IntegratedSecurity = !sqlLogin,
+            Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = false, ConnectTimeout = 15,
+            ApplicationName = "1C-Backup", Pooling = !sqlLogin
+        };
+        if (!sqlLogin) return new SqlConnection(builder.ConnectionString);
+        if (credentials is null)
+        {
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Для входа в MS SQL по логину нужно хранилище учётных данных.");
+            credentials = new WindowsSqlServerCredentialStore();
+        }
+        var value = await credentials.GetAsync(settings.CredentialKey!, token);
+        token.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(value.UserName)) throw new InvalidDataException("В сохранённых учётных данных MS SQL отсутствует логин.");
+        var password = value.SecurePassword;
+        password.MakeReadOnly();
+        // SqlCredential keeps the password out of connection strings, logs and saved jobs.
+        return new SqlConnection(builder.ConnectionString, new SqlCredential(value.UserName, password));
+    }
 
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
@@ -84,7 +117,7 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
         timeout.CancelAfter(TimeSpan.FromMinutes(settings.TimeoutMinutes));
         try
         {
-            await using var connection = connectionFactory?.Invoke(job) ?? CreateConnection(job);
+            await using var connection = connectionFactory?.Invoke(job) ?? await CreateConnectionAsync(job, credentials, timeout.Token);
             BackupProgressContext.Report(BackupStage.ConnectingSource);
             await connection.OpenAsync(timeout.Token);
             BackupProgressContext.Report(BackupStage.CreatingBackup);
