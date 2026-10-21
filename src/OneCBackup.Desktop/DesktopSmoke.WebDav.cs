@@ -23,6 +23,7 @@ internal static partial class DesktopSmoke
             Click("JobsNavigation"); Click("NewJobButton");
             Control<TextBox>("JobName").Text = "WebDAV — документы";
             Control<ComboBox>("Kind").SelectedItem = DatabaseKind.WebDav;
+            VerifyGuideLink(window, "WizardHelpButton", 15, "Скопировать папку из WebDAV или Nextcloud");
             Control<TextBox>("Source").Text = "http://dav.example/data/";
             Click("NextStepButton");
             if (!Control<TextBlock>("WizardError").IsVisible || !Control<TextBlock>("WizardError").Text.Contains("HTTPS"))

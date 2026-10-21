@@ -282,7 +282,21 @@ internal static partial class DesktopSmoke
             Click("HelpSettingsButton");
             Screenshot("about-program");
             Click("JobsNavigation");
+            var firstGuideWidth = window.Width; var firstGuideHeight = window.Height;
+            window.Width = 900; window.Height = 580;
+            VerifyGuideLink(window, "FirstCopyGuideButton", 2, "Сделать первую копию на безопасном примере");
+            if (Control<WrapPanel>("JobActions").IsVisible)
+                throw new InvalidOperationException("Пустой экран заданий перегружен недоступными действиями.");
+            Screenshot("jobs-first-copy-guide-compact");
+            window.Width = firstGuideWidth; window.Height = firstGuideHeight;
             Click("FirstJobButton");
+            VerifyGuideLink(window, "WizardHelpButton", 7, "Создать задание для файловой базы 1С");
+            foreach (var kind in new[] { DatabaseKind.SqlServer, DatabaseKind.PostgreSql })
+            {
+                Control<ComboBox>("Kind").SelectedItem = kind;
+                VerifyGuideLink(window, "WizardHelpButton", 9, "Подключить MS SQL или PostgreSQL");
+            }
+            Control<ComboBox>("Kind").SelectedItem = DatabaseKind.OneCFile;
             Click("NextStepButton");
             if (!Control<TextBlock>("WizardError").IsVisible || !Control<StackPanel>("BaseStep").IsVisible)
                 throw new InvalidOperationException("Пустое задание не остановлено на первом шаге.");
@@ -461,6 +475,8 @@ internal static partial class DesktopSmoke
             Click("PreviousStepButton"); Click("NextStepButton");
             Click("SaveButton");
             await WaitUntil(() => Control<DataGrid>("Jobs").Items.Count == 1 && Control<Button>("RunButton").IsEnabled, "Расписание не сохранено.");
+            if (!Control<WrapPanel>("JobActions").IsVisible || Control<Button>("FirstCopyGuideButton").Visibility != Visibility.Collapsed)
+                throw new InvalidOperationException("После создания задания действия копирования не появились или осталась стартовая подсказка.");
             var configured = (BackupJob)Control<DataGrid>("Jobs").Items[0];
             if (configured.KeepLast != 7 || configured.AdditionalDestinations![0].KeepLast != 2
                 || !Control<TextBox>("WizardSummary").Text.Contains("копий: 2"))

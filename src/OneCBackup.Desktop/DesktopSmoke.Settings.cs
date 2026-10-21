@@ -6,6 +6,33 @@ namespace OneCBackup.Desktop;
 
 internal static partial class DesktopSmoke
 {
+    private static void VerifyGuideLink(MainWindow window, string buttonName, int section, string heading)
+    {
+        var button = (Button)window.FindName(buttonName);
+        var source = ((TextBox)window.FindName("Source")).Text;
+        var progress = ((TextBlock)window.FindName("WizardProgress")).Text;
+        var previousOpen = window.UserGuideOpenOverride;
+        string? opened = null;
+        try
+        {
+            window.UserGuideOpenOverride = target => opened = target;
+            window.UpdateLayout();
+            var point = button.TranslatePoint(new Point(), window);
+            if (!button.IsVisible || !button.IsEnabled || point.X < 0 || point.Y < 0
+                || point.X + button.ActualWidth > window.ActualWidth || point.Y + button.ActualHeight > window.ActualHeight)
+                throw new InvalidOperationException("Помощь недоступна в текущем окне: " + buttonName);
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            if (!Uri.TryCreate(opened, UriKind.Absolute, out var uri) || !uri.IsFile || uri.Fragment != "#section-" + section)
+                throw new InvalidOperationException("Помощь не открывает нужный раздел локальной инструкции.");
+            var html = File.ReadAllText(uri.LocalPath);
+            if (!html.Contains("<h2 id=\"section-" + section + "\">" + section + ". " + heading + "</h2>"))
+                throw new InvalidOperationException("Ссылка помощи потеряла раздел: " + heading);
+            if (((TextBox)window.FindName("Source")).Text != source || ((TextBlock)window.FindName("WizardProgress")).Text != progress)
+                throw new InvalidOperationException("Открытие инструкции изменило введённые данные или шаг мастера.");
+        }
+        finally { window.UserGuideOpenOverride = previousOpen; }
+    }
+
     private static Task VerifySettingsSectionsAsync(MainWindow window, Action<string> screenshot)
     {
         T Control<T>(string name) where T : FrameworkElement => (T)window.FindName(name);

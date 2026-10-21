@@ -175,6 +175,7 @@
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24">
          <TextBlock x:Name="JobsEmptyTitle" Text="Добавьте первое задание" FontSize="20" FontWeight="SemiBold" TextAlignment="Center" />
          <Button x:Name="FirstJobButton" Content="Создать первое задание" Click="New_Click" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center" Margin="0,16,0,0" />
+         <Button x:Name="FirstCopyGuideButton" Content="Первая копия: инструкция с примером" Click="OpenFirstCopyGuide_Click" HorizontalAlignment="Center" Margin="0,8,0,0" />
          <TextBlock x:Name="JobsEmptyHint" Text="Укажите базу, хранилище и расписание.&#10;Сохранённое задание появится здесь." Foreground="{DynamicResource MutedBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,10,0,0" />
         </StackPanel>
        </Border>
@@ -371,7 +372,7 @@
    <TextBlock Text="Дополнительные хранилища используют это число, если в их настройках не задано своё." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,0,0,10" />
    <CheckBox x:Name="Enabled" Content="Выполнять задание по расписанию" IsChecked="True" Margin="0,0,0,12" Checked="Schedule_Changed" Unchecked="Schedule_Changed" />
 
-<TextBlock Text="Старые копии удаляются только после создания и проверки новой. 7 копий при одном запуске в день — примерно неделя истории. Компьютер должен быть включён; для фоновых запусков нужен вход пользователя в Windows." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8" />
+<TextBlock Text="Старые копии удаляются только после создания и проверки новой. 7 копий при одном запуске в день — примерно неделя истории. Компьютер должен быть включён. Для запусков после входа в Windows включите автозапуск агента; для работы без входа установите его службу в «Настройки → Фоновая работа»." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8" />
 </StackPanel>
         <StackPanel x:Name="ReviewStep" Visibility="Collapsed">
          <Border Background="{DynamicResource PanelBrush}" Padding="10,8">
@@ -404,7 +405,10 @@
        <StackPanel>
         <TextBlock x:Name="WizardError" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed" />
         <DockPanel>
-         <Button x:Name="CancelEditorButton" DockPanel.Dock="Left" Content="Отмена" Click="CancelEditor_Click" />
+         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+          <Button x:Name="CancelEditorButton" Content="Отмена" Click="CancelEditor_Click" />
+          <Button x:Name="WizardHelpButton" Content="Помощь на этом шаге" Click="OpenWizardHelp_Click" Margin="8,0,0,0" />
+         </StackPanel>
          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
           <Button x:Name="PreviousStepButton" Content="Назад" Click="PreviousStep_Click" Margin="0,0,8,0" />
           <Button x:Name="NextStepButton" Content="Далее →" Style="{StaticResource PrimaryButton}" Click="NextStep_Click" />

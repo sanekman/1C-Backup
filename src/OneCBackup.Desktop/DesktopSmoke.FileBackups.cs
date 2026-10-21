@@ -36,6 +36,7 @@ internal static partial class DesktopSmoke
             throw new InvalidOperationException("Мастер принял нулевую длину инкрементной цепочки.");
         Control<TextBox>("FullBackupEvery").Text = "3";
         window.Width = 900; window.Height = 580; window.UpdateLayout();
+        VerifyGuideLink(window, "WizardHelpButton", 2, "Сделать первую копию на безопасном примере");
         foreach (var name in new[] { "FileBackupModePicker", "FullBackupEvery", "FullBackupDayPicker" })
         {
             var element = Control<FrameworkElement>(name); var scroll = Control<ScrollViewer>("EditorScroll");
@@ -49,10 +50,13 @@ internal static partial class DesktopSmoke
         screenshot("files-incremental-source-compact");
         Click("NextStepButton");
         Control<TextBox>("Destination").Text = Path.Combine(fixture, "ordinary-copies");
+        VerifyGuideLink(window, "WizardHelpButton", 8, "Использовать внешний диск или сетевую папку");
         Control<TextBox>("TemporaryFolder").Text = Path.Combine(fixture, "ordinary-HDD-work");
         Click("NextStepButton");
         Control<TextBox>("KeepLast").Text = "1"; Control<CheckBox>("Enabled").IsChecked = false;
+        VerifyGuideLink(window, "WizardHelpButton", 4, "Настроить ежедневное копирование");
         Click("NextStepButton");
+        VerifyGuideLink(window, "WizardHelpButton", 3, "Убедиться, что копия действительно восстанавливается");
         if (!Control<TextBox>("WizardSummary").Text.Contains("Инкремент") || !Control<TextBox>("WizardSummary").Text.Contains("Пятница"))
             throw new InvalidOperationException("Итог мастера потерял файловый режим и длину цепочки.");
         screenshot("files-incremental-review-compact");

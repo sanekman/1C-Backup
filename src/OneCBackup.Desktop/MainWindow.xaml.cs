@@ -466,6 +466,8 @@ public partial class MainWindow : Window
         ImportJobSettingsMenuItem.IsEnabled = NewJobButton.IsEnabled && !editorOpen;
         ExportJobSettingsMenuItem.IsEnabled = ready && !jobFileTransfer && !persisting && !editorOpen && Jobs.SelectedItem is BackupJob;
         FirstJobButton.Visibility = jobs.Count == 0 && JobSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        FirstCopyGuideButton.Visibility = FirstJobButton.Visibility;
+        JobActions.Visibility = jobs.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         EditJobButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
         DuplicateJobButton.IsEnabled = ready && canSave && idle && !editorOpen && Jobs.SelectedItem is BackupJob;
         var scheduledJob = Jobs.SelectedItem as BackupJob;
@@ -678,7 +680,7 @@ public partial class MainWindow : Window
             view.Refresh();
         }
         JobsEmptyTitle.Text = query.Length == 0 ? "Добавьте первое задание" : "Задания не найдены";
-        JobsEmptyHint.Text = query.Length == 0 ? "Четыре коротких шага: база → хранилище → расписание → проверка." : "Измените или очистите строку поиска.";
+        JobsEmptyHint.Text = query.Length == 0 ? "Начните с пробной копии обычной папки.\nИнструкция поможет создать задание и проверить восстановление." : "Измените или очистите строку поиска.";
         UpdateRunControls();
     }
 
