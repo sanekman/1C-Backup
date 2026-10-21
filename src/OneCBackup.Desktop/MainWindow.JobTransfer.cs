@@ -54,8 +54,18 @@ public partial class MainWindow
             }
             if (imported.SqlServer is { Authentication: SqlServerAuthentication.SqlServer } sql)
             {
-                try { await new WindowsSqlServerCredentialStore().GetAsync(sql.CredentialKey!); }
-                catch { imported = imported with { SqlServer = sql with { CredentialKey = null } }; }
+                // An imported reference is not permission to send an existing secret to a new server.
+                var knownServer = jobs.Any(local => local.Kind == DatabaseKind.SqlServer
+                    && local.SqlServer is { Authentication: SqlServerAuthentication.SqlServer } trusted
+                    && trusted.CredentialKey == sql.CredentialKey
+                    && string.Equals(trusted.Server.Trim(), sql.Server.Trim(), StringComparison.OrdinalIgnoreCase));
+                var available = false;
+                if (knownServer)
+                {
+                    try { await new WindowsSqlServerCredentialStore().GetAsync(sql.CredentialKey!); available = true; }
+                    catch { /* Enter the password again instead of accepting an unavailable binding. */ }
+                }
+                if (!available) imported = imported with { SqlServer = sql with { CredentialKey = null } };
             }
             selectionBeforeEdit = Jobs.SelectedItem as BackupJob;
             LoadJobEditor(imported);

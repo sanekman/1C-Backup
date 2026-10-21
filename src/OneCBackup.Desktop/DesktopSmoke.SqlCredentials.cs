@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Controls;
 using OneCBackup.Core;
@@ -21,6 +22,7 @@ internal static partial class DesktopSmoke
         var jobStore = new JobStore(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"));
         var root = Path.GetDirectoryName(DesktopPaths.DataDirectory)!;
         var export = Path.Combine(root, "sql-login-transfer.json");
+        var changedServer = Path.Combine(root, "sql-login-other-server.json");
         const string secret = "fixture-only-sql-password";
         string? key = null;
         try
@@ -71,10 +73,28 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Редактор не восстановил сохранённый способ входа SQL.");
             Click("CancelEditorButton");
             await BackupJobTransfer.ExportAsync(job, export);
+            async Task Import(string path)
+            {
+                window.JobImportDialogOverride = dialog => { dialog.FileName = path; return true; };
+                Control<MenuItem>("ImportJobSettingsMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                await WaitUntil(() => window.SmokeReady && Control<Border>("EditorCard").IsVisible, "SQL-импорт не открыл мастер.");
+            }
+            var otherServer = JsonNode.Parse(await File.ReadAllTextAsync(export))!;
+            otherServer["Job"]!["SqlServer"]!["Server"] = "other-sql.example";
+            await File.WriteAllTextAsync(changedServer, otherServer.ToJsonString());
+            await Import(changedServer);
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WizardError").IsVisible || !Control<TextBlock>("WizardError").Text.Contains("логин и пароль"))
+                throw new InvalidOperationException("Импорт привязал сохранённый SQL-пароль к другому серверу.");
+            if ((await store.GetAsync(key)).Password != secret)
+                throw new InvalidOperationException("Импорт другого сервера изменил пароль исходного задания.");
+            Click("CancelEditorButton");
+            await Import(export);
+            if (!Control<TextBlock>("SqlCredentialStatus").Text.Contains("сохранены"))
+                throw new InvalidOperationException("Импорт того же известного SQL-сервера потерял доступную привязку.");
+            Click("CancelEditorButton");
             store.Delete(key);
-            window.JobImportDialogOverride = dialog => { dialog.FileName = export; return true; };
-            Control<MenuItem>("ImportJobSettingsMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            await WaitUntil(() => window.SmokeReady && Control<Border>("EditorCard").IsVisible, "SQL-импорт не открыл мастер.");
+            await Import(export);
             Click("NextStepButton");
             if (!Control<TextBlock>("WizardError").IsVisible || !Control<TextBlock>("WizardError").Text.Contains("логин и пароль"))
                 throw new InvalidOperationException("Импорт SQL принял отсутствующий пароль Windows.");
@@ -89,7 +109,7 @@ internal static partial class DesktopSmoke
         {
             window.SqlCredentialsDialogOpened = null; window.JobImportDialogOverride = null;
             if (key is not null) store.Delete(key);
-            File.Delete(export);
+            File.Delete(export); File.Delete(changedServer);
         }
     }
 }
