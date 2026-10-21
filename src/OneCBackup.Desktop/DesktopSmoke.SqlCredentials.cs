@@ -49,7 +49,9 @@ internal static partial class DesktopSmoke
             Click("SqlCredentialsButton");
             if (key is null || (await store.GetAsync(key)).Password != secret)
                 throw new InvalidOperationException("Мастер не сохранил пароль SQL в Windows.");
-            Control<ComboBox>("SqlAuthenticationPicker").BringIntoView();
+            if (Control<TextBlock>("WizardError").Visibility != Visibility.Collapsed)
+                throw new InvalidOperationException("После сохранения SQL-пароля осталось устаревшее сообщение об ошибке.");
+            Control<StackPanel>("SqlCredentialsPanel").BringIntoView();
             screenshot("sql-login-source");
             Click("NextStepButton");
             Control<TextBox>("Destination").Text = Path.Combine(root, "sql-copies");

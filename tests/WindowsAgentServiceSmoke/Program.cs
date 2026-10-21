@@ -120,7 +120,10 @@ internal static class Program
             checks.Add("scm-stop-releases-engine-lock");
             WindowsAgentService.Start(executable, directory); await WaitService(4);
             await Wait(async () => (state = await control.ReadAsync()) is { Phase: LocalAgentPhase.Running } && state.SessionId != firstSession, "SCM restart reused the old session.");
-            await Task.Delay(TimeSpan.FromSeconds(7));
+            // The registered host polls schedules every 30 seconds; observe a full cycle after restart.
+            await Wait(async () => (await control.ReadAsync()) is { Phase: LocalAgentPhase.Running } observed
+                && observed.SessionId == state!.SessionId && observed.UpdatedUtc >= state.StartedUtc.AddSeconds(32),
+                "Restarted service did not remain live through a schedule polling cycle.");
             Require((await history.ReadAsync()).Count == 2, "A same-boot service restart repeated a completed startup backup.");
             Require(await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json")) == originalJobs, "Service restart changed the saved jobs.");
             checks.Add("restart-preserves-history-and-does-not-repeat-startup");

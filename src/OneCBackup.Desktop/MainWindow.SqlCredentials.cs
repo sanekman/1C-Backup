@@ -37,6 +37,10 @@ public partial class MainWindow
         var key = Guid.NewGuid().ToString("N");
         var dialog = new FtpCredentialsWindow(key, new WindowsSqlServerCredentialStore().Save, "Логин и пароль MS SQL") { Owner = this };
         SqlCredentialsDialogOpened?.Invoke(dialog);
-        if (dialog.ShowDialog() == true) { sqlCredentialKey = key; UpdateSqlCredentialStatus(); }
+        if (dialog.ShowDialog() == true)
+        {
+            sqlCredentialKey = key; UpdateSqlCredentialStatus();
+            EditorFieldChanged(sender, e);
+        }
     }
 }

@@ -21,6 +21,15 @@ public sealed class NativePostgreSqlIntegrationTests
     {
         var bin = Environment.GetEnvironmentVariable("PGBIN")
             ?? throw new InvalidOperationException("Native SQL CI must provide the PostgreSQL bin directory.");
+        if (OperatingSystem.IsWindows())
+        {
+            var normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(bin));
+            var standard = new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 }
+                .Select(Environment.GetFolderPath).Where(path => !string.IsNullOrEmpty(path))
+                .Any(path => normalized.StartsWith(Path.Combine(path, "PostgreSQL") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+            var tools = standard ? PostgreSqlToolDiscovery.FindInstalledOnWindows() : PostgreSqlToolDiscovery.Find([bin]);
+            Assert.Contains(tools, tool => string.Equals(tool.Directory, normalized, StringComparison.OrdinalIgnoreCase));
+        }
         string Tool(string name)
         {
             var path = Path.Combine(bin, name + ".exe"); Assert.True(File.Exists(path), "Missing PostgreSQL fixture tool: " + name); return path;
