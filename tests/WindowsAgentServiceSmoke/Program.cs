@@ -31,6 +31,33 @@ internal static class Program
         catch (ArgumentException) { /* Process has already exited. */ }
     }
 
+    private static async Task CaptureFailure(string directory, string output, string password, string archivePassword)
+    {
+        var context = new Dictionary<string, object?>();
+        async Task Capture(string name, Func<Task<object?>> read)
+        {
+            try { context[name] = await read(); }
+            catch (Exception error) { context[name] = error.GetType().Name + ": " + error.Message; }
+        }
+        await Capture("service", () => Task.FromResult<object?>(WindowsAgentService.QueryInfo()));
+        await Capture("agent", async () => await new LocalAgentControlStore(directory).ReadAsync());
+        await Capture("history", async () => await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync());
+        foreach (var name in new[] { "jobs.json", "startup-schedule.json" })
+            await Capture(name, async () => File.Exists(Path.Combine(directory, name)) ? await File.ReadAllTextAsync(Path.Combine(directory, name)) : null);
+        var logs = Path.Combine(directory, "logs");
+        if (Directory.Exists(logs))
+            foreach (var file in Directory.EnumerateFiles(logs, "*.jsonl").Take(4))
+                await Capture(Path.GetFileName(file), async () =>
+                {
+                    await using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    if (stream.Length > 65536) stream.Seek(-65536, SeekOrigin.End);
+                    using var reader = new StreamReader(stream);
+                    return await reader.ReadToEndAsync();
+                });
+        var json = JsonSerializer.Serialize(context).Replace(password, "[redacted]").Replace(archivePassword, "[redacted]");
+        await File.WriteAllTextAsync(Path.Combine(output, "failure-context.json"), json);
+    }
+
     public static async Task<int> Main(string[] args)
     {
         if (Environment.GetEnvironmentVariable("ONECBACKUP_NATIVE_SERVICE_TEST") != "1" || args.Length != 2)
@@ -92,7 +119,21 @@ internal static class Program
             Require(new BackupEngineCoordinator(directory).IsHeldElsewhere(), "Service did not exclusively own the execution profile.");
             checks.Add("non-interactive-host-and-engine-lock");
             var history = new BackupRunHistory(Path.Combine(directory, "runs.json"));
-            await Wait(async () => (await history.ReadAsync()).Any(run => run.JobId == startup.Id && run.Status != BackupRunStatus.Running), "Startup job did not finish.");
+            var nextObservation = DateTimeOffset.MinValue;
+            await Wait(async () =>
+            {
+                var current = await history.ReadAsync();
+                if (current.Any(run => run.JobId == startup.Id && run.Status != BackupRunStatus.Running)) return true;
+                if (DateTimeOffset.UtcNow >= nextObservation)
+                {
+                    nextObservation = DateTimeOffset.UtcNow.AddSeconds(5);
+                    var observed = await control.ReadAsync();
+                    Console.WriteLine(JsonSerializer.Serialize(new { phase = "waiting-for-startup", agent = observed?.Phase,
+                        warning = observed?.Warning, error = observed?.Error, runs = current.Select(run => new { run.Status, run.Error }) })
+                        .Replace(password, "[redacted]").Replace(archivePassword, "[redacted]"));
+                }
+                return false;
+            }, "Startup job did not finish.");
             var startupRun = (await history.ReadAsync()).Single(run => run.JobId == startup.Id);
             Require(startupRun.Status == BackupRunStatus.Succeeded, "Startup backup failed under the service account: " + startupRun.Error);
             checks.Add("startup-backup-without-interactive-login");
@@ -134,7 +175,15 @@ internal static class Program
             Require((await catalog.ReadAsync()).Count == 2 && File.Exists(Path.Combine(directory, "jobs.json")), "Removing the service erased owner data.");
             checks.Add("service-removal-preserves-jobs-and-copies");
         }
-        catch (Exception error) { failure = error.ToString().Replace(password, "[redacted]").Replace(archivePassword, "[redacted]"); }
+        catch (Exception error)
+        {
+            failure = error.ToString().Replace(password, "[redacted]").Replace(archivePassword, "[redacted]");
+            if (profileCreated)
+            {
+                try { await CaptureFailure(directory, output, password, archivePassword); }
+                catch (Exception captureError) { failure += "\nFailure context: " + captureError.GetType().Name; }
+            }
+        }
         finally
         {
             try

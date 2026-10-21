@@ -108,7 +108,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-windows-agent-service-verification
-          path: artifacts/native-agent/service-result.json
+          path: |
+            artifacts/native-agent/service-result.json
+            artifacts/native-agent/failure-context.json
           retention-days: 14
 
   package:
