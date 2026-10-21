@@ -285,6 +285,14 @@ internal static partial class DesktopSmoke
             var firstGuideWidth = window.Width; var firstGuideHeight = window.Height;
             window.Width = 900; window.Height = 580;
             VerifyGuideLink(window, "FirstCopyGuideButton", 2, "Сделать первую копию на безопасном примере");
+            var guideScroll = Control<ScrollViewer>("FirstJobGuideScroll");
+            foreach (var name in new[] { "JobsEmptyTitle", "JobsEmptyHint", "FirstJobButton", "FirstCopyGuideButton" })
+            {
+                var element = Control<FrameworkElement>(name);
+                var position = element.TranslatePoint(new Point(), guideScroll);
+                if (!element.IsVisible || position.Y < 0 || position.Y + element.ActualHeight > guideScroll.ViewportHeight + 1)
+                    throw new InvalidOperationException("Начальная инструкция обрезана в компактном окне: " + name);
+            }
             if (Control<WrapPanel>("JobActions").IsVisible)
                 throw new InvalidOperationException("Пустой экран заданий перегружен недоступными действиями.");
             Screenshot("jobs-first-copy-guide-compact");
