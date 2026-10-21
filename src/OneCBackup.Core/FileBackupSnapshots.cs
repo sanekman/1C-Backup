@@ -168,7 +168,7 @@ public sealed class FileBackupSnapshotStore(string directory)
     {
         var path = Path.Combine(directory, jobId.ToString("N") + ".json");
         if (!File.Exists(path)) return null;
-        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         return await FileBackupManifest.ReadAsync(input, token);
     }
     public async Task SaveAsync(Guid jobId, FileBackupManifest manifest, CancellationToken token = default)

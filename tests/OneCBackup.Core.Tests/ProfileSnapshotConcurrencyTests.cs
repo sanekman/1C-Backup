@@ -65,5 +65,33 @@ public sealed class ProfileSnapshotConcurrencyTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(directory, "*.tmp"));
     }
 
+    [Fact]
+    public async Task IndependentReaderCanContinuouslyOpenHistoryWhileServicePublishesUpdates()
+    {
+        var path = Path.Combine(directory, "runs.json");
+        var writer = new BackupRunHistory(path);
+        var reader = new BackupRunHistory(path);
+        var run = new BackupRun(Guid.NewGuid(), Guid.NewGuid(), "fixture", DateTimeOffset.UtcNow,
+            null, BackupRunStatus.Running, Path.Combine(directory, "work"));
+        await writer.SaveAsync(run);
+        // A separate instance models the desktop process; no shared semaphore.
+        var reads = Task.Run(async () =>
+        {
+            for (var i = 0; i < 250; i++)
+            {
+                var observed = Assert.Single(await reader.ReadAsync());
+                Assert.Equal(run.RunId, observed.RunId);
+                Assert.True(observed.JobName == "fixture" || observed.JobName.StartsWith("revision-", StringComparison.Ordinal));
+            }
+        });
+        var writes = Task.Run(async () =>
+        {
+            for (var i = 0; i < 100; i++) await writer.SaveAsync(run with { JobName = "revision-" + i });
+        });
+        await Task.WhenAll(reads, writes).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal("revision-99", Assert.Single(await reader.ReadAsync()).JobName);
+        Assert.Empty(Directory.EnumerateFiles(directory, "*.tmp"));
+    }
+
     public void Dispose() => Directory.Delete(directory, true);
 }

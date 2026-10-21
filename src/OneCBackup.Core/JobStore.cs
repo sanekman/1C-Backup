@@ -18,7 +18,7 @@ public sealed class JobStore(string path, bool useLocalTime = false)
     public async Task<IReadOnlyList<BackupJob>> LoadAsync(CancellationToken cancellationToken = default)
     {
         if (!File.Exists(path)) return [];
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         var jobs = await JsonSerializer.DeserializeAsync<List<BackupJob>>(stream, Options, cancellationToken)
             ?? throw new InvalidDataException("Файл заданий содержит null.");
         if (useLocalTime) jobs = jobs.Select(job => job is null ? null! : job with { TimeZoneId = BackupSchedule.LocalTimeZone }).ToList();
