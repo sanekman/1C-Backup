@@ -13,8 +13,8 @@ internal sealed class AgentJsonFile<T>(string path) where T : class
 
     public async Task<T?> ReadAsync(CancellationToken cancellationToken)
     {
-        if (!File.Exists(path)) return null;
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        await using var stream = await AtomicProfileFile.OpenReadAsync(path, cancellationToken);
+        if (stream is null) return null;
         return await JsonSerializer.DeserializeAsync<T>(stream, Options, cancellationToken)
             ?? throw new InvalidDataException("Файл конфигурации агента содержит null.");
     }

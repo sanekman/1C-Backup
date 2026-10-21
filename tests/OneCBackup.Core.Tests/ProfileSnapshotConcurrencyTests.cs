@@ -93,5 +93,15 @@ public sealed class ProfileSnapshotConcurrencyTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(directory, "*.tmp"));
     }
 
+    [Fact]
+    public async Task UnreadableHistoryPathIsReportedInsteadOfReturningEmptyHistory()
+    {
+        var path = Path.Combine(directory, "runs.json");
+        Directory.CreateDirectory(path);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new BackupRunHistory(path).ReadAsync());
+        Assert.True(Directory.Exists(path));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(path));
+    }
+
     public void Dispose() => Directory.Delete(directory, true);
 }

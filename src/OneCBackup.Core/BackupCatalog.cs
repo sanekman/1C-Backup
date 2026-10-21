@@ -52,8 +52,8 @@ public sealed class BackupCatalog(string path)
 
     private async Task<List<BackupRecord>> ReadCoreAsync(CancellationToken cancellationToken)
     {
-        if (!File.Exists(path)) return [];
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        await using var stream = await AtomicProfileFile.OpenReadAsync(path, cancellationToken);
+        if (stream is null) return [];
         var records = await JsonSerializer.DeserializeAsync<List<BackupRecord>>(stream, Options, cancellationToken)
             ?? throw new InvalidDataException("Журнал копий содержит null.");
         Validate(records);

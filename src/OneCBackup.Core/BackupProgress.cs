@@ -100,7 +100,8 @@ public sealed class BackupProgressStore(string directory)
     {
         try
         {
-            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            await using var stream = await AtomicProfileFile.OpenReadAsync(path, CancellationToken.None);
+            if (stream is null) return null;
             return await JsonSerializer.DeserializeAsync<BackupProgressSnapshot>(stream);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
