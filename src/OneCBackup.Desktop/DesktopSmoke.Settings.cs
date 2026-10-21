@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -48,11 +49,22 @@ internal static partial class DesktopSmoke
                 if (Control<ComboBox>("AgentModePicker").IsVisible || Control<PasswordBox>("GitHubUpdateToken").IsVisible
                     || Control<ComboBox>("ServiceAccount").IsVisible)
                     throw new InvalidOperationException("Технические настройки открыты по умолчанию.");
+                if (section == "Help")
+                {
+                    string? opened = null;
+                    window.UserGuideOpenOverride = path => opened = path;
+                    Click("OpenUserGuideButton");
+                    if (opened is null || !File.Exists(opened) || !File.Exists(Path.Combine(Path.GetDirectoryName(opened)!, "settings-overview.png")))
+                        throw new InvalidOperationException("Пошаговое руководство или его изображение не включены в программу.");
+                    var html = File.ReadAllText(opened);
+                    if (!html.Contains("Скачать и установить") || !html.Contains("первую копию") || !html.Contains("восстанавливается"))
+                        throw new InvalidOperationException("Руководство потеряло основные сценарии.");
+                }
                 screenshot("settings-" + section.ToLowerInvariant() + "-compact");
             }
             Click("GeneralSettingsButton");
         }
-        finally { window.Width = width; window.Height = height; window.UpdateLayout(); }
+        finally { window.UserGuideOpenOverride = null; window.Width = width; window.Height = height; window.UpdateLayout(); }
         return Task.CompletedTask;
     }
 }

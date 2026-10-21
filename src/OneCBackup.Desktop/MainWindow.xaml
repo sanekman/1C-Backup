@@ -618,8 +618,9 @@
        </StackPanel>
        <StackPanel x:Name="HelpSettingsSection" Visibility="Collapsed">
         <TextBlock Text="Помощь и диагностика" FontSize="22" FontWeight="SemiBold" />
-        <TextBlock Text="Возникла проблема? Сохраните отчёт и передайте его вместе с примерным временем ошибки." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,14" />
-        <WrapPanel><Button x:Name="ExportDiagnosticsButton" Content="Сохранить диагностику…" Click="ExportDiagnostics_Click" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" />
+        <TextBlock Text="Начните с пошаговой инструкции. При ошибке сохраните диагностику." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,14" />
+        <WrapPanel><Button x:Name="OpenUserGuideButton" Content="Пошаговая инструкция" Click="OpenUserGuide_Click" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" />
+         <Button x:Name="ExportDiagnosticsButton" Content="Сохранить диагностику…" Click="ExportDiagnostics_Click" Margin="0,0,8,8" />
          <Button x:Name="OpenLogsButton" Content="Открыть логи" Click="OpenLogs_Click" Margin="0,0,0,8" /></WrapPanel>
         <TextBlock x:Name="DiagnosticsStatus" TextWrapping="Wrap" Margin="0,0,0,8" />
         <Expander Header="Что входит в отчёт" Margin="0,0,0,14"><TextBlock Text="Версия программы, сведения о системе и логи. Пароли, настройки подключения, исходные файлы и копии не входят. Отправка выполняется вами вручную. Логи хранятся до 14 дней и 50 МБ." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0" /></Expander>
