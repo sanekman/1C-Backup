@@ -94,7 +94,7 @@ public sealed class BackupCatalog(string path)
                 stream.Flush(flushToDisk: true);
             }
             cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temporary, fullPath, overwrite: true);
+            AtomicProfileFile.Publish(temporary, fullPath);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }

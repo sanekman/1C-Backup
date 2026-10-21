@@ -42,7 +42,7 @@ public sealed class JobStore(string path, bool useLocalTime = false)
                 stream.Flush(flushToDisk: true);
             }
             cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temporary, fullPath, overwrite: true);
+            AtomicProfileFile.Publish(temporary, fullPath);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }

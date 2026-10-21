@@ -183,7 +183,7 @@ public sealed class FileBackupSnapshotStore(string directory)
                 await JsonSerializer.SerializeAsync(bounded, manifest, FileBackupManifest.Options, token);
                 output.Flush(true);
             }
-            token.ThrowIfCancellationRequested(); File.Move(stage, path, overwrite: true);
+            token.ThrowIfCancellationRequested(); AtomicProfileFile.Publish(stage, path);
         }
         finally { File.Delete(stage); }
     }

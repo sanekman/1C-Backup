@@ -93,7 +93,7 @@ public sealed class BackupProgressStore(string directory)
     {
         Directory.CreateDirectory(directory);
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try { File.WriteAllText(temporary, JsonSerializer.Serialize(snapshot)); File.Move(temporary, path, true); }
+        try { File.WriteAllText(temporary, JsonSerializer.Serialize(snapshot)); AtomicProfileFile.Publish(temporary, path); }
         finally { File.Delete(temporary); }
     }
     public async Task<BackupProgressSnapshot?> ReadAsync()
