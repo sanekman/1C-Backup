@@ -82,11 +82,12 @@ public sealed class BackupNotificationTests : IDisposable
     {
         public List<NotificationProvider> Sent { get; } = [];
         public bool DenyTelegram;
+        public Action? AfterSend;
         public Task SendAsync(NotificationChannel channel, string text, CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
             if (DenyTelegram && channel.Provider == NotificationProvider.Telegram) throw new HttpRequestException("fixture offline");
-            Sent.Add(channel.Provider); return Task.CompletedTask;
+            Sent.Add(channel.Provider); AfterSend?.Invoke(); return Task.CompletedTask;
         }
     }
     private sealed class Clock : TimeProvider
@@ -154,8 +155,9 @@ public sealed class BackupNotificationTests : IDisposable
         await new NotificationSettingsStore(directory).SaveAsync(new() { Channels = [Channel()] });
         var run = Run(BackupRunStatus.Succeeded);
         var history = new BackupRunHistory(Path.Combine(directory, "runs.json")); await history.SaveAsync(run);
-        Directory.CreateDirectory(Path.Combine(directory, "notification-deliveries.json"));
-        var sender = new Sender();
+        // Keep the initial receipt read available; fail only the post-send write.
+        // An unreadable existing receipt store must prevent sending duplicates.
+        var sender = new Sender { AfterSend = () => Directory.CreateDirectory(Path.Combine(directory, "notification-deliveries.json")) };
         Assert.NotNull(await new BackupNotificationDispatcher(directory, sender).PollAsync()); Assert.Single(sender.Sent);
         Assert.Equal(BackupRunStatus.Succeeded, Assert.Single(await history.ReadAsync()).Status);
     }
