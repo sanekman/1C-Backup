@@ -13,7 +13,8 @@ namespace OneCBackup.Desktop;
 
 public partial class MainWindow : Window
 {
-    internal bool SmokeReady => ready && !persisting && !jobFileTransfer && !copiesRefreshing && activeRun is null && !manualPending && copyVerification is null;
+    internal bool SmokeReady => initializationCompleted && ready && !persisting && !jobFileTransfer && !copiesRefreshing && activeRun is null && !manualPending && copyVerification is null;
+    private bool initializationCompleted;
     private readonly JobStore store = new(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"), useLocalTime: true);
     private List<BackupJob> jobs = [];
     private readonly AgentSettingsStore agentSettingsStore = new(Path.Combine(DesktopPaths.DataDirectory, "agent.json"));
@@ -154,6 +155,7 @@ public partial class MainWindow : Window
                     if (app.StartWindowSchedule) StartSchedule_Click(this, new RoutedEventArgs());
                     app.WindowReady();
                 }
+                initializationCompleted = true;
             }
             catch (Exception ex)
             { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
