@@ -61,7 +61,7 @@ public sealed class FileFolderBackupTests : IDisposable
             Assert.Contains(zip.Entries, entry => entry.FullName == "data/new.txt");
         }
         Assert.Equal(2, (await catalog.ReadAsync()).Count); // N=1 must retain the full basis.
-        Assert.Contains((await history.ReadAsync()).Last().Warnings!, warning => warning.Contains("вся инкрементная цепочка"));
+        Assert.Contains((await history.ReadAsync()).Last().Warnings!, warning => warning.Contains("Для восстановления сохранено архивов"));
         var beforeCatalog = JsonSerializer.Serialize(await catalog.ReadAsync()); var beforeRuns = JsonSerializer.Serialize(await history.ReadAsync());
         var unrelated = Path.Combine(RestoreParent, "customer.txt"); await File.WriteAllTextAsync(unrelated, "keep");
         var restored = await Restorer().RestoreAsync(increment, Job, RestoreParent);

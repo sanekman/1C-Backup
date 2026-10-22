@@ -35,7 +35,7 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
         var partialCount = owned.Count(record => record.Backup.FileSnapshot?.IsIncomplete == true);
         var warnings = new List<string>();
         if (keep.Count - partialCount > job.KeepLast && owned.Any(record => record.Backup.FileSnapshot is not null))
-            warnings.Add($"Для восстановления сохранена вся инкрементная цепочка: {keep.Count - partialCount} архивов при лимите {job.KeepLast}. Старую цепочку можно удалить после следующей полной копии.");
+            warnings.Add($"Для восстановления сохранено архивов: {keep.Count - partialCount}, лимит копий: {job.KeepLast}. Программа удалит старые архивы автоматически, когда они больше не понадобятся сохраняемым копиям.");
         if (partialCount > 0)
             warnings.Add($"Неполные копии сохранены вне лимита: {partialCount}. При необходимости удалите их вручную.");
         foreach (var record in owned.Where(r => !keep.Contains(r.Id)).OrderByDescending(r => r.Backup.FileSnapshot?.Depth ?? 0).ThenBy(r => r.CompletedUtc))
