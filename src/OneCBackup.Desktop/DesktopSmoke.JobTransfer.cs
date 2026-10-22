@@ -36,8 +36,6 @@ internal static partial class DesktopSmoke
             window.JobImportDialogOverride = dialog => { dialog.FileName = source; return true; };
             Control<MenuItem>("ImportJobSettingsMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             await WaitUntil(() => window.SmokeReady, "Настройки задания не загрузились.");
-            if (!window.HasUnsavedJob)
-                throw new InvalidOperationException("Импортированное задание не защищено до первого изменения поля.");
         }
         try
         {
@@ -55,7 +53,7 @@ internal static partial class DesktopSmoke
             if (!Control<TextBlock>("Status").Text.Contains("вне рабочего профиля") || File.Exists(Path.Combine(DesktopPaths.DataDirectory, "unsafe-template.json")))
                 throw new InvalidOperationException("Экспорт настроек разрешён в рабочий профиль.");
             await Import(path);
-            if (!Control<Border>("EditorCard").IsVisible || Control<CheckBox>("Enabled").IsChecked != false
+            if (!Control<Border>("EditorCard").IsVisible || !window.HasUnsavedJob || Control<CheckBox>("Enabled").IsChecked != false
                 || !Control<TextBlock>("WizardHint").Text.Contains("ещё не сохранены"))
                 throw new InvalidOperationException("Импорт не открыл отключённый черновик в мастере.");
             screenshot("job-settings-import-draft");
