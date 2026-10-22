@@ -165,6 +165,8 @@ public sealed record BackupJob
                 || database.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase))
                 errors.Add("Укажите имя базы PostgreSQL, а не строку подключения.");
             if (PostgreSql is not null) errors.AddRange(PostgreSql.Validate());
+            if (PostgreSql?.CredentialKey is not null && (Source is null || Source == "*" || Source.Any(char.IsControl)))
+                errors.Add("Для сохранённого пароля PostgreSQL укажите конкретное имя базы без управляющих символов.");
         }
         return errors;
     }

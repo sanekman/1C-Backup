@@ -179,6 +179,8 @@ public partial class MainWindow
             if (Kind.SelectedItem is DatabaseKind.SqlServer)
                 WizardSummary.Text += "\nВход в MS SQL: " + (SelectedSqlAuthentication == SqlServerAuthentication.Windows
                     ? "учётная запись Windows исполнителя" : "сохранённый логин MS SQL");
+            if (Kind.SelectedItem is DatabaseKind.PostgreSql)
+                WizardSummary.Text += "\nВход в PostgreSQL: " + (UseSavedPostgreSqlPassword ? "пароль, сохранённый в Windows" : "существующие настройки PostgreSQL исполнителя");
             if (Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav && FileBackupModePicker.SelectedValue is FileBackupMode.Incremental)
                 WizardSummary.Text += "\n" + FullBackupPlanDescription + " Нужные предшествующие архивы сохраняются сверх лимита хранилища.";
             ReviewTechnicalDetails.IsExpanded = false;
@@ -278,6 +280,8 @@ public partial class MainWindow
             }
             if (Kind.SelectedItem is DatabaseKind.PostgreSql)
             {
+                if (UseSavedPostgreSqlPassword && postgreSqlCredentialKey is null)
+                    return RejectWizard("Нажмите «Задать пароль PostgreSQL…» и сохраните пароль выбранного пользователя.", 0, PgCredentialsButton);
                 if (string.IsNullOrWhiteSpace(PgDumpPath.Text) || string.IsNullOrWhiteSpace(PgRestorePath.Text))
                     return RejectWizard("Нажмите «Найти PostgreSQL на этом компьютере» или выберите pg_dump и pg_restore вручную.", 0, FindPostgreSqlToolsButton);
                 if (!Path.IsPathFullyQualified(PgDumpPath.Text.Trim()))
@@ -286,8 +290,7 @@ public partial class MainWindow
                     return RejectWizard("Выберите установленный pg_restore.exe или укажите полный путь к нему.", 0, PgRestorePath);
                 if (!int.TryParse(PgPort.Text, out var port)) return RejectWizard("Порт PostgreSQL должен быть числом от 1 до 65535.", 0, PgPort);
                 if (!int.TryParse(PgTimeout.Text, out var timeout)) return RejectWizard("Время ожидания должно быть целым числом минут.", 0, PgTimeout);
-                var settings = new PostgreSqlBackupSettings { Host = PgHost.Text.Trim(), Port = port, Username = PgUsername.Text.Trim(),
-                    PgDumpPath = PgDumpPath.Text.Trim(), PgRestorePath = PgRestorePath.Text.Trim(), TimeoutMinutes = timeout };
+                var settings = ReadPostgreSqlSettings(port, timeout);
                 var errors = (new BackupJob { Name = JobName.Text.Trim(), Source = Source.Text.Trim(), Kind = DatabaseKind.PostgreSql,
                     DestinationDirectory = Path.GetTempPath(), PostgreSql = settings }).Validate();
                 if (errors.Count != 0) return RejectWizard(string.Join(" ", errors), 0, PgHost);

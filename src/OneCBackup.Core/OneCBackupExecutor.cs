@@ -26,6 +26,7 @@ public sealed record BackupProcess(string Executable, IReadOnlyList<string> Argu
 {
     public string? ErrorLogPath { get; init; }
     public bool DiscardStandardOutput { get; init; }
+    public IReadOnlyDictionary<string, string?>? Environment { get; init; }
 }
 
 public interface IBackupProcessRunner
@@ -50,6 +51,11 @@ public sealed class BackupProcessRunner : IBackupProcessRunner
             RedirectStandardError = errorLog is not null, RedirectStandardOutput = command.DiscardStandardOutput
         };
         foreach (var argument in command.Arguments) info.ArgumentList.Add(argument);
+        foreach (var pair in command.Environment ?? new Dictionary<string, string?>())
+        {
+            if (pair.Value is null) info.Environment.Remove(pair.Key);
+            else info.Environment[pair.Key] = pair.Value;
+        }
         using var process = new Process { StartInfo = info };
         DiagnosticLog.Current.Write(DiagnosticEvent.ExternalProcessStarted);
         if (!process.Start()) throw new IOException("Не удалось запустить программу резервного копирования.");

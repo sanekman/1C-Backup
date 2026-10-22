@@ -295,9 +295,20 @@
      TextWrapping="Wrap" Margin="0,0,0,10" />
    </StackPanel>
    <StackPanel x:Name="PostgresBackupPanel" Visibility="Collapsed">
-    <TextBlock Text="Сервер PostgreSQL" /><TextBox x:Name="PgHost" Text="localhost" Margin="0,4,0,10" />
-    <TextBlock Text="Порт" /><TextBox x:Name="PgPort" Text="5432" Margin="0,4,0,10" />
-    <TextBlock Text="Пользователь" /><TextBox x:Name="PgUsername" Text="postgres" Margin="0,4,0,10" />
+    <TextBlock Text="Сервер PostgreSQL" /><TextBox x:Name="PgHost" Text="localhost" TextChanged="PgConnection_Changed" Margin="0,4,0,10" />
+    <TextBlock Text="Порт" /><TextBox x:Name="PgPort" Text="5432" TextChanged="PgConnection_Changed" Margin="0,4,0,10" />
+    <TextBlock Text="Пользователь" /><TextBox x:Name="PgUsername" Text="postgres" TextChanged="PgConnection_Changed" Margin="0,4,0,10" />
+    <TextBlock Text="Как подключаться" />
+    <ComboBox x:Name="PgAuthenticationPicker" SelectedIndex="1" SelectionChanged="PgAuthentication_Changed" Margin="0,4,0,10">
+     <ComboBoxItem Content="Пароль, сохранённый в программе" />
+     <ComboBoxItem Content="Настройки PostgreSQL на этом компьютере" />
+    </ComboBox>
+    <StackPanel x:Name="PgCredentialsPanel" Visibility="Collapsed" Margin="0,0,0,10">
+     <Button x:Name="PgCredentialsButton" Content="Задать пароль PostgreSQL…" Click="PgCredentials_Click" HorizontalAlignment="Left" />
+     <TextBlock x:Name="PgCredentialStatus" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" />
+    </StackPanel>
+    <TextBlock x:Name="PgExternalAuthenticationHint" Text="Используется существующая настройка PostgreSQL: например, pgpass.conf, сертификат или вход Windows. Для обычного входа по паролю выберите вариант выше."
+     TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
     <Button x:Name="FindPostgreSqlToolsButton" Content="Найти PostgreSQL на этом компьютере" Click="FindPostgreSqlTools_Click" HorizontalAlignment="Left" Margin="0,0,0,6" />
     <ComboBox x:Name="PostgreSqlToolsPicker" DisplayMemberPath="Label" SelectionChanged="PostgreSqlTools_Changed" Visibility="Collapsed" Margin="0,0,0,6" />
     <TextBlock x:Name="PostgreSqlToolsStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />

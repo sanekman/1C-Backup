@@ -7,6 +7,7 @@ namespace OneCBackup.Desktop;
 public partial class FtpCredentialsWindow : Window
 {
     private readonly string key;
+    internal string CredentialKey => key;
     private readonly Action<string, string, string> save;
     public FtpCredentialsWindow(string key, WindowsFtpCredentialStore store)
         : this(key, store.Save, "Учётные данные FTP") { }

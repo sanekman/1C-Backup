@@ -26,6 +26,7 @@ internal static partial class DesktopSmoke
         {
             Click("JobsNavigation"); Click("NewJobButton");
             Control<ComboBox>("Kind").SelectedItem = DatabaseKind.PostgreSql;
+            Control<ComboBox>("PgAuthenticationPicker").SelectedIndex = 1; // This scenario only checks discovery; saved-password entry is tested separately.
             Control<TextBox>("JobName").Text = "PostgreSQL — поиск утилит"; Control<TextBox>("Source").Text = "fixture_db";
             Click("NextStepButton");
             if (!Control<TextBlock>("WizardError").Text.Contains("Найти PostgreSQL"))

@@ -48,7 +48,7 @@ internal static partial class DesktopSmoke
                 {
                     if (entry.Name is "jobs.json" or "agent.json" or "copies.json" or "runs.json") throw new InvalidOperationException("Диагностика копирует сырой профиль.");
                     using var reader = new StreamReader(entry.Open()); var text = await reader.ReadToEndAsync();
-                    if (text.Contains("fixture-webdav-app-password") || text.Contains(DesktopPaths.DataDirectory))
+                    if (text.Contains("fixture-webdav-app-password") || text.Contains("fixture-pg-saved-password") || text.Contains(DesktopPaths.DataDirectory))
                         throw new InvalidOperationException("Диагностика раскрывает секрет или путь профиля.");
                 }
             }

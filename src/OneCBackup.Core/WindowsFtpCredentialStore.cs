@@ -12,10 +12,11 @@ namespace OneCBackup.Core;
 public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
 {
     private readonly string prefix;
-    private string CredentialLabel => prefix == "SqlServer" ? "MS SQL" : "FTP";
+    private readonly bool exportNewSecrets;
+    private string CredentialLabel => prefix switch { "SqlServer" => "MS SQL", "PostgreSQL" => "PostgreSQL", _ => "FTP" };
     private static WindowsServiceCredentialCache? serviceCache;
     public static void SetServiceCache(WindowsServiceCredentialCache? cache) => serviceCache = cache;
-    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV" or "GoogleDrive" or "Notifications" or "RemoteGateway" or "SqlServer") && serviceCache is not null;
+    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV" or "GoogleDrive" or "Notifications" or "RemoteGateway" or "SqlServer" or "PostgreSQL") && serviceCache is not null;
     public async Task ExportForServiceAsync(string key, CancellationToken token = default)
     {
         var value = await GetAsync(key, token);
@@ -27,6 +28,10 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
         var dav = new WindowsFtpCredentialStore("WebDAV");
         var google = new WindowsFtpCredentialStore("GoogleDrive");
         var sql = new WindowsFtpCredentialStore("SqlServer");
+        var postgres = new WindowsFtpCredentialStore("PostgreSQL");
+        foreach (var key in jobs.Where(job => job.Kind == DatabaseKind.PostgreSql)
+            .Select(job => job.PostgreSql?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal))
+            await postgres.ExportForServiceAsync(key);
         foreach (var key in jobs.Where(job => job.Kind == DatabaseKind.SqlServer
             && job.SqlServer?.Authentication == SqlServerAuthentication.SqlServer)
             .Select(job => job.SqlServer?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal))
@@ -42,7 +47,8 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
             .OfType<string>().Distinct()) await archive.ExportForServiceAsync(key);
     }
     public WindowsFtpCredentialStore() : this("FTP") { }
-    internal WindowsFtpCredentialStore(string prefix) => this.prefix = prefix;
+    internal WindowsFtpCredentialStore(string prefix, bool exportNewSecrets = true)
+    { this.prefix = prefix; this.exportNewSecrets = exportNewSecrets; }
     private const uint Generic = 1;
     private const int MaximumBlobSize = 2560;
     private string Target(string key)
@@ -101,7 +107,8 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
                 Blob = blob, BlobSize = (uint)bytes.Length, Persist = 2 /* local machine, current user */ };
             if (!Native.CredWrite(ref credential, 0))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), $"Не удалось сохранить учётные данные {CredentialLabel} в Windows.");
-            if (HasServiceCache) serviceCache!.Save(prefix, key, new NetworkCredential(username, password));
+            if (HasServiceCache && (exportNewSecrets || serviceCache!.Read(prefix, key) is not null))
+                serviceCache!.Save(prefix, key, new NetworkCredential(username, password));
         }
         finally
         {

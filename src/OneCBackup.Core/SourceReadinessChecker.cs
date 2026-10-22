@@ -8,7 +8,7 @@ public sealed record SourceCheckReport(bool Succeeded, string Details, bool Canc
 /// <summary>Reads source availability without creating a database backup or running the 1C platform.</summary>
 public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, string defaultWorkRoot,
     Func<BackupJob, DbConnection>? sqlConnectionFactory = null, Func<BackupJob, WebDavClient>? webDavClientFactory = null,
-    ISqlServerCredentialStore? sqlCredentials = null)
+    ISqlServerCredentialStore? sqlCredentials = null, IPostgreSqlCredentialStore? postgreSqlCredentials = null)
 {
     public async Task<SourceCheckReport> CheckAsync(BackupJob job, CancellationToken cancellationToken = default)
     {
@@ -124,14 +124,15 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         {
             if (Directory.Exists(work) || File.Exists(work)) throw new IOException("Тестовая папка уже существует.");
             Directory.CreateDirectory(work); ownsWork = true;
+            using var connection = await PostgreSqlConnectionEnvironment.OpenAsync(job, postgreSqlCredentials, token);
             var code = await processRunner.RunAsync(new BackupProcess(psql,
                 ["--no-password", "--host=" + settings.Host, "--port=" + settings.Port, "--username=" + settings.Username,
                     "--dbname=" + job.Source, "--set=ON_ERROR_STOP=1", "--command=SELECT 1;"], work)
-                { DiscardStandardOutput = true, ErrorLogPath = Path.Combine(work, "psql.log") }, token);
+                { DiscardStandardOutput = true, ErrorLogPath = Path.Combine(work, "psql.log"), Environment = connection.Environment }, token);
             token.ThrowIfCancellationRequested();
             return code == 0
                 ? new(true, "Подключение к базе PostgreSQL проверено через psql и SELECT 1. Дамп не создавался. Доступ к данным всех таблиц, совместимость pg_dump и восстановление проверяются первой копией и тестовым восстановлением.")
-                : new(false, $"psql завершился с кодом {code}. Проверьте имя базы, сервер, пользователя, файл паролей и настройки TLS.");
+                : new(false, $"psql завершился с кодом {code}. Проверьте имя базы, сервер, пользователя, выбранный способ входа и настройки TLS.");
         }
         finally
         {

@@ -41,6 +41,22 @@ public partial class MainWindow
         try
         {
             var imported = await Task.Run(() => BackupJobTransfer.ImportAsync(dialog.FileName));
+            var requiresPostgreSqlPassword = imported.Kind == DatabaseKind.PostgreSql && imported.PostgreSql?.CredentialKey is not null;
+            if (requiresPostgreSqlPassword && imported.PostgreSql is { } pg)
+            {
+                var known = jobs.Any(local => local.Kind == DatabaseKind.PostgreSql && local.PostgreSql is { } trusted
+                    && trusted.CredentialKey == pg.CredentialKey && trusted.Port == pg.Port
+                    && string.Equals(trusted.Host.Trim(), pg.Host.Trim(), StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(trusted.Username, pg.Username, StringComparison.Ordinal));
+                var available = false;
+                if (known)
+                {
+                    try { var credential = await new WindowsPostgreSqlCredentialStore().GetAsync(pg.CredentialKey!);
+                        available = credential.UserName == pg.Username; }
+                    catch { /* Ask for a new password instead of using an unavailable binding. */ }
+                }
+                if (!available) imported = imported with { PostgreSql = pg with { CredentialKey = null } };
+            }
             var passwordUnavailable = false;
             if (imported.ArchivePasswordKey is not null)
             {
@@ -69,6 +85,7 @@ public partial class MainWindow
             }
             selectionBeforeEdit = Jobs.SelectedItem as BackupJob;
             LoadJobEditor(imported);
+            if (requiresPostgreSqlPassword) PgAuthenticationPicker.SelectedIndex = 0;
             editingId = null;
             var name = imported.Name + " — импорт";
             var suffix = 2;

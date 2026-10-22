@@ -941,6 +941,7 @@ internal static partial class DesktopSmoke
             await VerifyWebDavWizardAsync(window, name => Screenshot(name));
             await VerifySqlCredentialsAsync(window, name => Screenshot(name));
             await VerifyPostgreSqlToolsAsync(window, name => Screenshot(name));
+            await VerifyPostgreSqlCredentialsAsync(window, name => Screenshot(name));
             await VerifyUnsavedJobAsync(window, (name, target) => Screenshot(name, target));
             await VerifyDiagnosticsAsync(window, name => Screenshot(name));
             await VerifyManualQueueReopenAsync(window, (name, target) => Screenshot(name, target));

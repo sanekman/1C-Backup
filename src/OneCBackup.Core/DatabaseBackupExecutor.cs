@@ -37,6 +37,8 @@ public sealed record SqlServerBackupSettings
 
 public sealed record PostgreSqlBackupSettings
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? CredentialKey { get; init; }
     public string Host { get; init; } = "localhost";
     public int Port { get; init; } = 5432;
     public string Username { get; init; } = "postgres";
@@ -47,6 +49,10 @@ public sealed record PostgreSqlBackupSettings
     {
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(Host) || string.IsNullOrWhiteSpace(Username)) errors.Add("Укажите сервер и пользователя PostgreSQL.");
+        if (CredentialKey is not null && (string.IsNullOrWhiteSpace(CredentialKey) || CredentialKey.Length > 512 || CredentialKey.Any(char.IsControl)))
+            errors.Add("Сохраните пароль PostgreSQL заново.");
+        if (CredentialKey is not null && (new[] { Host, Username }.Any(value => value is null || value == "*" || value.Any(char.IsControl)) || Host.Contains(',')))
+            errors.Add("Для сохранённого пароля PostgreSQL укажите один конкретный сервер и пользователя без управляющих символов.");
         if (Port is < 1 or > 65535) errors.Add("Укажите порт PostgreSQL от 1 до 65535.");
         if (string.IsNullOrWhiteSpace(PgDumpPath) || !Path.IsPathFullyQualified(PgDumpPath) ||
             string.IsNullOrWhiteSpace(PgRestorePath) || !Path.IsPathFullyQualified(PgRestorePath))
@@ -159,7 +165,7 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
     }
 }
 
-public sealed class PostgreSqlBackupExecutor(IBackupProcessRunner processRunner) : IBackupExecutor
+public sealed class PostgreSqlBackupExecutor(IBackupProcessRunner processRunner, IPostgreSqlCredentialStore? credentials = null) : IBackupExecutor
 {
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
@@ -176,14 +182,15 @@ public sealed class PostgreSqlBackupExecutor(IBackupProcessRunner processRunner)
         timeout.CancelAfter(TimeSpan.FromMinutes(settings.TimeoutMinutes));
         try
         {
+            using var connection = await PostgreSqlConnectionEnvironment.OpenAsync(job, credentials, timeout.Token);
             var code = await processRunner.RunAsync(new BackupProcess(settings.PgDumpPath,
                 ["--format=custom", "--no-password", "--host=" + settings.Host, "--port=" + settings.Port,
                  "--username=" + settings.Username, "--dbname=" + job.Source, "--file=" + dump], work)
-                { ErrorLogPath = Path.Combine(work, "pg_dump.log"), DiscardStandardOutput = true }, timeout.Token);
-            if (code != 0) throw new IOException($"pg_dump завершился с кодом {code}. Проверьте доступ, файл паролей и совместимость утилиты. Журнал: {Path.Combine(work, "pg_dump.log")}");
+                { ErrorLogPath = Path.Combine(work, "pg_dump.log"), DiscardStandardOutput = true, Environment = connection.Environment }, timeout.Token);
+            if (code != 0) throw new IOException($"pg_dump завершился с кодом {code}. Проверьте доступ, пароль пользователя и совместимость утилиты. Журнал: {Path.Combine(work, "pg_dump.log")}");
             if (!File.Exists(dump) || new FileInfo(dump).Length == 0) throw new InvalidDataException("pg_dump не создал непустую копию.");
             code = await processRunner.RunAsync(new BackupProcess(settings.PgRestorePath, ["--list", dump], work)
-                { ErrorLogPath = Path.Combine(work, "pg_restore.log"), DiscardStandardOutput = true }, timeout.Token);
+                { ErrorLogPath = Path.Combine(work, "pg_restore.log"), DiscardStandardOutput = true, Environment = connection.Environment }, timeout.Token);
             if (code != 0) throw new InvalidDataException($"Проверка каталога дампа pg_restore завершилась с кодом {code}. Журнал: {Path.Combine(work, "pg_restore.log")}");
             timeout.Token.ThrowIfCancellationRequested();
             return dump;

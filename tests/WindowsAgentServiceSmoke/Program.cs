@@ -6,6 +6,7 @@ using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Win32;
 using OneCBackup.Core;
+using ICSharpCode.SharpZipLib.Zip;
 
 internal static class Program
 {
@@ -31,7 +32,7 @@ internal static class Program
         catch (ArgumentException) { /* Process has already exited. */ }
     }
 
-    private static async Task CaptureFailure(string directory, string output, string password, string archivePassword)
+    private static async Task CaptureFailure(string directory, string output, string password, string archivePassword, string pgPassword)
     {
         var context = new Dictionary<string, object?>();
         async Task Capture(string name, Func<Task<object?>> read)
@@ -55,6 +56,7 @@ internal static class Program
                     return await reader.ReadToEndAsync();
                 });
         var json = JsonSerializer.Serialize(context).Replace(password, "[redacted]").Replace(archivePassword, "[redacted]");
+        if (!string.IsNullOrEmpty(pgPassword)) json = json.Replace(pgPassword, "[redacted]");
         await File.WriteAllTextAsync(Path.Combine(output, "failure-context.json"), json);
     }
 
@@ -70,6 +72,8 @@ internal static class Program
         var archivePassword = "CI encrypted service fixture password";
         var profileCreated = false; var userCreated = false;
         var archiveStore = new WindowsArchivePasswordStore(); string? archiveKey = null;
+        var pgStore = new WindowsPostgreSqlCredentialStore(); var pgKey = Guid.NewGuid().ToString("N");
+        PostgreSqlFixture? postgres = null;
         var checks = new List<string>(); string? failure = null;
         try
         {
@@ -77,6 +81,8 @@ internal static class Program
             Require(WindowsAgentService.QueryInfo() is null, "Refusing to replace an existing agent service.");
             Require(!Directory.Exists(directory) && !File.Exists(directory), "Refusing to use an existing owner profile.");
             Require(File.Exists(executable), "Published agent not found.");
+            postgres = new PostgreSqlFixture(); await postgres.StartAsync();
+            pgStore.Save(pgKey, postgres.Username, postgres.Password);
             Native.AddUser(account, password); userCreated = true;
             var selected = WindowsServiceAccounts.Resolve(account);
             var sid = WindowsIdentity.GetCurrent().User!.Value;
@@ -101,7 +107,8 @@ internal static class Program
                 DestinationDirectory = Path.Combine(directory, "copies", "manual"), ScheduleKind = ScheduleKind.Manual };
             var startup = manual with { Id = Guid.NewGuid(), Name = "startup service fixture", Enabled = true,
                 DestinationDirectory = Path.Combine(directory, "copies", "startup"), ScheduleKind = ScheduleKind.SystemStartup };
-            var jobs = new[] { manual, startup };
+            var pgJob = postgres.Job(Path.Combine(directory, "copies", "postgresql"), pgKey, archiveKey);
+            var jobs = new[] { manual, startup, pgJob };
             var jobStore = new JobStore(Path.Combine(directory, "jobs.json")); await jobStore.SaveAsync(jobs);
             var originalJobs = await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json"));
             WindowsFtpCredentialStore.SetServiceCache(new(directory, sid, selected.Sid));
@@ -155,6 +162,24 @@ internal static class Program
                 Require(await File.ReadAllTextAsync(extracted.Path) == payload, "Encrypted service copy did not restore correctly.");
             }
             checks.Add("delegated-dpapi-archive-password-and-restoration");
+            var pgCommand = await queue.EnqueueAsync(firstSession, pgJob.Id);
+            LocalManualRunReceipt? pgReceipt = null;
+            await Wait(async () => (pgReceipt = await queue.ReadReceiptAsync(pgCommand.RequestId)) is { Phase: not LocalManualRunPhase.Accepted },
+                "PostgreSQL service backup did not finish.");
+            Require(pgReceipt!.Phase == LocalManualRunPhase.Finished, "PostgreSQL service command was rejected: " + pgReceipt.Error);
+            var pgRun = (await history.ReadAsync()).Single(run => run.JobId == pgJob.Id);
+            Require(pgRun.Status == BackupRunStatus.Succeeded, "PostgreSQL service backup failed: " + pgRun.Error);
+            var pgCopy = (await catalog.ReadAsync()).Single(record => record.JobId == pgJob.Id);
+            var dump = Path.Combine(restore, "service-postgresql.dump");
+            using (var zip = new ZipFile(pgCopy.Backup.Location) { Password = archivePassword })
+            {
+                Require(zip.Count == 1 && zip[0].IsCrypted, "Service PostgreSQL archive must contain only the encrypted dump.");
+                await using var input = zip.GetInputStream(0);
+                await using var outputDump = new FileStream(dump, FileMode.CreateNew, FileAccess.Write);
+                await input.CopyToAsync(outputDump);
+            }
+            await postgres.AssertRestoresAsync(dump);
+            checks.Add("postgresql-scram-with-delegated-password-and-restoration");
             WindowsAgentService.Stop(executable, directory); await WaitService(1);
             await WaitProcessExit(state!.ProcessId, executable);
             await Wait(() => Task.FromResult(!new BackupEngineCoordinator(directory).IsHeldElsewhere()), "SCM stop did not release the execution profile.");
@@ -165,22 +190,23 @@ internal static class Program
             await Wait(async () => (await control.ReadAsync()) is { Phase: LocalAgentPhase.Running } observed
                 && observed.SessionId == state!.SessionId && observed.UpdatedUtc >= state.StartedUtc.AddSeconds(32),
                 "Restarted service did not remain live through a schedule polling cycle.");
-            Require((await history.ReadAsync()).Count == 2, "A same-boot service restart repeated a completed startup backup.");
+            Require((await history.ReadAsync()).Count == jobs.Length, "A same-boot service restart repeated a completed startup backup.");
             Require(await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json")) == originalJobs, "Service restart changed the saved jobs.");
             checks.Add("restart-preserves-history-and-does-not-repeat-startup");
             WindowsAgentService.Stop(executable, directory); await WaitService(1);
             await WaitProcessExit(state!.ProcessId, executable);
             WindowsAgentService.Remove(executable, directory);
             await Wait(() => Task.FromResult(WindowsAgentService.QueryInfo() is null), "Service registration was not removed.");
-            Require((await catalog.ReadAsync()).Count == 2 && File.Exists(Path.Combine(directory, "jobs.json")), "Removing the service erased owner data.");
+            Require((await catalog.ReadAsync()).Count == jobs.Length && File.Exists(Path.Combine(directory, "jobs.json")), "Removing the service erased owner data.");
             checks.Add("service-removal-preserves-jobs-and-copies");
         }
         catch (Exception error)
         {
-            failure = error.ToString().Replace(password, "[redacted]").Replace(archivePassword, "[redacted]");
+            failure = error.ToString().Replace(password, "[redacted]").Replace(archivePassword, "[redacted]")
+                .Replace(postgres?.Password ?? "not-created-fixture-password", "[redacted]");
             if (profileCreated)
             {
-                try { await CaptureFailure(directory, output, password, archivePassword); }
+                try { await CaptureFailure(directory, output, password, archivePassword, postgres?.Password ?? ""); }
                 catch (Exception captureError) { failure += "\nFailure context: " + captureError.GetType().Name; }
             }
         }
@@ -199,6 +225,8 @@ internal static class Program
             }
             catch (Exception error) { failure = (failure ?? "") + "\nSCM cleanup: " + error.GetType().Name + ": " + error.Message; }
             WindowsFtpCredentialStore.SetServiceCache(null);
+            try { pgStore.Delete(pgKey); if (postgres is not null) await postgres.DisposeAsync(); }
+            catch (Exception error) { failure = (failure ?? "") + "\nPostgreSQL fixture cleanup: " + error.GetType().Name; }
             try { if (archiveKey is not null) archiveStore.Delete(archiveKey); }
             catch (Exception error) { failure = (failure ?? "") + "\nCredential cleanup: " + error.GetType().Name; }
             if (userCreated)

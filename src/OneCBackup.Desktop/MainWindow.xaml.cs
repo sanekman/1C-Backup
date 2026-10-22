@@ -209,8 +209,7 @@ public partial class MainWindow : Window
         {
             if (!int.TryParse(PgPort.Text, out var port) || !int.TryParse(PgTimeout.Text, out var timeout))
             { Status.Text = "Укажите целые числа для порта и времени ожидания PostgreSQL."; return false; }
-            postgres = new PostgreSqlBackupSettings { Host = PgHost.Text.Trim(), Port = port, Username = PgUsername.Text.Trim(),
-                PgDumpPath = PgDumpPath.Text.Trim(), PgRestorePath = PgRestorePath.Text.Trim(), TimeoutMinutes = timeout };
+            postgres = ReadPostgreSqlSettings(port, timeout);
         }
         if (storageKind == StorageKind.Ftp && !int.TryParse(FtpPort.Text, out ftpPort))
         { Status.Text = "Укажите целое число в поле порта FTP."; return false; }
@@ -262,6 +261,13 @@ public partial class MainWindow : Window
         UpdateRunControls();
         try
         {
+            // Prepare newly referenced PostgreSQL secrets before the running service can see the new job.
+            // Merely entering a password in a discarded draft does not grant service access.
+            var knownPgKeys = jobs.Where(job => job.Kind == DatabaseKind.PostgreSql)
+                .Select(job => job.PostgreSql?.CredentialKey).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            foreach (var key in updated.Where(job => job.Kind == DatabaseKind.PostgreSql)
+                .Select(job => job.PostgreSql?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal).Where(key => !knownPgKeys.Contains(key)))
+                await new WindowsPostgreSqlCredentialStore().ExportForServiceAsync(key);
             await store.SaveAsync(updated);
             jobs = updated;
             Jobs.ItemsSource = jobs;
@@ -361,6 +367,8 @@ public partial class MainWindow : Window
         PgUsername.Text = job.PostgreSql?.Username ?? "postgres";
         PgDumpPath.Text = job.PostgreSql?.PgDumpPath ?? ""; PgRestorePath.Text = job.PostgreSql?.PgRestorePath ?? "";
         PgTimeout.Text = (job.PostgreSql?.TimeoutMinutes ?? 120).ToString();
+        postgreSqlCredentialKey = job.PostgreSql?.CredentialKey;
+        PgAuthenticationPicker.SelectedIndex = postgreSqlCredentialKey is null ? 1 : 0; UpdatePostgreSqlCredentialStatus();
         webDavCredentialKey = job.WebDav?.CredentialKey;
         WebDavTimeout.Text = (job.WebDav?.TimeoutMinutes ?? 120).ToString(); UpdateWebDavCredentialStatus();
         JobName.Text = job.Name; Kind.SelectedItem = job.Kind; Source.Text = job.Source;
@@ -412,6 +420,7 @@ public partial class MainWindow : Window
         SqlBackupServer.Clear(); SqlServerDirectory.Clear(); SqlAgentDirectory.Clear(); SqlBackupTimeout.Text = "120";
         sqlCredentialKey = null; SqlAuthenticationPicker.SelectedValue = SqlServerAuthentication.Windows; UpdateSqlCredentialStatus();
         PgHost.Text = "localhost"; PgPort.Text = "5432"; PgUsername.Text = "postgres";
+        postgreSqlCredentialKey = null; PgAuthenticationPicker.SelectedIndex = 0; UpdatePostgreSqlCredentialStatus();
         ResetPostgreSqlTools(); PgDumpPath.Clear(); PgRestorePath.Clear(); PgTimeout.Text = "120";
         DailyAt.Text = "23:00"; KeepLast.Text = "7"; Enabled.IsChecked = true;
         archivePasswordKey = null; EncryptArchive.IsChecked = false;

@@ -16,6 +16,7 @@ public sealed class NativePostgreSqlIntegrationTests
     }
 
     [NativeSqlFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     [Trait("Category", "NativeSqlIntegration")]
     public async Task EncryptedPgDumpReachesTwoStoresWithSeparateRetentionRestoresDataAndEmitsExternalReport()
     {
@@ -37,18 +38,21 @@ public sealed class NativePostgreSqlIntegrationTests
         var root = Path.Combine(Path.GetTempPath(), "OneCBackup-pg-" + Guid.NewGuid().ToString("N"));
         var cluster = Path.Combine(root, "cluster"); var passwordFile = Path.Combine(root, "init-password");
         Directory.CreateDirectory(root);
-        var password = Guid.NewGuid().ToString("N");
+        var password = "native:password\\" + Guid.NewGuid().ToString("N");
+        var credentialKey = Guid.NewGuid().ToString("N");
+        var credentials = new WindowsPostgreSqlCredentialStore();
         var archivePassword = Guid.NewGuid().ToString("N");
         var user = "onec_" + Guid.NewGuid().ToString("N")[..12];
         var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
         await File.WriteAllTextAsync(passwordFile, password);
         var pgpass = Path.Combine(root, "pgpass.conf");
-        await File.WriteAllTextAsync(pgpass, $"127.0.0.1:{port}:*:{user}:{password}\n");
+        await File.WriteAllTextAsync(pgpass, $"127.0.0.1:{port}:*:{user}:" + password.Replace("\\", "\\\\").Replace(":", "\\:") + "\n");
         var environment = new Dictionary<string, string?>
         {
             ["PGHOST"] = "127.0.0.1", ["PGPORT"] = port.ToString(), ["PGUSER"] = user,
             ["PGPASSFILE"] = pgpass, ["PGPASSWORD"] = null, ["PGSERVICE"] = null, ["PGSERVICEFILE"] = null,
+            ["PGHOSTADDR"] = null,
             ["PGCLIENTENCODING"] = "UTF8"
         };
         var previous = environment.Keys.ToDictionary(key => key, Environment.GetEnvironmentVariable);
@@ -67,6 +71,12 @@ public sealed class NativePostgreSqlIntegrationTests
             await NativeSqlTestTools.RunAsync(Tool("pg_ctl"), ["start", "-D", cluster, "-w", "-t", "60",
                 "-l", Path.Combine(root, "postgres.log"), "-o", $"-h 127.0.0.1 -p {port}"], captureOutput: false);
             foreach (var pair in environment) Environment.SetEnvironmentVariable(pair.Key, pair.Value);
+            credentials.Save(credentialKey, user, password);
+            // The agent must use the saved secret, not inherited authentication or a different target address.
+            Environment.SetEnvironmentVariable("PGPASSFILE", Path.Combine(root, "missing-ambient-pgpass"));
+            Environment.SetEnvironmentVariable("PGPASSWORD", "incorrect ambient password");
+            Environment.SetEnvironmentVariable("PGSERVICE", "missing-ambient-service");
+            Environment.SetEnvironmentVariable("PGHOSTADDR", "192.0.2.1");
             await Sql("postgres", "CREATE DATABASE source_fixture;");
             await Sql("source_fixture", "CREATE TABLE backup_fixture (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO backup_fixture VALUES (1,'first'),(2,'second');");
             var catalog = new BackupCatalog(Path.Combine(root, "copies.json"));
@@ -76,10 +86,13 @@ public sealed class NativePostgreSqlIntegrationTests
                 DestinationDirectory = Path.Combine(root, "primary"), TemporaryDirectory = Path.Combine(root, "work"), KeepLast = 2,
                 AdditionalDestinations = [new() { DestinationDirectory = Path.Combine(root, "secondary"), KeepLast = 1 }],
                 ScheduleKind = ScheduleKind.Manual, Enabled = false, ArchiveCopies = true, ArchivePasswordKey = "fixture-archive",
-                PostgreSql = new() { Host = "127.0.0.1", Port = port, Username = user,
+                PostgreSql = new() { Host = "127.0.0.1", Port = port, Username = user, CredentialKey = credentialKey,
                     PgDumpPath = Tool("pg_dump"), PgRestorePath = Tool("pg_restore"), TimeoutMinutes = 2 } };
             var sourceChecker = new SourceReadinessChecker(new BackupProcessRunner(), Path.Combine(root, "unused-work"));
             var ready = await sourceChecker.CheckAsync(job); Assert.True(ready.Succeeded, ready.Details);
+            credentials.Save(credentialKey, user, "incorrect saved password");
+            Assert.False((await sourceChecker.CheckAsync(job)).Succeeded);
+            credentials.Save(credentialKey, user, password);
             Assert.False((await sourceChecker.CheckAsync(job with { Source = "missing_fixture_database" })).Succeeded);
             Assert.Empty(await history.ReadAsync()); Assert.Empty(await catalog.ReadAsync());
             Assert.Empty(Directory.GetFileSystemEntries(job.TemporaryDirectory!));
@@ -109,8 +122,9 @@ public sealed class NativePostgreSqlIntegrationTests
                 await input.CopyToAsync(output);
             }
             await Sql("postgres", "CREATE DATABASE restored_fixture;");
-            await NativeSqlTestTools.RunAsync(Tool("pg_restore"), ["--no-password", "--exit-on-error", "--host=127.0.0.1",
-                "--port=" + port, "--username=" + user, "--dbname=restored_fixture", dump], environment);
+            using (var connection = await PostgreSqlConnectionEnvironment.OpenAsync(job with { Source = "restored_fixture" }, credentials, CancellationToken.None))
+                await NativeSqlTestTools.RunAsync(Tool("pg_restore"), ["--no-password", "--exit-on-error", "--host=127.0.0.1",
+                    "--port=" + port, "--username=" + user, "--dbname=restored_fixture", dump], connection.Environment);
             Assert.Equal("1:first,2:second,3:third", await Sql("restored_fixture", "SELECT string_agg(id::text || ':' || value, ',' ORDER BY id) FROM backup_fixture;"));
             var repository = Environment.GetEnvironmentVariable("ONECBACKUP_TEST_REPOSITORY") ?? Environment.CurrentDirectory;
             var script = Path.Combine(repository, "tools", "postgresql_backup_report.py"); Assert.True(File.Exists(script));
@@ -133,6 +147,7 @@ public sealed class NativePostgreSqlIntegrationTests
         }
         finally
         {
+            credentials.Delete(credentialKey);
             foreach (var pair in previous) Environment.SetEnvironmentVariable(pair.Key, pair.Value);
             if (initialized && File.Exists(Path.Combine(cluster, "postmaster.pid")))
                 await NativeSqlTestTools.RunAsync(Tool("pg_ctl"), ["stop", "-D", cluster, "-w", "-t", "60", "-m", "fast"]);

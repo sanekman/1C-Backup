@@ -20,12 +20,12 @@ public partial class MainWindow
             WebDavTimeout.Text, FtpHost.Text, FtpPort.Text, FtpCredentialKey.Text,
             DailyAt.Text, KeepLast.Text, FullBackupEvery.Text },
         Selection = new[] { Kind.SelectedIndex, OneCMethodPicker.SelectedIndex, SqlAuthenticationPicker.SelectedIndex,
-            FileBackupModePicker.SelectedIndex, FullBackupDayPicker.SelectedIndex, Storage.SelectedIndex, Schedule.SelectedIndex },
+            FileBackupModePicker.SelectedIndex, FullBackupDayPicker.SelectedIndex, Storage.SelectedIndex, Schedule.SelectedIndex, PgAuthenticationPicker.SelectedIndex },
         Checks = new[] { AllowOpenOneCDatabase.IsChecked, AutoOneCPlatform.IsChecked, FtpTls.IsChecked,
             ArchiveCopies.IsChecked, EncryptArchive.IsChecked, Enabled.IsChecked,
             Mon.IsChecked, Tue.IsChecked, Wed.IsChecked, Thu.IsChecked, Fri.IsChecked, Sat.IsChecked, Sun.IsChecked },
         additionalDestinations, googleDriveSettings, googleDriveFolder, remoteGatewaySettings,
-        archivePasswordKey, webDavCredentialKey, sqlCredentialKey
+        archivePasswordKey, webDavCredentialKey, sqlCredentialKey, postgreSqlCredentialKey
     });
 
     private void RememberEditorDraft()
