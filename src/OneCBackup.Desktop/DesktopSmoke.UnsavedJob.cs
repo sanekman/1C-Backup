@@ -26,6 +26,7 @@ internal static partial class DesktopSmoke
             {
                 dialog.UpdateLayout();
                 if (captureDialog) screenshot("unsaved-job", dialog);
+                if (choice == "Close") { dialog.Close(); return; }
                 ((Button)dialog.FindName(choice)).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 // A directly raised Click does not invoke WPF's IsCancel command.
                 if (choice == "ReturnToDraftButton" && dialog.IsVisible) dialog.Close();
@@ -113,6 +114,11 @@ internal static partial class DesktopSmoke
             window.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window), 0, Key.Escape)
                 { RoutedEvent = Keyboard.PreviewKeyDownEvent });
             Require(prompts == beforePrompt + 1 && window.HasUnsavedJob, "Esc не сохранил черновик после возврата.");
+            choice = "Close";
+            Click("CancelEditorButton");
+            Require(window.HasUnsavedJob && Control<Border>("EditorCard").IsVisible,
+                "Закрытие подтверждения крестиком потеряло черновик.");
+            choice = "ReturnToDraftButton";
 
             // Hiding the window must preserve the draft and avoid any prompt.
             window.SmokeMode = false;

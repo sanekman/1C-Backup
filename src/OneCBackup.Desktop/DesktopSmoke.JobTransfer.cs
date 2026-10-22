@@ -36,6 +36,8 @@ internal static partial class DesktopSmoke
             window.JobImportDialogOverride = dialog => { dialog.FileName = source; return true; };
             Control<MenuItem>("ImportJobSettingsMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             await WaitUntil(() => window.SmokeReady, "Настройки задания не загрузились.");
+            if (!window.HasUnsavedJob)
+                throw new InvalidOperationException("Импортированное задание не защищено до первого изменения поля.");
         }
         try
         {
