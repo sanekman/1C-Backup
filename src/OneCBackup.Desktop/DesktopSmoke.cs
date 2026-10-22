@@ -36,6 +36,9 @@ internal static partial class DesktopSmoke
         {
             await WaitUntil(() => Application.Current.MainWindow is MainWindow { SmokeReady: true }, "Окно не завершило загрузку.");
             var window = (MainWindow)Application.Current.MainWindow;
+            // Existing scenarios explicitly abandon their temporary drafts.
+            window.UnsavedJobDialogOpened = dialog => dialog.Loaded += (_, _) =>
+                ((Button)dialog.FindName("DiscardDraftButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             // Measured progress is visible even when no job is selected. Independent destinations differ.
             var progressRun = Guid.NewGuid();
             window.RenderBackupProgress(new(progressRun, Guid.NewGuid(), "Тест прогресса", Environment.ProcessId, 1, DateTimeOffset.UtcNow,
@@ -938,6 +941,7 @@ internal static partial class DesktopSmoke
             await VerifyWebDavWizardAsync(window, name => Screenshot(name));
             await VerifySqlCredentialsAsync(window, name => Screenshot(name));
             await VerifyPostgreSqlToolsAsync(window, name => Screenshot(name));
+            await VerifyUnsavedJobAsync(window, (name, target) => Screenshot(name, target));
             await VerifyDiagnosticsAsync(window, name => Screenshot(name));
             await VerifyManualQueueReopenAsync(window, (name, target) => Screenshot(name, target));
             Finish(output, true, "Диагностический ZIP, постоянные логи, версия / коммит, отсутствие секретов / сырого профиля, неизменность заданий / истории / копий и отказ перезаписи; компактный мастер WebDAV, запрет HTTP, сохранение пароля приложения Windows без записи в JSON, полный / инкрементный режим и повторное редактирование; компактный мастер файлов, полная / инкрементная цепочка, сохранение основы при лимите 1, экспорт архива с пояснением зависимостей и точное восстановление файлов / удалений / пустых папок проверены; сохранение выбранной зашифрованной копии с SHA-256, отказ при повреждении и существующем файле, неизменность каталога; проверка последних копий во всех хранилищах без доступа к занятой базе, повреждение и отсутствие копии, неизменность журнала и истории; последние результаты всех заданий, подсказки, обновление без изменения выбора и компактная таблица, пояснения истории, переход к текущему заданию по ID, три ближайших запуска, смена дней / часового пояса / режима и итог, компактное окно, мастер и создание задания на основе существующего, отмена, независимое хранение копий двух баз, несколько времён, ZIP AES-256, сохранение пароля Windows, извлечение, ошибка занятой базы, история, каталог, SHA256, проверка хранилищ и импорт SQL-отчёта проверены на Windows.");

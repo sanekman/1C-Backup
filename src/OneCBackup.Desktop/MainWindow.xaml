@@ -647,7 +647,7 @@
         <WrapPanel><Button x:Name="CopyBuildInfoButton" Content="Скопировать версию для поддержки" Click="CopyBuildInfo_Click" Margin="0,0,0,8" /></WrapPanel>
         <TextBlock x:Name="BuildInfoStatus" TextWrapping="Wrap" Margin="0,0,0,8" />
         <Expander Header="Версия и сведения о сборке" Margin="0,0,0,14"><TextBox x:Name="BuildInfo" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Padding="0" Margin="0,10,0,0" AutomationProperties.Name="Версия и сведения о сборке" /></Expander>
-        <Expander Header="Завершение работы"><Button Content="Выйти полностью — остановить агент и закрыть окно" Click="ExitFully_Click" HorizontalAlignment="Left" Margin="0,10,0,0" /></Expander>
+        <Expander Header="Завершение работы"><Button x:Name="ExitFullyButton" Content="Выйти полностью — остановить агент и закрыть окно" Click="ExitFully_Click" HorizontalAlignment="Left" Margin="0,10,0,0" /></Expander>
        </StackPanel>
       </Grid>
      </Border>

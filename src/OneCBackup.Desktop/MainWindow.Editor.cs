@@ -33,6 +33,7 @@ public partial class MainWindow
         JobListCard.Visibility = Visibility.Collapsed;
         EditorCard.Visibility = Visibility.Visible;
         SetWizardStep(0);
+        RememberEditorDraft();
         UpdateRunControls();
         JobName.Focus();
     }
@@ -41,6 +42,8 @@ public partial class MainWindow
     {
         ++postgresToolSearchGeneration;
         editorOpen = false;
+        editorBaseline = null;
+        editorContainsImportedDraft = false;
         EditorCard.Visibility = Visibility.Collapsed;
         JobListCard.Visibility = Visibility.Visible;
         WizardError.Visibility = Visibility.Collapsed;
@@ -94,9 +97,11 @@ public partial class MainWindow
             : "Расписание выбранного задания выключено. Ручное копирование доступно; копии, уже принятые к выполнению, не отменяются.";
     }
 
-    private void CancelEditor_Click(object sender, RoutedEventArgs e)
+    private async void CancelEditor_Click(object sender, RoutedEventArgs e)
     {
-        if (persisting) return;
+        if (persisting || !await ConfirmLeavingEditorAsync()) return;
+        // Saving from the confirmation has already closed the editor.
+        if (!editorOpen) return;
         CloseEditor();
         // Reload the saved model; draft fields are never used by a manual run.
         if (selectionBeforeEdit is not null) Jobs.SelectedItem = jobs.FirstOrDefault(job => job.Id == selectionBeforeEdit.Id);

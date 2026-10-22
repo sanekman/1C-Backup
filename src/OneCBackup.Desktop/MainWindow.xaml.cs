@@ -172,12 +172,18 @@ public partial class MainWindow : Window
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
         if (!canSave || !editorOpen || wizardStep != 3) return;
-        for (var step = 0; step < 3; step++) if (!ValidateWizardStep(step)) return;
+        await SaveEditorAsync();
+    }
+
+    private async Task<bool> SaveEditorAsync()
+    {
+        if (!canSave || !editorOpen || persisting) return false;
+        for (var step = 0; step < 3; step++) if (!ValidateWizardStep(step)) return false;
         var scheduleKind = (ScheduleKind)Schedule.SelectedValue;
         TimeOnly[] times = [new(23, 0)];
         if ((scheduleKind is ScheduleKind.Daily or ScheduleKind.Weekly && !TryParseRunTimes(DailyAt.Text, out times))
             || !int.TryParse(KeepLast.Text, out var keep))
-        { Status.Text = "Укажите от 1 до 48 уникальных времён в формате чч:мм через запятую и целое число копий."; return; }
+        { Status.Text = "Укажите от 1 до 48 уникальных времён в формате чч:мм через запятую и целое число копий."; return false; }
         var storageKind = (StorageKind)Storage.SelectedValue;
         OneCSettings? oneC = null;
         var oneCMethod = OneCMethodPicker.SelectedValue is OneCBackupMethod method ? method : OneCBackupMethod.PlatformDump;
@@ -185,7 +191,7 @@ public partial class MainWindow : Window
         {
             if (!int.TryParse(OneCTimeout.Text, out var timeout))
             {
-                if (oneCMethod == OneCBackupMethod.PlatformDump) { Status.Text = "Укажите целое число минут ожидания выгрузки."; return; }
+                if (oneCMethod == OneCBackupMethod.PlatformDump) { Status.Text = "Укажите целое число минут ожидания выгрузки."; return false; }
                 timeout = 120;
             }
             oneC = ReadOneCSettings(timeout);
@@ -196,18 +202,18 @@ public partial class MainWindow : Window
         if (Kind.SelectedItem is DatabaseKind.SqlServer)
         {
             if (!int.TryParse(SqlBackupTimeout.Text, out var timeout))
-            { Status.Text = "Укажите целое число минут ожидания SQL-копии."; return; }
+            { Status.Text = "Укажите целое число минут ожидания SQL-копии."; return false; }
             sql = ReadSqlSettings(timeout);
         }
         if (Kind.SelectedItem is DatabaseKind.PostgreSql)
         {
             if (!int.TryParse(PgPort.Text, out var port) || !int.TryParse(PgTimeout.Text, out var timeout))
-            { Status.Text = "Укажите целые числа для порта и времени ожидания PostgreSQL."; return; }
+            { Status.Text = "Укажите целые числа для порта и времени ожидания PostgreSQL."; return false; }
             postgres = new PostgreSqlBackupSettings { Host = PgHost.Text.Trim(), Port = port, Username = PgUsername.Text.Trim(),
                 PgDumpPath = PgDumpPath.Text.Trim(), PgRestorePath = PgRestorePath.Text.Trim(), TimeoutMinutes = timeout };
         }
         if (storageKind == StorageKind.Ftp && !int.TryParse(FtpPort.Text, out ftpPort))
-        { Status.Text = "Укажите целое число в поле порта FTP."; return; }
+        { Status.Text = "Укажите целое число в поле порта FTP."; return false; }
         var job = new BackupJob
         {
             Id = editingId ?? Guid.NewGuid(), Name = JobName.Text.Trim(), Kind = (DatabaseKind)Kind.SelectedItem,
@@ -236,15 +242,17 @@ public partial class MainWindow : Window
             } : null
         };
         var errors = job.Validate();
-        if (errors.Count > 0) { Status.Text = string.Join(" ", errors); return; }
+        if (errors.Count > 0) { Status.Text = string.Join(" ", errors); return false; }
         if (EncryptArchive.IsChecked == true && archivePasswordKey is null)
-        { Status.Text = "Сначала задайте пароль архива."; return; }
+        { Status.Text = "Сначала задайте пароль архива."; return false; }
         var updated = jobs.Where(j => j.Id != job.Id).Append(job).ToList();
         if (await PersistAsync(updated))
         {
             JobSearch.Clear(); Jobs.SelectedItem = job; CloseEditor();
             Status.Text = "Задание сохранено. Нажмите «Создать копию», чтобы проверить его. Для расписания включите автоматическое копирование.";
+            return true;
         }
+        return false;
     }
 
     private async Task<bool> PersistAsync(List<BackupJob> updated)
@@ -322,6 +330,7 @@ public partial class MainWindow : Window
 
     private void Jobs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (editorOpen) { UpdateRunControls(); return; }
         if (!checkingStorages && StorageCheckResults is not null)
             StorageCheckResults.Visibility = Jobs.SelectedItem is BackupJob selected && selected.Id == storageCheckJobId
                 ? Visibility.Visible : Visibility.Collapsed;
@@ -468,13 +477,13 @@ public partial class MainWindow : Window
         UpdateTray();
         var idle = !serviceManaging && !installingUpdate && !trayStopping && !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
         var engineAvailable = !backgroundBusy && !backgroundStarting;
-        NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle;
+        NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle && !editorOpen;
         ImportJobSettingsMenuItem.IsEnabled = NewJobButton.IsEnabled && !editorOpen;
         ExportJobSettingsMenuItem.IsEnabled = ready && !jobFileTransfer && !persisting && !editorOpen && Jobs.SelectedItem is BackupJob;
         FirstJobButton.Visibility = jobs.Count == 0 && JobSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         FirstCopyGuideButton.Visibility = FirstJobButton.Visibility;
         JobActions.Visibility = jobs.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        EditJobButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
+        EditJobButton.IsEnabled = ready && canSave && idle && !editorOpen && Jobs.SelectedItem is BackupJob;
         DuplicateJobButton.IsEnabled = ready && canSave && idle && !editorOpen && Jobs.SelectedItem is BackupJob;
         var scheduledJob = Jobs.SelectedItem as BackupJob;
         JobScheduleButton.IsEnabled = ready && canSave && idle && !editorOpen && scheduledJob is { ScheduleKind: not ScheduleKind.Manual };
@@ -508,7 +517,8 @@ public partial class MainWindow : Window
             && historyRuns.Any(run => run.JobId == runJob.Id);
         JobEditor.IsEnabled = SaveButton.IsEnabled = ready && canSave && idle;
         DeleteButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
-        AgentModePicker.IsEnabled = SaveAgentSettingsButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null;
+        AgentModePicker.IsEnabled = SaveAgentSettingsButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null && !editorOpen;
+        SaveAgentSettingsButton.ToolTip = editorOpen ? "Сначала сохраните задание или закройте его редактор." : null;
         ExternalMonitoringButton.IsEnabled = ready && idle && schedulingTask is null;
         StartScheduleButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null && !editorOpen;
         ArchivePasswordButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;

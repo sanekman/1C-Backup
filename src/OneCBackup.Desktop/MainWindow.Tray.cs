@@ -78,7 +78,7 @@ public partial class MainWindow
         Activate();
     }
 
-    private void WindowClosingToTray(object? sender, CancelEventArgs e)
+    private async void WindowClosingToTray(object? sender, CancelEventArgs e)
     {
         if (allowFullClose || SmokeMode) return;
         if (trayIcon is { Visible: true })
@@ -94,7 +94,15 @@ public partial class MainWindow
             return;
         }
         if (persisting || jobFileTransfer || activeRun is not null || schedulingTask is not null || manualPending || copyVerification is not null)
-        { e.Cancel = true; Status.Text = "Дождитесь завершения операции или остановите копирование перед закрытием."; }
+        { e.Cancel = true; Status.Text = "Дождитесь завершения операции или остановите копирование перед закрытием."; return; }
+        if (HasUnsavedJob)
+        {
+            e.Cancel = true;
+            await Task.Yield(); // Complete WPF's Closing event before showing a dialog.
+            if (!await ConfirmLeavingEditorAsync()) return;
+            allowFullClose = true;
+            _ = Dispatcher.BeginInvoke(new Action(Close));
+        }
     }
 
     private void DisposeTray()
@@ -163,6 +171,8 @@ public partial class MainWindow
         if (serviceManaging) { ShowFromTray(); Status.Text = "Дождитесь завершения установки или удаления службы."; return; }
         if (OwnedWindows.Cast<Window>().Any(window => window.IsVisible))
         { ShowFromTray(); Status.Text = "Сначала закройте окно настроек или мониторинга, затем повторите остановку из трея."; return; }
+        // Resolve the draft before stopping any running work or handing off an update.
+        if (exit && !await ConfirmLeavingEditorAsync()) return;
         if (exit) updateCancellation?.Cancel();
         trayStopping = true;
         IsEnabled = false;
