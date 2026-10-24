@@ -7,6 +7,8 @@ param(
     [string]$ServerAddress = ('https://'+$env:COMPUTERNAME+':7443/'),
     [string]$ServerNameFile,
     [string]$ServerAddressFile,
+    [int]$HttpsPort = 0,
+    [ValidateSet('Preserve','Allow','None')][string]$FirewallMode = 'Preserve',
     [string]$AdministratorPasswordFile
 )
 $ErrorActionPreference = 'Stop'
@@ -23,6 +25,9 @@ function Random-Password {
     $bytes = New-Object byte[] 48
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
     try { $rng.GetBytes($bytes); return [Convert]::ToBase64String($bytes) } finally { $rng.Dispose() }
+}
+if ($PSBoundParameters.ContainsKey('HttpsPort') -and ($HttpsPort -lt 1 -or $HttpsPort -gt 65535 -or $HttpsPort -eq 15433)) {
+    throw 'HTTPS port must be between 1 and 65535 and differ from the internal database port 15433.'
 }
 if ($ServerNameFile) { $ServerName=[IO.File]::ReadAllText($ServerNameFile) }
 if ($ServerAddressFile) { $ServerAddress=[IO.File]::ReadAllText($ServerAddressFile) }
@@ -50,6 +55,8 @@ try {
         if ($ServerAddress -match '[\s\\]' -or ![Uri]::TryCreate($ServerAddress,[UriKind]::Absolute,[ref]$address) -or
             $address.Scheme -ne 'https' -or $address.HostNameType -notin @([UriHostNameType]::Dns,[UriHostNameType]::IPv4,[UriHostNameType]::IPv6) -or
             $address.UserInfo -or $address.Query -or $address.Fragment -or $address.Port -lt 1 -or $address.Host -in @('0.0.0.0','[::]')) { throw 'Enter an absolute HTTPS server address without login, query or fragment.' }
+        if ($HttpsPort -ne 0) { $builder=New-Object System.UriBuilder -ArgumentList $address; $builder.Port=$HttpsPort; $address=$builder.Uri }
+        if ($address.Port -eq 15433) { throw 'HTTPS port 15433 is reserved for the internal database.' }
         $pathBase=$address.AbsolutePath.TrimEnd('/')
         if ($pathBase -and $pathBase -notmatch '^/[a-zA-Z0-9/_-]+$') { throw 'The address path may contain letters, digits, slash, hyphen and underscore.' }
         $listenPort=$address.Port
@@ -89,6 +96,7 @@ try {
         Write-Private (Join-Path $DataDirectory 'administrator-password.txt') $adminPassword
         $settings = @{
             AllowedHosts = ((@($names)+@($address.Host) | Select-Object -Unique) -join ';'); Urls = ('https://+:'+$listenPort)
+            WindowsInstaller = @{ OpenFirewall = ($FirewallMode -ne 'None') }
             Server = @{
                 DisplayName = $ServerName; PublicAddress = $ServerAddress; PathBase = $(if ($pathBase) { $pathBase } else { $null })
                 DataDirectory = (Join-Path $DataDirectory 'data'); ConnectionStringFile = (Join-Path $DataDirectory 'connection-string.txt')
@@ -143,9 +151,29 @@ try {
     }
     Run-Native 'sc.exe' @('failure',$serverService,'reset=','86400','actions=','restart/10000/restart/30000/restart/60000')
     Run-Native 'sc.exe' @('failure',$pgService,'reset=','86400','actions=','restart/10000/restart/30000/restart/60000')
-    if (!(Get-NetFirewallRule -Name 'OneCBackupServer-Https' -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -Name 'OneCBackupServer-Https' -DisplayName '1C-Backup Server HTTPS' -Direction Inbound -Protocol TCP -LocalPort $listenPort -Program $exe -Profile Domain,Private -Action Allow | Out-Null
+    Step 'firewall'
+    $rule = Get-NetFirewallRule -Name 'OneCBackupServer-Https' -ErrorAction SilentlyContinue
+    if ($FirewallMode -eq 'Allow') { $openFirewall=$true }
+    elseif ($FirewallMode -eq 'None') { $openFirewall=$false }
+    elseif ($configuration.PSObject.Properties['WindowsInstaller'] -and $configuration.WindowsInstaller -and $configuration.WindowsInstaller.PSObject.Properties['OpenFirewall']) {
+        if ($configuration.WindowsInstaller.OpenFirewall -isnot [bool]) { throw 'Invalid saved firewall preference.' }
+        $openFirewall=$configuration.WindowsInstaller.OpenFirewall
+    } else {
+        # Legacy upgrades respect a removed/disabled rule instead of reopening access silently.
+        $openFirewall=[bool]($rule | Where-Object { $_.Enabled -eq 'True' })
     }
+    if ($openFirewall) {
+        if ($rule) {
+            $rule | Set-NetFirewallRule -Enabled True -Direction Inbound -Action Allow -Profile Domain,Private -Program $exe
+            $rule | Get-NetFirewallPortFilter | Set-NetFirewallPortFilter -Protocol TCP -LocalPort $listenPort
+        } else {
+            New-NetFirewallRule -Name 'OneCBackupServer-Https' -DisplayName '1C-Backup Server HTTPS' -Direction Inbound -Protocol TCP -LocalPort $listenPort -Program $exe -Profile Domain,Private -Action Allow | Out-Null
+        }
+    } elseif ($rule) { $rule | Remove-NetFirewallRule }
+    if (!$configuration.PSObject.Properties['WindowsInstaller'] -or !$configuration.WindowsInstaller) {
+        $configuration | Add-Member -NotePropertyName WindowsInstaller -NotePropertyValue ([pscustomobject]@{OpenFirewall=[bool]$openFirewall}) -Force
+    } else { $configuration.WindowsInstaller | Add-Member -NotePropertyName OpenFirewall -NotePropertyValue ([bool]$openFirewall) -Force }
+    Write-Private $config ($configuration | ConvertTo-Json -Depth 5)
     Step 'server-service'
     Start-Service -Name $serverService
     (Get-Service $serverService).WaitForStatus('Running',[TimeSpan]::FromSeconds(60))

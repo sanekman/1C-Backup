@@ -11,9 +11,12 @@ $address='https://127.0.0.1:7447/monitoring/'
 $password=[Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N')
 [IO.File]::WriteAllText($secret,$password,(New-Object Text.UTF8Encoding($false)))
 New-Item -ItemType Directory -Path 'artifacts/server-tests' -Force | Out-Null
-function Install-Server([string]$Name=$displayName,[string]$Url=$address) {
+function Install-Server([string]$Name=$displayName,[string]$Url=$address,[string]$Port='',[string]$Firewall='') {
     $log=Join-Path (Get-Location).Path ('artifacts/server-tests/windows-installer-'+[Guid]::NewGuid().ToString('N')+'.log')
-    $process=Start-Process -FilePath $Installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG="'+$log+'"'),('/ADMINPASSWORDFILE="'+$secret+'"'),('/SERVERNAME="'+$Name+'"'),('/SERVERADDRESS="'+$Url+'"')) -PassThru
+    $arguments=@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG="'+$log+'"'),('/ADMINPASSWORDFILE="'+$secret+'"'),('/SERVERNAME="'+$Name+'"'),('/SERVERADDRESS="'+$Url+'"'))
+    if ($Port -ne '') { $arguments+=('/HTTPSPORT='+$Port) }
+    if ($Firewall -ne '') { $arguments+=('/FIREWALL='+$Firewall) }
+    $process=Start-Process -FilePath $Installer -ArgumentList $arguments -PassThru
     if (!$process.WaitForExit(240000)) {
         & taskkill.exe /PID $process.Id /T /F | Out-Null
         throw 'Installer exceeded the four-minute phase timeout.'
@@ -35,6 +38,9 @@ function Login {
     if (($management.Content | ConvertFrom-Json).name -ne 'admin') { throw 'Administrator session not authenticated.' }
     $script:administratorSession=$session
     $script:administratorCsrf=($management.Content | ConvertFrom-Json).csrfToken
+    $theme=Invoke-WebRequest -UseBasicParsing ($address+'theme.js') -WebSession $session
+    $themeText=if ($theme.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($theme.Content) } else { [string]$theme.Content }
+    if (!$themeText.Contains('localStorage')) { throw 'Installed theme script unavailable.' }
     foreach ($path in @('system','account','audit')) {
         $view=Invoke-WebRequest -UseBasicParsing ($address+$path) -WebSession $session
         if ($view.StatusCode -ne 200) { throw 'Administration page failed.' }
@@ -48,7 +54,14 @@ function Login {
 
 }
 try {
-    Install-Server
+    $invalidRoot=Join-Path $env:TEMP ('onec-invalid-port-'+[Guid]::NewGuid().ToString('N'))
+    foreach ($invalidPort in @(0,-1,65536,15433)) {
+        $rejected=$false
+        try { & (Join-Path $PSScriptRoot '../../deploy/server/windows/Configure-Server.ps1') -InstallDirectory $install -DataDirectory $invalidRoot -HttpsPort $invalidPort }
+        catch { $rejected=$true }
+        if (!$rejected -or (Test-Path $invalidRoot)) { throw 'Invalid HTTPS port was not rejected before creating server data.' }
+    }
+    Install-Server -Url 'https://127.0.0.1/monitoring/' -Port '7447' -Firewall '0'
     Health
     Login
     $newPassword=[Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N')
@@ -58,6 +71,9 @@ try {
     Login
     $settings=Get-Content (Join-Path $root 'server.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.Server.DisplayName -ne $displayName -or $settings.Server.PublicAddress -ne $address) { throw 'Name and address were not stored independently.' }
+    if ($settings.Urls -ne 'https://+:7447' -or $settings.WindowsInstaller.OpenFirewall -ne $false) { throw 'Separate HTTPS port or unchecked firewall choice was not stored.' }
+    if (Get-NetFirewallRule -Name 'OneCBackupServer-Https' -ErrorAction SilentlyContinue) { throw 'Unchecked firewall created an inbound rule.' }
+
     if ([IO.File]::ReadAllText((Join-Path $root 'panel-url.txt')) -ne $address) { throw 'Panel shortcut address differs.' }
     $connectionHash=(Get-FileHash (Join-Path $root 'connection-string.txt')).Hash
     $certificateHash=(Get-FileHash (Join-Path $root 'server.pfx')).Hash
@@ -74,16 +90,39 @@ try {
     Login
     $settings=Get-Content (Join-Path $root 'server.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.Server.DisplayName -ne $displayName -or $settings.Server.PublicAddress -ne $address) { throw 'Reinstall overwrote the server identity.' }
+    if ($settings.WindowsInstaller.OpenFirewall -ne $false -or (Get-NetFirewallRule -Name 'OneCBackupServer-Https' -ErrorAction SilentlyContinue)) { throw 'Reinstall reopened a disabled firewall choice.' }
+
     if ($connectionHash -ne (Get-FileHash (Join-Path $root 'connection-string.txt')).Hash -or $certificateHash -ne (Get-FileHash (Join-Path $root 'server.pfx')).Hash) { throw 'Reinstall changed persistent credentials/certificate.' }
     # Upgrade a legacy configuration with only panel-url.txt; do not regenerate its certificate or database.
     $settings.Server.PSObject.Properties.Remove('DisplayName')
     $settings.Server.PSObject.Properties.Remove('PublicAddress')
+    $settings.PSObject.Properties.Remove('WindowsInstaller')
     [IO.File]::WriteAllText((Join-Path $root 'server.json'),($settings | ConvertTo-Json -Depth 5),(New-Object Text.UTF8Encoding($false)))
     Install-Server
     Health
     Login
     $settings=Get-Content (Join-Path $root 'server.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.Server.DisplayName -ne $displayName -or $settings.Server.PublicAddress -ne $address) { throw 'Legacy identity migration failed.' }
+    if ($settings.WindowsInstaller.OpenFirewall -ne $false -or (Get-NetFirewallRule -Name 'OneCBackupServer-Https' -ErrorAction SilentlyContinue)) { throw 'Legacy migration reopened a removed firewall rule.' }
+    Install-Server -Firewall '1'
+    Health
+    Login
+    $rule=Get-NetFirewallRule -Name 'OneCBackupServer-Https'
+    $filter=$rule | Get-NetFirewallPortFilter
+    if ($rule.Enabled -ne 'True' -or $rule.Direction -ne 'Inbound' -or $rule.Action -ne 'Allow' -or $filter.LocalPort -ne '7447') { throw 'Allowed firewall rule does not target the configured HTTPS port.' }
+    if ([string]$rule.Profile -match 'Public|Any') { throw 'Firewall rule unexpectedly opens a public network profile.' }
+    # Correct only the application's stale rule and preserve its user-defined remote-address scope.
+    $rule | Get-NetFirewallAddressFilter | Set-NetFirewallAddressFilter -RemoteAddress 'LocalSubnet'
+    $rule | Get-NetFirewallPortFilter | Set-NetFirewallPortFilter -LocalPort 7448
+    Install-Server
+    Health
+    $fixed=Get-NetFirewallRule -Name 'OneCBackupServer-Https'
+    if (($fixed | Get-NetFirewallPortFilter).LocalPort -ne '7447' -or [string]($fixed | Get-NetFirewallAddressFilter).RemoteAddress -ne 'LocalSubnet') { throw 'Firewall repair lost the configured port or custom remote scope.' }
+    Install-Server -Firewall '0'
+    Health
+    Login
+    if (Get-NetFirewallRule -Name 'OneCBackupServer-Https' -ErrorAction SilentlyContinue) { throw 'Explicit firewall opt-out did not remove the owned rule.' }
+
     if ($connectionHash -ne (Get-FileHash (Join-Path $root 'connection-string.txt')).Hash -or $certificateHash -ne (Get-FileHash (Join-Path $root 'server.pfx')).Hash) { throw 'Migration changed persistent credentials/certificate.' }
     # Reboot-equivalent SCM stop/start; both services must recover with their installed identity.
     & (Join-Path $install 'windows\Stop-Server.ps1')
@@ -100,7 +139,7 @@ try {
     Health
     Login
     New-Item -ItemType Directory -Path 'artifacts/server-tests' -Force | Out-Null
-    @{ passwordChangePreservedAfterReinstall=$true; diagnosticZip=$true; administrationPages=$true; separateNameAndAddress=$true; customHttpsPortAndPath=$true; ipCertificateValidated=$true; legacyIdentityMigration=$true; installed=$true; https=$true; administratorLogin=$true; reinstallPreservesData=$true; serviceRestart=$true; uninstallPreservesDatabase=$true; reinstallAfterUninstall=$true } | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-installer-result.json'
+    @{ separateHttpsPort=$true; firewallOptOutPreserved=$true; legacyFirewallChoicePreserved=$true; firewallRulePortAndProfiles=$true; firewallRemoteScopePreserved=$true; passwordChangePreservedAfterReinstall=$true; diagnosticZip=$true; administrationPages=$true; separateNameAndAddress=$true; customHttpsPortAndPath=$true; ipCertificateValidated=$true; legacyIdentityMigration=$true; installed=$true; https=$true; administratorLogin=$true; reinstallPreservesData=$true; serviceRestart=$true; uninstallPreservesDatabase=$true; reinstallAfterUninstall=$true } | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-installer-result.json'
 } catch {
     if (Test-Path (Join-Path $root 'setup.log')) { Get-Content (Join-Path $root 'setup.log') }
     Get-Service OneCBackupServer,OneCBackupServerDatabase -ErrorAction SilentlyContinue | Select-Object Name,Status | Format-Table

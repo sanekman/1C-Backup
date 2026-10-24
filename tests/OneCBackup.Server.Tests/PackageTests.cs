@@ -63,6 +63,8 @@ public sealed class PackageTests(ServerFixture fixture) : IClassFixture<ServerFi
             Assert.True(ready, server.HasExited ? await errorOutput : "Published server did not become ready.");
             using var style = await client.GetAsync("app.css"); Assert.Equal(HttpStatusCode.OK, style.StatusCode);
             Assert.Contains("@media", await style.Content.ReadAsStringAsync());
+            using var theme = await client.GetAsync("theme.js"); theme.EnsureSuccessStatusCode();
+            Assert.Contains("localStorage", await theme.Content.ReadAsStringAsync());
             await fixture.SignInAsync(client);
             using var panel = await client.GetAsync(""); Assert.Equal(HttpStatusCode.OK, panel.StatusCode);
             using var system = await client.GetAsync("system"); system.EnsureSuccessStatusCode();
