@@ -36,6 +36,7 @@ public partial class ExternalMonitoringWindow
         if (dialog.ShowDialog() == true)
         {
             sqlCredentialKey = key; sqlCredentialServer = SqlServer.Text.Trim(); UpdateSqlCredentialStatus();
+            Status.Text = "Данные входа сохранены в Windows. Нажмите «Сохранить источник», затем «Проверить источник».";
         }
     }
 }

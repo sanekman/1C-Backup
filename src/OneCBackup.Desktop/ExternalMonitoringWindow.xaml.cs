@@ -137,6 +137,7 @@ public partial class ExternalMonitoringWindow : Window
     {
         if (!ready || busy) return;
         SourceSettings.IsExpanded = true;
+        ReportDetailsPanel.IsExpanded = PollStatusesPanel.IsExpanded = false;
         ClearMonitorEditor();
     }
 

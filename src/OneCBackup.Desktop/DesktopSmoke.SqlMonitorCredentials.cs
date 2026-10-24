@@ -35,6 +35,9 @@ internal static partial class DesktopSmoke
             Click("SqlCredentialsButton");
             if (key is null || (await credentials.GetAsync(key)).Password != secret)
                 throw new InvalidOperationException("Пароль мониторинга не сохранён в Windows.");
+            if (Control<TextBlock>("Status").Text.Contains("Не удалось сохранить")
+                || Control<Expander>("ReportDetailsPanel").IsExpanded || Control<Expander>("PollStatusesPanel").IsExpanded)
+                throw new InvalidOperationException("Новый источник сохраняет старую ошибку или подробности прежнего наблюдения.");
             Control<StackPanel>("SqlCredentialsPanel").BringIntoView(); window.UpdateLayout();
             screenshot("sql-monitor-login", window);
             Click("SaveMonitorButton"); await WaitUntil(() => window.SmokeReady, "Источник SQL не сохранён.");
