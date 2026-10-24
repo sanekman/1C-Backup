@@ -12,7 +12,7 @@ using OneCBackup.Server.Components;
 
 namespace OneCBackup.Server;
 
-public static class ServerHost
+public static partial class ServerHost
 {
     public static WebApplication Build(string[] args)
     {
@@ -55,6 +55,7 @@ public static class ServerHost
         builder.Services.AddSingleton(settings);
         builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(database.ConnectionString));
         builder.Services.AddSingleton<ServerStore>(); builder.Services.AddSingleton<ServerLog>();
+        builder.Services.AddSingleton<ServerDiagnostics>();
         var protection = builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(keys)).SetApplicationName("OneCBackup.Server");
         if (OperatingSystem.IsWindows()) protection.ProtectKeysWithDpapi();
         ServerAuthentication.Add(builder, settings);
@@ -70,6 +71,8 @@ public static class ServerHost
         builder.Services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = 429;
+            options.AddPolicy("maintenance", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "local",
+                _ => new() { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
             options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "local",
                 _ => new() { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
             options.AddPolicy("enrollment", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "local",
@@ -106,7 +109,7 @@ public static class ServerHost
         app.MapGet("/health/live", () => Results.Text("live"));
         app.MapGet("/health/ready", async (ServerStore store, CancellationToken token) => await store.ReadyAsync(token) ? Results.Text("ready") : Results.StatusCode(503));
         app.MapOpenApi().RequireAuthorization(ServerAuthentication.Administrator);
-        MapSessions(app); MapApi(app);
+        MapSessions(app); MapApi(app); MapAdministration(app);
         app.MapRazorComponents<App>();
         return app;
     }
@@ -130,6 +133,7 @@ public static class ServerHost
             if (name.Length is < 1 or > 80 || password.Length is < 1 or > 256) throw new ServerRequestException(400, "invalid_login");
             var user = await store.LoginAsync(name, password, context.RequestAborted);
             if (user is null) { log.Write(ServerEvent.LoginFailed); return Results.Redirect(context.Request.PathBase + "/login?failed=1"); }
+            await store.RecordAdministratorLoginAsync(user.Id, context.RequestAborted);
             var identity = new ClaimsIdentity([new(ClaimTypes.NameIdentifier, user.Id.ToString("D")), new(ClaimTypes.Name, user.Name),
                 new(ClaimTypes.Role, ServerAuthentication.Administrator), new("stamp", user.SecurityStamp.ToString("D"))], CookieAuthenticationDefaults.AuthenticationScheme);
             await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));

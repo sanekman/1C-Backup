@@ -194,7 +194,7 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
         await AuditAsync(connection, transaction, userId, agentId, "AgentRevoked", token);
         await transaction.CommitAsync(token);
     }
-    private static async Task AuditAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid? user, Guid? agent, string kind, CancellationToken token)
+    private static async Task AuditAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid? user, Guid? agent, string kind, CancellationToken token)
     {
         await using var cmd = Command(connection, transaction, "INSERT INTO server_audit(user_id,agent_id,event) VALUES(@user,@agent,@event)", ("user", user), ("agent", agent), ("event", kind));
         await cmd.ExecuteNonQueryAsync(token);

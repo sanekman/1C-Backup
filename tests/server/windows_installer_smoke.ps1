@@ -33,10 +33,28 @@ function Login {
     $panel=Invoke-WebRequest -UseBasicParsing ($address+'session/login') -Method Post -WebSession $session -Body @{name='admin';password=$password;__RequestVerificationToken=$token}
     $management=Invoke-WebRequest -UseBasicParsing ($address+'api/v1/management/session') -WebSession $session
     if (($management.Content | ConvertFrom-Json).name -ne 'admin') { throw 'Administrator session not authenticated.' }
+    $script:administratorSession=$session
+    $script:administratorCsrf=($management.Content | ConvertFrom-Json).csrfToken
+    foreach ($path in @('system','account','audit')) {
+        $view=Invoke-WebRequest -UseBasicParsing ($address+$path) -WebSession $session
+        if ($view.StatusCode -ne 200) { throw 'Administration page failed.' }
+    }
+    $diagnostic=Join-Path (Get-Location).Path 'artifacts/server-tests/windows-server-diagnostics.zip'
+    Invoke-WebRequest -UseBasicParsing ($address+'api/v1/management/diagnostics') -Method Post -WebSession $session -Headers @{'X-CSRF-TOKEN'=$script:administratorCsrf} -OutFile $diagnostic
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive=[IO.Compression.ZipFile]::OpenRead($diagnostic)
+    try { if (!$archive.GetEntry('server.json') -or !$archive.GetEntry('events.json')) { throw 'Diagnostic ZIP missing summary/events.' } }
+    finally { $archive.Dispose() }
+
 }
 try {
     Install-Server
     Health
+    Login
+    $newPassword=[Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N')
+    $changed=Invoke-WebRequest -UseBasicParsing ($address+'management/password') -Method Post -WebSession $script:administratorSession -Headers @{'X-CSRF-TOKEN'=$script:administratorCsrf} -Body @{currentPassword=$password;newPassword=$newPassword;confirmation=$newPassword}
+    if (![Net.WebUtility]::HtmlDecode($changed.Content).Contains('Пароль изменён')) { throw 'Panel password change did not complete.' }
+    $script:password=$newPassword
     Login
     $settings=Get-Content (Join-Path $root 'server.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.Server.DisplayName -ne $displayName -or $settings.Server.PublicAddress -ne $address) { throw 'Name and address were not stored independently.' }
@@ -82,7 +100,7 @@ try {
     Health
     Login
     New-Item -ItemType Directory -Path 'artifacts/server-tests' -Force | Out-Null
-    @{ separateNameAndAddress=$true; customHttpsPortAndPath=$true; ipCertificateValidated=$true; legacyIdentityMigration=$true; installed=$true; https=$true; administratorLogin=$true; reinstallPreservesData=$true; serviceRestart=$true; uninstallPreservesDatabase=$true; reinstallAfterUninstall=$true } | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-installer-result.json'
+    @{ passwordChangePreservedAfterReinstall=$true; diagnosticZip=$true; administrationPages=$true; separateNameAndAddress=$true; customHttpsPortAndPath=$true; ipCertificateValidated=$true; legacyIdentityMigration=$true; installed=$true; https=$true; administratorLogin=$true; reinstallPreservesData=$true; serviceRestart=$true; uninstallPreservesDatabase=$true; reinstallAfterUninstall=$true } | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-installer-result.json'
 } catch {
     if (Test-Path (Join-Path $root 'setup.log')) { Get-Content (Join-Path $root 'setup.log') }
     Get-Service OneCBackupServer,OneCBackupServerDatabase -ErrorAction SilentlyContinue | Select-Object Name,Status | Format-Table

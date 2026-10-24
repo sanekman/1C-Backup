@@ -18,6 +18,14 @@
 </dl>
 <p>Проверка готовности: <a href="health/ready">health/ready</a>. Панель обновляется каждые 30 секунд.</p>
 <p class="muted">Данные сервера и база должны входить в ваше системное резервное копирование. Установщик сохраняет их при обновлении и удалении программы.</p></section>
+<section class="card">
+<h2>Обслуживание</h2>
+<p><a class="button" href="account">Сменить пароль администратора</a> <a class="button" href="audit">Журнал действий</a></p>
+<h2>Помощь при проблеме</h2>
+<p>Скачайте ZIP диагностики и передайте поддержке вместе с временем и описанием проблемы.</p>
+<form action="api/v1/management/diagnostics" method="post"><AntiforgeryToken /><button type="submit">Скачать диагностику сервера</button></form>
+<p class="muted">В ZIP — состояние сервера и последние события. База, настройки, пароли, токены и сертификаты не включаются. Это не резервная копия сервера.</p>
+</section>
 @code {
     private bool Ready;
     private string Disk = "Нет данных";

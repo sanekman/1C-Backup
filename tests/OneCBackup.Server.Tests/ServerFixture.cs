@@ -101,13 +101,13 @@ public sealed class ServerFixture : IAsyncLifetime
         }
     };
     public HttpClient Client() => new(Handler()) { BaseAddress = Address };
-    public async Task SignInAsync(HttpClient client, string basePath = "")
+    public async Task SignInAsync(HttpClient client, string basePath = "", string? password = null)
     {
         using var page = await client.GetAsync(basePath + "login"); page.EnsureSuccessStatusCode();
         var html = await page.Content.ReadAsStringAsync();
         var token = AntiToken(html);
         using var response = await client.PostAsync(basePath + "session/login", new FormUrlEncodedContent(new Dictionary<string, string>
-            { ["__RequestVerificationToken"] = token, ["name"] = "administrator", ["password"] = Password }));
+            { ["__RequestVerificationToken"] = token, ["name"] = "administrator", ["password"] = password ?? Password }));
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.DoesNotContain("failed", response.Headers.Location!.OriginalString);
     }

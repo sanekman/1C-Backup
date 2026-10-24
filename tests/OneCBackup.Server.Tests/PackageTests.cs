@@ -65,6 +65,18 @@ public sealed class PackageTests(ServerFixture fixture) : IClassFixture<ServerFi
             Assert.Contains("@media", await style.Content.ReadAsStringAsync());
             await fixture.SignInAsync(client);
             using var panel = await client.GetAsync(""); Assert.Equal(HttpStatusCode.OK, panel.StatusCode);
+            using var system = await client.GetAsync("system"); system.EnsureSuccessStatusCode();
+            Assert.Contains("Скачать диагностику сервера", WebUtility.HtmlDecode(await system.Content.ReadAsStringAsync()));
+            using var account = await client.GetAsync("account"); account.EnsureSuccessStatusCode();
+            Assert.Contains("currentPassword", await account.Content.ReadAsStringAsync());
+            using var audit = await client.GetAsync("audit"); audit.EnsureSuccessStatusCode();
+            using var session = await client.GetAsync("api/v1/management/session");
+            using var info = System.Text.Json.JsonDocument.Parse(await session.Content.ReadAsStringAsync());
+            using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/management/diagnostics");
+            request.Headers.Add("X-CSRF-TOKEN", info.RootElement.GetProperty("csrfToken").GetString());
+            using var diagnostics = await client.SendAsync(request); diagnostics.EnsureSuccessStatusCode();
+            using var zip = new System.IO.Compression.ZipArchive(new MemoryStream(await diagnostics.Content.ReadAsByteArrayAsync()));
+            Assert.NotNull(zip.GetEntry("server.json"));
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", enrolled.Token);
             using var configuration = await client.GetAsync("api/v1/agents/" + enrolled.AgentId + "/configuration"); Assert.Equal(HttpStatusCode.OK, configuration.StatusCode);
             Assert.Contains(enrolled.AgentId.ToString(), await configuration.Content.ReadAsStringAsync());

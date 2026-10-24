@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace OneCBackup.Server;
 
-public enum ServerEvent { Started, Stopped, StartupFailed, RequestFailed, LoginSucceeded, LoginFailed, InvitationCreated, AgentEnrolled, AgentRevoked }
+public enum ServerEvent { Started, Stopped, StartupFailed, RequestFailed, LoginSucceeded, LoginFailed, InvitationCreated, AgentEnrolled, AgentRevoked, AdministratorPasswordChanged, PasswordChangeFailed, DiagnosticsDownloaded }
 public sealed class ServerLog(ServerOptions options)
 {
     private readonly object gate = new();

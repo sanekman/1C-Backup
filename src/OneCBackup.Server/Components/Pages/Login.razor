@@ -7,6 +7,7 @@
     <p><strong>@Settings.DisplayName</strong></p>
     <p class="muted">Войдите под учётной записью администратора сервера.</p>
     @if (Failed == "1") { <p class="error" role="alert">Не удалось войти. Проверьте имя и пароль.</p> }
+    @if (Changed == "1") { <p role="status">Пароль изменён. Войдите с новым паролем. Остальные сеансы панели завершены.</p> }
     <form action="session/login" method="post">
         <AntiforgeryToken />
         <label>Имя пользователя<input name="name" autocomplete="username" maxlength="80" required /></label>
@@ -14,4 +15,5 @@
         <button type="submit">Войти</button>
     </form>
 </section>
-@code { [SupplyParameterFromQuery(Name = "failed")] public string? Failed { get; set; } }
+@code { [SupplyParameterFromQuery(Name = "failed")] public string? Failed { get; set; }
+[SupplyParameterFromQuery(Name = "changed")] public string? Changed { get; set; } }
