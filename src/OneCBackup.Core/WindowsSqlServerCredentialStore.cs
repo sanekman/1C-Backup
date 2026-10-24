@@ -13,7 +13,12 @@ public interface ISqlServerCredentialStore
 public sealed class WindowsSqlServerCredentialStore : ISqlServerCredentialStore
 {
     private readonly WindowsFtpCredentialStore store = new("SqlServer", exportNewSecrets: false);
-    public Task<NetworkCredential> GetAsync(string key, CancellationToken token = default) => store.GetAsync(key, token);
+    public async Task<NetworkCredential> GetAsync(string key, CancellationToken token = default)
+    {
+        try { return await store.GetAsync(key, token); }
+        catch (InvalidOperationException error)
+        { throw new InvalidOperationException("Не удалось прочитать сохранённые данные входа MS SQL. Откройте задание или источник мониторинга в программе владельца, задайте логин и пароль заново и сохраните настройки.", error); }
+    }
     public void Save(string key, string username, string password)
     {
         if (string.IsNullOrWhiteSpace(username) || username.Length > 128 || username.Any(char.IsControl))

@@ -22,6 +22,14 @@ public sealed class SqlServerBackupHistorySource(Func<ExternalBackupMonitor, DbC
     public async Task<IReadOnlyList<ExternalBackupObservation>> ReadAsync(ExternalBackupMonitor monitor,
         CancellationToken cancellationToken = default)
     {
+        try { return await ReadCoreAsync(monitor, cancellationToken); }
+        catch (Exception ex) when (SqlServerErrorHints.Describe(ex) is { } hint)
+        { throw new IOException(hint, ex); }
+    }
+
+    private async Task<IReadOnlyList<ExternalBackupObservation>> ReadCoreAsync(ExternalBackupMonitor monitor,
+        CancellationToken cancellationToken)
+    {
         monitor.Validate();
         if (monitor.Kind != ExternalBackupSourceKind.SqlServerHistory) throw new ArgumentException("Нужен источник MS SQL.");
         await using var connection = connectionFactory?.Invoke(monitor) ?? await CreateConnectionAsync(monitor, credentials, cancellationToken);

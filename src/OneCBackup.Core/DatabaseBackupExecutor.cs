@@ -132,6 +132,8 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { throw new TimeoutException("Превышено время копирования MS SQL."); }
+        catch (Exception ex) when (SqlServerErrorHints.Describe(ex) is { } hint)
+        { throw new IOException(hint, ex); }
     }
 
     private static void AddParameter(DbCommand command, string name, string value)

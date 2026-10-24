@@ -93,6 +93,12 @@ public sealed class SourceReadinessCheckerTests : IDisposable
             await File.WriteAllTextAsync(command.ErrorLogPath!, "fixture", token); return exitCode;
         });
         var result = await Checker(process).CheckAsync(job); Assert.Equal(success, result.Succeeded);
+        if (!success)
+        {
+            Assert.Contains("Код выхода не определяет точную причину", result.Details);
+            Assert.Contains("редакторе задания", result.Details);
+            Assert.DoesNotContain("fixture", result.Details);
+        }
         var call = Assert.Single(process.Calls);
         Assert.Contains("--dbname=database with spaces", call.Arguments);
         Assert.Contains("--command=SELECT 1;", call.Arguments); Assert.Contains("--no-password", call.Arguments);

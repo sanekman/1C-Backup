@@ -49,7 +49,12 @@ public sealed class ExternalBackupPoller(ExternalBackupMonitorStore store, Exter
                     results.Add(new ExternalBackupPollResult(monitor.Id, monitor.Name, now.ToUniversalTime(), observations.Count, added));
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-                catch (Exception ex) { results.Add(new ExternalBackupPollResult(monitor.Id, monitor.Name, now.ToUniversalTime(), 0, 0, ex.Message)); }
+                catch (Exception ex)
+                {
+                    DiagnosticLog.Current.Write(DiagnosticEvent.MonitoringFailed, DiagnosticLevel.Warning, ex,
+                        sourceKind: monitor.Kind == ExternalBackupSourceKind.SqlServerHistory ? DatabaseKind.SqlServer : DatabaseKind.PostgreSql);
+                    results.Add(new ExternalBackupPollResult(monitor.Id, monitor.Name, now.ToUniversalTime(), 0, 0, ex.Message));
+                }
             }
             var old = await status.ReadAsync(cancellationToken);
             var currentIds = monitors.Select(m => m.Id).ToHashSet();

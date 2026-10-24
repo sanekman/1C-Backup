@@ -38,7 +38,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         catch (OperationCanceledException)
         { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Warning, jobId: job.Id, sourceKind: job.Kind, values: new(Code: 3)); return new(false, "Время проверки источника превысило 30 секунд. Проверьте подключение и доступ."); }
         catch (Exception ex)
-        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Error, ex, jobId: job.Id, sourceKind: job.Kind); return new(false, ex.Message); }
+        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Error, ex, jobId: job.Id, sourceKind: job.Kind); return new(false, job.Kind == DatabaseKind.SqlServer ? SqlServerErrorHints.Describe(ex) ?? ex.Message : ex.Message); }
     }
 
     private async Task<SourceCheckReport> CheckWebDavAsync(BackupJob job, CancellationToken token)
@@ -106,7 +106,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         var value = await command.ExecuteScalarAsync(token);
         token.ThrowIfCancellationRequested();
         if (value is not int result || result != 1)
-            return new(false, "База недоступна или нет права BACKUP DATABASE. Проверьте имя базы и права выбранного пользователя MS SQL.");
+            return new(false, "Подключение к MS SQL установлено, но база недоступна или нет права BACKUP DATABASE. Проверьте имя базы в задании и попросите администратора проверить доступ и права выбранного пользователя. При Windows-входе служба использует свою учётную запись.");
         return new(true, "Подключение к MS SQL, доступ к базе и право BACKUP DATABASE проверены. Копия не создавалась. Права службы на серверную папку, сопоставление путей, VERIFYONLY и восстановление проверяются отдельно.");
     }
 
@@ -132,7 +132,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
             token.ThrowIfCancellationRequested();
             return code == 0
                 ? new(true, "Подключение к базе PostgreSQL проверено через psql и SELECT 1. Дамп не создавался. Доступ к данным всех таблиц, совместимость pg_dump и восстановление проверяются первой копией и тестовым восстановлением.")
-                : new(false, $"psql завершился с кодом {code}. Проверьте имя базы, сервер, пользователя, выбранный способ входа и настройки TLS.");
+                : new(false, $"Не удалось проверить подключение к PostgreSQL (psql, код {code}). Проверьте сервер, порт, имя базы и пользователя. В редакторе задания проверьте выбранный способ входа и при необходимости задайте пароль заново. Если сервер требует TLS, попросите администратора проверить настройки и сертификаты. Код выхода не определяет точную причину; дамп при этой проверке не создавался.");
         }
         finally
         {
