@@ -1,10 +1,10 @@
 using System.Data.Common;
-using Microsoft.Data.SqlClient;
 
 namespace OneCBackup.Core;
 
 /// <summary>Read-only msdb history. Does not run BACKUP, inspect files, or prune external copies.</summary>
-public sealed class SqlServerBackupHistorySource(Func<ExternalBackupMonitor, DbConnection>? connectionFactory = null) : IExternalBackupSource
+public sealed class SqlServerBackupHistorySource(Func<ExternalBackupMonitor, DbConnection>? connectionFactory = null,
+    ISqlServerCredentialStore? credentials = null) : IExternalBackupSource
 {
     internal const string Query = """
         SELECT CAST(SERVERPROPERTY('ServerName') AS nvarchar(256)),
@@ -24,12 +24,7 @@ public sealed class SqlServerBackupHistorySource(Func<ExternalBackupMonitor, DbC
     {
         monitor.Validate();
         if (monitor.Kind != ExternalBackupSourceKind.SqlServerHistory) throw new ArgumentException("Нужен источник MS SQL.");
-        await using var connection = connectionFactory?.Invoke(monitor) ?? new SqlConnection(new SqlConnectionStringBuilder
-        {
-            DataSource = monitor.SqlServer, InitialCatalog = "msdb", IntegratedSecurity = true,
-            Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = false, ConnectTimeout = 15,
-            ApplicationName = "1C-Backup monitor"
-        }.ConnectionString);
+        await using var connection = connectionFactory?.Invoke(monitor) ?? await CreateConnectionAsync(monitor, credentials, cancellationToken);
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = Query;
@@ -55,6 +50,15 @@ public sealed class SqlServerBackupHistorySource(Func<ExternalBackupMonitor, DbC
             observations[key] = observation;
         }
         return observations.Values.ToArray();
+    }
+
+    internal static Task<DbConnection> CreateConnectionAsync(ExternalBackupMonitor monitor,
+        ISqlServerCredentialStore? credentials = null, CancellationToken token = default)
+    {
+        monitor.Validate();
+        if (monitor.Kind != ExternalBackupSourceKind.SqlServerHistory) throw new ArgumentException("Нужен источник MS SQL.");
+        return SqlServerConnectionFactory.CreateAsync(monitor.SqlServer, monitor.SqlAuthentication,
+            monitor.SqlCredentialKey, "msdb", "1C-Backup monitor", credentials, token);
     }
 
     private static void AddParameter(DbCommand command, string name, System.Data.DbType type, object value)

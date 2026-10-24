@@ -34,6 +34,12 @@ public partial class ExternalMonitoringWindow : Window
         pollingStatus = new ExternalBackupPollingStatusStore(directory);
         engine = new BackupEngineCoordinator(directory);
         InitializeComponent();
+        SqlAuthentication.ItemsSource = new Dictionary<SqlServerAuthentication, string>
+        {
+            [SqlServerAuthentication.Windows] = "Учётная запись Windows исполнителя",
+            [SqlServerAuthentication.SqlServer] = "Логин и пароль MS SQL"
+        };
+        SqlAuthentication.SelectedValue = SqlServerAuthentication.Windows;
         SourceKind.ItemsSource = new Dictionary<ExternalBackupSourceKind, string>
         {
             [ExternalBackupSourceKind.SqlServerHistory] = "MS SQL: история msdb",
@@ -114,7 +120,15 @@ public partial class ExternalMonitoringWindow : Window
         UpdateMonitorControls();
         if (SelectedMonitor is not { } monitor) return;
         editingId = monitor.Id; MonitorName.Text = monitor.Name; SourceKind.SelectedValue = monitor.Kind;
-        SqlServer.Text = monitor.SqlServer; Database.Text = monitor.DatabaseName;
+        loadingSqlSource = true;
+        try
+        {
+            SqlServer.Text = monitor.SqlServer; sqlCredentialKey = monitor.SqlCredentialKey;
+            sqlCredentialServer = monitor.SqlServer; SqlAuthentication.SelectedValue = monitor.SqlAuthentication;
+            UpdateSqlCredentialStatus();
+        }
+        finally { loadingSqlSource = false; }
+        Database.Text = monitor.DatabaseName;
         Days.Text = monitor.LookbackDays.ToString(); ReportDirectory.Text = monitor.ReportDirectory;
         MonitorEnabled.IsChecked = monitor.Enabled; PollInterval.Text = monitor.PollIntervalSeconds.ToString();
     }
@@ -129,6 +143,8 @@ public partial class ExternalMonitoringWindow : Window
     private void ClearMonitorEditor()
     {
         editingId = null; Sources.SelectedItem = null; MonitorName.Clear(); SqlServer.Clear(); Database.Clear();
+        sqlCredentialKey = null; sqlCredentialServer = null;
+        SqlAuthentication.SelectedValue = SqlServerAuthentication.Windows; UpdateSqlCredentialStatus();
         ReportDirectory.Clear(); Days.Text = "30";
         MonitorEnabled.IsChecked = true; PollInterval.Text = "60";
     }
@@ -144,12 +160,16 @@ public partial class ExternalMonitoringWindow : Window
             {
                 Id = editingId ?? Guid.NewGuid(), Name = MonitorName.Text.Trim(),
                 Kind = (ExternalBackupSourceKind)SourceKind.SelectedValue,
+                SqlAuthentication = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory ? SelectedSqlAuthentication : SqlServerAuthentication.Windows,
+                SqlCredentialKey = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory && SelectedSqlAuthentication == SqlServerAuthentication.SqlServer ? sqlCredentialKey : null,
                 SqlServer = SqlServer.Text.Trim(), DatabaseName = Database.Text.Trim(), TimeZoneId = TimeZoneInfo.Local.Id,
                 LookbackDays = int.TryParse(Days.Text, out var days) ? days : 0, ReportDirectory = ReportDirectory.Text.Trim(),
                 Enabled = MonitorEnabled.IsChecked == true, PollIntervalSeconds = int.TryParse(PollInterval.Text, out var interval) ? interval : 0
             };
             monitor.Validate();
             var updated = monitors.Where(m => m.Id != monitor.Id).Append(monitor).ToList();
+            if (monitor.SqlAuthentication == SqlServerAuthentication.SqlServer && monitor.SqlCredentialKey is { } key)
+                await new WindowsSqlServerCredentialStore().ExportForServiceAsync(key, lifetime.Token);
             await store.SaveAsync(updated, lifetime.Token);
             monitors = updated; BindMonitorSources(monitor.Id);
             UpdateReportSourceChoices(); ApplyReportFilter(); SourceSettings.IsExpanded = false;

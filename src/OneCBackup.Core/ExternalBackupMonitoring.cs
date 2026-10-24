@@ -11,6 +11,10 @@ public sealed record ExternalBackupMonitor
     public string Name { get; init; } = "";
     public ExternalBackupSourceKind Kind { get; init; }
     public string SqlServer { get; init; } = "";
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public SqlServerAuthentication SqlAuthentication { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? SqlCredentialKey { get; init; }
     public string DatabaseName { get; init; } = "";
     public string TimeZoneId { get; init; } = "UTC";
     public int LookbackDays { get; init; } = 30;
@@ -26,6 +30,11 @@ public sealed record ExternalBackupMonitor
             throw new InvalidDataException("Интервал опроса источника должен быть от 15 до 86400 секунд.");
         if (Kind == ExternalBackupSourceKind.SqlServerHistory && string.IsNullOrWhiteSpace(SqlServer))
             throw new InvalidDataException("Укажите экземпляр MS SQL.");
+        if (Kind == ExternalBackupSourceKind.SqlServerHistory)
+        {
+            var errors = SqlServerConnectionFactory.ValidateAuthentication(SqlAuthentication, SqlCredentialKey);
+            if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
+        }
         if (Kind == ExternalBackupSourceKind.PostgreSqlReports && !Path.IsPathFullyQualified(ReportDirectory))
             throw new InvalidDataException("Укажите полный путь к каталогу отчётов PostgreSQL.");
         try { TimeZoneInfo.FindSystemTimeZoneById(TimeZoneId); }

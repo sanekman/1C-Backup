@@ -994,6 +994,7 @@ internal static partial class DesktopSmoke
             if (Control<DataGrid>("Reports").Items.Count != 1)
                 throw new InvalidOperationException("Мониторинг дублирует внешний отчёт.");
             await VerifyMonitoringFiltersAsync(monitorWindow, settings, observation, screenshot);
+            await VerifySqlMonitorCredentialsAsync(monitorWindow, screenshot);
         }
         finally { monitorWindow.Close(); }
     }

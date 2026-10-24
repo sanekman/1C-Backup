@@ -261,13 +261,18 @@ public partial class MainWindow : Window
         UpdateRunControls();
         try
         {
-            // Prepare newly referenced PostgreSQL secrets before the running service can see the new job.
+            // Prepare newly referenced database secrets before the running service can see the new job.
             // Merely entering a password in a discarded draft does not grant service access.
             var knownPgKeys = jobs.Where(job => job.Kind == DatabaseKind.PostgreSql)
                 .Select(job => job.PostgreSql?.CredentialKey).OfType<string>().ToHashSet(StringComparer.Ordinal);
             foreach (var key in updated.Where(job => job.Kind == DatabaseKind.PostgreSql)
                 .Select(job => job.PostgreSql?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal).Where(key => !knownPgKeys.Contains(key)))
                 await new WindowsPostgreSqlCredentialStore().ExportForServiceAsync(key);
+            var knownSqlKeys = jobs.Where(job => job.Kind == DatabaseKind.SqlServer && job.SqlServer?.Authentication == SqlServerAuthentication.SqlServer)
+                .Select(job => job.SqlServer?.CredentialKey).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            foreach (var key in updated.Where(job => job.Kind == DatabaseKind.SqlServer && job.SqlServer?.Authentication == SqlServerAuthentication.SqlServer)
+                .Select(job => job.SqlServer?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal).Where(key => !knownSqlKeys.Contains(key)))
+                await new WindowsSqlServerCredentialStore().ExportForServiceAsync(key);
             await store.SaveAsync(updated);
             jobs = updated;
             Jobs.ItemsSource = jobs;

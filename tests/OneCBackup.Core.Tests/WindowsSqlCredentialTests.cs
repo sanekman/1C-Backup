@@ -34,6 +34,19 @@ public sealed class WindowsSqlCredentialTests
             await WindowsFtpCredentialStore.ExportProfileForServiceAsync([job], []);
             Assert.Equal(password, cache.Read("SqlServer", first)!.Password);
             Assert.Null(cache.Read("SqlServer", other));
+            var monitorKey = Guid.NewGuid().ToString("N");
+            try
+            {
+                store.Save(monitorKey, "history-reader", "monitor-secret");
+                Assert.Null(cache.Read("SqlServer", monitorKey)); // An unsaved draft does not grant service access.
+                await store.ExportMonitorsForServiceAsync([new ExternalBackupMonitor
+                { Name = "SQL history", SqlServer = "sql.example", SqlAuthentication = SqlServerAuthentication.SqlServer, SqlCredentialKey = monitorKey }]);
+                Assert.Equal("monitor-secret", cache.Read("SqlServer", monitorKey)!.Password);
+                Assert.Equal("history-reader", cache.Read("SqlServer", monitorKey)!.UserName);
+                store.Save(monitorKey, "history-reader", "updated-monitor-secret");
+                Assert.Equal("updated-monitor-secret", cache.Read("SqlServer", monitorKey)!.Password);
+            }
+            finally { store.Delete(monitorKey); }
             Assert.Null(cache.Read("FTP", first));
             var bytes = await File.ReadAllBytesAsync(Assert.Single(Directory.GetFiles(Path.Combine(root, "service-secrets"))));
             Assert.DoesNotContain(password, System.Text.Encoding.UTF8.GetString(bytes));

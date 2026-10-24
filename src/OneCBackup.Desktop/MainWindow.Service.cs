@@ -83,6 +83,8 @@ public partial class MainWindow
                 await profile.SaveAsync(DesktopPaths.DataDirectory);
                 WindowsFtpCredentialStore.SetServiceCache(new(DesktopPaths.DataDirectory, sid, selected.Sid));
                 await WindowsFtpCredentialStore.ExportProfileForServiceAsync(jobs, await catalog.ReadAsync());
+                await new WindowsSqlServerCredentialStore().ExportMonitorsForServiceAsync(
+                    await new ExternalBackupMonitorStore(Path.Combine(DesktopPaths.DataDirectory, "external-monitors.json")).LoadAsync());
                 await ExportServerMonitoringForServiceAsync();
                 await new WindowsNotificationCredentialStore().ExportForServiceAsync(DesktopPaths.DataDirectory);
                 await new WindowsRemoteGatewayConnections(DesktopPaths.DataDirectory).ExportForServiceAsync(jobs);

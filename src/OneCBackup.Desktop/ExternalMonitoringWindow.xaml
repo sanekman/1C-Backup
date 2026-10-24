@@ -22,8 +22,14 @@
    </WrapPanel>
    <TextBlock Text="Имя базы (пусто — все базы источника)" /><TextBox x:Name="Database" Margin="0,4,0,10" />
    <StackPanel x:Name="SqlPanel">
-    <TextBlock Text="MS SQL (например SERVER\INSTANCE). Windows-аутентификация текущего пользователя, проверка TLS-сертификата." TextWrapping="Wrap" />
-    <TextBox x:Name="SqlServer" Margin="0,4,0,10" />
+    <TextBlock Text="MS SQL (например SERVER\INSTANCE). Подключение с проверкой TLS-сертификата." TextWrapping="Wrap" />
+    <TextBox x:Name="SqlServer" Margin="0,4,0,10" TextChanged="SqlServer_Changed" />
+    <TextBlock Text="Как подключаться" />
+    <ComboBox x:Name="SqlAuthentication" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="SqlAuthentication_Changed" Margin="0,4,0,10" />
+    <StackPanel x:Name="SqlCredentialsPanel" Visibility="Collapsed" Margin="0,0,0,10">
+     <Button x:Name="SqlCredentialsButton" Content="Задать логин и пароль MS SQL…" Click="SqlCredentials_Click" HorizontalAlignment="Left" />
+     <TextBlock x:Name="SqlCredentialStatus" TextWrapping="Wrap" Margin="0,6,0,0" />
+    </StackPanel>
     <WrapPanel>
      <StackPanel Width="200"><TextBlock Text="История за дней" /><TextBox x:Name="Days" Text="30" Margin="0,4,0,10" /></StackPanel>
     </WrapPanel>
@@ -42,7 +48,7 @@
     <Button x:Name="SaveMonitorButton" Content="Сохранить источник" Padding="12,6" Click="Save_Click" />
     <Button x:Name="DeleteMonitorButton" Content="Удалить источник" Padding="12,6" Margin="8,0,0,0" Click="Delete_Click" IsEnabled="False" />
    </WrapPanel>
-   <TextBlock Text="История SQL подтверждает завершение команды, а не наличие файла или возможность восстановления. Внешние копии агент не изменяет и не удаляет. Отчёты сохраняются локально; отправка из интерфейса будет подключена вместе со службой и сервером."
+   <TextBlock Text="История SQL подтверждает завершение команды, а не наличие файла или возможность восстановления. Внешние копии агент не изменяет и не удаляет. Отчёты сохраняются локально. При подключённом мониторинге агент или служба передают их на сервер."
     TextWrapping="Wrap" Margin="0,0,0,12" />
   </StackPanel>
   </ScrollViewer>
