@@ -58,6 +58,24 @@ public sealed class ResilientFileBackupTests : IDisposable
         }
     }
     [Fact]
+    public async Task RecoveredIncompleteIncrementKeepsTheLastReadableVersionAndThePlannedChain()
+    {
+        var configured = job with { FullBackupEvery = 7 };
+        await Write("good.txt", "v1"); await Write("locked.txt", "saved before error");
+        var full = Manifest(await Runner().RunAsync(configured));
+        Stream Open(string path) => Path.GetFileName(path) == "locked.txt" ? throw new IOException("fixture locked") : File.OpenRead(path);
+        await Write("good.txt", "v2"); var partial = Manifest(await Runner(Open).RunAsync(configured));
+        Assert.NotNull(partial.ParentSnapshotId); Assert.NotEmpty(partial.SkippedPaths!);
+        File.Delete(Path.Combine(root, "file-snapshots", job.Id.ToString("N") + ".json"));
+        await Write("good.txt", "v3"); var next = await Runner(Open).RunAsync(configured); var recovered = Manifest(next);
+        Assert.Equal(partial.SnapshotId, recovered.ParentSnapshotId); Assert.Equal(full.SnapshotId, recovered.FullSnapshotId);
+        Assert.NotEmpty(recovered.SkippedPaths!);
+        var restore = await Restore(next);
+        Assert.Equal("v3", await File.ReadAllTextAsync(Path.Combine(restore.Directory, "good.txt")));
+        Assert.Equal("saved before error", await File.ReadAllTextAsync(Path.Combine(restore.Directory, "locked.txt")));
+    }
+
+    [Fact]
     public async Task IncompleteIncrementAndIncompleteWeeklyFullKeepTheirCalendarPlan()
     {
         var clock = new BackupTestClock("2026-10-14T10:00:00Z");

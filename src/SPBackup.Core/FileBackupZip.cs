@@ -21,7 +21,7 @@ internal static class FileBackupZip
         using var zip = new ZipFile(path) { Password = password };
         return await ReadManifestAsync(zip, password, token);
     }
-    private static async Task<FileBackupManifest> ReadManifestAsync(ZipFile zip, string? password, CancellationToken token)
+    internal static async Task<FileBackupManifest> ReadManifestAsync(ZipFile zip, string? password, CancellationToken token)
     {
         var entry = zip.GetEntry(FileBackupManifest.ArchiveEntryName)
             ?? throw new InvalidDataException("В ZIP отсутствует индекс файловой копии.");

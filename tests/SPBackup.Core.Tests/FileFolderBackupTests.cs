@@ -143,18 +143,182 @@ public sealed class FileFolderBackupTests : IDisposable
         Assert.All(protectedRun.Destinations!, result => Assert.True(result.Record!.Backup.FileSnapshot!.IsFull));
     }
 
-    [Fact]
-    public async Task CorruptIndexForcesFullAndMissingArchiveRefusesRestoreWithoutPublishing()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LostOrCorruptIndexRecoversVerifiedChainAndKeepsIncrementalPlan(bool corrupt)
     {
-        await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "content"); var first = await Run();
-        var state = Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"); await File.WriteAllTextAsync(state, "broken JSON");
-        var full = await Run(); Assert.True(full.Backup.FileSnapshot!.IsFull);
-        Assert.StartsWith("files_", Path.GetFileName(full.Backup.Location));
-        Assert.EndsWith(".files-full.zip", full.Backup.Location);
+        var file = Path.Combine(Source, "a.txt"); await File.WriteAllTextAsync(file, "original");
+        var job = Job with { FullBackupEvery = 7 };
+        var full = await Run(job); await File.WriteAllTextAsync(file, "second"); var increment = await Run(job);
+        var state = Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json");
+        if (corrupt) await File.WriteAllTextAsync(state, "broken JSON"); else File.Delete(state);
+        await File.WriteAllTextAsync(file, "third"); var recovered = await Run(job);
+        Assert.False(recovered.Backup.FileSnapshot!.IsFull);
+        Assert.Equal(increment.Backup.FileSnapshot!.SnapshotId, recovered.Backup.FileSnapshot.ParentSnapshotId);
+        Assert.Equal(full.Backup.FileSnapshot!.SnapshotId, recovered.Backup.FileSnapshot.FullSnapshotId);
+        Assert.Equal(2, recovered.Backup.FileSnapshot.Depth);
+        var restored = await Restorer().RestoreAsync(recovered, job, RestoreParent);
+        Assert.Equal("third", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "a.txt")));
+    }
+
+    [Fact]
+    public async Task MissingArchiveRefusesRestoreWithoutPublishing()
+    {
+        await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "content"); var full = await Run();
         var inc = await Run(); Assert.False(inc.Backup.FileSnapshot!.IsFull);
         File.Delete(full.Backup.Location);
         await Assert.ThrowsAnyAsync<Exception>(() => Restorer().RestoreAsync(inc, Job, RestoreParent));
         Assert.Empty(Directory.GetFileSystemEntries(RestoreParent));
+    }
+
+    [Fact]
+    public async Task StaleIndexAfterRegisteredDeliveryUsesNewestArchiveNotOlderCachedBasis()
+    {
+        var file = Path.Combine(Source, "a.txt"); await File.WriteAllTextAsync(file, "first");
+        var job = Job with { FullBackupEvery = 7 };
+        var full = await Run(job);
+        var state = Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"); var old = await File.ReadAllBytesAsync(state);
+        await File.WriteAllTextAsync(file, "second"); var increment = await Run(job);
+        await File.WriteAllBytesAsync(state, old); // Crash after catalog registration, before cache publication.
+        var next = await Run(job);
+        Assert.False(next.Backup.FileSnapshot!.IsFull);
+        Assert.Equal(increment.Backup.FileSnapshot!.SnapshotId, next.Backup.FileSnapshot.ParentSnapshotId);
+        using (var zip = ZipFile.OpenRead(next.Backup.Location)) Assert.DoesNotContain(zip.Entries, entry => entry.FullName == "data/a.txt");
+        var restored = await Restorer().RestoreAsync(next, job, RestoreParent);
+        Assert.Equal("second", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "a.txt")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RecoveryRejectsMissingOrChangedAncestorAndKeepsOldArchives(bool missing)
+    {
+        var job = Job with { FullBackupEvery = 7, KeepLast = 10 };
+        await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "content");
+        var full = await Run(job); var increment = await Run(job);
+        if (missing) File.Delete(full.Backup.Location); else await File.AppendAllTextAsync(full.Backup.Location, "changed");
+        File.Delete(Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"));
+        var next = await Run(job); Assert.True(next.Backup.FileSnapshot!.IsFull);
+        Assert.True(File.Exists(increment.Backup.Location));
+        Assert.Equal(!missing, File.Exists(full.Backup.Location));
+    }
+
+    [Fact]
+    public async Task EncryptedRecoveryUsesSavedPasswordAndRestoresOldAndNewContent()
+    {
+        var job = Job with { FullBackupEvery = 7, ArchivePasswordKey = "fixture-key" };
+        var passwords = new Passwords(); var file = Path.Combine(Source, "secret.txt");
+        await File.WriteAllTextAsync(file, "before"); await Run(job, passwords);
+        File.Delete(Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"));
+        await File.WriteAllTextAsync(file, "after"); var next = await Run(job, passwords);
+        Assert.False(next.Backup.FileSnapshot!.IsFull);
+        var restored = await Restorer(passwords).RestoreAsync(next, job, RestoreParent);
+        Assert.Equal("after", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "secret.txt")));
+    }
+
+    [Fact]
+    public async Task RecoveredChainStillMakesFullCopyAtPlannedArchiveCount()
+    {
+        await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "data");
+        await Run(); await Run();
+        File.Delete(Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"));
+        var third = await Run(); Assert.False(third.Backup.FileSnapshot!.IsFull);
+        File.Delete(Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"));
+        Assert.True((await Run()).Backup.FileSnapshot!.IsFull);
+    }
+
+    [Fact]
+    public async Task InvalidManifestInReadableJsonCacheAlsoRecoversFromTheArchive()
+    {
+        var job = Job with { FullBackupEvery = 7 }; await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "data");
+        var first = await Run(job);
+        var path = Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json");
+        var json = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(path))!;
+        json["SnapshotId"] = System.Text.Json.Nodes.JsonValue.Create(Guid.Empty);
+        await File.WriteAllTextAsync(path, json.ToJsonString());
+        var next = await Run(job); Assert.False(next.Backup.FileSnapshot!.IsFull);
+        Assert.Equal(first.Backup.FileSnapshot!.SnapshotId, next.Backup.FileSnapshot.ParentSnapshotId);
+    }
+
+    [Fact]
+    public async Task UnwritableCacheStillContinuesFromVerifiedArchivesOnEveryRun()
+    {
+        var job = Job with { FullBackupEvery = 7 }; await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "data");
+        var full = await Run(job);
+        var directory = Path.Combine(root, "file-snapshots");
+        Directory.Delete(directory, true); await File.WriteAllTextAsync(directory, "fixture blocks cache directory");
+        var first = await Runner().RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, first.Status);
+        Assert.False(first.Backup!.FileSnapshot!.IsFull);
+        Assert.Contains(first.Warnings!, text => text.Contains("попробует восстановить"));
+        Assert.DoesNotContain(first.Warnings!, text => text.Contains("будет полной"));
+        var second = await Runner().RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, second.Status);
+        Assert.False(second.Backup!.FileSnapshot!.IsFull);
+        Assert.Equal(first.Backup.FileSnapshot.SnapshotId, second.Backup.FileSnapshot.ParentSnapshotId);
+        Assert.True(File.Exists(full.Backup.Location));
+    }
+
+    [Fact]
+    public async Task RecoveryVerifiesEveryLocalDestinationAndRejectsDivergingTips()
+    {
+        var job = Job with { FullBackupEvery = 7, KeepLast = 10,
+            AdditionalDestinations = [new() { DestinationDirectory = Path.Combine(root, "extra"), KeepLast = 10 }] };
+        await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "data");
+        await Run(job);
+        var state = Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"); File.Delete(state);
+        var inc = await Run(job); Assert.False(inc.Backup.FileSnapshot!.IsFull);
+        var records = await catalog.ReadAsync();
+        var secondTip = records.Single(record => record.Backup.FileSnapshot?.SnapshotId == inc.Backup.FileSnapshot.SnapshotId
+            && record.Backup.Location.StartsWith(Path.Combine(root, "extra")));
+        await catalog.RemoveAsync(secondTip.Id); File.Delete(state);
+        Assert.True((await Run(job)).Backup.FileSnapshot!.IsFull);
+    }
+
+    [Fact]
+    public async Task ArchiveOutsideConfiguredStorageCannotBecomeARecoveredBasis()
+    {
+        var job = Job with { FullBackupEvery = 7, KeepLast = 10 }; await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "data");
+        var full = await Run(job); var outside = Path.Combine(root, "outside.zip"); File.Copy(full.Backup.Location, outside);
+        var edited = full with { Backup = full.Backup with { Location = outside } };
+        await File.WriteAllTextAsync(Path.Combine(root, "copies.json"), JsonSerializer.Serialize(new[] { edited }));
+        File.Delete(Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"));
+        Assert.True((await Run(job)).Backup.FileSnapshot!.IsFull);
+        Assert.True(File.Exists(outside));
+    }
+
+    [Fact]
+    public async Task CancellingRecoveryDoesNotPublishAnIndexOrChangeTheCatalog()
+    {
+        var job = Job with { FullBackupEvery = 7 }; await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "data");
+        await Run(job); var snapshots = new FileBackupSnapshotStore(Path.Combine(root, "file-snapshots"));
+        File.Delete(Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"));
+        var before = await File.ReadAllBytesAsync(Path.Combine(root, "copies.json"));
+        using var stop = new CancellationTokenSource();
+        using var progress = BackupProgressContext.Begin(job, Guid.NewGuid(), state => {
+            if (state.Progress.Stage == BackupStage.Verifying) stop.Cancel();
+        });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => FileBackupBases.ReadAsync(job,
+            FileBackupManifest.IdentifySource(Source, false), catalog, snapshots, stop.Token));
+        Assert.Null(await snapshots.ReadAsync(job.Id));
+        Assert.Equal(before, await File.ReadAllBytesAsync(Path.Combine(root, "copies.json")));
+    }
+
+    [Fact]
+    public async Task RegistrationOrderSurvivesClockRollbackAndStaleCache()
+    {
+        var clock = new BackupTestClock("2026-10-25T10:00:00Z");
+        var job = Job with { FullBackupEvery = 7 }; var file = Path.Combine(Source, "a.txt");
+        await File.WriteAllTextAsync(file, "old");
+        var runner = new LocalBackupRunner(new NoDatabase(), new BackupCompletion(storage, catalog), history,
+            Path.Combine(root, "default-work"), timeProvider: clock);
+        var first = await runner.RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, first.Status);
+        var state = Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"); var old = await File.ReadAllBytesAsync(state);
+        clock.Set("2026-10-25T09:00:00Z"); await File.WriteAllTextAsync(file, "new");
+        var second = await runner.RunAsync(job); Assert.False(second.Backup!.FileSnapshot!.IsFull);
+        await File.WriteAllBytesAsync(state, old); // Disk cache predates the archive registered with an earlier wall clock.
+        var third = await runner.RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, third.Status);
+        Assert.False(third.Backup!.FileSnapshot!.IsFull);
+        Assert.Equal(second.Backup.FileSnapshot.SnapshotId, third.Backup.FileSnapshot.ParentSnapshotId);
     }
 
     [Fact]

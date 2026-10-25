@@ -22,7 +22,7 @@ public enum DiagnosticEvent
     ExternalProcessStarted, ExternalProcessExited, ExternalProcessFailed,
     DiagnosticExportStarted, DiagnosticExportCompleted, DiagnosticExportFailed,
     UpdateCheckStarted, UpdateCheckCompleted, UpdateDownloaded, UpdateInstallationStarted, UpdateResultLoaded, UpdateFailed, GoogleDriveRequestFailed, SourceItemsSkipped, UpdateRetrying, AgentWarning,
-    NotificationSent, NotificationFailed
+    NotificationSent, NotificationFailed, SnapshotCacheRecovered, SnapshotRecoveryFailed
 }
 public sealed record DiagnosticValues(long? Count = null, long? Bytes = null, long? Milliseconds = null, int? Code = null);
 

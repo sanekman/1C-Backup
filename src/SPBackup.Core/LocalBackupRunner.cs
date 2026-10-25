@@ -90,7 +90,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 if (fileManifest is not null && run.Backup is not null)
                 {
                     try { await fileSnapshots.SaveAsync(job.Id, fileManifest, CancellationToken.None); }
-                    catch (Exception ex) { log.Write(DiagnosticEvent.SnapshotCacheFailed, DiagnosticLevel.Warning, ex); warnings.Add("Индекс инкрементной копии не сохранён; следующая копия будет полной: " + ex.Message); }
+                    catch (Exception ex) { log.Write(DiagnosticEvent.SnapshotCacheFailed, DiagnosticLevel.Warning, ex); warnings.Add("Индекс инкрементной копии не сохранён. При следующем запуске программа попробует восстановить его по проверенным локальным или сетевым архивам: " + ex.Message); }
                 }
                 // Own working files are removed only after verified delivery and registration.
                 if (run.Status == BackupRunStatus.Succeeded)

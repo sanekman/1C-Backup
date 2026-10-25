@@ -38,6 +38,18 @@ public sealed class WeeklyFullBackupTests : IDisposable
         return run;
     }
     [Fact]
+    public async Task MissingIndexDoesNotReplaceWeeklyPlanWithAnUnscheduledFull()
+    {
+        var first = await Run();
+        var path = Path.Combine(root, "file-snapshots", job.Id.ToString("N") + ".json");
+        File.Delete(path); clock.UtcNow = clock.UtcNow.AddHours(1);
+        var next = await Run(); Assert.False(next.Backup!.FileSnapshot!.IsFull);
+        Assert.Equal(first.Backup!.FileSnapshot!.SnapshotId, next.Backup.FileSnapshot.ParentSnapshotId);
+        File.Delete(path); clock.Set("2026-10-19T00:00:00Z");
+        Assert.True((await Run()).Backup!.FileSnapshot!.IsFull);
+    }
+
+    [Fact]
     public async Task FirstIsFullThenIncrementsIgnoreArchiveCountAndWeeklyFullRunsOnlyOnce()
     {
         var first = await Run(); Assert.True(first.Backup!.FileSnapshot!.IsFull);

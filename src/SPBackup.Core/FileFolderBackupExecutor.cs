@@ -14,7 +14,7 @@ public sealed class FileFolderBackupExecutor(BackupCatalog catalog, FileBackupSn
         if (!isFile)
             FileBackupPaths.RequireOutside(source, snapshots.DirectoryPath, "Исходная папка содержит рабочий профиль программы. Выберите отдельную папку с данными.");
         var previous = await FileBackupBases.ReadAsync(job, FileBackupManifest.IdentifySource(source, isFile),
-            catalog, snapshots, cancellationToken, timeProvider);
+            catalog, snapshots, cancellationToken, timeProvider, passwords);
         return await new AccessibleFilesBackupExecutor(this, passwords, enumerateSource, openSource)
             .CreateSnapshotAsync(job, workDirectory, cancellationToken, previous);
     }
