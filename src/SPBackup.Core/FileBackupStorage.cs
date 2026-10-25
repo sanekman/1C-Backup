@@ -6,8 +6,10 @@ namespace SPBackup.Core;
 public sealed class FileBackupStorage : IBackupStorage
 {
     private readonly Func<string, long?> availableBytes;
+    private readonly FileStorageOperations operations;
     public FileBackupStorage() : this(BackupDiskSpace.AvailableBytes) { }
-    internal FileBackupStorage(Func<string, long?> availableBytes) => this.availableBytes = availableBytes;
+    internal FileBackupStorage(Func<string, long?> availableBytes, FileStorageOperations? operations = null)
+    { this.availableBytes = availableBytes; this.operations = operations ?? new(); }
     public Task VerifyAsync(StoredBackup backup, BackupJob job, CancellationToken cancellationToken = default)
     {
         if (job.StorageKind is not (StorageKind.LocalDirectory or StorageKind.NetworkShare))
@@ -59,40 +61,93 @@ public sealed class FileBackupStorage : IBackupStorage
         var length = input.Length;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var sameFile = string.Equals(source, destination, comparison);
-        if (!sameFile)
-        {
-            if (File.Exists(destination)) throw new IOException("Копия с таким именем уже существует в хранилище.");
-            cancellationToken.ThrowIfCancellationRequested();
-            BackupProgressContext.Report(BackupStage.ConnectingStorage);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            BackupDiskSpace.RequireAvailable(Path.GetDirectoryName(destination)!, length, availableBytes);
-        }
-        BackupProgressContext.Report(BackupStage.Verifying);
-        var sourceHash = await SHA256.HashDataAsync(input, cancellationToken);
         if (sameFile)
-            return new StoredBackup(destination, length, Convert.ToHexString(sourceHash));
-        var temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        {
+            BackupProgressContext.Report(BackupStage.Verifying);
+            return new StoredBackup(destination, length, Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken)));
+        }
+        // Never adopt a file that existed before this delivery, even if its bytes happen to match.
+        if (File.Exists(destination)) throw new IOException("Копия с таким именем уже существует в хранилище.");
+        byte[]? sourceHash = null;
+        var temporaryFiles = new HashSet<string>();
+        var publicationAttempted = false;
         try
         {
-            input.Position = 0;
-            await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                81920, FileOptions.Asynchronous))
+            for (var attempt = 0; ; attempt++)
             {
-                await BackupProgressContext.CopyAsync(input, output, BackupStage.CopyingToStorage, length, cancellationToken);
-                await output.FlushAsync(cancellationToken);
-                output.Flush(flushToDisk: true);
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    BackupProgressContext.Report(BackupStage.ConnectingStorage);
+                    if (File.Exists(destination))
+                    {
+                        // An SMB rename can succeed on the server even when its acknowledgement is lost.
+                        if (!publicationAttempted || sourceHash is null)
+                            throw new IOException("Копия с таким именем уже существует в хранилище.");
+                        await VerifyBytesAsync(destination, sourceHash);
+                        return new(destination, length, Convert.ToHexString(sourceHash));
+                    }
+                    publicationAttempted = false;
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    CleanupTemporaryFiles();
+                    BackupDiskSpace.RequireAvailable(Path.GetDirectoryName(destination)!, length, availableBytes);
+                    if (sourceHash is null)
+                    {
+                        BackupProgressContext.Report(BackupStage.Verifying);
+                        input.Position = 0;
+                        sourceHash = await SHA256.HashDataAsync(input, cancellationToken);
+                    }
+                    input.Position = 0;
+                    var temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                    // Ownership starts only after CreateNew succeeds; a collision is never deleted.
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await using (var output = operations.OpenTemporary(temporary))
+                    {
+                        temporaryFiles.Add(temporary);
+                        await BackupProgressContext.CopyAsync(input, output, BackupStage.CopyingToStorage, length, cancellationToken);
+                        await output.FlushAsync(cancellationToken);
+                        output.Flush(flushToDisk: true);
+                    }
+                    await VerifyBytesAsync(temporary, sourceHash);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    publicationAttempted = true;
+                    operations.Publish(temporary, destination);
+                    return new(destination, length, Convert.ToHexString(sourceHash));
+                }
+                catch (IOException error) when (attempt < 2 && !cancellationToken.IsCancellationRequested && FileStorageFailures.Transient(error))
+                {
+                    DiagnosticLog.Current.Write(DiagnosticEvent.StorageRetrying, DiagnosticLevel.Warning, error,
+                        jobId: job.Id, storageKind: job.StorageKind, values: new(Count: attempt + 1, Code: FileStorageFailures.Code(error)));
+                    BackupProgressContext.Report(BackupStage.RetryingStorage);
+                    await operations.Delay(attempt + 1, cancellationToken);
+                }
             }
-            BackupProgressContext.Report(BackupStage.Verifying);
-            await using (var stored = File.OpenRead(temporary))
-            {
-                var storedHash = await SHA256.HashDataAsync(stored, cancellationToken);
-                if (stored.Length != length || !CryptographicOperations.FixedTimeEquals(sourceHash, storedHash))
-                    throw new InvalidDataException("Проверка сохранённой копии не пройдена.");
-            }
-            cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temporary, destination, overwrite: false);
-            return new StoredBackup(destination, length, Convert.ToHexString(sourceHash));
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException && FileStorageFailures.Hint(error) is not null)
+        {
+            var hint = FileStorageFailures.Hint(error) + $" Код Windows: {FileStorageFailures.Code(error)}.";
+            if (error is UnauthorizedAccessException) throw new UnauthorizedAccessException(hint, error);
+            throw new IOException(hint, error);
+        }
+        finally { CleanupTemporaryFiles(); }
+
+        async Task VerifyBytesAsync(string path, byte[] expectedHash)
+        {
+            BackupProgressContext.Report(BackupStage.Verifying);
+            FileBackupPaths.RejectReparse(path);
+            await using var stored = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous);
+            var storedHash = await SHA256.HashDataAsync(stored, cancellationToken);
+            if (stored.Length != length || !CryptographicOperations.FixedTimeEquals(expectedHash, storedHash))
+                throw new InvalidDataException("Проверка сохранённой копии не пройдена.");
+        }
+        void CleanupTemporaryFiles()
+        {
+            foreach (var path in temporaryFiles.ToArray())
+            {
+                try { operations.DeleteTemporary(path); temporaryFiles.Remove(path); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                { DiagnosticLog.Current.Write(DiagnosticEvent.StorageTemporaryCleanupFailed, DiagnosticLevel.Warning, error, jobId: job.Id, storageKind: job.StorageKind); }
+            }
+        }
     }
 }

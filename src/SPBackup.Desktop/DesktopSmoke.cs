@@ -88,6 +88,10 @@ internal static partial class DesktopSmoke
                     System.Windows.Controls.Primitives.RangeBase.ValueProperty)?.Mode != System.Windows.Data.BindingMode.OneWay))
                 throw new InvalidOperationException("Шкалы хранилищ должны отображать отдельные проценты с привязкой только для чтения.");
             window.RenderBackupProgress(new(progressRun, Guid.NewGuid(), "Тест прогресса", Environment.ProcessId, 3, DateTimeOffset.UtcNow,
+                new(BackupStage.RetryingStorage), []));
+            if (!progressLabel.Text.Contains("Повтор подключения") || !progressBar.IsIndeterminate || !window.TrayAnimationRunning)
+                throw new InvalidOperationException("Повтор доставки должен показывать ожидание подключения, без ложных 100%.");
+            window.RenderBackupProgress(new(progressRun, Guid.NewGuid(), "Тест прогресса", Environment.ProcessId, 4, DateTimeOffset.UtcNow,
                 new(BackupStage.Completed), []));
             if (window.TrayAnimationRunning || window.TrayCurrentRunStopAvailable)
                 throw new InvalidOperationException("После задания анимация и остановка текущего задания должны отключиться.");

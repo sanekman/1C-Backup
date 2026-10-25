@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace SPBackup.Core;
 
-public enum BackupStage { ConnectingSource, PreparingStorage, CreatingBackup, ScanningSource, ProcessingFiles, DownloadingFile, ArchivingFile, Archiving, ConnectingStorage, CopyingToStorage, Verifying, Retention, Waiting, Completed, Failed, Cancelled, PartiallySucceeded, ArchivingFiles, DownloadingAndArchivingFiles }
+public enum BackupStage { ConnectingSource, PreparingStorage, CreatingBackup, ScanningSource, ProcessingFiles, DownloadingFile, ArchivingFile, Archiving, ConnectingStorage, CopyingToStorage, Verifying, Retention, Waiting, Completed, Failed, Cancelled, PartiallySucceeded, ArchivingFiles, DownloadingAndArchivingFiles, RetryingStorage }
 public sealed record BackupStageProgress(BackupStage Stage, long Completed = 0, long Total = 0)
 {
     public int? Percent => Total > 0 ? (int)Math.Clamp(100d * Completed / Total, 0, 100) : Stage == BackupStage.Completed ? 100 : null;

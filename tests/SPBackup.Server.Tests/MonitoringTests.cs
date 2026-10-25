@@ -90,6 +90,13 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
         var json=JsonSerializer.Serialize(reports); Assert.DoesNotContain("must-not-be-sent",json); Assert.DoesNotContain("private-path",json);
         Assert.Equal(0,(await server.Store.MonitoringAsync(agent.AgentId,default))!.Snapshot.PendingRuns);
         Assert.Null((await server.Store.MonitoringAsync(agent.AgentId,default))!.Snapshot.Progress);
+        var active = new BackupRun(Guid.NewGuid(),job.Id,job.Name,DateTimeOffset.UtcNow,null,BackupRunStatus.Running,"private-path");
+        await new BackupRunHistory(Path.Combine(root,"runs.json")).SaveAsync(active);
+        new BackupProgressStore(root).Write(new(active.RunId,job.Id,job.Name,Environment.ProcessId,2,DateTimeOffset.UtcNow,new(BackupStage.RetryingStorage),[]));
+        await new ServerMonitoringDispatcher(root,secrets).PollAsync();
+        var retrying = (await server.Store.MonitoringAsync(agent.AgentId,default))!.Snapshot.Progress;
+        Assert.NotNull(retrying); Assert.Equal(active.RunId,retrying.RunId);
+        Assert.Equal("ConnectingStorage",retrying.Stage); Assert.Null(retrying.Percent);
     }
     [ServerFact]
     public async Task PinnedTlsAcceptsOnlyTheSpecifiedServerCertificate()

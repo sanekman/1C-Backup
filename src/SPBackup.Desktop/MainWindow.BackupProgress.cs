@@ -22,6 +22,7 @@ public partial class MainWindow
             BackupStage.DownloadingFile => "Скачивание текущего файла",
             BackupStage.Archiving => "Архивация",
             BackupStage.ConnectingStorage => "Подключение к хранилищу",
+            BackupStage.RetryingStorage => "Повтор подключения к хранилищу",
             BackupStage.CopyingToStorage => "Копирование в хранилище",
             BackupStage.Verifying => "Проверка содержимого копии",
             BackupStage.Retention => "Проверка и удаление старых копий",

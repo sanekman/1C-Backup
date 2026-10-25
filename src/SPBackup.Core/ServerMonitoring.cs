@@ -118,7 +118,8 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
         var snapshot = new MonitoringSnapshot(DateTimeOffset.UtcNow, typeof(ServerMonitoringDispatcher).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute),false).Cast<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown",
             jobs.Select(j=>new MonitoredJob(j.Id,Label(j.Name),j.Kind.ToString(),j.Enabled,j.ScheduleDescription+" · "+j.TimeZoneId+(j.ScheduleKind==ScheduleKind.Weekly ? " · "+j.DaysOfWeek : ""),
                 BackupSchedule.NextRun(j,DateTimeOffset.UtcNow),j.StorageJobs.Count)).ToArray(),
-            progress is { Finished:false } && history.Any(r=>r.RunId==progress.RunId && r.Status==BackupRunStatus.Running) ? new(progress.RunId,progress.JobId,progress.Progress.Stage.ToString(),progress.Progress.Percent,progress.UpdatedUtc) : null,pending.Length,
+            progress is { Finished:false } && history.Any(r=>r.RunId==progress.RunId && r.Status==BackupRunStatus.Running) ? new(progress.RunId,progress.JobId,
+                progress.Progress.Stage == BackupStage.RetryingStorage ? "ConnectingStorage" : progress.Progress.Stage.ToString(),progress.Progress.Percent,progress.UpdatedUtc) : null,pending.Length,
             monitors.Select(m=>new MonitoredSource(m.Id,Label(m.Name),m.Kind.ToString(),m.Enabled,polling.FirstOrDefault(p=>p.MonitorId==m.Id)?.PolledUtc,
                 polling.FirstOrDefault(p=>p.MonitorId==m.Id)?.Error is not null)).ToArray(),collectionWarnings);
         var batch = pending.Where(r=>!acknowledged.RetryAfter!.TryGetValue(r.RunId,out var time) || time <= DateTimeOffset.UtcNow).Take(25).ToArray();
