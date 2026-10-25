@@ -68,7 +68,7 @@ def check():
                 pass
             else:
                 raise AssertionError('Installation unexpectedly enabled autostart')
-        shortcut = Path(os.environ['PROGRAMDATA']) / 'Microsoft/Windows/Start Menu/Programs/SP-Backup/SP-Backup.lnk'
+        shortcut = Path(os.environ['PROGRAMDATA']) / 'Microsoft/Windows/Start Menu/Programs/SP Backup/SP Backup.lnk'
         assert shortcut.is_file(), 'Missing Start Menu shortcut'
         # A live engine owns this exact share-denying lock in normal application use.
         kernel = ctypes.WinDLL('kernel32', use_last_error=True)
