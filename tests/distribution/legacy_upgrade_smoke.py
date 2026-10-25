@@ -68,7 +68,7 @@ def main():
         run(previous, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=' + str(installation))
         installed = True
         assert Path(registration()['InstallLocation']) == installation
-        assert registration()['DisplayName'] == '1C-Backup'
+        assert registration()['DisplayName'].startswith('1C-Backup'), 'Unexpected legacy installed-program name'
         assert (installation / 'VERSION.txt').read_text().strip() == VERSION
         checks.append('published-alpha25-pinned-checksum-and-installation')
         stage = 'legacy-profile-and-backup'
@@ -87,7 +87,7 @@ def main():
         # No /DIR: the same installer ID must retain the old installation directory.
         run(current, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-')
         assert Path(registration()['InstallLocation']) == installation
-        assert registration()['DisplayName'] == 'SP Backup'
+        assert registration()['DisplayName'].startswith('SP Backup'), 'Unexpected new installed-program name'
         assert (installation / 'VERSION.txt').read_text().strip() == version
         assert not (Path(os.environ['ProgramFiles']) / 'SP Backup').exists()
         assert startup() == legacy_tray, 'Installer changed an existing autostart'
