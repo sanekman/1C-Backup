@@ -122,7 +122,7 @@
        </Border>
        <ProgressBar x:Name="JobProgress" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,8,0,0" AutomationProperties.Name="Создание резервной копии" />
        <TextBlock x:Name="SelectedJobSummary" Text="Выберите задание, чтобы создать копию или изменить настройки." TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" />
-       <Expander x:Name="StorageCheckResults" Header="Проверка хранилищ" Visibility="Collapsed" Margin="0,6,0,0">
+       <Expander x:Name="StorageCheckResults" Header="Проверка хранилищ" Visibility="Collapsed" Margin="0,6,0,0" Expanded="StorageCheckResults_Expanded">
         <TextBox x:Name="StorageCheckDetails" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="130" VerticalScrollBarVisibility="Auto" BorderThickness="0" Padding="6" />
        </Expander>
       </StackPanel></ScrollViewer></Border>

@@ -6,6 +6,19 @@ namespace SPBackup.Desktop;
 
 public partial class MainWindow
 {
+    private void StorageCheckResults_Expanded(object sender, RoutedEventArgs e)
+    {
+        // The actions panel has its own scrollbar; wait for the new report height before revealing it.
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (StorageCheckResults.IsExpanded)
+            {
+                StorageCheckResults.UpdateLayout();
+                StorageCheckResults.BringIntoView();
+            }
+        }));
+    }
+
     private void JobsView_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (StorageCheckDetails is not null) StorageCheckDetails.MaxHeight = ActualHeight < 650 ? 60 : 130;

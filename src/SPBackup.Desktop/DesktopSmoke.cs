@@ -537,6 +537,14 @@ internal static partial class DesktopSmoke
                 || !capacityDetails.Contains("размер будущего архива заранее неизвестен"))
                 throw new InvalidOperationException("Проверка хранилищ не показывает доступное место временной папки и двух хранилищ.");
             Control<Expander>("StorageCheckResults").IsExpanded = true;
+            await WaitUntil(() =>
+            {
+                window.UpdateLayout();
+                var report = Control<Expander>("StorageCheckResults");
+                var viewport = Control<ScrollViewer>("JobActionsScroll");
+                var top = report.TranslatePoint(new Point(), viewport).Y;
+                return top >= -1 && top + report.ActualHeight <= viewport.ViewportHeight + 1;
+            }, "Раскрытый результат проверки не прокручен в видимую область.");
             Screenshot("storage-readiness-success");
             Control<Expander>("StorageCheckResults").IsExpanded = false;
             Click("RunButton");
