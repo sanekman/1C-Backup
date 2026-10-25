@@ -73,7 +73,7 @@ def main():
         checks.append('published-alpha25-pinned-checksum-and-installation')
         stage = 'legacy-profile-and-backup'
         run('dotnet', 'build', project, '-c', 'Release', '-o', old_probe.parent,
-            '-p:LegacyDistribution=' + str(installation), '-m:1', '-nr:false')
+            '-p:LegacyDistribution=' + str(installation), '-m:1', '-nr:false', '-p:UseSharedCompilation=false')
         run('dotnet', old_probe, 'prepare', state, installation)
         fixture = json.loads((state / 'fixture.json').read_text())
         job_id = fixture['JobId']
@@ -99,7 +99,7 @@ def main():
             assert (installation / ('SPBackup.' + component + '.exe')).read_bytes() == (installation / ('OneCBackup.' + component + '.exe')).read_bytes()
         checks.append('new-shortcuts-and-compatible-apphosts')
         stage = 'read-old-secrets-and-restore'
-        run('dotnet', 'build', project, '-c', 'Release', '-o', new_probe.parent, '-m:1', '-nr:false')
+        run('dotnet', 'build', project, '-c', 'Release', '-o', new_probe.parent, '-m:1', '-nr:false', '-p:UseSharedCompilation=false')
         run('dotnet', new_probe, 'verify-one', state, installation)
         checks.append('unchanged-profile-vault-dpapi-export-and-old-copy-restoration')
         stage = 'legacy-desktop-launch-and-autostart-migration'

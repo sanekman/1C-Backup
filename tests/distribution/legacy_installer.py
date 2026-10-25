@@ -12,6 +12,12 @@ URL = ('https://api.github.com/repositories/1413316996/contents/windows/'
        '1C-Backup-' + VERSION + '-windows-x64-setup.exe?ref=distribution%2Fwindows-x64-' + VERSION)
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, file, code, message, headers, new_url):
+        # A baseline is fetched from a fixed API route; never forward its token.
+        return None
+
+
 def verify(path):
     if path.stat().st_size != SIZE:
         raise ValueError('Published baseline size differs from the pinned release')
@@ -20,7 +26,9 @@ def verify(path):
             raise ValueError('Published baseline checksum differs from the pinned release')
 
 
-def download(directory, *, opener=urllib.request.urlopen, token=None):
+def download(directory, *, opener=None, token=None):
+    if opener is None:
+        opener = urllib.request.build_opener(NoRedirect()).open
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / ('1C-Backup-' + VERSION + '-windows-x64-setup.exe')
