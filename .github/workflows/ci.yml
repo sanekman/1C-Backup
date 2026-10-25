@@ -150,6 +150,19 @@ jobs:
           } finally { $zip.Dispose() }
       - run: python tools/build_windows_installer.py
       - run: python tests/distribution/installer_smoke.py
+      - name: Upgrade the published alpha.25 installation to SP Backup
+        run: python tests/distribution/legacy_upgrade_smoke.py
+        env:
+          SPBACKUP_UPGRADE_SMOKE: '1'
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-upgrade-verification
+          path: |
+            artifacts/windows-upgrade-result.json
+            artifacts/windows-upgrade-failure.json
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64-distribution
