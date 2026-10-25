@@ -17,20 +17,22 @@ def main():
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+', args.version):
         raise ValueError('Invalid storage version')
     artifacts = repository / 'artifacts'; artifacts.mkdir(exist_ok=True)
-    archive = artifacts / ('OneCBackup-Storage-' + args.version + '-linux-x64.tar.gz')
+    archive = artifacts / ('SPBackup-Storage-' + args.version + '-linux-x64.tar.gz')
     if archive.exists() or archive.with_suffix('.gz.sha256').exists():
         raise FileExistsError('Package already exists; no overwrite permitted')
     with tempfile.TemporaryDirectory(dir=artifacts, prefix='storage-publish-') as temporary:
         package = Path(temporary)
-        subprocess.run([args.dotnet, 'publish', str(repository / 'src/OneCBackup.StorageBridge'), '-c', 'Release', '-r', 'linux-x64',
+        subprocess.run([args.dotnet, 'publish', str(repository / 'src/SPBackup.StorageBridge'), '-c', 'Release', '-r', 'linux-x64',
                         '--self-contained', 'true', '-o', str(package), '/p:Version=' + args.version, '/p:RuntimeFrameworkVersion=10.0.13'], check=True, cwd=repository)
-        runtime = json.loads((package / 'OneCBackup.StorageBridge.runtimeconfig.json').read_text())
+        runtime = json.loads((package / 'SPBackup.StorageBridge.runtimeconfig.json').read_text())
         frameworks = {item['name']: item['version'] for item in runtime['runtimeOptions']['includedFrameworks']}
         if frameworks != {'Microsoft.NETCore.App': '10.0.13', 'Microsoft.AspNetCore.App': '10.0.13'}:
             raise ValueError('Published package must include .NET and ASP.NET Core 10.0.13')
+        from legacy_apphosts import copy_legacy_apphosts
+        copy_legacy_apphosts(package, ['StorageBridge'], windows=False)
         (package / 'VERSION.txt').write_text(args.version + '\n')
         with tarfile.open(archive, 'x:gz') as output:
-            for file in sorted(package.iterdir()): output.add(file, arcname='OneCBackup-Storage/' + file.name)
+            for file in sorted(package.iterdir()): output.add(file, arcname='SPBackup-Storage/' + file.name)
     digest = hashlib.file_digest(archive.open('rb'), 'sha256').hexdigest()
     archive.with_suffix('.gz.sha256').write_text(digest + '  ' + archive.name + '\n')
     print(archive.name + ' SHA256=' + digest)

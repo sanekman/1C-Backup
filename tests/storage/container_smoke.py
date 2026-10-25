@@ -6,7 +6,7 @@ def main():
  repository=Path(__file__).resolve().parents[2]
  dotnet=os.environ.get('STORAGE_TEST_DOTNET','dotnet')
  initializer=os.environ.get('STORAGE_TEST_INITIALIZER')
- project=repository/'src/OneCBackup.StorageBridge'
+ project=repository/'src/SPBackup.StorageBridge'
  names=['onec-storage-'+uuid.uuid4().hex[:12] for _ in range(4)]
  network,hub,edge,gateway=names
  image=os.environ.get('STORAGE_TEST_IMAGE','onec-storage-bridge:ci')

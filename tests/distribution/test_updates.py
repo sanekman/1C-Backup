@@ -19,7 +19,7 @@ class UpdatePublicationTests(unittest.TestCase):
         self.version = '0.2.0-alpha.1'
         self.files = publisher.distribution_files(self.version)
         with zipfile.ZipFile(self.root / self.files[0], 'w') as archive:
-            archive.writestr('1C-Backup/VERSION.txt', self.version + '\r\n')
+            archive.writestr('SP-Backup/VERSION.txt', self.version + '\r\n')
         (self.root / self.files[2]).write_bytes(b'MZinstaller fixture')
         (self.root / self.files[5]).write_bytes((self.root / self.files[2]).read_bytes())
         for name in [self.files[0], self.files[2], self.files[5]]:
@@ -54,7 +54,7 @@ class UpdatePublicationTests(unittest.TestCase):
 
     def test_zip_version_must_match_manifest(self):
         with zipfile.ZipFile(self.root / self.files[0], 'w') as archive:
-            archive.writestr('1C-Backup/VERSION.txt', '0.2.0-alpha.2')
+            archive.writestr('SP-Backup/VERSION.txt', '0.2.0-alpha.2')
         (self.root / self.files[1]).write_text(hashlib.sha256((self.root / self.files[0]).read_bytes()).hexdigest())
         self.save_manifest()
         with self.assertRaisesRegex(ValueError, 'version'):

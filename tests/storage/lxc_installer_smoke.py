@@ -6,7 +6,7 @@ def main():
  repository=Path(__file__).resolve().parents[2]
  parser=argparse.ArgumentParser();parser.add_argument('--version',default=(repository/'deploy/storage/VERSION').read_text().strip());args=parser.parse_args()
  if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+',args.version):raise ValueError('Invalid version')
- archive=repository/('artifacts/OneCBackup-Storage-'+args.version+'-linux-x64.tar.gz')
+ archive=repository/('artifacts/SPBackup-Storage-'+args.version+'-linux-x64.tar.gz')
  image='onec-storage-debian12-'+uuid.uuid4().hex[:12]
  name='onec-storage-install-'+uuid.uuid4().hex[:12]
  with tempfile.TemporaryDirectory(prefix='onec-lxc-installer-') as directory:
@@ -45,7 +45,7 @@ Path('/tmp/initial-secrets.json').write_text(json.dumps({str(path):hashlib.sha25
 PY
 bash /setup/install-lxc.sh --archive /packages/PACKAGE_ARCHIVE --storage /backups --endpoint wss://relay.example.com
 bash /setup/install-lxc.sh --archive /packages/PACKAGE_ARCHIVE --storage /backups
-test -x /opt/onec-backup-storage/current/OneCBackup.StorageBridge
+test -x /opt/onec-backup-storage/current/SPBackup.StorageBridge
 test -f /etc/systemd/system/onec-backup-storage.service
 test ! -f /etc/onec-backup-storage/agent.pfx
 test ! -f /etc/onec-backup-storage/client-pairing.json

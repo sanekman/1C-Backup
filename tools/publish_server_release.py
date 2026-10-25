@@ -45,7 +45,7 @@ def main():
     require_absent('releases/tags/' + tag)
     branch = 'distribution/server-' + version
     require_absent('git/ref/heads/' + urllib.parse.quote(branch, safe=''))
-    expected = [f'1C-Backup-Server-{version}-windows-x64-setup.exe', '1C-Backup-server-win-x64.zip', '1C-Backup-server-linux-x64.tar.gz']
+    expected = [f'SP-Backup-Server-{version}-windows-x64-setup.exe', 'SP-Backup-server-win-x64.zip', 'SP-Backup-server-linux-x64.tar.gz']
     files = []
     assets = []
     for name in expected:
@@ -81,7 +81,7 @@ def main():
              'Управление заданиями с сервера остаётся следующим этапом.\n\n'
              'Инструкция: https://github.com/' + REPOSITORY + '/blob/' + source + '/docs/server-start.md\n\n'
              'Исходный коммит: `' + source + '`. Контрольные суммы находятся рядом с файлами и в server-release.json.')
-    release = api('releases', {'tag_name': tag, 'target_commitish': source, 'name': '1C-Backup Server ' + version,
+    release = api('releases', {'tag_name': tag, 'target_commitish': source, 'name': 'SP Backup Server ' + version,
                               'body': notes, 'draft': True, 'prerelease': True, 'make_latest': 'false'})
     upload_base = release['upload_url'].split('{')[0]
     for path in files:

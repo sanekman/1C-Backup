@@ -21,9 +21,9 @@ def fixture_source(root, output, result):
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
-Name "1C-Backup directory verification fixture"
+Name "SP Backup directory verification fixture"
 OutFile "OUTPUT"
-InstallDir "$PROGRAMFILES64\1C-Backup-test"
+InstallDir "$PROGRAMFILES64\SP-Backup-test"
 RequestExecutionLevel user
 Var Phase
 Var InstallOwnerLocalData
@@ -53,9 +53,9 @@ Function FixtureCheck
  FileClose $2
  IntOp $Phase $Phase + 1
  ${If} $Phase == 1
-  SendMessage $mui.DirectoryPage.Directory ${WM_SETTEXT} 0 "STR:$LOCALAPPDATA\Backup Apps\1C-Backup"
+  SendMessage $mui.DirectoryPage.Directory ${WM_SETTEXT} 0 "STR:$LOCALAPPDATA\Backup Apps\SP Backup"
  ${ElseIf} $Phase == 2
-  SendMessage $mui.DirectoryPage.Directory ${WM_SETTEXT} 0 "STR:$LOCALAPPDATA\Программы\1C-Backup"
+  SendMessage $mui.DirectoryPage.Directory ${WM_SETTEXT} 0 "STR:$LOCALAPPDATA\Программы\SP Backup"
  ${Else}
   Quit
  ${EndIf}

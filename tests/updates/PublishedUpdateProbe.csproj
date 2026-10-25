@@ -6,6 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/OneCBackup.Core/OneCBackup.Core.csproj" />
+    <ProjectReference Include="../../src/SPBackup.Core/SPBackup.Core.csproj" />
   </ItemGroup>
 </Project>

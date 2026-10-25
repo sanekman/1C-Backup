@@ -12,7 +12,7 @@ import tempfile
 import zipfile
 
 
-INSTRUCTIONS = """1C-Backup — Windows x64
+INSTRUCTIONS = """SP Backup — Windows x64
 
 НАЧНИТЕ ЗДЕСЬ
 Откройте Help/user-guide.html двойным щелчком. Это подробное руководство:
@@ -22,11 +22,11 @@ INSTRUCTIONS = """1C-Backup — Windows x64
 
 1. УСТАНОВКА
 Скачайте из выпуска установщик 1C-Backup-windows-x64-setup.exe.
-Запустите его и разрешите установку. Затем откройте 1C-Backup через «Пуск»
+Запустите его и разрешите установку. Затем откройте SP Backup через «Пуск»
 под своей обычной учётной записью Windows: у каждого пользователя свой профиль.
 Устанавливать .NET отдельно не нужно.
 Для переносного варианта распакуйте весь ZIP в отдельную папку и запустите
-OneCBackup.Desktop.exe. Не запускайте EXE внутри ZIP и не переносите его отдельно.
+SPBackup.Desktop.exe. Не запускайте EXE внутри ZIP и не переносите его отдельно.
 Поддерживаемая система: Windows 10 22H2 или Windows 11, x64.
 Дистрибутив не подписан цифровой подписью.
 
@@ -98,7 +98,7 @@ def main():
     if not args.skip_publish:
         # Publish into a fresh directory so removed dependencies cannot enter a release.
         with tempfile.TemporaryDirectory(prefix="windows-publish-", dir=artifacts) as stage:
-            for project in ["OneCBackup.Desktop", "OneCBackup.Agent"]:
+            for project in ["SPBackup.Desktop", "SPBackup.Agent"]:
                 subprocess.run([
                     args.dotnet, "publish", str(root / f"src/{project}/{project}.csproj"),
                     "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "true",
@@ -112,7 +112,7 @@ def main():
 
 def distribution_version(publish):
     versions = []
-    for project in ["OneCBackup.Desktop", "OneCBackup.Agent"]:
+    for project in ["SPBackup.Desktop", "SPBackup.Agent"]:
         dependencies = json.loads((publish / f"{project}.deps.json").read_text())
         versions.append(next(key.split("/", 1)[1] for key in dependencies["libraries"] if key.startswith(project + "/")))
     if versions[0] != versions[1]:
@@ -127,7 +127,7 @@ def verify_pkcs_asset(publish, package_folders=None):
     package = "System.Security.Cryptography.Pkcs"
     asset = package + ".dll"
     owners = []
-    for project in ["OneCBackup.Desktop", "OneCBackup.Agent"]:
+    for project in ["SPBackup.Desktop", "SPBackup.Agent"]:
         deps = json.loads((publish / (project + ".deps.json")).read_text())
         names = {name for target in deps.get("targets", {}).values() for name, entry in target.items()
                  if any(Path(path).name == asset for kind in ["runtime", "runtimeTargets"] for path in entry.get(kind, {}))}
@@ -146,7 +146,7 @@ def verify_pkcs_asset(publish, package_folders=None):
     if len({owner.split("/", 1)[1] for owner in owners}) != 1:
         raise RuntimeError("Desktop and agent PKCS runtime versions differ")
     if package_folders is None:
-        assets = Path(__file__).resolve().parents[1] / "src/OneCBackup.Core/obj/project.assets.json"
+        assets = Path(__file__).resolve().parents[1] / "src/SPBackup.Core/obj/project.assets.json"
         package_folders = json.loads(assets.read_text())["packageFolders"]
     restored = [path for owner in set(owners) for folder in package_folders
                 for path in (Path(folder) / owner.removeprefix("runtimepack.").lower()).rglob(asset)
@@ -160,18 +160,18 @@ def verify_pkcs_asset(publish, package_folders=None):
 
 
 def package(publish, artifacts):
-    required = ["OneCBackup.Desktop.exe", "OneCBackup.Desktop.dll", "OneCBackup.Core.dll",
-                "OneCBackup.Agent.exe", "OneCBackup.Agent.dll", "OneCBackup.Agent.runtimeconfig.json", "OneCBackup.Agent.deps.json",
+    required = ["SPBackup.Desktop.exe", "SPBackup.Desktop.dll", "SPBackup.Core.dll",
+                "SPBackup.Agent.exe", "SPBackup.Agent.dll", "SPBackup.Agent.runtimeconfig.json", "SPBackup.Agent.deps.json",
                 "hostfxr.dll", "hostpolicy.dll", "coreclr.dll", "clrjit.dll",
                 "PresentationFramework.dll", "PresentationCore.dll", "wpfgfx_cor3.dll"]
     for name in required:
         file = publish / name
         if not file.is_file() or file.stat().st_size == 0:
             raise RuntimeError(f"Missing distribution component: {name}")
-    with (publish / "OneCBackup.Desktop.exe").open("rb") as executable:
+    with (publish / "SPBackup.Desktop.exe").open("rb") as executable:
         if executable.read(2) != b"MZ":
             raise RuntimeError("Application host is not a Windows executable")
-    config = json.loads((publish / "OneCBackup.Desktop.runtimeconfig.json").read_text())
+    config = json.loads((publish / "SPBackup.Desktop.runtimeconfig.json").read_text())
     frameworks = {framework["name"] for framework in config["runtimeOptions"].get("includedFrameworks", [])}
     if not {"Microsoft.NETCore.App", "Microsoft.WindowsDesktop.App"}.issubset(frameworks):
         raise RuntimeError("The distribution does not include the .NET and Windows Desktop runtimes")
@@ -179,20 +179,22 @@ def package(publish, artifacts):
     verify_pkcs_asset(publish)
     from windows_signing import sign_and_verify
     signed = sign_and_verify([publish / name for name in
-        ("OneCBackup.Desktop.exe", "OneCBackup.Agent.exe", "OneCBackup.Desktop.dll", "OneCBackup.Agent.dll", "OneCBackup.Core.dll")])
+        ("SPBackup.Desktop.exe", "SPBackup.Agent.exe", "SPBackup.Desktop.dll", "SPBackup.Agent.dll", "SPBackup.Core.dll")])
+    from legacy_apphosts import copy_legacy_apphosts
+    copy_legacy_apphosts(publish, ["Desktop", "Agent"], windows=True)
     files = [file for file in publish.rglob("*") if file.is_file() and file.suffix != ".pdb"]
-    destination = artifacts / f"1C-Backup-{version}-windows-x64.zip"
+    destination = artifacts / f"SP-Backup-{version}-windows-x64.zip"
     handle, temporary_name = tempfile.mkstemp(suffix=".zip.tmp", dir=artifacts)
     os.close(handle)
     temporary = Path(temporary_name)
     try:
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for file in sorted(files):
-                archive.write(file, Path("1C-Backup") / file.relative_to(publish))
+                archive.write(file, Path("SP-Backup") / file.relative_to(publish))
             instructions = INSTRUCTIONS.replace("Дистрибутив не подписан цифровой подписью.",
                 "Программы подписаны проверенной цифровой подписью издателя.") if signed else INSTRUCTIONS
-            archive.writestr("1C-Backup/START-HERE.txt", instructions.replace("1C-Backup-windows-x64-setup.exe", f"1C-Backup-{version}-windows-x64-setup.exe").replace("\n", "\r\n").encode("utf-8-sig"))
-            archive.writestr("1C-Backup/VERSION.txt", (version + "\r\n").encode("utf-8"))
+            archive.writestr("SP-Backup/START-HERE.txt", instructions.replace("1C-Backup-windows-x64-setup.exe", f"SP-Backup-{version}-windows-x64-setup.exe").replace("\n", "\r\n").encode("utf-8-sig"))
+            archive.writestr("SP-Backup/VERSION.txt", (version + "\r\n").encode("utf-8"))
         with zipfile.ZipFile(temporary) as archive:
             corrupt = archive.testzip()
             if corrupt:

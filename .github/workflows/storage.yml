@@ -33,7 +33,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with: {dotnet-version: 10.0.402}
       - run: python3 -m unittest discover -s tests/storage -p 'test_*.py' -v
-      - run: dotnet test tests/OneCBackup.Core.Tests --filter 'FullyQualifiedName~RemoteGatewayTests|FullyQualifiedName~RemoteProtocolSafetyTests'
+      - run: dotnet test tests/SPBackup.Core.Tests --filter 'FullyQualifiedName~RemoteGatewayTests|FullyQualifiedName~RemoteProtocolSafetyTests'
       - run: docker build -f deploy/storage/Dockerfile --build-arg VERSION="$STORAGE_VERSION" -t onec-storage-bridge:ci .
         env:
           STORAGE_VERSION: ${{ steps.version.outputs.version }}
@@ -58,11 +58,11 @@ jobs:
           python3 tests/storage/upgrade_smoke.py \
             --previous-archive artifacts/storage-previous/storage/OneCBackup-Storage-0.1.0-alpha.1-linux-x64.tar.gz \
             --previous-installer artifacts/storage-previous-source/deploy/storage/install-lxc.sh \
-            --archive "artifacts/OneCBackup-Storage-$STORAGE_VERSION-linux-x64.tar.gz"
+            --archive "artifacts/SPBackup-Storage-$STORAGE_VERSION-linux-x64.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
           name: storage-linux-x64
-          path: artifacts/OneCBackup-Storage-*.tar.gz*
+          path: artifacts/SPBackup-Storage-*.tar.gz*
   image:
     needs: verify
     if: startsWith(github.ref, 'refs/tags/storage-v')
@@ -118,10 +118,10 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           python3 tools/publish_storage_distribution.py --version "$STORAGE_VERSION"
-          package="artifacts/OneCBackup-Storage-$STORAGE_VERSION-linux-x64.tar.gz"
+          package="artifacts/SPBackup-Storage-$STORAGE_VERSION-linux-x64.tar.gz"
           gh release create "storage-v$STORAGE_VERSION" "$package" "$package.sha256" artifacts/storage-manifest.json \
             --draft --prerelease --target "$GITHUB_SHA" \
-            --title "1C-Backup Storage $STORAGE_VERSION — Linux x64 / .NET 10.0.13" \
+            --title "SP Backup Storage $STORAGE_VERSION — Linux x64 / .NET 10.0.13" \
             --notes-file artifacts/storage-release-notes.md
           gh release view "storage-v$STORAGE_VERSION" --json url,isDraft,tagName > artifacts/storage-draft-release.json
       - uses: actions/upload-artifact@v4

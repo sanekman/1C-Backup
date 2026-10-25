@@ -14,7 +14,7 @@ class DistributionVersionTests(unittest.TestCase):
     def check_version(self, desktop, agent, tag=None):
         with tempfile.TemporaryDirectory() as directory, patch.dict(distribution.os.environ, {}, clear=True):
             publish = Path(directory)
-            for project, version in [("OneCBackup.Desktop", desktop), ("OneCBackup.Agent", agent)]:
+            for project, version in [("SPBackup.Desktop", desktop), ("SPBackup.Agent", agent)]:
                 (publish / f"{project}.deps.json").write_text(json.dumps({"libraries": {f"{project}/{version}": {}}}))
             if tag:
                 distribution.os.environ.update(GITHUB_REF_TYPE="tag", GITHUB_REF_NAME=tag)

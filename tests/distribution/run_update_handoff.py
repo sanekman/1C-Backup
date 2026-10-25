@@ -11,7 +11,7 @@ IMAGE = 'mcr.microsoft.com/powershell@sha256:206a748b34deec1b64553fcfa92294fc871
 
 
 def run(use_docker=False):
-    source = Path(__file__).resolve().parents[2] / 'src/OneCBackup.Desktop/UpdateHandoff.ps1'
+    source = Path(__file__).resolve().parents[2] / 'src/SPBackup.Desktop/UpdateHandoff.ps1'
     fixture = Path(__file__).with_name('update_handoff_fixture.ps1')
     shell = shutil.which('powershell') or shutil.which('pwsh')
     if not use_docker and shell is None:

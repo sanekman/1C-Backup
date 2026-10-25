@@ -9,18 +9,18 @@
 #endif
 [Setup]
 AppId={{ACDE2073-28A8-43F8-9A84-BB0BE3C6831D}
-AppName=1C-Backup Server
+AppName=SP Backup Server
 AppVersion={#AppVersion}
-AppPublisher=1C-Backup
-DefaultDirName={autopf}\1C-Backup Server
-DefaultGroupName=1C-Backup Server
+AppPublisher=SP Backup
+DefaultDirName={autopf}\SP Backup Server
+DefaultGroupName=SP Backup Server
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.14393
 OutputDir={#OutputFolder}
-OutputBaseFilename=1C-Backup-Server-{#AppVersion}-windows-x64-setup
+OutputBaseFilename=SP-Backup-Server-{#AppVersion}-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -31,7 +31,7 @@ Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 [Files]
 Source: "{#SourceFolder}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 [Icons]
-Name: "{commonprograms}\1C-Backup Server\Открыть панель"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\windows\Open-Panel.ps1"""
+Name: "{commonprograms}\SP Backup Server\Открыть панель"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\windows\Open-Panel.ps1"""
 [Code]
 var
   Credentials, Network: TInputQueryWizardPage;
@@ -113,7 +113,7 @@ begin
   Credentials.Add('Пароль администратора (не менее 12 символов):', True);
   Credentials.Add('Повторите пароль:', True);
   Credentials.Values[0] := ExpandConstant('{param:SERVERNAME|}');
-  if Credentials.Values[0] = '' then Credentials.Values[0] := '1C-Backup Server';
+  if Credentials.Values[0] = '' then Credentials.Values[0] := 'SP Backup Server';
   Credentials.Values[1] := ExpandConstant('{param:SERVERADDRESS|}');
   PortParameter := ExpandConstant('{param:HTTPSPORT|}');
   if Credentials.Values[1] = '' then begin

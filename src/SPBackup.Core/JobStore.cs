@@ -1,0 +1,58 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace SPBackup.Core;
+
+// The caller owns synchronization. A temporary file in the same directory avoids
+// exposing a partial JSON document when writing fails or the process stops.
+public sealed class JobStore(string path, bool useLocalTime = false)
+{
+    internal string StartupSchedulePath => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "startup-schedule.json");
+
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    public async Task<IReadOnlyList<BackupJob>> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        await using var stream = await AtomicProfileFile.OpenReadAsync(path, cancellationToken);
+        if (stream is null) return [];
+        var jobs = await JsonSerializer.DeserializeAsync<List<BackupJob>>(stream, Options, cancellationToken)
+            ?? throw new InvalidDataException("Файл заданий содержит null.");
+        if (useLocalTime) jobs = jobs.Select(job => job is null ? null! : job with { TimeZoneId = BackupSchedule.LocalTimeZone }).ToList();
+        ValidateJobs(jobs);
+        return jobs;
+    }
+
+    public async Task SaveAsync(IReadOnlyList<BackupJob> jobs, CancellationToken cancellationToken = default)
+    {
+        if (useLocalTime) jobs = jobs.Select(job => job is null ? null! : job with { TimeZoneId = BackupSchedule.LocalTimeZone }).ToArray();
+        ValidateJobs(jobs);
+        var fullPath = Path.GetFullPath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        var temporary = fullPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                await JsonSerializer.SerializeAsync(stream, jobs, Options, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+                stream.Flush(flushToDisk: true);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            AtomicProfileFile.Publish(temporary, fullPath);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    internal static void ValidateJobs(IReadOnlyList<BackupJob> jobs)
+    {
+        if (jobs.Any(j => j is null)) throw new InvalidDataException("Файл содержит пустое задание.");
+        var errors = jobs.SelectMany(j => j.Validate()).ToArray();
+        if (errors.Length > 0) throw new InvalidDataException(string.Join(Environment.NewLine, errors));
+        if (jobs.Select(j => j.Id).Distinct().Count() != jobs.Count)
+            throw new InvalidDataException("Идентификаторы заданий должны быть уникальными.");
+    }
+}

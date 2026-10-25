@@ -95,18 +95,20 @@ root=Path(sys.argv[2]);seen=set();total=0
 with tarfile.open(sys.argv[1]) as archive:
  for item in archive.getmembers():
   parts=PurePosixPath(item.name).parts
-  if not parts or parts[0]!='OneCBackup-Storage' or '..' in parts or '\\' in item.name or item.name in seen or not (item.isfile() or item.isdir()): raise SystemExit('Invalid package member')
+  if not parts or parts[0] not in ('SPBackup-Storage','OneCBackup-Storage') or '..' in parts or '\\' in item.name or item.name in seen or not (item.isfile() or item.isdir()): raise SystemExit('Invalid package member')
   seen.add(item.name);total+=item.size
   if len(seen)>4096 or item.size<0 or total>1024*1024*1024: raise SystemExit('Package limits exceeded')
-  target=root.joinpath(*parts)
+  target=root.joinpath("SPBackup-Storage",*parts[1:])
   if item.isdir(): target.mkdir(parents=True,exist_ok=True)
   else:
    target.parent.mkdir(parents=True,exist_ok=True)
    with archive.extractfile(item) as source,target.open('xb') as output:shutil.copyfileobj(source,output)
    os.chmod(target,item.mode & 0o755)
 PY
-package="$stage/OneCBackup-Storage"
-[[ -x "$package/OneCBackup.StorageBridge" && -f "$package/VERSION.txt" ]] || { echo 'Invalid package.' >&2; exit 1; }
+package="$stage/SPBackup-Storage"
+bridge_executable="SPBackup.StorageBridge"
+[[ -x "$package/$bridge_executable" ]] || bridge_executable="OneCBackup.StorageBridge"
+[[ -x "$package/$bridge_executable" && -f "$package/VERSION.txt" ]] || { echo 'Invalid package.' >&2; exit 1; }
 version=$(cat "$package/VERSION.txt")
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]] || { echo 'Invalid version.' >&2; exit 1; }
 target="/opt/onec-backup-storage/$version"
@@ -116,7 +118,7 @@ else
  mv "$package" "$target"; chmod -R a+rX "$target"; echo "$actual" >"$target/.package-sha256"
 fi
 if [[ ! -f /etc/onec-backup-storage/gateway.json ]]; then
- "$target/OneCBackup.StorageBridge" initialize /etc/onec-backup-storage "$endpoint"
+ "$target/$bridge_executable" initialize /etc/onec-backup-storage "$endpoint"
  pairing_output=$(mktemp -d /root/onec-backup-storage-pairing.XXXXXXXX)
  mv /etc/onec-backup-storage/client-pairing.json "$pairing_output/client-pairing.json"
  rm /etc/onec-backup-storage/agent.pfx
@@ -153,13 +155,13 @@ ln -s -- "$target" "$stage/current.next"
 mv -Tf -- "$stage/current.next" "$current_link"
 cat >"$stage/unit.next" <<'UNIT'
 [Unit]
-Description=1C-Backup storage gateway
+Description=SP Backup storage gateway
 Wants=network-online.target
 After=network-online.target
 [Service]
 User=onecbackup-storage
 Group=onecbackup-storage
-ExecStart=/opt/onec-backup-storage/current/OneCBackup.StorageBridge gateway /etc/onec-backup-storage/gateway.json
+ExecStart=/opt/onec-backup-storage/current/$bridge_executable gateway /etc/onec-backup-storage/gateway.json
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

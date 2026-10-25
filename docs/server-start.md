@@ -6,9 +6,9 @@
 
 ## Установка Windows без ручной конфигурации
 
-1. Запустите `1C-Backup-Server-<версия>-windows-x64-setup.exe` от администратора (Windows 10 22H2 / Windows 11 или Windows Server 2016 и новее, x64).
+1. Запустите `SP-Backup-Server-<версия>-windows-x64-setup.exe` от администратора (Windows 10 22H2 / Windows 11 или Windows Server 2016 и новее, x64).
 2. Заполните отдельные поля: **Имя сервера** — понятное название системы мониторинга, например «Бухгалтерия — основной»; **Адрес сервера** — полный HTTPS-адрес подключения, например `https://backup.example.com:7443/`. DNS-имя или IP из адреса должны быть доступны агентам. Название может содержать пробелы и кириллицу и не используется как сетевое имя. Задайте пароль администратора длиной 12–256 символов. Установка не требует внешней БД или установленного .NET.
-3. Откройте **Пуск → 1C-Backup Server → Открыть панель**. Войдите с логином `admin` и заданным паролем.
+3. Откройте **Пуск → SP Backup Server → Открыть панель**. Войдите с логином `admin` и заданным паролем.
 4. Нажмите **Подключить агент**, создайте приглашение и перенесите адрес, код и SHA-256 сертификата в Windows-программу агента: **Мониторинг на сервере Windows → Подключить по приглашению**. Рекомендуется клиент 0.2.0-alpha.21 или новее: он повторяет отправку из фонового агента после ошибок связи. Первоначальная поддержка мониторинга появилась в alpha.20; alpha.19 и более ранние её ещё не содержат.
 5. Включите фоновый агент или службу Windows на клиенте для мониторинга при закрытом окне. При открытой программе отправка работает и из неё. Подключение мониторинга сохраняет автономный режим, задания и расписания.
 
@@ -16,7 +16,7 @@
 
 Установщик использует службы `OneCBackupServer` и `OneCBackupServerDatabase` с ограниченной учётной записью NetworkService. PostgreSQL слушает только `127.0.0.1:15433`; HTTPS-порт из адреса открывается только в профилях сети Domain/Private. Другие экземпляры PostgreSQL не изменяются. Если порт занят, установка сообщает ошибку. Компонент Microsoft Visual C++ x64 входит в пакет; его подпись Microsoft проверяется при сборке.
 
-При обновлении существующей установки имя и адрес сохраняются вместе с базой и сертификатом. Для установки раннего preview без этих полей адрес переносится из `panel-url.txt`, а название по умолчанию — «1C-Backup Server». Название хранится в `Server.DisplayName`, адрес — в `Server.PublicAddress` файла `server.json`; после изменения конфигурации требуется перезапустить службу. Для смены адреса также нужны соответствующие сертификат, порт и сетевой доступ.
+При обновлении существующей установки имя и адрес сохраняются вместе с базой и сертификатом. Для установки раннего preview без этих полей адрес переносится из `panel-url.txt`, а название по умолчанию — «SP Backup Server». Название хранится в `Server.DisplayName`, адрес — в `Server.PublicAddress` файла `server.json`; после изменения конфигурации требуется перезапустить службу. Для смены адреса также нужны соответствующие сертификат, порт и сетевой доступ.
 
 Все постоянные данные находятся в `C:\ProgramData\OneCBackupServer`. ACL ограничивает доступ администраторами, SYSTEM, NetworkService и владельцем установки. Пароли генерируются автоматически и не попадают в аргументы процессов. Временный пароль первоначального администратора удаляется после инициализации. При повторной установке сохраняются пароль администратора, сертификат, агенты и история; схема БД обновляется автоматически. Удаление программы удаляет службы и её правило брандмауэра, но сохраняет базу и конфигурацию. Перед обновлением делайте системную резервную копию постоянного каталога/БД; старый сервер может не поддерживать новую схему.
 
@@ -47,7 +47,7 @@
 
 ## Ручная установка Windows (расширенный вариант)
 
-Распакуйте весь пакет, например в `C:\Apps\1C-Backup-Server`. Подготовьте `C:\ProgramData\OneCBackupServer\server.json` с настройками, указав название системы мониторинга и адрес подключения:
+Распакуйте весь пакет, например в `C:\Apps\SP-Backup-Server`. Подготовьте `C:\ProgramData\OneCBackupServer\server.json` с настройками, указав название системы мониторинга и адрес подключения:
 
 ```json
 {
@@ -71,8 +71,8 @@
 Из папки программы выполните в PowerShell:
 
 ```powershell
-.\OneCBackup.Server.exe --Server:ConfigFile C:\ProgramData\OneCBackupServer\server.json --initialize
-.\OneCBackup.Server.exe --Server:ConfigFile C:\ProgramData\OneCBackupServer\server.json
+.\SPBackup.Server.exe --Server:ConfigFile C:\ProgramData\OneCBackupServer\server.json --initialize
+.\SPBackup.Server.exe --Server:ConfigFile C:\ProgramData\OneCBackupServer\server.json
 ```
 
 Первый запуск создаёт таблицы и первого администратора, затем завершается. Повторный `--initialize` не сбрасывает пароль и сообщает `administrator_already_exists`. Для применения последующих миграций предусмотрен `--migrate`; приложение откажется работать с неподготовленной или более новой схемой. Миграции выполняются в транзакции под блокировкой PostgreSQL.
@@ -81,15 +81,15 @@
 
 ## Нативная установка Linux
 
-Распакуйте архив в `/opt/onec-backup-server`; исполняемый файл `OneCBackup.Server` должен сохранить право исполнения. Создайте отдельную учётную запись `onec-backup-server`. Подготовьте PostgreSQL и защищённые файлы в `/etc/onec-backup-server`.
+Распакуйте архив в `/opt/onec-backup-server`; исполняемый файл `SPBackup.Server` должен сохранить право исполнения. Создайте отдельную учётную запись `onec-backup-server`. Подготовьте PostgreSQL и защищённые файлы в `/etc/onec-backup-server`.
 
-Скопируйте `server.env.example` как `server.env` и замените адрес / пути. Передайте переменные из этого файла процессу и один раз запустите `/opt/onec-backup-server/OneCBackup.Server --initialize` под сервисной учётной записью. Например, в shell этой учётной записи:
+Скопируйте `server.env.example` как `server.env` и замените адрес / пути. Передайте переменные из этого файла процессу и один раз запустите `/opt/onec-backup-server/SPBackup.Server --initialize` под сервисной учётной записью. Например, в shell этой учётной записи:
 
 ```sh
 set -a
 . /etc/onec-backup-server/server.env
 set +a
-/opt/onec-backup-server/OneCBackup.Server --initialize
+/opt/onec-backup-server/SPBackup.Server --initialize
 ```
 
 Для этого запуска заранее создайте `/var/lib/onec-backup-server`, передав владение сервисной учётной записи и задав режим 0700. `server.env` и файлы секретов должны быть доступны этой учётной записи, но не остальным пользователям. Unit `onec-backup-server.service` использует `/opt/onec-backup-server`, постоянный каталог `/var/lib/onec-backup-server` и отдельный EnvironmentFile. Установите unit через администратора ОС, выполните `systemctl daemon-reload` и `systemctl enable --now onec-backup-server`. Шаблон не заменяет установку PostgreSQL и сертификата.
@@ -149,14 +149,14 @@ docker compose -f deploy/server/compose.yaml up -d
 Из исходников:
 
 ```sh
-dotnet restore OneCBackup.slnx
-dotnet build OneCBackup.slnx --no-restore -m:1 -nr:false
+dotnet restore SPBackup.slnx
+dotnet build SPBackup.slnx --no-restore -m:1 -nr:false
 python3 tools/dev_server_db.py start
 ```
 
 Последняя команда создаёт только отдельный контейнер PostgreSQL разработки на 127.0.0.1:15432 и защищённый файл `artifacts/server-dev/connection-string.txt`; пароли не выводятся. Повторный запуск использует этот контейнер. `python3 tools/dev_server_db.py stop` останавливает и удаляет только контейнер с меткой этого стенда; постоянной пользовательской БД команда не касается. Для сервера задайте путь подключения через `Server:ConnectionStringFile` и подготовьте остальные параметры выше.
 
-Интеграционные проверки используют собственную временную схему PostgreSQL и настоящий Kestrel с TLS. Укажите `ONECBACKUP_SERVER_TEST_CONNECTION_FILE` на файл подключения к **тестовой** PostgreSQL, затем выполните `dotnet test tests/OneCBackup.Server.Tests --no-restore -m:1 -nr:false --filter 'Category!=ServerPackage'`. Без этой переменной проверки явно пропускаются. Проверка клиентом использует отдельный тестовый доверенный сертификат; производственная проверка TLS сохраняется.
+Интеграционные проверки используют собственную временную схему PostgreSQL и настоящий Kestrel с TLS. Укажите `ONECBACKUP_SERVER_TEST_CONNECTION_FILE` на файл подключения к **тестовой** PostgreSQL, затем выполните `dotnet test tests/SPBackup.Server.Tests --no-restore -m:1 -nr:false --filter 'Category!=ServerPackage'`. Без этой переменной проверки явно пропускаются. Проверка клиентом использует отдельный тестовый доверенный сертификат; производственная проверка TLS сохраняется.
 
 Пакеты: `python3 tools/build_server_distribution.py --runtime win-x64` или `--runtime linux-x64`; результат в `artifacts/server`, рядом SHA-256. macOS и Linux arm64 пока не входят в сборку. Установочные шаблоны systemd / Windows Service требуют отдельной проверки на целевых сервисных учётных записях.
 

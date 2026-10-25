@@ -7,14 +7,14 @@ def main():
  parser=argparse.ArgumentParser();parser.add_argument('--version',default=(repository/'deploy/storage/VERSION').read_text().strip());args=parser.parse_args()
  if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+',args.version):raise ValueError('Invalid version')
  artifacts=repository/'artifacts'
- archive=artifacts/('OneCBackup-Storage-'+args.version+'-linux-x64.tar.gz');checksum=archive.with_suffix('.gz.sha256')
+ archive=artifacts/('SPBackup-Storage-'+args.version+'-linux-x64.tar.gz');checksum=archive.with_suffix('.gz.sha256')
  with archive.open('rb') as file:digest=hashlib.file_digest(file,'sha256').hexdigest()
  if digest!=checksum.read_text().split()[0] or archive.stat().st_size>95*1024*1024:raise ValueError('Package checksum/size mismatch')
  with tarfile.open(archive) as file:
   members=file.getmembers()
-  if any(not member.name.startswith('OneCBackup-Storage/') or '..' in member.name.split('/') or not (member.isfile() or member.isdir()) for member in members):raise ValueError('Invalid archive')
-  if file.extractfile('OneCBackup-Storage/VERSION.txt').read().decode().strip()!=args.version:raise ValueError('Wrong package version')
-  runtime=json.load(file.extractfile('OneCBackup-Storage/OneCBackup.StorageBridge.runtimeconfig.json'))
+  if any(not member.name.startswith('SPBackup-Storage/') or '..' in member.name.split('/') or not (member.isfile() or member.isdir()) for member in members):raise ValueError('Invalid archive')
+  if file.extractfile('SPBackup-Storage/VERSION.txt').read().decode().strip()!=args.version:raise ValueError('Wrong package version')
+  runtime=json.load(file.extractfile('SPBackup-Storage/SPBackup.StorageBridge.runtimeconfig.json'))
   frameworks={item['name']:item['version'] for item in runtime['runtimeOptions']['includedFrameworks']}
   if frameworks!={'Microsoft.NETCore.App':'10.0.13','Microsoft.AspNetCore.App':'10.0.13'}:raise ValueError('Unexpected package runtime')
  branch='distribution/storage-linux-x64-'+args.version
@@ -33,7 +33,7 @@ def main():
   commit=git('commit-tree',tree,input=('Storage gateway '+args.version+'\n').encode())
   git('push','origin',commit+':refs/heads/'+branch)
  root='https://github.com/sanekman/1C-Backup/blob/'+branch+'/storage/'
- notes='''# Шлюз хранилища 1C-Backup '''+args.version+'''
+ notes='''# Шлюз хранилища SP Backup '''+args.version+'''
 
 SDK 10.0.402; самодостаточный пакет и Docker-образ используют .NET / ASP.NET Core 10.0.13. Предыдущие теги и дистрибутивы сохраняются; версия образа совпадает с версией выпуска.
 

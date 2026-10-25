@@ -3,7 +3,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$InstallDirectory,
     [string]$DataDirectory = (Join-Path $env:ProgramData 'OneCBackupServer'),
-    [string]$ServerName = '1C-Backup Server',
+    [string]$ServerName = 'SP Backup Server',
     [string]$ServerAddress = ('https://'+$env:COMPUTERNAME+':7443/'),
     [string]$ServerNameFile,
     [string]$ServerAddressFile,
@@ -132,7 +132,7 @@ try {
     Step 'database-service'
     Start-Service -Name $pgService
     (Get-Service $pgService).WaitForStatus('Running',[TimeSpan]::FromSeconds(60))
-    $exe = Join-Path $InstallDirectory 'OneCBackup.Server.exe'
+    $exe = Join-Path $InstallDirectory 'SPBackup.Server.exe'
     # pg_ctl service readiness precedes database readiness; use bounded --initialize/--migrate retries.
     $adminFile = Join-Path $DataDirectory 'administrator-password.txt'
     $mode = if (Test-Path $adminFile) { '--provision' } else { '--migrate' }
@@ -146,7 +146,7 @@ try {
     if (!$initialized) { throw 'Database initialization failed. Configuration and database have been retained for recovery.' }
     Remove-Item -LiteralPath $adminFile -ErrorAction SilentlyContinue
     if (!(Get-Service -Name $serverService -ErrorAction SilentlyContinue)) {
-        New-Service -Name $serverService -DisplayName '1C-Backup Server' -BinaryPathName ('"'+$exe+'" --Server:ConfigFile "'+$config+'"') -StartupType Automatic -DependsOn $pgService -Credential (New-Object Management.Automation.PSCredential('NT AUTHORITY\NetworkService',(New-Object Security.SecureString))) | Out-Null
+        New-Service -Name $serverService -DisplayName 'SP Backup Server' -BinaryPathName ('"'+$exe+'" --Server:ConfigFile "'+$config+'"') -StartupType Automatic -DependsOn $pgService -Credential (New-Object Management.Automation.PSCredential('NT AUTHORITY\NetworkService',(New-Object Security.SecureString))) | Out-Null
 
     }
     Run-Native 'sc.exe' @('failure',$serverService,'reset=','86400','actions=','restart/10000/restart/30000/restart/60000')
@@ -167,7 +167,7 @@ try {
             $rule | Set-NetFirewallRule -Enabled True -Direction Inbound -Action Allow -Profile Domain,Private -Program $exe
             $rule | Get-NetFirewallPortFilter | Set-NetFirewallPortFilter -Protocol TCP -LocalPort $listenPort
         } else {
-            New-NetFirewallRule -Name 'OneCBackupServer-Https' -DisplayName '1C-Backup Server HTTPS' -Direction Inbound -Protocol TCP -LocalPort $listenPort -Program $exe -Profile Domain,Private -Action Allow | Out-Null
+            New-NetFirewallRule -Name 'OneCBackupServer-Https' -DisplayName 'SP Backup Server HTTPS' -Direction Inbound -Protocol TCP -LocalPort $listenPort -Program $exe -Profile Domain,Private -Action Allow | Out-Null
         }
     } elseif ($rule) { $rule | Remove-NetFirewallRule }
     if (!$configuration.PSObject.Properties['WindowsInstaller'] -or !$configuration.WindowsInstaller) {
@@ -185,7 +185,7 @@ try {
     }
     if (!$ready) { throw 'The Windows services were installed but HTTPS readiness failed. See the server logs.' }
     Step 'ready'
-    Write-Output '1C-Backup Server installed. Open the panel from the Start menu and sign in as admin.'
+    Write-Output 'SP Backup Server installed. Open the panel from the Start menu and sign in as admin.'
 } catch {
     # Keep all persistent files. A failed setup must never delete a database or reset a password.
     Add-Content -LiteralPath (Join-Path $DataDirectory 'setup.log') -Encoding UTF8 -Value ('failed '+$stage+' '+$_.Exception.GetType().Name)

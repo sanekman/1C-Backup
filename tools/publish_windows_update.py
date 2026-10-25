@@ -12,7 +12,7 @@ import zipfile
 def distribution_files(version):
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?", version):
         raise ValueError("Invalid distribution version")
-    stem = "1C-Backup-" + version + "-windows-x64"
+    stem = "SP-Backup-" + version + "-windows-x64"
     return [stem + ".zip", stem + ".zip.sha256", stem + "-setup.exe", stem + "-setup.exe.sha256",
             "update-manifest.json", "1C-Backup-windows-x64-setup.exe", "1C-Backup-windows-x64-setup.exe.sha256"]
 
@@ -39,7 +39,7 @@ def verify_artifacts(artifacts):
         if stream.read(2) != b"MZ":
             raise ValueError("Installer is not a Windows executable")
     with zipfile.ZipFile(artifacts / files[0]) as archive:
-        if archive.testzip() is not None or archive.read("1C-Backup/VERSION.txt").decode().strip() != version:
+        if archive.testzip() is not None or archive.read("SP-Backup/VERSION.txt").decode().strip() != version:
             raise ValueError("Distribution is corrupt or its version differs")
     return version
 
@@ -65,11 +65,11 @@ def publish(root, artifacts, branch=None, notes=None):
             blob = git("hash-object", "-w", str(artifacts / name))
             git("update-index", "--add", "--cacheinfo", "100644", blob, "windows/" + name, env=env)
         tree = git("write-tree", env=env)
-        commit = git("-c", "user.name=1C-Backup Release", "-c", "user.email=release@users.noreply.github.com",
+        commit = git("-c", "user.name=SP Backup Release", "-c", "user.email=release@users.noreply.github.com",
                      "commit-tree", tree, input=("Publish Windows update " + version + "\n").encode())
         subprocess.run(["git", "push", "origin", commit + ":refs/heads/" + branch], cwd=root, check=True)
     (artifacts / "distribution-commit.txt").write_text(commit + "\n")
-    body = notes.read_text(encoding="utf-8") if notes else "1C-Backup " + version
+    body = notes.read_text(encoding="utf-8") if notes else "SP Backup " + version
     base = "https://github.com/sanekman/1C-Backup/blob/" + branch + "/windows/"
     body += "\n\n[Скачать установщик](" + base + files[2] + "?raw=true)\n\n[Скачать ZIP](" + base + files[0] + "?raw=true)\n"
     body += "\n<!-- onec-update-manifest: " + branch + " -->\n"

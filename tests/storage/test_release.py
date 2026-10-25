@@ -62,7 +62,7 @@ class StorageReleaseTests(unittest.TestCase):
         (root / 'deploy/storage').mkdir(parents=True)
         (root / 'deploy/storage/VERSION').write_text('0.1.0-alpha.2\n')
         (root / 'artifacts').mkdir()
-        return root / 'artifacts/OneCBackup-Storage-0.1.0-alpha.2-linux-x64.tar.gz'
+        return root / 'artifacts/SPBackup-Storage-0.1.0-alpha.2-linux-x64.tar.gz'
 
     def test_existing_local_package_is_not_overwritten_or_rebuilt(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -84,8 +84,8 @@ class StorageReleaseTests(unittest.TestCase):
             {'name': 'Microsoft.AspNetCore.App', 'version': runtime}]}}
         with tarfile.open(archive, 'w:gz') as output:
             for name, contents in [('VERSION.txt', b'0.1.0-alpha.2\n'),
-                ('OneCBackup.StorageBridge.runtimeconfig.json', json.dumps(config).encode())]:
-                member = tarfile.TarInfo('OneCBackup-Storage/' + name)
+                ('SPBackup.StorageBridge.runtimeconfig.json', json.dumps(config).encode())]:
+                member = tarfile.TarInfo('SPBackup-Storage/' + name)
                 member.size = len(contents)
                 output.addfile(member, io.BytesIO(contents))
         checksum = hashlib.sha256(archive.read_bytes()).hexdigest()

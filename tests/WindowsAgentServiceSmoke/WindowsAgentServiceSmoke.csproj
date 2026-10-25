@@ -6,5 +6,5 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="../../src/OneCBackup.Core/OneCBackup.Core.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../../src/SPBackup.Core/SPBackup.Core.csproj" /></ItemGroup>
 </Project>

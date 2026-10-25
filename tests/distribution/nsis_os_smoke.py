@@ -51,7 +51,7 @@ Var SimVersion
 !macroend
 !define __WinVer_GWV '!insertmacro FixtureGetWinVer'
 !include "WinVer.nsh"
-Name "1C-Backup OS gate fixture"
+Name "SP Backup OS gate fixture"
 OutFile "OUTPUT"
 RequestExecutionLevel user
 Function .onInit

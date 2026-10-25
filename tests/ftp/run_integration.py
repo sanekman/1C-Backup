@@ -39,7 +39,7 @@ def main():
             environment = dict(os.environ)
             environment["ONECBACKUP_TEST_FTP_PORT"] = str(port)
             environment["ONECBACKUP_TEST_FTP_ROOT"] = root
-            project = Path(__file__).resolve().parents[1] / "OneCBackup.Core.Tests"
+            project = Path(__file__).resolve().parents[1] / "SPBackup.Core.Tests"
             return subprocess.run([
                 args.dotnet, "test", str(project), "--no-build", "--no-restore",
                 "-m:1", "-nr:false", "--filter", "Category=FtpIntegration"

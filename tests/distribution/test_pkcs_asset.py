@@ -23,7 +23,7 @@ class PackagedPkcsTests(unittest.TestCase):
         restored.mkdir(parents=True)
         (restored / self.asset).write_bytes(b"patched PKCS fixture")
         (self.publish / self.asset).write_bytes(b"patched PKCS fixture")
-        for project in ["OneCBackup.Desktop", "OneCBackup.Agent"]:
+        for project in ["SPBackup.Desktop", "SPBackup.Agent"]:
             self.deps(project)
 
     def deps(self, project, version="10.0.13", active=True):
@@ -46,7 +46,7 @@ class PackagedPkcsTests(unittest.TestCase):
     def runtime_pack(self, version):
         name = "runtimepack.Microsoft.AspNetCore.App.Runtime.win-x64/" + version
         runtime = {"runtime": {self.asset: {}}}
-        for project in ["OneCBackup.Desktop", "OneCBackup.Agent"]:
+        for project in ["SPBackup.Desktop", "SPBackup.Agent"]:
             (self.publish / (project + ".deps.json")).write_text(json.dumps({
                 "libraries": {name: {}}, "targets": {"net10.0/win-x64": {name: runtime}}}))
 
@@ -68,11 +68,11 @@ class PackagedPkcsTests(unittest.TestCase):
 
     def test_desktop_and_agent_can_resolve_same_patched_version_from_different_packs(self):
         self.runtime_pack("10.0.13")
-        self.deps("OneCBackup.Agent")
+        self.deps("SPBackup.Agent")
         self.verify()
 
     def test_desktop_and_agent_cannot_disagree_on_runtime_version(self):
-        self.deps("OneCBackup.Agent", version="10.0.14")
+        self.deps("SPBackup.Agent", version="10.0.14")
         with self.assertRaisesRegex(RuntimeError, "versions differ"):
             self.verify()
 
@@ -82,11 +82,11 @@ class PackagedPkcsTests(unittest.TestCase):
             self.verify()
 
     def test_agent_must_also_load_patched_runtime_asset(self):
-        self.deps("OneCBackup.Agent", active=False)
+        self.deps("SPBackup.Agent", active=False)
         with self.assertRaisesRegex(RuntimeError, "does not load"):
             self.verify()
 
     def test_unpatched_major10_package_is_rejected(self):
-        self.deps("OneCBackup.Desktop", version="10.0.12")
+        self.deps("SPBackup.Desktop", version="10.0.12")
         with self.assertRaisesRegex(RuntimeError, "at least"):
             self.verify()

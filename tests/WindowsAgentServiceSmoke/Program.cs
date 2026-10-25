@@ -5,7 +5,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Win32;
-using OneCBackup.Core;
+using SPBackup.Core;
 using ICSharpCode.SharpZipLib.Zip;
 
 internal static class Program
@@ -264,7 +264,7 @@ internal static class Program
         private static extern uint NetUserDel(string? server, string name);
         public static void AddUser(string name, string password)
         {
-            var user = new User { Name = name, Password = password, Privilege = 1, Flags = 0x10201, Comment = "Disposable 1C-Backup CI service account" };
+            var user = new User { Name = name, Password = password, Privilege = 1, Flags = 0x10201, Comment = "Disposable SP Backup CI service account" };
             var code = NetUserAdd(null, 1, ref user, out _);
             if (code != 0) throw new Win32Exception((int)code, "Could not create the disposable CI account.");
         }

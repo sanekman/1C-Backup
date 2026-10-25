@@ -22,4 +22,6 @@ temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 git clone --depth 1 --single-branch --no-tags --branch "distribution/storage-linux-x64-$version" \
  https://github.com/sanekman/1C-Backup.git "$temporary/distribution"
-bash "$root/install-lxc.sh" --archive "$temporary/distribution/storage/OneCBackup-Storage-$version-linux-x64.tar.gz" "${installer_arguments[@]}"
+archive="$temporary/distribution/storage/SPBackup-Storage-$version-linux-x64.tar.gz"
+[[ -f "$archive" ]] || archive="$temporary/distribution/storage/OneCBackup-Storage-$version-linux-x64.tar.gz"
+bash "$root/install-lxc.sh" --archive "$archive" "${installer_arguments[@]}"

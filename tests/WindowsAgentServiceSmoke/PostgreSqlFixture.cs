@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.AccessControl;
 using System.Security.Principal;
-using OneCBackup.Core;
+using SPBackup.Core;
 
 /// <summary>Fresh SCRAM cluster; the service cannot read the owner's private fixture password file.</summary>
 internal sealed class PostgreSqlFixture : IAsyncDisposable

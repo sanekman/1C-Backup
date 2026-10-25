@@ -28,21 +28,21 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s tests/server -p "test_*.py"
-      - run: dotnet restore tests/OneCBackup.Server.Tests --locked-mode
-      - run: dotnet build tests/OneCBackup.Server.Tests --no-restore -m:1 -nr:false
+      - run: dotnet restore tests/SPBackup.Server.Tests --locked-mode
+      - run: dotnet build tests/SPBackup.Server.Tests --no-restore -m:1 -nr:false
       - if: runner.os == 'Linux'
         run: |
           python3 tools/dev_server_db.py start --state-dir /tmp/onec-server-ci --name onec-server-ci
           echo "ONECBACKUP_SERVER_TEST_CONNECTION_FILE=/tmp/onec-server-ci/connection-string.txt" >> "$GITHUB_ENV"
       - if: runner.os == 'Linux'
-        run: dotnet test tests/OneCBackup.Server.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=ServerPackage' --logger 'trx;LogFileName=server-linux.trx' --results-directory artifacts/server-tests
+        run: dotnet test tests/SPBackup.Server.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=ServerPackage' --logger 'trx;LogFileName=server-linux.trx' --results-directory artifacts/server-tests
       - if: runner.os == 'Windows'
         run: python tests/server/run_windows.py
       - run: python tools/build_server_distribution.py --runtime ${{ matrix.runtime }}
       - if: runner.os == 'Linux'
         run: |
           export ONECBACKUP_SERVER_TEST_PACKAGE_DIR="$GITHUB_WORKSPACE/artifacts/server/linux-x64"
-          dotnet test tests/OneCBackup.Server.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category=ServerPackage' --logger 'trx;LogFileName=server-package-linux.trx' --results-directory artifacts/server-tests
+          dotnet test tests/SPBackup.Server.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category=ServerPackage' --logger 'trx;LogFileName=server-package-linux.trx' --results-directory artifacts/server-tests
       - if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -56,7 +56,7 @@ jobs:
       - if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $installer = (Get-ChildItem artifacts/server/1C-Backup-Server-*-windows-x64-setup.exe).FullName
+          $installer = (Get-ChildItem artifacts/server/SP-Backup-Server-*-windows-x64-setup.exe).FullName
           & tests/server/windows_installer_smoke.ps1 -Installer $installer
       - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }}
       - if: runner.os == 'Linux'
@@ -74,7 +74,7 @@ jobs:
         with:
           name: server-${{ matrix.runtime }}-verification
           path: |
-            artifacts/server/1C-Backup-Server-*.exe
+            artifacts/server/SP-Backup-Server-*.exe
             artifacts/server/*.zip
             artifacts/server/*.tar.gz
             artifacts/server/*.sha256

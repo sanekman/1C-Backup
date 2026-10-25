@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
-using OneCBackup.Core;
+using SPBackup.Core;
 
 var previousVersion = args.Length > 0 ? args[0] : "0.0.0";
 var expectedVersion = args.Length > 1 ? args[1] : null;

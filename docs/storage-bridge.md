@@ -29,7 +29,7 @@ apt-get update
 apt-get install -y git ca-certificates
 git clone --depth 1 --single-branch --branch storage-v0.1.0-alpha.3 \
   https://github.com/sanekman/1C-Backup.git
-cd 1C-Backup
+cd SP Backup
 bash deploy/storage/install-from-github.sh \
   --storage /backups --endpoint wss://relay.ВАШ-ДОМЕН
 ```
@@ -80,7 +80,7 @@ docker compose -f deploy/storage/compose.yaml logs -f
 
 ## Подключение в Windows
 
-Требуется **1C-Backup 0.2.0-alpha.13 или новее**.
+Требуется **SP Backup 0.2.0-alpha.13 или новее**.
 
 1. Если публичный узел будет в основной программе: «Настройки → Публичный узел → Импортировать hub.json». Добавление файла другого шлюза объединяет разрешённые ID, а не удаляет прежние.
 2. Опубликуйте локальный порт **127.0.0.1:7087** через Caddy, IIS или Apache, по инструкции ниже. Окно в трее, фоновый агент или служба должны работать. Выключение узла закрывает подключения, но сохраняет список разрешённых шлюзов.

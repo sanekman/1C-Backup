@@ -28,7 +28,7 @@ def build(archive_path, compiler, kind="inno"):
                 raise RuntimeError('Corrupt distribution ZIP')
             for member in archive.infolist():
                 parts = PurePosixPath(member.filename).parts
-                if len(parts) < 2 or parts[0] != '1C-Backup' or '..' in parts or '\\' in member.filename or ':' in member.filename:
+                if len(parts) < 2 or parts[0] != 'SP-Backup' or '..' in parts or '\\' in member.filename or ':' in member.filename:
                     raise RuntimeError('Unexpected distribution path')
                 target = source.joinpath(*parts[1:])
                 if member.is_dir():
@@ -64,7 +64,7 @@ def build(archive_path, compiler, kind="inno"):
                                 str(Path(__file__).with_name('windows-installer.nsi'))], check=True)
         else:
             raise ValueError('Unknown installer compiler')
-    installer = artifacts / f"1C-Backup-{version}-windows-x64-setup.exe"
+    installer = artifacts / f"SP-Backup-{version}-windows-x64-setup.exe"
     from windows_signing import sign_and_verify
     sign_and_verify([installer])
     with installer.open('rb') as stream:
@@ -91,5 +91,5 @@ if __name__ == '__main__':
     parser.add_argument('--compiler', type=Path)
     args = parser.parse_args()
     compiler = args.compiler or (Path("makensis") if args.kind == "nsis" else Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Inno Setup 6/ISCC.exe")
-    archive = args.zip or Path("artifacts") / ("1C-Backup-" + Path("artifacts/distribution-version.txt").read_text().strip() + "-windows-x64.zip")
+    archive = args.zip or Path("artifacts") / ("SP-Backup-" + Path("artifacts/distribution-version.txt").read_text().strip() + "-windows-x64.zip")
     build(archive, compiler, args.kind)

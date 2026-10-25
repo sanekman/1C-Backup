@@ -49,7 +49,7 @@ def main():
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?',version):
         raise RuntimeError('Invalid server version')
     output = source.parent
-    installer = output/f'1C-Backup-Server-{version}-windows-x64-setup.exe'
+    installer = output/f'SP-Backup-Server-{version}-windows-x64-setup.exe'
     if installer.exists():
         raise FileExistsError('Refusing to overwrite an existing installer: '+str(installer))
     subprocess.run([args.compiler,'/Qp','/DSourceFolder='+str(source),'/DOutputFolder='+str(output),'/DAppVersion='+version,str(Path(__file__).with_name('server-windows-installer.iss'))],check=True)

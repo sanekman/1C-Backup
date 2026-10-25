@@ -23,8 +23,10 @@ def main():
     reference = os.environ.get("GITHUB_REF_NAME", "")
     if os.environ.get("GITHUB_REF_TYPE") == "tag" and reference.startswith("server-v"):
         version = reference.removeprefix("server-v")
-    subprocess.run([args.dotnet, "publish", "src/OneCBackup.Server", "-c", "Release", "-r", args.runtime,
+    subprocess.run([args.dotnet, "publish", "src/SPBackup.Server", "-c", "Release", "-r", args.runtime,
                     "--self-contained", "true", "-p:RestoreLockedMode=true", "-o", str(output), "-p:Version=" + version], cwd=repository, check=True)
+    from legacy_apphosts import copy_legacy_apphosts
+    copy_legacy_apphosts(output, ["Server"], windows=args.runtime == "win-x64")
     (output / "VERSION.txt").write_text(version + "\n", encoding="utf-8")
     (output / "START-HERE.md").write_text((repository / "docs/server-start.md").read_text(encoding="utf-8"), encoding="utf-8")
     shutil.copy(repository / "deploy/server/server.env.example", output)
@@ -32,24 +34,24 @@ def main():
         shutil.copytree(repository / "deploy/server/windows", output / "windows")
     if args.runtime == "linux-x64":
         shutil.copy(repository / "deploy/server/onec-backup-server.service", output)
-    dependency = json.loads((output / "OneCBackup.Server.deps.json").read_text(encoding="utf-8"))
-    if "OneCBackup.Server/" + version not in dependency["libraries"]:
+    dependency = json.loads((output / "SPBackup.Server.deps.json").read_text(encoding="utf-8"))
+    if "SPBackup.Server/" + version not in dependency["libraries"]:
         raise RuntimeError("Published server version mismatch")
     forbidden = {"connection-string.txt", "administrator-password.txt", "certificate-password.txt", "server.pfx", "postgres.env"}
     if any(path.name in forbidden or path.suffix in {".pfx", ".pem", ".jsonl"} for path in output.rglob("*")):
         raise RuntimeError("A credential or diagnostic file entered the distribution")
-    archive = output.parent / ("1C-Backup-server-" + args.runtime + (".zip" if args.runtime == "win-x64" else ".tar.gz"))
+    archive = output.parent / ("SP-Backup-server-" + args.runtime + (".zip" if args.runtime == "win-x64" else ".tar.gz"))
     if args.runtime == "win-x64":
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for path in sorted(output.rglob("*")):
                 if path.is_file():
-                    zip_file.write(path, "1C-Backup-Server/" + path.relative_to(output).as_posix())
+                    zip_file.write(path, "SP-Backup-Server/" + path.relative_to(output).as_posix())
         with zipfile.ZipFile(archive) as zip_file:
             if zip_file.testzip() is not None:
                 raise RuntimeError("Server archive CRC failed")
     else:
         with tarfile.open(archive, "w:gz") as tar:
-            tar.add(output, arcname="1C-Backup-Server")
+            tar.add(output, arcname="SP-Backup-Server")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_name(archive.name + ".sha256").write_text(digest + "  " + archive.name + "\n")
     print("Server distribution:", archive.name, "SHA-256", digest)

@@ -31,7 +31,7 @@ $env:ONECBACKUP_NATIVE_SQL = '1'
 $env:ONECBACKUP_TEST_REPOSITORY = (Get-Location).Path
 $env:ONECBACKUP_TEST_LOCALDB_EXE = 'C:\Program Files\Microsoft SQL Server\160\Tools\Binn\SqlLocalDB.exe'
 $env:PGBIN = 'C:\Program Files\PostgreSQL\17\bin'
-dotnet test tests/OneCBackup.Core.Tests --filter 'Category=NativeSqlIntegration'
+dotnet test tests/SPBackup.Core.Tests --filter 'Category=NativeSqlIntegration'
 ```
 
 Пути к установленным утилитам могут отличаться. Без явного флага интеграционные тесты пропускаются; обычная проверка ядра исключает их фильтром `Category!=FtpIntegration&Category!=NativeSqlIntegration`. В обязательном задании CI отсутствие утилит считается ошибкой подготовки, а не успешным пропуском.

@@ -49,7 +49,7 @@ def main():
             environment = dict(os.environ, ONECBACKUP_SERVER_TEST_CONNECTION_FILE=str(connection), ONECBACKUP_TEST_REPOSITORY=str(repository))
             name = "server-package-windows.trx" if args.package else "server-windows.trx"
             category = "Category=ServerPackage" if args.package else "Category!=ServerPackage"
-            result = subprocess.run([args.dotnet, "test", "tests/OneCBackup.Server.Tests", "--no-build", "--no-restore", "-m:1", "-nr:false", "--filter", category,
+            result = subprocess.run([args.dotnet, "test", "tests/SPBackup.Server.Tests", "--no-build", "--no-restore", "-m:1", "-nr:false", "--filter", category,
                                      "--logger", "trx;LogFileName=" + name, "--results-directory", "artifacts/server-tests"], cwd=repository, env=environment)
             if result.returncode:
                 raise RuntimeError("Server integration tests failed.")

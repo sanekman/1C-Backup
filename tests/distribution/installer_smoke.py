@@ -24,7 +24,7 @@ def check():
     root = Path(__file__).resolve().parents[2]
     artifacts = root / 'artifacts'
     version = (artifacts / 'distribution-version.txt').read_text().strip()
-    installer = artifacts / f'1C-Backup-{version}-windows-x64-setup.exe'
+    installer = artifacts / f'SP-Backup-{version}-windows-x64-setup.exe'
     installation = Path(os.environ['LOCALAPPDATA']) / 'Programs' / ('OneCBackup-test-' + uuid.uuid4().hex)
     profile = Path(os.environ['LOCALAPPDATA']) / 'OneCBackup'
     profile.mkdir(parents=True, exist_ok=True)
@@ -53,7 +53,7 @@ def check():
     try:
         run(installer, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=' + str(installation))
         installed = True
-        with zipfile.ZipFile(artifacts / f'1C-Backup-{version}-windows-x64.zip') as archive:
+        with zipfile.ZipFile(artifacts / f'SP-Backup-{version}-windows-x64.zip') as archive:
             for name in archive.namelist():
                 if name.endswith('/'):
                     continue
@@ -68,7 +68,7 @@ def check():
                 pass
             else:
                 raise AssertionError('Installation unexpectedly enabled autostart')
-        shortcut = Path(os.environ['PROGRAMDATA']) / 'Microsoft/Windows/Start Menu/Programs/1C-Backup/1C-Backup.lnk'
+        shortcut = Path(os.environ['PROGRAMDATA']) / 'Microsoft/Windows/Start Menu/Programs/SP-Backup/SP-Backup.lnk'
         assert shortcut.is_file(), 'Missing Start Menu shortcut'
         # A live engine owns this exact share-denying lock in normal application use.
         kernel = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -83,12 +83,13 @@ def check():
         try:
             run(installer, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=' + str(installation), success=False)
             run(uninstaller(), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', success=False)
-            assert (installation / 'OneCBackup.Desktop.exe').is_file()
+            assert (installation / 'SPBackup.Desktop.exe').is_file()
             assert marker.read_bytes() == marker_bytes
         finally:
             kernel.CloseHandle(handle)
         run(installer, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=' + str(installation))
         assert marker.read_bytes() == marker_bytes, 'Update changed user profile'
+        # The pre-rename updater restarts this exact legacy executable name.
         run(installation / 'OneCBackup.Desktop.exe', '--smoke-ui', ui, timeout=180)
         result = json.loads((ui / 'smoke-result.json').read_text(encoding='utf-8-sig'))
         assert result['success'], 'Installed GUI smoke failed'
@@ -96,13 +97,13 @@ def check():
         assert info['version'] == version
         assert info['revision'] == os.environ['GITHUB_SHA']
         # Uninstall must leave an autostart pointing at a different portable copy alone.
-        foreign = '"C:\\Portable\\OneCBackup.Agent.exe" --run --quiet'
+        foreign = '"C:\\Portable\\SPBackup.Agent.exe" --run --quiet'
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_path) as key:
             winreg.SetValueEx(key, startup_name, 0, winreg.REG_SZ, foreign)
         run(uninstaller(), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
         installed = False
         assert marker.read_bytes() == marker_bytes
-        assert not (installation / 'OneCBackup.Desktop.exe').exists()
+        assert not (installation / 'SPBackup.Desktop.exe').exists()
         assert not shortcut.exists()
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_path, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
             assert winreg.QueryValueEx(key, startup_name)[0] == foreign
@@ -112,7 +113,7 @@ def check():
         installed = True
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_path) as key:
             winreg.SetValueEx(key, startup_name, 0, winreg.REG_SZ,
-                             '"' + str(installation / 'OneCBackup.Desktop.exe') + '" --tray --start-agent')
+                             '"' + str(installation / 'SPBackup.Desktop.exe') + '" --tray --start-agent')
         run(uninstaller(), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
         installed = False
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_path) as key:

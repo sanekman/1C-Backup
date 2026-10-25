@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 $root=Join-Path $env:ProgramData 'OneCBackupServer'
-$install=Join-Path $env:ProgramFiles '1C-Backup Server'
+$install=Join-Path $env:ProgramFiles 'SP Backup Server'
 if (Test-Path $root) { throw 'Installer smoke requires a clean disposable machine.' }
 $secret=Join-Path $env:TEMP ('onec-server-smoke-'+[Guid]::NewGuid().ToString('N')+'.txt')
 $displayName='Бухгалтерия — основной сервер'

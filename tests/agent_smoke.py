@@ -15,7 +15,7 @@ def main():
     parser.add_argument("--dotnet", default="dotnet")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    assembly = root / "src/OneCBackup.Agent/bin/Debug/net10.0/OneCBackup.Agent.dll"
+    assembly = root / "src/SPBackup.Agent/bin/Debug/net10.0/SPBackup.Agent.dll"
     with tempfile.TemporaryDirectory(prefix="onec-agent-smoke-") as fixture:
         data = Path(fixture)
         source = data / "base"

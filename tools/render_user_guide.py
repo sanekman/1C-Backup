@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'docs/user-guide.md'
-OUTPUT = ROOT / 'src/OneCBackup.Desktop/Help/user-guide.html'
+OUTPUT = ROOT / 'src/SPBackup.Desktop/Help/user-guide.html'
 TOKEN = re.compile(r'(!?\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*)')
 
 def inline(text):
@@ -65,7 +65,7 @@ def render(source):
     return '''<!doctype html>
 <!-- Generated from docs/user-guide.md by tools/render_user_guide.py. -->
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Пошаговая инструкция — 1C-Backup</title>
+<title>Пошаговая инструкция — SP Backup</title>
 <style>
 body{margin:0;background:#eef2f7;color:#172b4d;font:18px/1.65 system-ui,Segoe UI,sans-serif}
 main{max-width:920px;margin:32px auto;padding:36px 44px;background:white;border-radius:16px}
