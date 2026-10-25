@@ -80,7 +80,9 @@ public sealed class ApplicationReleaseVersion : IComparable<ApplicationReleaseVe
 /// <summary>Only fixed GitHub API routes are used. Secrets are never placed in URLs or error messages.</summary>
 public sealed class GitHubApplicationUpdates(HttpClient client)
 {
-    private const string Api = "https://api.github.com/repos/sanekman/1C-Backup/";
+    // Repository identity survives renames; redirects remain disabled so credentials
+    // are sent only to the fixed GitHub API endpoint, never a redirect destination.
+    private const string Api = "https://api.github.com/repositories/1413316996/";
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private sealed class TransferInterrupted(string message, Exception? inner = null) : IOException(message, inner);
     private static async Task<T> RetryAsync<T>(Func<Task<T>> action, UpdateRequestPhase phase, IProgress<UpdateRetryNotice>? retry, CancellationToken token)
@@ -117,7 +119,7 @@ public sealed class GitHubApplicationUpdates(HttpClient client)
             throw new ArgumentException("Некорректный токен GitHub.");
         var request = new HttpRequestMessage(HttpMethod.Get, Api + path)
         { Version = HttpVersion.Version11, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
-        request.Headers.UserAgent.ParseAdd("OneCBackup-Updater/1.0");
+        request.Headers.UserAgent.ParseAdd("SPBackup-Updater/1.0");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(raw ? "application/vnd.github.raw" : "application/vnd.github+json"));
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         if (token is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);

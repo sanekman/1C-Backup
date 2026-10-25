@@ -42,6 +42,7 @@ public sealed class ApplicationUpdateTests : IDisposable
         {
             requests++;
             Assert.Equal("api.github.com", request.RequestUri!.Host);
+            Assert.StartsWith("/repositories/1413316996/", request.RequestUri.AbsolutePath);
             Assert.Equal("https", request.RequestUri.Scheme);
             Assert.DoesNotContain("ghp_fixture", request.RequestUri.ToString());
             Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
@@ -249,7 +250,8 @@ public sealed class ApplicationUpdateTests : IDisposable
         var requests = 0; var notices = new List<UpdateRetryNotice>();
         using var client = new HttpClient(new Handler((request, _) =>
         {
-            Assert.Equal("api.github.com", request.RequestUri!.Host); requests++;
+            Assert.Equal("api.github.com", request.RequestUri!.Host);
+            Assert.StartsWith("/repositories/1413316996/", request.RequestUri.AbsolutePath); requests++;
             return Task.FromResult(requests == 1 ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
                 : request.RequestUri.AbsolutePath.EndsWith("/releases") ? Json(new[] { Release("0.1.0-preview.42") }) : Json(Manifest()));
         }));

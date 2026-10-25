@@ -2,7 +2,7 @@ name: Verify published update download
 on:
   push:
     branches: ['feature/**']
-    paths: ['.github/workflows/update-download.yml', 'tests/updates/**']
+    paths: ['.github/workflows/update-download.yml', 'tests/updates/**', 'src/SPBackup.Core/ApplicationUpdates.cs']
   workflow_dispatch:
     inputs:
       previous_version:
