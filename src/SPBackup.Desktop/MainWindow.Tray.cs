@@ -135,8 +135,12 @@ public partial class MainWindow
             trayCancelRun.ToolTipText = working && activeRun is null && backgroundState?.CanCancelCurrentRun != true
                 ? "Для остановки только текущего задания обновите и перезапустите агент." : "Расписание и агент продолжат работать.";
         }
+        var execution = BackupAutomationReadiness.DetermineExecution(new(DateTimeOffset.UtcNow, backgroundBusy, backgroundState,
+            schedulingTask is not null, schedulerStopping || trayStopping, backgroundStarting, automationService, automationReadFailed));
         var text = trayStopping ? "SP Backup — останавливается…" : activeRun is not null ? "SP Backup — создаётся копия"
-            : backgroundBusy || schedulingTask is not null ? "SP Backup — автоматическое копирование включено" : "SP Backup — автоматическое копирование выключено";
+            : execution is AutomationExecution.Window or AutomationExecution.Background or AutomationExecution.Service ? "SP Backup — автоматическое копирование включено"
+            : execution is AutomationExecution.OneRun or AutomationExecution.Busy ? "SP Backup — исполнитель занят; расписание не подтверждено"
+            : "SP Backup — автоматическое копирование выключено";
         if (!trayStopping && latestBackupProgress is { Finished: false } progress) text = "SP Backup — " + StageLabel(progress.Progress);
         trayIcon.Text = text.Length <= 63 ? text : text[..63];
     }

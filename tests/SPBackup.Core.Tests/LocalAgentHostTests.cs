@@ -53,6 +53,7 @@ public sealed class LocalAgentHostTests : IDisposable
         var job = await CreateJob();
         var host = new LocalAgentHost(directory, new DatabaseBackupExecutor(new BackupProcessRunner()), new NoCredentials());
         Assert.Equal(0, await host.RunAsync(job.Id));
+        Assert.False((await new LocalAgentControlStore(directory).ReadAsync())!.RunsSchedules);
         var run = Assert.Single(await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync());
         Assert.Equal(BackupRunStatus.Succeeded, run.Status);
         var progress = await new BackupProgressStore(directory).ReadAsync();
@@ -244,6 +245,7 @@ public sealed class LocalAgentHostTests : IDisposable
             var control = new LocalAgentControlStore(directory);
             var state = (await control.ReadAsync())!;
             Assert.True(state.CanRunManually);
+            Assert.True(state.RunsSchedules);
             var stale = await queue.EnqueueAsync(Guid.NewGuid(), manual.Id);
             var missing = await queue.EnqueueAsync(state.SessionId, Guid.NewGuid());
             // A broken command must not prevent subsequent valid requests from being read.

@@ -222,6 +222,8 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Окно не вернулось из трея.");
             await CheckJobActionLayoutAsync(window);
             Screenshot("first-start");
+            VerifyAutomationOverview(window, name => Screenshot(name));
+            VerifyAutostartOwnership();
             var expectedVersion = Environment.GetEnvironmentVariable("GITHUB_REF_TYPE") == "tag"
                 ? Environment.GetEnvironmentVariable("GITHUB_REF_NAME")![1..] : "0.1.0-dev";
             if (ApplicationBuildInfo.Version != expectedVersion || Control<TextBlock>("AppVersion").Text != expectedVersion)

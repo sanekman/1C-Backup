@@ -559,9 +559,12 @@ public partial class MainWindow : Window
         CancelCopyVerificationButton.IsEnabled = copyVerification is { IsCancellationRequested: false };
         CancelCopyVerificationButton.Visibility = copyVerification is not null && !checkingStorages ? Visibility.Visible : Visibility.Collapsed;
         OpenCopyDirectoryButton.IsEnabled = ready && Copies.SelectedItem is BackupCopyRow { CanOpenDirectory: true };
-        StartBackgroundButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null && !editorOpen;
-        StopBackgroundButton.IsEnabled = ready && (backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running || schedulingTask is not null && !schedulerStopping);
-        var automationStarted = backgroundBusy || schedulingTask is not null;
+        StartBackgroundButton.IsEnabled = ready && canSave && agentSettings?.Mode == AgentMode.Standalone && idle && engineAvailable && schedulingTask is null && !editorOpen && !backgroundStarting
+            && automationService is AutomationService.None or AutomationService.Stopped;
+        StopBackgroundButton.IsEnabled = ready && !serviceManaging && (backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running
+            || schedulingTask is not null && !schedulerStopping || automationService == AutomationService.Running);
+        var automationStarted = backgroundBusy || schedulingTask is not null || backgroundStarting
+            || automationService is AutomationService.Starting or AutomationService.Running or AutomationService.Stopping;
         StartBackgroundButton.Visibility = automationStarted ? Visibility.Collapsed : Visibility.Visible;
         StopBackgroundButton.Visibility = automationStarted ? Visibility.Visible : Visibility.Collapsed;
         ArchivePasswordButton.ToolTip = FtpCredentialsButton.ToolTip = !engineAvailable || schedulingTask is not null
@@ -572,6 +575,7 @@ public partial class MainWindow : Window
         OpenRunDirectoryButton.IsEnabled = ready && RunHistory.SelectedItem is BackupRun;
         UpdateSelectedJobSummary();
         UpdateRunGuidance();
+        UpdateAutomationOverview();
     }
 
     private IDisposable? AcquireEngineOrReport()
@@ -598,27 +602,21 @@ public partial class MainWindow : Window
                 if (code != 0) Status.Text = $"Фоновый агент завершился с кодом {code}. Проверьте режим и настройки заданий.";
             }
             if (backgroundBusy) backgroundStarting = false;
-            var live = backgroundBusy && backgroundState is not null &&
-                DateTimeOffset.UtcNow - backgroundState.UpdatedUtc < TimeSpan.FromSeconds(10) &&
-                backgroundState.Phase is LocalAgentPhase.Running or LocalAgentPhase.Stopping;
-            var scheduledCount = jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual);
-            BackgroundStatus.Text = backgroundStarting ? "Автоматическое копирование включается…"
-                : schedulingTask is not null ? "Расписание работает только пока открыто это окно." : live
-                ? backgroundState!.Phase == LocalAgentPhase.Stopping ? "Останавливается текущая операция…"
-                    : (scheduledCount == 0 ? "Фоновая работа включена, но заданий по расписанию нет. " : $"Работает · заданий по расписанию: {scheduledCount}. ")
-                        + (backgroundState.Warning is { Length: > 0 } warning ? "Предупреждение: " + warning
-                            : backgroundState.Error ?? backgroundState.MonitoringError ?? "Можно закрыть окно.")
-                : backgroundBusy ? "Рабочий каталог занят другим исполнителем."
-                : backgroundState?.Phase == LocalAgentPhase.Faulted ? "Агент остановлен с ошибкой: " + backgroundState.Error
-                : "Выключено. Включите для запуска заданий по расписанию после закрытия окна.";
+            automationReadFailed = false;
+            automationAutostartUnknown = false;
+            if (!SmokeMode)
+            {
+                try { automationAutostart = CurrentUserAgentStartup.IsEnabled(); }
+                catch { automationAutostart = false; automationAutostartUnknown = true; }
+            }
             if (backgroundBusy && DateTimeOffset.UtcNow - lastBackgroundRefresh > TimeSpan.FromSeconds(10))
             {
                 lastBackgroundRefresh = DateTimeOffset.UtcNow;
                 await RefreshHistoryAsync(); await RefreshCopiesAsync();
             }
         }
-        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); BackgroundStatus.Text = "Не удалось проверить состояние агента: " + ex.Message; }
-        finally { refreshingBackground = false; UpdateRunControls(); RefreshService(); }
+        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); automationReadFailed = true; backgroundState = null; }
+        finally { refreshingBackground = false; RefreshService(); UpdateRunControls(); }
     }
 
     private async void StartBackground_Click(object sender, RoutedEventArgs e)
@@ -648,9 +646,14 @@ public partial class MainWindow : Window
     private async void StopBackground_Click(object sender, RoutedEventArgs e)
     {
         if (schedulingTask is not null) { StopSchedule_Click(sender, e); return; }
-        if (!StopBackgroundButton.IsEnabled || backgroundState is null) return;
+        if (!StopBackgroundButton.IsEnabled) return;
         try
         {
+            if (!SmokeMode && OwnService() is { State: not 1 } && (!backgroundBusy || backgroundState?.RunsSchedules != false))
+            {
+                await StopOwnedServiceAsync(); await RefreshBackgroundStateAsync(); return;
+            }
+            if (backgroundState is null) return;
             await backgroundControl.RequestStopAsync(backgroundState.SessionId);
             BackgroundStatus.Text = "Запрошена остановка агента. Дождитесь завершения операции.";
             StopBackgroundButton.IsEnabled = false;
@@ -686,7 +689,7 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("Автозапуск фонового агента доступен в автономном режиме. Сначала сохраните этот режим в настройках агента.");
             CurrentUserAgentStartup.Save(AgentStartup.IsChecked == true);
             StartupStatus.Text = AgentStartup.IsChecked == true ? "Агент будет запускаться при входе текущего пользователя в Windows. После переноса папки программы сохраните настройку заново."
-                : "Автозапуск выключен. Уже работающий агент можно остановить кнопкой «Остановить агент».";
+                : "Автозапуск этой программы выключен. Уже работающий агент можно остановить кнопкой «Остановить агент».";
         }
         catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); StartupStatus.Text = "Не удалось изменить автозапуск: " + ex.Message; }
     }

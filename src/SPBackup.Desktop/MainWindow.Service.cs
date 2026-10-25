@@ -46,6 +46,9 @@ public partial class MainWindow
         {
             var info = WindowsAgentService.QueryInfo();
             var owned = info?.Matches(ServiceExecutable, DesktopPaths.DataDirectory) == true;
+            automationService = info is null ? AutomationService.None : !owned ? AutomationService.OtherProfile
+                : info.State switch { 1 => AutomationService.Stopped, 2 => AutomationService.Starting, 3 => AutomationService.Stopping,
+                    4 => AutomationService.Running, _ => AutomationService.Unavailable };
             ServiceStatus.Text = info is null ? "Служба не установлена." : owned ? "Служба: " + info.Description + " · " + info.Account
                 : "Служба установлена для другой папки программы или профиля.";
             if (info is null && !ApplicationUpdateHandoff.IsInstalled())
@@ -55,7 +58,7 @@ public partial class MainWindow
             StartServiceButton.IsEnabled = ready && !serviceManaging && owned && info!.State == 1;
             StopServiceButton.IsEnabled = ready && !serviceManaging && owned && info!.State == 4;
         }
-        catch (Exception error) { ServiceStatus.Text = error.Message; }
+        catch (Exception error) { automationService = AutomationService.Unavailable; ServiceStatus.Text = error.Message; }
     }
     private async void InstallService_Click(object sender, RoutedEventArgs e) => await ManageServiceAsync("install");
     private async void RemoveService_Click(object sender, RoutedEventArgs e) => await ManageServiceAsync("remove");

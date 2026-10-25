@@ -33,7 +33,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         });
         var control = new LocalAgentControlStore(directory);
         var now = DateTimeOffset.UtcNow;
-        var state = new LocalAgentState(Guid.NewGuid(), Environment.ProcessId, now, now, LocalAgentPhase.Running) { CanCancelCurrentRun = true, CanRunManually = manual is null };
+        var state = new LocalAgentState(Guid.NewGuid(), Environment.ProcessId, now, now, LocalAgentPhase.Running) { CanCancelCurrentRun = true, CanRunManually = manual is null, RunsSchedules = manual is null };
         try { await control.WriteAsync(state, cancellationToken); }
         catch (Exception error) when (manual is null && AgentRuntimeWarnings.Recoverable(error)) { warnings.Set("Управление агентом", error); }
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

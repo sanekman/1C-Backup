@@ -68,7 +68,9 @@
       <Button x:Name="StartBackgroundButton" Content="Включить автоматически" Style="{StaticResource PrimaryButton}" Click="StartBackground_Click" IsEnabled="False" ToolTip="Выполнять сохранённые задания по расписанию даже после закрытия окна" />
       <Button x:Name="StopBackgroundButton" Content="Остановить" Click="StopBackground_Click" IsEnabled="False" Visibility="Collapsed" />
      </StackPanel>
-     <StackPanel><TextBlock Text="Автоматическое копирование" FontWeight="SemiBold" /><TextBlock x:Name="BackgroundStatus" Text="Проверка состояния…" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,0" /></StackPanel>
+     <StackPanel><TextBlock Text="Автоматическое копирование" FontWeight="SemiBold" /><TextBlock x:Name="BackgroundStatus" Text="Проверка состояния…" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,0" />
+      <TextBlock x:Name="NextAutomaticRun" Text="" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0" />
+     </StackPanel>
     </DockPanel>
    </Border>
    <Grid x:Name="JobsView" Grid.Row="2" SizeChanged="JobsView_SizeChanged">
