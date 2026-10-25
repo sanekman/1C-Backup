@@ -103,7 +103,9 @@ jobs:
       - run: dotnet publish src/SPBackup.Agent -c Release -r win-x64 --self-contained true -o artifacts/native-agent/service-bin -m:1 -nr:false
       - shell: pwsh
         run: |
-          $agent = Join-Path $PWD 'artifacts/native-agent/service-bin/SPBackup.Agent.exe'
+          # Existing SCM registrations keep the pre-rename application-host path.
+          Copy-Item artifacts/native-agent/service-bin/SPBackup.Agent.exe artifacts/native-agent/service-bin/OneCBackup.Agent.exe
+          $agent = Join-Path $PWD 'artifacts/native-agent/service-bin/OneCBackup.Agent.exe'
           dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- $agent (Join-Path $PWD 'artifacts/native-agent')
           if ($LASTEXITCODE -ne 0) { throw 'Native Windows agent service verification failed' }
       - if: always()

@@ -296,6 +296,8 @@ Section "Uninstall"
   StrCpy $2 '$\"$INSTDIR\SPBackup.Desktop.exe$\" --tray --start-agent'
   ${If} $0 == $1
   ${OrIf} $0 == $2
+  ${OrIf} $0 == '$\"$INSTDIR\OneCBackup.Agent.exe$\" --run --quiet'
+  ${OrIf} $0 == '$\"$INSTDIR\OneCBackup.Desktop.exe$\" --tray --start-agent'
     DeleteRegValue HKCU "${RunKey}" "OneCBackupAgent"
   ${EndIf}
   !include "${UninstallFiles}"

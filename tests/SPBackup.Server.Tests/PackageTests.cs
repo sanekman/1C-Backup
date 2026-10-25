@@ -24,6 +24,8 @@ public sealed class PackageTests(ServerFixture fixture) : IClassFixture<ServerFi
         var directory = Environment.GetEnvironmentVariable("ONECBACKUP_SERVER_TEST_PACKAGE_DIR")!;
         var executable = Path.Combine(directory, "SPBackup.Server" + (OperatingSystem.IsWindows() ? ".exe" : ""));
         Assert.True(File.Exists(executable));
+        var legacyExecutable = Path.Combine(directory, "OneCBackup.Server" + (OperatingSystem.IsWindows() ? ".exe" : ""));
+        Assert.Equal(File.ReadAllBytes(executable), File.ReadAllBytes(legacyExecutable));
         var enrolled = await fixture.EnrollAsync();
         using var reservation = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         reservation.Bind(new IPEndPoint(IPAddress.Loopback, 0)); var port = ((IPEndPoint)reservation.LocalEndPoint!).Port; reservation.Close();
@@ -34,7 +36,7 @@ public sealed class PackageTests(ServerFixture fixture) : IClassFixture<ServerFi
             HttpsCertificatePath = Path.Combine(fixture.Root, "certificate.pfx"), HttpsCertificatePasswordFile = Path.Combine(fixture.Root, "certificate-password.txt") } }));
         Process Start(bool migration)
         {
-            var info = new ProcessStartInfo(executable) {
+            var info = new ProcessStartInfo(migration ? executable : legacyExecutable) {
                 WorkingDirectory = fixture.Root, UseShellExecute = false,
                 RedirectStandardOutput = true, RedirectStandardError = true,
                 StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
@@ -67,6 +69,7 @@ public sealed class PackageTests(ServerFixture fixture) : IClassFixture<ServerFi
             Assert.Contains("localStorage", await theme.Content.ReadAsStringAsync());
             await fixture.SignInAsync(client);
             using var panel = await client.GetAsync(""); Assert.Equal(HttpStatusCode.OK, panel.StatusCode);
+            Assert.Contains("SP Backup", WebUtility.HtmlDecode(await panel.Content.ReadAsStringAsync()));
             using var system = await client.GetAsync("system"); system.EnsureSuccessStatusCode();
             Assert.Contains("Скачать диагностику сервера", WebUtility.HtmlDecode(await system.Content.ReadAsStringAsync()));
             using var account = await client.GetAsync("account"); account.EnsureSuccessStatusCode();

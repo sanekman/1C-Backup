@@ -151,13 +151,16 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  CurrentValue, InstalledValue, TrayValue: String;
+  CurrentValue, InstalledValue, TrayValue, LegacyAgent, LegacyTray: String;
 begin
   if CurUninstallStep = usUninstall then begin
     InstalledValue := '"' + ExpandConstant('{app}\SPBackup.Agent.exe') + '" --run --quiet';
     TrayValue := '"' + ExpandConstant('{app}\SPBackup.Desktop.exe') + '" --tray --start-agent';
+    LegacyAgent := '"' + ExpandConstant('{app}\OneCBackup.Agent.exe') + '" --run --quiet';
+    LegacyTray := '"' + ExpandConstant('{app}\OneCBackup.Desktop.exe') + '" --tray --start-agent';
     if RegQueryStringValue(HKCU, RunKey, RunValue, CurrentValue) then
-      if (CompareText(CurrentValue, InstalledValue) = 0) or (CompareText(CurrentValue, TrayValue) = 0) then
+      if (CompareText(CurrentValue, InstalledValue) = 0) or (CompareText(CurrentValue, TrayValue) = 0)
+        or (CompareText(CurrentValue, LegacyAgent) = 0) or (CompareText(CurrentValue, LegacyTray) = 0) then
         RegDeleteValue(HKCU, RunKey, RunValue);
   end;
 end;

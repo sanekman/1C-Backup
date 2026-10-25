@@ -149,6 +149,12 @@ try {
         New-Service -Name $serverService -DisplayName 'SP Backup Server' -BinaryPathName ('"'+$exe+'" --Server:ConfigFile "'+$config+'"') -StartupType Automatic -DependsOn $pgService -Credential (New-Object Management.Automation.PSCredential('NT AUTHORITY\NetworkService',(New-Object Security.SecureString))) | Out-Null
 
     }
+    # Update the executable path too: the firewall rule must target the host SCM starts.
+    $registered = Get-CimInstance Win32_Service -Filter "Name='$serverService'"
+    $changed = Invoke-CimMethod -InputObject $registered -MethodName Change -Arguments @{
+        PathName=('"'+$exe+'" --Server:ConfigFile "'+$config+'"'); DisplayName='SP Backup Server'
+    }
+    if ($changed.ReturnValue -ne 0) { throw 'Could not update the server service application path.' }
     Run-Native 'sc.exe' @('failure',$serverService,'reset=','86400','actions=','restart/10000/restart/30000/restart/60000')
     Run-Native 'sc.exe' @('failure',$pgService,'reset=','86400','actions=','restart/10000/restart/30000/restart/60000')
     Step 'firewall'

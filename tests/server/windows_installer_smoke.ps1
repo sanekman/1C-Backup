@@ -93,6 +93,14 @@ try {
     if ($settings.WindowsInstaller.OpenFirewall -ne $false -or (Get-NetFirewallRule -Name 'OneCBackupServer-Https' -ErrorAction SilentlyContinue)) { throw 'Reinstall reopened a disabled firewall choice.' }
 
     if ($connectionHash -ne (Get-FileHash (Join-Path $root 'connection-string.txt')).Hash -or $certificateHash -ne (Get-FileHash (Join-Path $root 'server.pfx')).Hash) { throw 'Reinstall changed persistent credentials/certificate.' }
+    # Emulate a pre-rename SCM registration, then verify upgrade fixes its host path.
+    Stop-Service OneCBackupServer
+    $registered=Get-CimInstance Win32_Service -Filter "Name='OneCBackupServer'"
+    $legacyPath='"'+(Join-Path $install 'OneCBackup.Server.exe')+'" --Server:ConfigFile "'+(Join-Path $root 'server.json')+'"'
+    $changed=Invoke-CimMethod -InputObject $registered -MethodName Change -Arguments @{PathName=$legacyPath;DisplayName='1C-Backup Server'}
+    if ($changed.ReturnValue -ne 0) { throw 'Could not prepare the legacy service fixture.' }
+    Start-Service OneCBackupServer
+    Health
     # Upgrade a legacy configuration with only panel-url.txt; do not regenerate its certificate or database.
     $settings.Server.PSObject.Properties.Remove('DisplayName')
     $settings.Server.PSObject.Properties.Remove('PublicAddress')
@@ -104,6 +112,8 @@ try {
     $settings=Get-Content (Join-Path $root 'server.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.Server.DisplayName -ne $displayName -or $settings.Server.PublicAddress -ne $address) { throw 'Legacy identity migration failed.' }
     if ($settings.WindowsInstaller.OpenFirewall -ne $false -or (Get-NetFirewallRule -Name 'OneCBackupServer-Https' -ErrorAction SilentlyContinue)) { throw 'Legacy migration reopened a removed firewall rule.' }
+    $registered=Get-CimInstance Win32_Service -Filter "Name='OneCBackupServer'"
+    if ($registered.PathName -notlike '*SPBackup.Server.exe*' -or $registered.DisplayName -ne 'SP Backup Server') { throw 'Upgrade did not migrate the legacy server host path and display name.' }
     Install-Server -Firewall '1'
     Health
     Login
@@ -139,7 +149,7 @@ try {
     Health
     Login
     New-Item -ItemType Directory -Path 'artifacts/server-tests' -Force | Out-Null
-    @{ separateHttpsPort=$true; firewallOptOutPreserved=$true; legacyFirewallChoicePreserved=$true; firewallRulePortAndProfiles=$true; firewallRemoteScopePreserved=$true; passwordChangePreservedAfterReinstall=$true; diagnosticZip=$true; administrationPages=$true; separateNameAndAddress=$true; customHttpsPortAndPath=$true; ipCertificateValidated=$true; legacyIdentityMigration=$true; installed=$true; https=$true; administratorLogin=$true; reinstallPreservesData=$true; serviceRestart=$true; uninstallPreservesDatabase=$true; reinstallAfterUninstall=$true } | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-installer-result.json'
+    @{ legacyServicePathMigrated=$true; separateHttpsPort=$true; firewallOptOutPreserved=$true; legacyFirewallChoicePreserved=$true; firewallRulePortAndProfiles=$true; firewallRemoteScopePreserved=$true; passwordChangePreservedAfterReinstall=$true; diagnosticZip=$true; administrationPages=$true; separateNameAndAddress=$true; customHttpsPortAndPath=$true; ipCertificateValidated=$true; legacyIdentityMigration=$true; installed=$true; https=$true; administratorLogin=$true; reinstallPreservesData=$true; serviceRestart=$true; uninstallPreservesDatabase=$true; reinstallAfterUninstall=$true } | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-installer-result.json'
 } catch {
     if (Test-Path (Join-Path $root 'setup.log')) { Get-Content (Join-Path $root 'setup.log') }
     Get-Service OneCBackupServer,OneCBackupServerDatabase -ErrorAction SilentlyContinue | Select-Object Name,Status | Format-Table
