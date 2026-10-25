@@ -14,6 +14,17 @@ public partial class MainWindow
     private BackupJob[] automationPlanJobs = [];
     private AutomaticBackupPlan? automationPlan;
 
+    private void AutomationWindow_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateAutomationLayout();
+
+    private void UpdateAutomationLayout()
+    {
+        if (NextAutomaticRun is null || BackgroundStatus is null) return;
+        var compact = ActualHeight < 650 && (CopiesView?.Visibility == Visibility.Visible || HistoryView?.Visibility == Visibility.Visible);
+        NextAutomaticRun.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        BackgroundStatus.TextWrapping = compact ? TextWrapping.NoWrap : TextWrapping.Wrap;
+        BackgroundStatus.TextTrimming = compact ? TextTrimming.CharacterEllipsis : TextTrimming.None;
+    }
+
     private void UpdateAutomationOverview()
     {
         if (NextAutomaticRun is null) return;

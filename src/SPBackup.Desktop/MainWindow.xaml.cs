@@ -775,6 +775,7 @@ public partial class MainWindow : Window
             "agent" => ("Настройки программы", "Основное, фоновая работа, обновления, подключения и помощь."),
             _ => ("Задания резервного копирования", "Файлы и папки · WebDAV · 1С · MS SQL · PostgreSQL")
         };
+        UpdateAutomationLayout();
     }
 
     private async Task RefreshHistoryAsync()

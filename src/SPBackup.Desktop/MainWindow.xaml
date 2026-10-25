@@ -3,7 +3,7 @@
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:core="clr-namespace:SPBackup.Core;assembly=SPBackup.Core"
  xmlns:local="clr-namespace:SPBackup.Desktop"
- PreviewKeyDown="Window_PreviewKeyDown" Title="SP Backup" Width="1100" Height="620" MinWidth="900" MinHeight="520"
+ SizeChanged="AutomationWindow_SizeChanged" PreviewKeyDown="Window_PreviewKeyDown" Title="SP Backup" Width="1100" Height="620" MinWidth="900" MinHeight="520"
  Icon="Assets/sp-backup.ico" WindowStartupLocation="CenterScreen" Background="{DynamicResource CanvasBrush}">
  <Window.Resources>
   <local:LocalTimeConverter x:Key="LocalTimeConverter" />
