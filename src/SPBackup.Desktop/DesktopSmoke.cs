@@ -531,6 +531,11 @@ internal static partial class DesktopSmoke
             if (Control<DataGrid>("Copies").Items.Count != 0 || Control<DataGrid>("RunHistory").Items.Count != 0
                 || File.ReadAllText(temporaryMarker) != "keep unrelated files")
                 throw new InvalidOperationException("Проверка доступа создала копию, запуск или изменила посторонний файл.");
+            var capacityDetails = Control<TextBox>("StorageCheckDetails").Text;
+            if (capacityDetails.Split("Свободное место:").Length != 4
+                || capacityDetails.Contains("Не удалось определить") || !capacityDetails.Contains("байт")
+                || !capacityDetails.Contains("размер будущего архива заранее неизвестен"))
+                throw new InvalidOperationException("Проверка хранилищ не показывает доступное место временной папки и двух хранилищ.");
             Control<Expander>("StorageCheckResults").IsExpanded = true;
             Screenshot("storage-readiness-success");
             Control<Expander>("StorageCheckResults").IsExpanded = false;

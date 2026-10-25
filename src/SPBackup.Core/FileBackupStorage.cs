@@ -5,6 +5,9 @@ namespace SPBackup.Core;
 /// <summary>Local directories and UNC shares use the same filesystem operations.</summary>
 public sealed class FileBackupStorage : IBackupStorage
 {
+    private readonly Func<string, long?> availableBytes;
+    public FileBackupStorage() : this(BackupDiskSpace.AvailableBytes) { }
+    internal FileBackupStorage(Func<string, long?> availableBytes) => this.availableBytes = availableBytes;
     public Task VerifyAsync(StoredBackup backup, BackupJob job, CancellationToken cancellationToken = default)
     {
         if (job.StorageKind is not (StorageKind.LocalDirectory or StorageKind.NetworkShare))
@@ -54,15 +57,20 @@ public sealed class FileBackupStorage : IBackupStorage
         await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read,
             81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
         var length = input.Length;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var sameFile = string.Equals(source, destination, comparison);
+        if (!sameFile)
+        {
+            if (File.Exists(destination)) throw new IOException("Копия с таким именем уже существует в хранилище.");
+            cancellationToken.ThrowIfCancellationRequested();
+            BackupProgressContext.Report(BackupStage.ConnectingStorage);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            BackupDiskSpace.RequireAvailable(Path.GetDirectoryName(destination)!, length, availableBytes);
+        }
         BackupProgressContext.Report(BackupStage.Verifying);
         var sourceHash = await SHA256.HashDataAsync(input, cancellationToken);
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (string.Equals(source, destination, comparison))
+        if (sameFile)
             return new StoredBackup(destination, length, Convert.ToHexString(sourceHash));
-        if (File.Exists(destination)) throw new IOException("Копия с таким именем уже существует в хранилище.");
-
-        BackupProgressContext.Report(BackupStage.ConnectingStorage);
-        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         var temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {

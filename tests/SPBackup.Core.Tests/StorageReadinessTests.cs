@@ -28,6 +28,8 @@ public sealed class StorageReadinessTests : IDisposable
         Assert.Equal(Job.TemporaryDirectory, report.TemporaryDirectory);
         Assert.Equal(2, report.Destinations.Count);
         Assert.All(report.Destinations, result => Assert.True(result.Succeeded, result.Error));
+        Assert.True(report.TemporaryAvailableBytes is >= 0);
+        Assert.All(report.Destinations, result => Assert.True(result.AvailableBytes is >= 0));
         foreach (var directory in markers)
         {
             Assert.Empty(Directory.GetDirectories(directory));

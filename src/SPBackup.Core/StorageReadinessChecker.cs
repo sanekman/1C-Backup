@@ -2,9 +2,17 @@ using System.Security.Cryptography;
 
 namespace SPBackup.Core;
 
-public sealed record StorageCheckResult(string Destination, bool Succeeded, string? Error);
+public sealed record StorageCheckResult(string Destination, bool Succeeded, string? Error)
+{
+    public long? AvailableBytes { get; init; }
+    public string AvailableSpaceDescription => AvailableBytes is { } bytes ? BackupDiskSpace.Format(bytes) : "Не удалось определить";
+}
 public sealed record StorageCheckReport(string TemporaryDirectory, string? TemporaryError,
-    IReadOnlyList<StorageCheckResult> Destinations, bool Cancelled);
+    IReadOnlyList<StorageCheckResult> Destinations, bool Cancelled)
+{
+    public long? TemporaryAvailableBytes { get; init; }
+    public string TemporaryAvailableSpaceDescription => TemporaryAvailableBytes is { } bytes ? BackupDiskSpace.Format(bytes) : "Не удалось определить";
+}
 
 /// <summary>Checks write, read and deletion using only uniquely named disposable files, never a backup catalog.</summary>
 public sealed class StorageReadinessChecker(IBackupStorage storage, string defaultWorkRoot)
@@ -76,7 +84,10 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
                         }
                     }
                 }
-                results.Add(new(label, error is null, error));
+                results.Add(new(label, error is null, error) {
+                    AvailableBytes = error is null && !cancellationToken.IsCancellationRequested
+                        && target.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare
+                        ? BackupDiskSpace.AvailableBytes(target.DestinationDirectory) : null });
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -91,6 +102,8 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
                 { temporaryError = (temporaryError is null ? "" : temporaryError + " ") + "Не удалось удалить тестовую рабочую папку: " + work + ". " + ex.Message; }
             }
         }
-        return new(root, temporaryError, results, cancelled || cancellationToken.IsCancellationRequested);
+        return new(root, temporaryError, results, cancelled || cancellationToken.IsCancellationRequested)
+        { TemporaryAvailableBytes = temporaryError is null && !cancelled && !cancellationToken.IsCancellationRequested
+            ? BackupDiskSpace.AvailableBytes(root) : null };
     }
 }

@@ -44,11 +44,11 @@ public partial class MainWindow
             details.AddRange(report.Destinations.Where(result => !result.Succeeded)
                 .Select(result => result.Destination + "\nОшибка: " + result.Error));
             if (report.TemporaryError is null)
-                details.Add("Временная папка: " + report.TemporaryDirectory + "\nЗапись и чтение временного файла проверены.");
+                details.Add("Временная папка: " + report.TemporaryDirectory + "\nЗапись и чтение временного файла проверены.\nСвободное место: " + report.TemporaryAvailableSpaceDescription);
             details.AddRange(report.Destinations.Where(result => result.Succeeded)
-                .Select(result => result.Destination + "\nЗапись, чтение и удаление проверены."));
+                .Select(result => result.Destination + "\nЗапись, чтение и удаление проверены.\nСвободное место: " + result.AvailableSpaceDescription));
             if (report.Destinations.Count == 0) details.Add("Хранилища не проверены.");
-            details.Add("Это проверка доступа. Создание копии базы проверяется отдельным запуском.");
+            details.Add("Это проверка доступа. Свободное место может измениться; размер будущего архива заранее неизвестен. Создание копии базы проверяется отдельным запуском.");
             StorageCheckDetails.Text = string.Join("\n\n", details);
             StorageCheckResults.IsExpanded = !all;
             Status.Text = StorageCheckResults.Header.ToString();
