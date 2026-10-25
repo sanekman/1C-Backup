@@ -19,7 +19,7 @@ public partial class MainWindow
     private void UpdateAutomationLayout()
     {
         if (NextAutomaticRun is null || BackgroundStatus is null) return;
-        var compact = ActualHeight < 650 && (CopiesView?.Visibility == Visibility.Visible || HistoryView?.Visibility == Visibility.Visible);
+        var compact = ActualHeight < 650 && (editorOpen || CopiesView?.Visibility == Visibility.Visible || HistoryView?.Visibility == Visibility.Visible);
         NextAutomaticRun.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         BackgroundStatus.TextWrapping = compact ? TextWrapping.NoWrap : TextWrapping.Wrap;
         BackgroundStatus.TextTrimming = compact ? TextTrimming.CharacterEllipsis : TextTrimming.None;
@@ -28,6 +28,7 @@ public partial class MainWindow
     private void UpdateAutomationOverview()
     {
         if (NextAutomaticRun is null) return;
+        UpdateAutomationLayout();
         if (!ready) { ShowAutomationNotice("Проверка состояния…", ""); return; }
         if (!canSave) { ShowAutomationNotice("Настройки не удалось загрузить. Проверьте сообщение внизу окна.", "Расписание не подтверждено."); return; }
         if (agentSettings?.Mode == AgentMode.Managed)
