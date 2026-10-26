@@ -227,6 +227,7 @@ internal static partial class DesktopSmoke
             await CheckJobActionLayoutAsync(window);
             Screenshot("first-start");
             VerifyAutomationOverview(window, name => Screenshot(name));
+            await window.SmokeVerifyCrashProgressAsync();
             VerifyAutostartOwnership();
             var expectedVersion = Environment.GetEnvironmentVariable("GITHUB_REF_TYPE") == "tag"
                 ? Environment.GetEnvironmentVariable("GITHUB_REF_NAME")![1..] : "0.1.0-dev";

@@ -121,8 +121,7 @@ public partial class MainWindow
             (backgroundStarting || backgroundBusy && backgroundState?.Phase is LocalAgentPhase.Running or LocalAgentPhase.Stopping || schedulingTask is not null);
         if (trayExit is not null) trayExit.Enabled = !trayStopping;
         var currentProgress = latestBackupProgress is { Finished: false } snapshot &&
-            (snapshot.ProcessId == Environment.ProcessId || backgroundBusy && backgroundState is not null
-                && snapshot.ProcessId == backgroundState.ProcessId && snapshot.UpdatedUtc >= backgroundState.StartedUtc);
+            (snapshot.ProcessId == Environment.ProcessId || BelongsToBackgroundAgent(snapshot));
         var working = activeRun is not null || currentProgress;
         if (working && trayAnimationTimer is { IsEnabled: false }) trayAnimationTimer.Start();
         else if (!working && trayAnimationTimer is { IsEnabled: true })
@@ -141,7 +140,7 @@ public partial class MainWindow
             : execution is AutomationExecution.Window or AutomationExecution.Background or AutomationExecution.Service ? "SP Backup — автоматическое копирование включено"
             : execution is AutomationExecution.OneRun or AutomationExecution.Busy ? "SP Backup — исполнитель занят; расписание не подтверждено"
             : "SP Backup — автоматическое копирование выключено";
-        if (!trayStopping && latestBackupProgress is { Finished: false } progress) text = "SP Backup — " + StageLabel(progress.Progress);
+        if (!trayStopping && currentProgress && latestBackupProgress is { } progress) text = "SP Backup — " + StageLabel(progress.Progress);
         trayIcon.Text = text.Length <= 63 ? text : text[..63];
     }
 

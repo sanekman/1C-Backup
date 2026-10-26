@@ -57,17 +57,20 @@ public partial class MainWindow
         latestBackupProgress = null;
         BackupProgressPanel.Visibility = Visibility.Collapsed;
         BackupDestinationProgressList.ItemsSource = null;
+        UpdateTray();
     }
+    private bool BelongsToBackgroundAgent(BackupProgressSnapshot value) => backgroundBusy && backgroundState is not null
+        && value.ProcessId == backgroundState.ProcessId && value.UpdatedUtc >= backgroundState.StartedUtc;
+
     private async Task RefreshBackupProgressAsync()
     {
         if (activeRun is not null) return;
         var value = await backupProgressStore.ReadAsync();
         // Ignore snapshots from an earlier process/session. A long SQL dump may have no byte updates.
-        if (value is not null && backgroundBusy && backgroundState is not null
-            && value.ProcessId == backgroundState.ProcessId && value.UpdatedUtc >= backgroundState.StartedUtc
+        if (value is not null && BelongsToBackgroundAgent(value)
             && (!value.Finished || DateTimeOffset.UtcNow - value.UpdatedUtc < TimeSpan.FromSeconds(15)))
             RenderBackupProgress(value);
-        else if (latestBackupProgress is { } latest && (latest.ProcessId != Environment.ProcessId && !backgroundBusy
+        else if (latestBackupProgress is { } latest && (latest.ProcessId != Environment.ProcessId && !BelongsToBackgroundAgent(latest)
             || latest.Finished && DateTimeOffset.UtcNow - latest.UpdatedUtc > TimeSpan.FromSeconds(15))) ClearBackupProgress();
     }
 }

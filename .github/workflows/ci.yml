@@ -52,7 +52,7 @@ jobs:
         run: |
           python -m pip install -r tests/encryption/requirements.txt
           python tests/encryption/verify_zip.py artifacts/ui/encrypted-fixture.zip
-      - run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=FtpIntegration&Category!=NativeSqlIntegration&FullyQualifiedName!~ProfileSnapshotConcurrencyTests'
+      - run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=FtpIntegration&Category!=NativeSqlIntegration&Category!=NativeSmbIntegration&FullyQualifiedName!~ProfileSnapshotConcurrencyTests'
       - if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
@@ -90,6 +90,27 @@ jobs:
           path: artifacts/native-sql/*.trx
           retention-days: 14
 
+  native-smb:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      ONECBACKUP_NATIVE_SMB: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - run: dotnet restore tests/SPBackup.Core.Tests
+      - run: dotnet build tests/SPBackup.Core.Tests --no-restore -m:1 -nr:false
+      - name: Interrupt an owned SMB share during a real flushed transfer
+        run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category=NativeSmbIntegration' --logger 'trx;LogFileName=native-smb.trx' --results-directory artifacts/native-smb
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-smb-verification
+          path: artifacts/native-smb/*.trx
+          retention-days: 14
+
   native-agent-service:
     runs-on: windows-latest
     timeout-minutes: 10
@@ -118,7 +139,7 @@ jobs:
           retention-days: 14
 
   package:
-    needs: [verify, native-sql, native-agent-service]
+    needs: [verify, native-sql, native-smb, native-agent-service]
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:
