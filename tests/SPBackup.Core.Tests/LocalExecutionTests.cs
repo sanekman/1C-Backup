@@ -243,6 +243,29 @@ public sealed class LocalExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task CancelledRecoveryPreservesHistoryAndRetryIsIdempotent()
+    {
+        var path = Path.Combine(root, "runs.json");
+        var pending = new BackupRun(Guid.NewGuid(), Job.Id, Job.Name, DateTimeOffset.UtcNow, null,
+            BackupRunStatus.Running, Path.Combine(root, "work", "interrupted"));
+        await History.SaveAsync(pending);
+        var before = await File.ReadAllBytesAsync(path);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => History.RecoverInterruptedAsync(cancellation.Token));
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
+        await History.RecoverInterruptedAsync();
+        var recovered = Assert.Single(await History.ReadAsync());
+        Assert.Equal(BackupRunStatus.Interrupted, recovered.Status);
+        Assert.Equal(pending.RunId, recovered.RunId);
+        Assert.Equal(pending.WorkDirectory, recovered.WorkDirectory);
+        Assert.NotNull(recovered.FinishedUtc);
+        var after = await File.ReadAllBytesAsync(path);
+        await History.RecoverInterruptedAsync();
+        Assert.Equal(after, await File.ReadAllBytesAsync(path));
+    }
+
+    [Fact]
     public async Task ConcurrentRequestsDoNotOverlapPlatformExecution()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
