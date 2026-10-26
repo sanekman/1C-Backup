@@ -69,6 +69,43 @@ public sealed class LocalAgentHostTests : IDisposable
     }
 
     [Fact]
+    public async Task RestartRecoversHistoryWithoutReplayingOldCommandOrChangingDeliveredCopy()
+    {
+        var job = await CreateJob();
+        Assert.Equal(0, await new LocalAgentHost(directory, new DatabaseBackupExecutor(new BackupProcessRunner()),
+            new NoCredentials()).RunAsync(job.Id));
+        var history = new BackupRunHistory(Path.Combine(directory, "runs.json"));
+        var completed = Assert.Single(await history.ReadAsync());
+        var catalogPath = Path.Combine(directory, "copies.json");
+        var catalogBefore = await File.ReadAllBytesAsync(catalogPath);
+        var copy = Assert.Single(await new BackupCatalog(catalogPath).ReadAsync());
+        var archiveBefore = await File.ReadAllBytesAsync(copy.Backup.Location);
+        var unfinished = completed with { RunId = Guid.NewGuid(), Status = BackupRunStatus.Running,
+            FinishedUtc = null, Backup = null, Destinations = null };
+        await history.SaveAsync(unfinished);
+        var oldSession = (await new LocalAgentControlStore(directory).ReadAsync())!.SessionId;
+        var queue = new LocalManualRunQueue(directory);
+        var oldCommand = await queue.EnqueueAsync(oldSession, job.Id);
+        using var stop = new CancellationTokenSource();
+        var host = new LocalAgentHost(directory, new DatabaseBackupExecutor(new BackupProcessRunner()),
+            new NoCredentials()).RunAsync(pollInterval: TimeSpan.FromMilliseconds(50), cancellationToken: stop.Token);
+        try
+        {
+            await WaitForReceipt(queue, oldCommand.RequestId, LocalManualRunPhase.Rejected);
+            var runs = await history.ReadAsync();
+            Assert.Equal(2, runs.Count);
+            Assert.Equal(BackupRunStatus.Interrupted, runs.Single(r => r.RunId == unfinished.RunId).Status);
+            Assert.Equal(BackupRunStatus.Succeeded, runs.Single(r => r.RunId == completed.RunId).Status);
+            Assert.Equal(catalogBefore, await File.ReadAllBytesAsync(catalogPath));
+            Assert.Equal(archiveBefore, await File.ReadAllBytesAsync(copy.Backup.Location));
+            await new BackupCopyVerifier(new FileBackupStorage()).VerifyAsync(copy, job);
+            Assert.False(host.IsCompleted);
+        }
+        finally { stop.Cancel(); Assert.Equal(0, await host.WaitAsync(TimeSpan.FromSeconds(10))); }
+        Assert.False(new BackupEngineCoordinator(directory).IsHeldElsewhere());
+    }
+
+    [Fact]
     public async Task PartialManualDeliveryKeepsLocalCopyAndReturnsFailureToTheCaller()
     {
         var job = (await CreateJob()) with { AdditionalDestinations = [new BackupDestination
