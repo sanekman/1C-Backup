@@ -208,6 +208,45 @@ internal static class Program
             Require((await history.ReadAsync()).Count == jobs.Length, "A same-boot service restart repeated a completed startup backup.");
             Require(await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json")) == originalJobs, "Service restart changed the saved jobs.");
             checks.Add("restart-preserves-history-and-does-not-repeat-startup");
+            var beforeCrashHistory = await File.ReadAllBytesAsync(Path.Combine(directory, "runs.json"));
+            var beforeCrashCatalog = await File.ReadAllBytesAsync(Path.Combine(directory, "copies.json"));
+            var archiveHashes = new Dictionary<string, byte[]>();
+            foreach (var record in await catalog.ReadAsync())
+            {
+                await using var archive = File.OpenRead(record.Backup.Location);
+                archiveHashes[record.Backup.Location] = await System.Security.Cryptography.SHA256.HashDataAsync(archive);
+            }
+            var crashedSession = state!.SessionId;
+            using (var process = Process.GetProcessById(state.ProcessId))
+            {
+                Require(string.Equals(process.MainModule?.FileName, executable, StringComparison.OrdinalIgnoreCase),
+                    "Refusing to terminate a process other than the isolated published agent.");
+                process.Kill();
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            }
+            await WaitService(1);
+            await Wait(() => Task.FromResult(!new BackupEngineCoordinator(directory).IsHeldElsewhere()),
+                "Terminated process retained the engine lock.");
+            WindowsAgentService.Start(executable, directory); await WaitService(4);
+            await Wait(async () => (state = await control.ReadAsync()) is
+                { Phase: LocalAgentPhase.Running, CanRunManually: true, CanCheckStorages: true }
+                && state.SessionId != crashedSession, "Service did not recover with a fresh ready session after termination.");
+            await Wait(async () => (await control.ReadAsync()) is { Phase: LocalAgentPhase.Running } observed
+                && observed.SessionId == state!.SessionId && observed.UpdatedUtc >= state.StartedUtc.AddSeconds(32),
+                "Service did not remain live after process termination.");
+            var afterCrashHistory = await File.ReadAllBytesAsync(Path.Combine(directory, "runs.json"));
+            var afterCrashCatalog = await File.ReadAllBytesAsync(Path.Combine(directory, "copies.json"));
+            Require(beforeCrashHistory.SequenceEqual(afterCrashHistory) && beforeCrashCatalog.SequenceEqual(afterCrashCatalog),
+                "Process termination or recovery changed completed history/catalog or repeated a startup backup.");
+            Require(await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json")) == originalJobs,
+                "Process termination or recovery changed saved jobs.");
+            foreach (var entry in archiveHashes)
+            {
+                await using var archive = File.OpenRead(entry.Key);
+                var hash = await System.Security.Cryptography.SHA256.HashDataAsync(archive);
+                Require(entry.Value.SequenceEqual(hash), "Process termination or recovery changed a delivered archive.");
+            }
+            checks.Add("idle-process-termination-releases-lock-and-restart-preserves-copies");
             WindowsAgentService.Stop(executable, directory); await WaitService(1);
             await WaitProcessExit(state!.ProcessId, executable);
             WindowsAgentService.Remove(executable, directory);
