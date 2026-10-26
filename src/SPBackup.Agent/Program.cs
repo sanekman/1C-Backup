@@ -48,6 +48,8 @@ try
         AppDomain.CurrentDomain.UnhandledException += (_, error) => DiagnosticLog.Current.Write(DiagnosticEvent.UnhandledException, DiagnosticLevel.Error, error.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, error) => DiagnosticLog.Current.Write(DiagnosticEvent.UnobservedTaskException, DiagnosticLevel.Error, error.Exception);
     }
+    if (OperatingSystem.IsWindows() && command is "run" or "service")
+        WindowsAgentProcessLifetime.Initialize();
     if (command == "service")
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Служба доступна только в Windows.");

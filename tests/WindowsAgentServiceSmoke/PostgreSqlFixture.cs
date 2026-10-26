@@ -14,6 +14,7 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
     public string Password { get; } = "ServicePG:\\" + Guid.NewGuid().ToString("N");
     private int port;
     private bool initialized;
+    private BackupHold? backupHold;
     private string Tool(string name)
     {
         var path = Path.Combine(bin, name + ".exe");
@@ -42,8 +43,99 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
         if (process.ExitCode != 0) throw new IOException(name + " fixture failed: " + error.Replace(Password, "[redacted]"));
         return text.Trim();
     }
-    private Task<string> Sql(string database, string sql) => Run("psql", ["--no-password", "--host=127.0.0.1", "--port=" + port,
+    private Task<string> Sql(string database, string sql) => Run("psql", ["--no-psqlrc", "--no-password", "--host=127.0.0.1", "--port=" + port,
         "--username=" + user, "--dbname=" + database, "--set=ON_ERROR_STOP=1", "--tuples-only", "--no-align", "--command=" + sql]);
+    public async Task<IAsyncDisposable> HoldBackupAsync()
+    {
+        if (backupHold is not null) throw new InvalidOperationException("A PostgreSQL backup barrier is already active.");
+        var application = "ocb_backup_barrier_" + Guid.NewGuid().ToString("N");
+        var start = new ProcessStartInfo(Tool("psql")) { UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var arg in new[] { "--no-psqlrc", "--no-password", "--host=127.0.0.1", "--port=" + port,
+            "--username=" + user, "--dbname=service_source", "--set=ON_ERROR_STOP=1", "--quiet" }) start.ArgumentList.Add(arg);
+        foreach (var pair in Authentication)
+            if (pair.Value is null) start.Environment.Remove(pair.Key); else start.Environment[pair.Key] = pair.Value;
+        start.Environment["PGAPPNAME"] = application;
+        start.Environment["PGCONNECT_TIMEOUT"] = "10";
+        var process = Process.Start(start) ?? throw new IOException("PostgreSQL backup barrier did not start.");
+        var hold = new BackupHold(process, application, Password);
+        backupHold = hold;
+        try
+        {
+            await process.StandardInput.WriteLineAsync("BEGIN; LOCK TABLE fixture IN ACCESS EXCLUSIVE MODE;")
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            await process.StandardInput.FlushAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+            while (await Sql("service_source", "SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid "
+                + $"WHERE a.application_name='{application}' AND l.relation='fixture'::regclass "
+                + "AND l.mode='AccessExclusiveLock' AND l.granted);") != "t")
+            {
+                if (process.HasExited) throw new IOException("PostgreSQL backup barrier exited: " + await hold.ErrorAsync());
+                if (DateTimeOffset.UtcNow >= deadline) throw new TimeoutException("PostgreSQL backup barrier did not acquire its table lock.");
+                await Task.Delay(100);
+            }
+            return hold;
+        }
+        catch
+        {
+            await hold.DisposeAsync();
+            backupHold = null;
+            throw;
+        }
+    }
+    public async Task<int> WaitForBlockedDumpAsync()
+    {
+        var hold = backupHold ?? throw new InvalidOperationException("The PostgreSQL backup barrier is not active.");
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(60);
+        while (true)
+        {
+            var result = await Sql("service_source", "SELECT a.pid FROM pg_stat_activity a WHERE a.datname='service_source' "
+                + $"AND a.usename='{user}' AND a.application_name='pg_dump' AND a.wait_event_type='Lock' "
+                + "AND EXISTS (SELECT 1 FROM pg_stat_activity blocker "
+                + $"WHERE blocker.application_name='{hold.Application}' AND blocker.pid=ANY(pg_blocking_pids(a.pid))) LIMIT 1;");
+            if (int.TryParse(result, out var pid) && pid > 0) return pid;
+            if (DateTimeOffset.UtcNow >= deadline) throw new TimeoutException("The actual service pg_dump did not wait on the fixture table lock.");
+            await Task.Delay(100);
+        }
+    }
+    public async Task<bool> IsDumpBackendPresentAsync(int pid) => await Sql("service_source",
+        $"SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid={pid} AND datname='service_source' "
+        + $"AND usename='{user}' AND application_name='pg_dump');") == "t";
+
+    private sealed class BackupHold(Process process, string application, string password) : IAsyncDisposable
+    {
+        private readonly Task<string> output = process.StandardOutput.ReadToEndAsync();
+        private readonly Task<string> errors = process.StandardError.ReadToEndAsync();
+        private bool disposed;
+        public string Application => application;
+        public async Task<string> ErrorAsync() => (await errors).Replace(password, "[redacted]");
+        public async ValueTask DisposeAsync()
+        {
+            if (disposed) return;
+            disposed = true;
+            try
+            {
+                if (!process.HasExited)
+                {
+                    try
+                    {
+                        await process.StandardInput.WriteLineAsync("ROLLBACK;\n\\q").WaitAsync(TimeSpan.FromSeconds(5));
+                        await process.StandardInput.FlushAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                        process.StandardInput.Close();
+                    }
+                    catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException) { }
+                    try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)); }
+                    catch (TimeoutException)
+                    {
+                        if (!process.HasExited) process.Kill(entireProcessTree: true);
+                        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                    }
+                }
+                await Task.WhenAll(output, errors).WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally { process.Dispose(); }
+        }
+    }
     public async Task StartAsync()
     {
         var sid = WindowsIdentity.GetCurrent().User!;
@@ -72,16 +164,19 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
             PgDumpPath = Tool("pg_dump"), PgRestorePath = Tool("pg_restore"), TimeoutMinutes = 2 }
     };
     public string Username => user;
+    public string DumpExecutablePath => Tool("pg_dump");
     public async Task AssertRestoresAsync(string dump)
     {
-        await Sql("postgres", "CREATE DATABASE service_restored;");
+        var restored = "service_restored_" + Guid.NewGuid().ToString("N");
+        await Sql("postgres", "CREATE DATABASE " + restored + ";");
         await Run("pg_restore", ["--no-password", "--exit-on-error", "--host=127.0.0.1", "--port=" + port,
-            "--username=" + user, "--dbname=service_restored", dump]);
-        if (await Sql("service_restored", "SELECT value FROM fixture WHERE id=1;") != "from service")
+            "--username=" + user, "--dbname=" + restored, dump]);
+        if (await Sql(restored, "SELECT value FROM fixture WHERE id=1;") != "from service")
             throw new InvalidDataException("The service PostgreSQL backup did not restore expected data.");
     }
     public async ValueTask DisposeAsync()
     {
+        if (backupHold is not null) await backupHold.DisposeAsync();
         if (initialized && File.Exists(Path.Combine(root, "cluster", "postmaster.pid")))
             await Run("pg_ctl", ["stop", "-D", Path.Combine(root, "cluster"), "-w", "-t", "60", "-m", "fast"], capture: false);
         if (Directory.Exists(root)) Directory.Delete(root, true);

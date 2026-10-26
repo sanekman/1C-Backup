@@ -32,6 +32,28 @@ internal static class Program
         catch (ArgumentException) { /* Process has already exited. */ }
     }
 
+    private static async Task TerminateAgent(int id, string executable)
+    {
+        using var process = Process.GetProcessById(id);
+        Require(string.Equals(process.MainModule?.FileName, executable, StringComparison.OrdinalIgnoreCase),
+            "Refusing to terminate a process other than the isolated published agent.");
+        // Terminate only the parent: killing the tree here would hide orphaned dump processes.
+        process.Kill();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    private static async Task AssertPostgreSqlRestores(PostgreSqlFixture postgres, BackupRecord copy, string password, string dump)
+    {
+        using (var zip = new ZipFile(copy.Backup.Location) { Password = password })
+        {
+            Require(zip.Count == 1 && zip[0].IsCrypted, "Service PostgreSQL archive must contain only the encrypted dump.");
+            await using var input = zip.GetInputStream(0);
+            await using var output = new FileStream(dump, FileMode.CreateNew, FileAccess.Write);
+            await input.CopyToAsync(output);
+        }
+        await postgres.AssertRestoresAsync(dump);
+    }
+
     private static async Task CaptureFailure(string directory, string output, string password, string archivePassword, string pgPassword)
     {
         var context = new Dictionary<string, object?>();
@@ -185,15 +207,7 @@ internal static class Program
             var pgRun = (await history.ReadAsync()).Single(run => run.JobId == pgJob.Id);
             Require(pgRun.Status == BackupRunStatus.Succeeded, "PostgreSQL service backup failed: " + pgRun.Error);
             var pgCopy = (await catalog.ReadAsync()).Single(record => record.JobId == pgJob.Id);
-            var dump = Path.Combine(restore, "service-postgresql.dump");
-            using (var zip = new ZipFile(pgCopy.Backup.Location) { Password = archivePassword })
-            {
-                Require(zip.Count == 1 && zip[0].IsCrypted, "Service PostgreSQL archive must contain only the encrypted dump.");
-                await using var input = zip.GetInputStream(0);
-                await using var outputDump = new FileStream(dump, FileMode.CreateNew, FileAccess.Write);
-                await input.CopyToAsync(outputDump);
-            }
-            await postgres.AssertRestoresAsync(dump);
+            await AssertPostgreSqlRestores(postgres, pgCopy, archivePassword, Path.Combine(restore, "service-postgresql.dump"));
             checks.Add("postgresql-scram-with-delegated-password-and-restoration");
             WindowsAgentService.Stop(executable, directory); await WaitService(1);
             await WaitProcessExit(state!.ProcessId, executable);
@@ -217,13 +231,7 @@ internal static class Program
                 archiveHashes[record.Backup.Location] = await System.Security.Cryptography.SHA256.HashDataAsync(archive);
             }
             var crashedSession = state!.SessionId;
-            using (var process = Process.GetProcessById(state.ProcessId))
-            {
-                Require(string.Equals(process.MainModule?.FileName, executable, StringComparison.OrdinalIgnoreCase),
-                    "Refusing to terminate a process other than the isolated published agent.");
-                process.Kill();
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
-            }
+            await TerminateAgent(state.ProcessId, executable);
             await WaitService(1);
             await Wait(() => Task.FromResult(!new BackupEngineCoordinator(directory).IsHeldElsewhere()),
                 "Terminated process retained the engine lock.");
@@ -247,11 +255,89 @@ internal static class Program
                 Require(entry.Value.SequenceEqual(hash), "Process termination or recovery changed a delivered archive.");
             }
             checks.Add("idle-process-termination-releases-lock-and-restart-preserves-copies");
+
+            var completedRuns = await history.ReadAsync();
+            var activeCrashSession = state!.SessionId;
+            BackupRun interrupted;
+            int dumpBackend;
+            await using (await postgres.HoldBackupAsync())
+            {
+                var activeCommand = await queue.EnqueueAsync(activeCrashSession, pgJob.Id);
+                dumpBackend = await postgres.WaitForBlockedDumpAsync();
+                interrupted = (await history.ReadAsync()).Single(run => run.JobId == pgJob.Id && run.Status == BackupRunStatus.Running);
+                Require((await queue.ReadReceiptAsync(activeCommand.RequestId))?.Phase == LocalManualRunPhase.Accepted,
+                    "The actual blocked backup was not durably accepted.");
+                var childId = Native.ChildProcessIds(state.ProcessId).Single(id =>
+                {
+                    using var child = Process.GetProcessById(id);
+                    return string.Equals(child.MainModule?.FileName, postgres.DumpExecutablePath, StringComparison.OrdinalIgnoreCase);
+                });
+                using var dumpProcess = Process.GetProcessById(childId);
+                Require(!dumpProcess.HasExited && Directory.Exists(interrupted.WorkDirectory),
+                    "The real service dump was not active at the crash barrier.");
+                Console.WriteLine(JsonSerializer.Serialize(new { phase = "active-backup-crash-barrier", runId = interrupted.RunId,
+                    agentPid = state.ProcessId, dumpPid = childId, backendPid = dumpBackend }));
+                await TerminateAgent(state.ProcessId, executable);
+                // Keep the database barrier closed until the actual child exits. A restart must never
+                // release the profile to a second executor while an orphan is still writing a dump.
+                await dumpProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+                await WaitService(1);
+                await Wait(() => Task.FromResult(!new BackupEngineCoordinator(directory).IsHeldElsewhere()),
+                    "Terminating an active backup did not release the execution profile.");
+            }
+            await Wait(async () => !await postgres.IsDumpBackendPresentAsync(dumpBackend),
+                "The terminated dump retained its PostgreSQL session after releasing the fixture barrier.");
+            var staleCommand = await queue.EnqueueAsync(activeCrashSession, pgJob.Id);
+            WindowsAgentService.Start(executable, directory); await WaitService(4);
+            await Wait(async () => (state = await control.ReadAsync()) is
+                { Phase: LocalAgentPhase.Running, CanRunManually: true, CanCheckStorages: true }
+                && state.SessionId != activeCrashSession, "Service did not become ready after an active backup crash.");
+            await Wait(async () => (await history.ReadAsync()).Single(run => run.RunId == interrupted.RunId).Status == BackupRunStatus.Interrupted,
+                "The actually interrupted backup remained Running after recovery.");
+            await Wait(async () => (await queue.ReadReceiptAsync(staleCommand.RequestId))?.Phase == LocalManualRunPhase.Rejected,
+                "Restart accepted a command belonging to the crashed session.");
+            await Wait(async () => (await control.ReadAsync()) is { Phase: LocalAgentPhase.Running } observed
+                && observed.SessionId == state!.SessionId && observed.UpdatedUtc >= state.StartedUtc.AddSeconds(32),
+                "Service did not remain live through a full polling cycle after an active backup crash.");
+            var recoveredRuns = await history.ReadAsync();
+            Require(recoveredRuns.Count == completedRuns.Count + 1 && recoveredRuns.All(run => run.Status != BackupRunStatus.Running),
+                "Recovery replayed an interrupted/manual/startup backup or retained a Running record.");
+            foreach (var completed in completedRuns)
+                Require(JsonSerializer.Serialize(completed) == JsonSerializer.Serialize(recoveredRuns.Single(run => run.RunId == completed.RunId)),
+                    "Active crash recovery changed a completed history record.");
+            var recovered = recoveredRuns.Single(run => run.RunId == interrupted.RunId);
+            Require(recovered.FinishedUtc is not null && !string.IsNullOrWhiteSpace(recovered.Error)
+                && recovered.Backup is null && Directory.Exists(recovered.WorkDirectory),
+                "Recovery did not retain the unfinished work with an honest interrupted outcome.");
+            var recoveredCatalog = await File.ReadAllBytesAsync(Path.Combine(directory, "copies.json"));
+            Require(beforeCrashCatalog.SequenceEqual(recoveredCatalog)
+                && await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json")) == originalJobs,
+                "Active backup crash changed saved jobs or registered an unfinished dump.");
+            foreach (var entry in archiveHashes)
+            {
+                await using var archive = File.OpenRead(entry.Key);
+                var hash = await System.Security.Cryptography.SHA256.HashDataAsync(archive);
+                Require(entry.Value.SequenceEqual(hash),
+                    "Active backup crash changed a previously delivered archive.");
+            }
+            checks.Add("active-dump-parent-termination-stops-child-and-recovers-without-replay");
+            var retry = await queue.EnqueueAsync(state!.SessionId, pgJob.Id);
+            await Wait(async () => (await queue.ReadReceiptAsync(retry.RequestId)) is { Phase: not LocalManualRunPhase.Accepted },
+                "Explicit backup after active crash did not finish.");
+            Require((await queue.ReadReceiptAsync(retry.RequestId))?.Phase == LocalManualRunPhase.Finished,
+                "The new service session rejected an explicit backup after the crash.");
+            var finalRuns = await history.ReadAsync();
+            Require(finalRuns.Count == jobs.Length + 2 && finalRuns.Count(run => run.Status == BackupRunStatus.Interrupted) == 1
+                && finalRuns.Count(run => run.Status == BackupRunStatus.Succeeded) == jobs.Length + 1,
+                "Explicit backup after crash produced unexpected history.");
+            var newPgCopy = (await catalog.ReadAsync()).Single(record => record.JobId == pgJob.Id && record.Id != pgCopy.Id);
+            await AssertPostgreSqlRestores(postgres, newPgCopy, archivePassword, Path.Combine(restore, "after-crash-postgresql.dump"));
+            checks.Add("explicit-backup-after-active-crash-restores-real-data");
             WindowsAgentService.Stop(executable, directory); await WaitService(1);
             await WaitProcessExit(state!.ProcessId, executable);
             WindowsAgentService.Remove(executable, directory);
             await Wait(() => Task.FromResult(WindowsAgentService.QueryInfo() is null), "Service registration was not removed.");
-            Require((await catalog.ReadAsync()).Count == jobs.Length && File.Exists(Path.Combine(directory, "jobs.json")), "Removing the service erased owner data.");
+            Require((await catalog.ReadAsync()).Count == jobs.Length + 1 && File.Exists(Path.Combine(directory, "jobs.json")), "Removing the service erased owner data.");
             checks.Add("service-removal-preserves-jobs-and-copies");
         }
         catch (Exception error)
@@ -301,6 +387,40 @@ internal static class Program
 
     private static class Native
     {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct ProcessEntry
+        {
+            public uint Size, Usage, ProcessId;
+            public UIntPtr DefaultHeap;
+            public uint ModuleId, Threads, ParentProcessId;
+            public int Priority;
+            public uint Flags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string Executable;
+        }
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)] private static extern bool Process32FirstW(IntPtr snapshot, ref ProcessEntry entry);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)] private static extern bool Process32NextW(IntPtr snapshot, ref ProcessEntry entry);
+        [DllImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CloseHandle(IntPtr handle);
+        public static IReadOnlyList<int> ChildProcessIds(int parent)
+        {
+            var snapshot = CreateToolhelp32Snapshot(2, 0);
+            if (snapshot == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            try
+            {
+                var result = new List<int>();
+                var entry = new ProcessEntry { Size = (uint)Marshal.SizeOf<ProcessEntry>(), Executable = "" };
+                if (!Process32FirstW(snapshot, ref entry)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                do { if (entry.ParentProcessId == parent) result.Add(checked((int)entry.ProcessId)); }
+                while (Process32NextW(snapshot, ref entry));
+                return result;
+            }
+            finally { CloseHandle(snapshot); }
+        }
+
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct User
         {
