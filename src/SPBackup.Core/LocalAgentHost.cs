@@ -199,11 +199,6 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             {
                 lifetime.Token.ThrowIfCancellationRequested();
                 var receipt = new LocalManualRunReceipt(request.RequestId, request.SessionId, request.JobId, LocalManualRunPhase.Accepted);
-                if (request.SessionId != state.SessionId)
-                {
-                    await FlushReceipt(receipt with { Phase = LocalManualRunPhase.Rejected, Error = "Сеанс агента завершён. Повторите ручной запуск." });
-                    queue.Consume(request.RequestId); return;
-                }
                 LocalManualRunReceipt? existing;
                 try { existing = await queue.ReadReceiptAsync(request.RequestId, lifetime.Token); }
                 catch (Exception error) when (error is System.Text.Json.JsonException or InvalidDataException)
@@ -211,7 +206,18 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                     await FlushReceipt(receipt with { Phase = LocalManualRunPhase.Rejected, Error = "Подтверждение команды повреждено. Проверьте историю перед повторным запуском." });
                     queue.Consume(request.RequestId); return;
                 }
+                if (existing is not null && (existing.SessionId != request.SessionId || existing.JobId != request.JobId))
+                {
+                    // A restored/corrupt command must not replace the receipt belonging to another binding.
+                    warnings.Set("Ручной запуск", new InvalidDataException("Команда ручного запуска не совпадает с её подтверждением. Проверьте историю перед повторным запуском."));
+                    queue.Consume(request.RequestId); return;
+                }
                 if (existing is { Phase: not LocalManualRunPhase.Accepted }) { queue.Consume(request.RequestId); return; }
+                if (request.SessionId != state.SessionId)
+                {
+                    await FlushReceipt(receipt with { Phase = LocalManualRunPhase.Rejected, Error = "Сеанс агента завершён. Повторите ручной запуск." });
+                    queue.Consume(request.RequestId); return;
+                }
                 var job = (await store.LoadAsync(lifetime.Token)).FirstOrDefault(j => j.Id == request.JobId);
                 if (job is null)
                 {

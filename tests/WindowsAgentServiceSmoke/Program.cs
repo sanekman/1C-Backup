@@ -96,6 +96,9 @@ internal static class Program
         var archiveStore = new WindowsArchivePasswordStore(); string? archiveKey = null;
         var pgStore = new WindowsPostgreSqlCredentialStore(); var pgKey = Guid.NewGuid().ToString("N");
         PostgreSqlFixture? postgres = null;
+        WindowsSmbFixture? smb = null;
+        string ReadableArchive(string location) => smb is not null
+            && location.StartsWith(smb.UncPath + "\\", StringComparison.OrdinalIgnoreCase) ? smb.LocalPath(location) : location;
         var checks = new List<string>(); string? failure = null;
         try
         {
@@ -109,6 +112,7 @@ internal static class Program
             var selected = WindowsServiceAccounts.Resolve(account);
             var sid = WindowsIdentity.GetCurrent().User!.Value;
             Require(selected.Sid != sid, "The service must use a distinct non-interactive account.");
+            smb = await WindowsSmbFixture.CreateAsync(selected.Name, selected.Sid);
             var binary = new DirectoryInfo(Path.GetDirectoryName(executable)!);
             var binaryAcl = binary.GetAccessControl();
             binaryAcl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(selected.Sid), FileSystemRights.ReadAndExecute,
@@ -130,7 +134,11 @@ internal static class Program
             var startup = manual with { Id = Guid.NewGuid(), Name = "startup service fixture", Enabled = true,
                 DestinationDirectory = Path.Combine(directory, "copies", "startup"), ScheduleKind = ScheduleKind.SystemStartup };
             var pgJob = postgres.Job(Path.Combine(directory, "copies", "postgresql"), pgKey, archiveKey);
-            var jobs = new[] { manual, startup, pgJob };
+            var network = manual with { Id = Guid.NewGuid(), Name = "service-account UNC fixture",
+                StorageKind = StorageKind.NetworkShare, DestinationDirectory = smb.UncPath };
+            var deniedNetwork = network with { Id = Guid.NewGuid(), Name = "service-account denied UNC fixture",
+                DestinationDirectory = smb.DeniedUncPath };
+            var jobs = new[] { manual, startup, pgJob, network, deniedNetwork };
             var jobStore = new JobStore(Path.Combine(directory, "jobs.json")); await jobStore.SaveAsync(jobs);
             var originalJobs = await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json"));
             WindowsFtpCredentialStore.SetServiceCache(new(directory, sid, selected.Sid));
@@ -181,6 +189,24 @@ internal static class Program
             Require((await control.ReadAsync()) is { SessionId: var probeSession, Phase: LocalAgentPhase.Running, RunsSchedules: true }
                 && probeSession == firstSession, "Storage probe stopped or restarted the scheduler host.");
             checks.Add("storage-probe-under-service-identity-without-backup-or-schedule-stop");
+            var deniedRequest = await storageChecks.EnqueueAsync(firstSession, deniedNetwork);
+            var denied = await storageChecks.WaitAsync(deniedRequest);
+            Require(denied.ExecutionIdentity?.WindowsSid == selected.Sid && denied.TemporaryError is null
+                && denied.Destinations.Single() is { Succeeded: false, Error: not null },
+                "The service did not report actual SMB share permission denial under its own identity.");
+            var networkRequest = await storageChecks.EnqueueAsync(firstSession, network);
+            var networkProbe = await storageChecks.WaitAsync(networkRequest);
+            Require(networkProbe.ExecutionIdentity?.WindowsSid == selected.Sid && networkProbe.TemporaryError is null
+                && networkProbe.Destinations.Single() is { Succeeded: true },
+                "The distinct service account cannot probe its allowed UNC share.");
+            var networkProbeHistory = await File.ReadAllBytesAsync(Path.Combine(directory, "runs.json"));
+            var networkProbeCatalog = await File.ReadAllBytesAsync(Path.Combine(directory, "copies.json"));
+            Require(beforeProbeHistory.SequenceEqual(networkProbeHistory) && beforeProbeCatalog.SequenceEqual(networkProbeCatalog),
+                "Denied/allowed UNC probes changed backup history or registered copies.");
+            Require((await control.ReadAsync()) is { Phase: LocalAgentPhase.Running, RunsSchedules: true, CanRunManually: true }
+                observedNetwork && observedNetwork.SessionId == firstSession,
+                "SMB permission denial stopped the service or its schedules.");
+            checks.Add("distinct-service-account-unc-access-and-permission-denial-with-live-scheduler");
             var queue = new LocalManualRunQueue(directory);
             var command = await queue.EnqueueAsync(firstSession, manual.Id);
             LocalManualRunReceipt? receipt = null;
@@ -209,17 +235,56 @@ internal static class Program
             var pgCopy = (await catalog.ReadAsync()).Single(record => record.JobId == pgJob.Id);
             await AssertPostgreSqlRestores(postgres, pgCopy, archivePassword, Path.Combine(restore, "service-postgresql.dump"));
             checks.Add("postgresql-scram-with-delegated-password-and-restoration");
+            var networkCommand = await queue.EnqueueAsync(firstSession, network.Id);
+            await Wait(async () => (await queue.ReadReceiptAsync(networkCommand.RequestId)) is { Phase: not LocalManualRunPhase.Accepted },
+                "The distinct service account did not finish a real UNC backup.");
+            Require((await queue.ReadReceiptAsync(networkCommand.RequestId))?.Phase == LocalManualRunPhase.Finished,
+                "The owner manual queue rejected the UNC backup.");
+            var networkRun = (await history.ReadAsync()).Single(run => run.JobId == network.Id);
+            Require(networkRun.Status == BackupRunStatus.Succeeded, "Service UNC backup failed: " + networkRun.Error);
+            var networkCopy = (await catalog.ReadAsync()).Single(record => record.JobId == network.Id);
+            var networkArchive = smb.LocalPath(networkCopy.Backup.Location);
+            Require(new FileInfo(networkArchive).GetAccessControl().GetOwner(typeof(SecurityIdentifier))?.Value == selected.Sid,
+                "The real SMB archive was not created by the distinct service identity.");
+            await using (var input = File.OpenRead(networkArchive))
+                Require(string.Equals(Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(input)),
+                    networkCopy.Backup.Sha256, StringComparison.OrdinalIgnoreCase), "The actual UNC archive differs from its registered SHA-256.");
+            using (var zip = new ZipFile(networkArchive) { Password = archivePassword })
+            {
+                Require(zip.Count == 1 && zip[0].IsCrypted && zip[0].Name == "1Cv8.1CD", "The UNC archive is not the expected encrypted copy.");
+                await using var input = zip.GetInputStream(0);
+                using var reader = new StreamReader(input);
+                Require(await reader.ReadToEndAsync() == payload, "The encrypted UNC backup did not restore expected source data.");
+            }
+            var baselineRuns = await history.ReadAsync();
+            var baselineCopyCount = (await catalog.ReadAsync()).Count;
+            Require(baselineRuns.Count == 4 && baselineRuns.All(run => run.Status == BackupRunStatus.Succeeded)
+                && baselineCopyCount == 4, "Expected four distinct successful service backups before restart checks.");
+            checks.Add("distinct-service-account-unc-encrypted-backup-sha256-and-restoration");
             WindowsAgentService.Stop(executable, directory); await WaitService(1);
             await WaitProcessExit(state!.ProcessId, executable);
             await Wait(() => Task.FromResult(!new BackupEngineCoordinator(directory).IsHeldElsewhere()), "SCM stop did not release the execution profile.");
             checks.Add("scm-stop-releases-engine-lock");
+            var completedReceiptPath = Path.Combine(directory, "manual-runs", "receipts", command.RequestId.ToString("N") + ".json");
+            var completedReceiptBefore = await File.ReadAllBytesAsync(completedReceiptPath);
+            // Restore the actual already completed owner command, as can happen after a profile
+            // restore or redelivery. Its old session must not erase the recorded completion.
+            await File.WriteAllTextAsync(Path.Combine(directory, "manual-runs", "pending", command.RequestId.ToString("N") + ".json"),
+                JsonSerializer.Serialize(command));
             WindowsAgentService.Start(executable, directory); await WaitService(4);
             await Wait(async () => (state = await control.ReadAsync()) is { Phase: LocalAgentPhase.Running } && state.SessionId != firstSession, "SCM restart reused the old session.");
+            await Wait(async () => !(await queue.PendingAsync()).Any(request => request.RequestId == command.RequestId),
+                "The new service session did not consume the already finished old command.");
+            var completedReceiptAfter = await File.ReadAllBytesAsync(completedReceiptPath);
+            Require((await queue.ReadReceiptAsync(command.RequestId))?.Phase == LocalManualRunPhase.Finished
+                && completedReceiptBefore.SequenceEqual(completedReceiptAfter),
+                "A redelivered command changed the actual finished receipt after service restart.");
+            checks.Add("completed-manual-receipt-survives-old-session-redelivery");
             // The registered host polls schedules every 30 seconds; observe a full cycle after restart.
             await Wait(async () => (await control.ReadAsync()) is { Phase: LocalAgentPhase.Running } observed
                 && observed.SessionId == state!.SessionId && observed.UpdatedUtc >= state.StartedUtc.AddSeconds(32),
                 "Restarted service did not remain live through a schedule polling cycle.");
-            Require((await history.ReadAsync()).Count == jobs.Length, "A same-boot service restart repeated a completed startup backup.");
+            Require((await history.ReadAsync()).Count == baselineRuns.Count, "A same-boot service restart repeated a completed startup backup.");
             Require(await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json")) == originalJobs, "Service restart changed the saved jobs.");
             checks.Add("restart-preserves-history-and-does-not-repeat-startup");
             var beforeCrashHistory = await File.ReadAllBytesAsync(Path.Combine(directory, "runs.json"));
@@ -227,7 +292,7 @@ internal static class Program
             var archiveHashes = new Dictionary<string, byte[]>();
             foreach (var record in await catalog.ReadAsync())
             {
-                await using var archive = File.OpenRead(record.Backup.Location);
+                await using var archive = File.OpenRead(ReadableArchive(record.Backup.Location));
                 archiveHashes[record.Backup.Location] = await System.Security.Cryptography.SHA256.HashDataAsync(archive);
             }
             var crashedSession = state!.SessionId;
@@ -250,7 +315,7 @@ internal static class Program
                 "Process termination or recovery changed saved jobs.");
             foreach (var entry in archiveHashes)
             {
-                await using var archive = File.OpenRead(entry.Key);
+                await using var archive = File.OpenRead(ReadableArchive(entry.Key));
                 var hash = await System.Security.Cryptography.SHA256.HashDataAsync(archive);
                 Require(entry.Value.SequenceEqual(hash), "Process termination or recovery changed a delivered archive.");
             }
@@ -315,7 +380,7 @@ internal static class Program
                 "Active backup crash changed saved jobs or registered an unfinished dump.");
             foreach (var entry in archiveHashes)
             {
-                await using var archive = File.OpenRead(entry.Key);
+                await using var archive = File.OpenRead(ReadableArchive(entry.Key));
                 var hash = await System.Security.Cryptography.SHA256.HashDataAsync(archive);
                 Require(entry.Value.SequenceEqual(hash),
                     "Active backup crash changed a previously delivered archive.");
@@ -327,8 +392,8 @@ internal static class Program
             Require((await queue.ReadReceiptAsync(retry.RequestId))?.Phase == LocalManualRunPhase.Finished,
                 "The new service session rejected an explicit backup after the crash.");
             var finalRuns = await history.ReadAsync();
-            Require(finalRuns.Count == jobs.Length + 2 && finalRuns.Count(run => run.Status == BackupRunStatus.Interrupted) == 1
-                && finalRuns.Count(run => run.Status == BackupRunStatus.Succeeded) == jobs.Length + 1,
+            Require(finalRuns.Count == completedRuns.Count + 2 && finalRuns.Count(run => run.Status == BackupRunStatus.Interrupted) == 1
+                && finalRuns.Count(run => run.Status == BackupRunStatus.Succeeded) == completedRuns.Count + 1,
                 "Explicit backup after crash produced unexpected history.");
             var newPgCopy = (await catalog.ReadAsync()).Single(record => record.JobId == pgJob.Id && record.Id != pgCopy.Id);
             await AssertPostgreSqlRestores(postgres, newPgCopy, archivePassword, Path.Combine(restore, "after-crash-postgresql.dump"));
@@ -337,7 +402,7 @@ internal static class Program
             await WaitProcessExit(state!.ProcessId, executable);
             WindowsAgentService.Remove(executable, directory);
             await Wait(() => Task.FromResult(WindowsAgentService.QueryInfo() is null), "Service registration was not removed.");
-            Require((await catalog.ReadAsync()).Count == jobs.Length + 1 && File.Exists(Path.Combine(directory, "jobs.json")), "Removing the service erased owner data.");
+            Require((await catalog.ReadAsync()).Count == baselineCopyCount + 1 && File.Exists(Path.Combine(directory, "jobs.json")), "Removing the service erased owner data.");
             checks.Add("service-removal-preserves-jobs-and-copies");
         }
         catch (Exception error)
@@ -364,6 +429,8 @@ internal static class Program
                 }
             }
             catch (Exception error) { failure = (failure ?? "") + "\nSCM cleanup: " + error.GetType().Name + ": " + error.Message; }
+            try { if (smb is not null) await smb.DisposeAsync(); }
+            catch (Exception error) { failure = (failure ?? "") + "\nSMB fixture cleanup: " + error.GetType().Name; }
             WindowsFtpCredentialStore.SetServiceCache(null);
             try { pgStore.Delete(pgKey); if (postgres is not null) await postgres.DisposeAsync(); }
             catch (Exception error) { failure = (failure ?? "") + "\nPostgreSQL fixture cleanup: " + error.GetType().Name; }
