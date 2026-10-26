@@ -120,7 +120,9 @@ internal static partial class DesktopSmoke
             }
             finally { stopHost.Cancel(); await host.WaitAsync(TimeSpan.FromSeconds(10)); }
         }
-        await WaitUntil(() => Control<Button>("CheckStorageButton").IsEnabled, "Окно не освободило исполнитель после остановки агента.");
+        await WaitUntil(() => !window.SmokeBackgroundManualReady && !window.SmokeBackgroundStorageReady
+            && Control<Button>("CheckStorageButton").IsEnabled && Control<Button>("RunButton").IsEnabled,
+            "Окно не подтвердило остановку агента и готовность локального исполнителя.");
         var first = (await catalog.ReadAsync()).Single(record => record.JobId == job.Id);
         if (first.Backup.FileSnapshot?.IsFull != true) throw new InvalidOperationException("Первая копия не полная.");
         await File.WriteAllTextAsync(Path.Combine(source, "change.txt"), "after"); File.Delete(Path.Combine(source, "remove.txt"));
