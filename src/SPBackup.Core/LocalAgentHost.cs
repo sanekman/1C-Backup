@@ -62,7 +62,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                 {
                     if (await control.StopRequestedAsync(state.SessionId, lifetime.Token))
                     {
-                        try { await control.WriteAsync(state with { Phase = LocalAgentPhase.Stopping, UpdatedUtc = DateTimeOffset.UtcNow }, CancellationToken.None); }
+                        try { await control.WriteAsync(Volatile.Read(ref state) with { Phase = LocalAgentPhase.Stopping, UpdatedUtc = DateTimeOffset.UtcNow }, CancellationToken.None); }
                         catch (Exception error) when (AgentRuntimeWarnings.Recoverable(error)) { warnings.Set("Управление агентом", error); }
                         finally { DiagnosticLog.Current.Write(DiagnosticEvent.AgentStopRequested); lifetime.Cancel(); }
                         return;
@@ -80,7 +80,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                 try
                 {
                     var notices = new[] { warnings.Summary, Volatile.Read(ref lastError), Volatile.Read(ref monitorError), Volatile.Read(ref notificationError), Volatile.Read(ref hubError) }.Where(text => !string.IsNullOrEmpty(text)).ToArray();
-                    await control.WriteAsync(state with { UpdatedUtc = DateTimeOffset.UtcNow, Error = Volatile.Read(ref lastError),
+                    await control.WriteAsync(Volatile.Read(ref state) with { UpdatedUtc = DateTimeOffset.UtcNow, Error = Volatile.Read(ref lastError),
                         MonitoringError = Volatile.Read(ref monitorError), Warning = notices.Length == 0 ? null : string.Join("\n", notices) }, lifetime.Token);
                     warnings.Set("Управление агентом", null);
                 }
@@ -109,6 +109,14 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             }
         }
         var initialized = InitializeExecutionAsync();
+        async Task StorageCheckLoop()
+        {
+            await initialized;
+            Volatile.Write(ref state, Volatile.Read(ref state) with { CanCheckStorages = true });
+            await new LocalStorageCheckProcessor(directory, store, new(storage, Path.Combine(directory, "work")))
+                .RunAsync(state.SessionId, error => warnings.Set("Проверка хранилищ", error), lifetime.Token);
+        }
+        var storageChecksTask = manual is null ? StorageCheckLoop() : Task.CompletedTask;
         async Task MonitorLoop()
         {
             await initialized;
@@ -255,7 +263,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         try
         {
             var completed = manual is null
-                ? await Task.WhenAny(executionTask, controlTask, monitoringTask, manualRequestsTask)
+                ? await Task.WhenAny(executionTask, controlTask, monitoringTask, manualRequestsTask, storageChecksTask)
                 : await Task.WhenAny(executionTask, controlTask);
             await completed;
         }
@@ -264,11 +272,11 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         finally
         {
             lifetime.Cancel();
-            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask, serverMonitoringTask, manualRequestsTask); }
+            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask, serverMonitoringTask, manualRequestsTask, storageChecksTask); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) { failure ??= ex; }
             var error = failure?.Message ?? (manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? lastRun.Error : null);
-            try { await control.WriteAsync(state with { UpdatedUtc = DateTimeOffset.UtcNow,
+            try { await control.WriteAsync(Volatile.Read(ref state) with { UpdatedUtc = DateTimeOffset.UtcNow,
                 Phase = error is null ? LocalAgentPhase.Stopped : LocalAgentPhase.Faulted, Error = error,
                 MonitoringError = Volatile.Read(ref monitorError), Warning = warnings.Summary }, CancellationToken.None); }
             catch (Exception writeError) when (AgentRuntimeWarnings.Recoverable(writeError)) { warnings.Set("Запись состояния агента", writeError); }

@@ -96,6 +96,17 @@ internal static partial class DesktopSmoke
             {
                 await WaitUntil(() => window.SmokeBackgroundManualReady
                     && Control<Button>("RunButton").IsEnabled, "Фоновый агент блокирует ручное задание без расписания.");
+                await WaitUntil(() => window.SmokeBackgroundStorageReady && Control<Button>("CheckStorageButton").IsEnabled,
+                    "Работающий агент не принимает проверку хранилищ.");
+                var beforeProbeHistory = await history.ReadAsync(); var beforeProbeCatalog = await catalog.ReadAsync();
+                Click("CheckStorageButton");
+                await WaitUntil(() => window.SmokeReady && Control<Expander>("StorageCheckResults").Header.ToString()!.Contains("доступны (агент)"),
+                    "Проверка хранилищ через агента не завершилась.");
+                if (!Control<TextBox>("StorageCheckDetails").Text.Contains("Проверка через работающего агента.")
+                    || !Control<TextBox>("StorageCheckDetails").Text.Contains("Пользователь:")
+                    || beforeProbeHistory.Count != (await history.ReadAsync()).Count || beforeProbeCatalog.Count != (await catalog.ReadAsync()).Count
+                    || host.IsCompleted)
+                    throw new InvalidOperationException("Проверка не показывает своего исполнителя или создаёт копию/останавливает агент.");
                 Click("RunButton");
                 if (Control<Button>("RunButton").IsEnabled) throw new InvalidOperationException("Повторный щелчок дублирует принятый ручной запуск.");
                 await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled,

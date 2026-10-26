@@ -511,14 +511,18 @@ public partial class MainWindow : Window
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
         JobsSummary.Text = $"Всего: {jobs.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}";
         UpdateManualRunControl();
-        CheckStorageButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
-        CheckSourceButton.IsEnabled = CheckStorageButton.IsEnabled;
+        var canInspectLocally = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
+        CheckStorageButton.IsEnabled = ready && idle && !editorOpen && Jobs.SelectedItem is BackupJob
+            && (engineAvailable || BackgroundAcceptsStorageChecks);
+        CheckSourceButton.IsEnabled = canInspectLocally;
         CheckSourceButton.ToolTip = !engineAvailable || schedulingTask is not null
             ? "Остановите автоматическое копирование, чтобы проверить источник."
             : "Проверить файл базы или SQL-подключение без создания резервной копии. Для PostgreSQL нужен psql рядом с pg_dump.";
-        CheckStorageButton.ToolTip = !engineAvailable || schedulingTask is not null
-            ? "Остановите автоматическое копирование, чтобы проверить хранилища." : "Проверить временную папку и запись, чтение и удаление тестового файла во всех хранилищах";
-        CheckLatestCopiesButton.IsEnabled = CheckStorageButton.IsEnabled;
+        CheckStorageButton.ToolTip = BackgroundAcceptsStorageChecks
+            ? "Проверить хранилища через работающего агента, под его пользователем. Расписание продолжит работать; резервная копия не создаётся."
+            : !engineAvailable ? "Дождитесь готовности исполнителя. Если он не поддерживает проверку без остановки расписания, обновите и перезапустите агент/службу."
+            : "Проверить хранилища от пользователя окна программы. Доступ службы проверяется через работающего агента.";
+        CheckLatestCopiesButton.IsEnabled = canInspectLocally;
         CheckLatestCopiesButton.ToolTip = !engineAvailable || schedulingTask is not null
             ? "Остановите автоматическое копирование, чтобы проверить последние копии."
             : "Проверить размер и SHA-256 последней зарегистрированной копии в каждом хранилище задания. База и сохранённые копии не изменяются.";

@@ -532,6 +532,21 @@ internal static partial class DesktopSmoke
                 await WaitUntil(() => window.SmokeReady && Control<Expander>("StorageCheckResults").Header.ToString()!.StartsWith("Все хранилища доступны"),
                     "Проверка хранилищ не завершилась через интерфейс.");
             }
+            Click("StartScheduleButton");
+            try
+            {
+                await WaitUntil(() => Control<Button>("StopScheduleButton").IsEnabled && Control<Button>("CheckStorageButton").IsEnabled,
+                    "Планировщик в окне блокирует безопасную проверку хранилищ.");
+                if (Control<Button>("CheckSourceButton").IsEnabled || Control<Button>("CheckLatestCopiesButton").IsEnabled)
+                    throw new InvalidOperationException("Новая доступность проверки хранилищ ошибочно включила другие операции.");
+                Click("CheckStorageButton");
+                await WaitUntil(() => window.SmokeReady && Control<Expander>("StorageCheckResults").Header.ToString()!.Contains("доступны (окно)"),
+                    "Проверка хранилищ при работающем планировщике не завершилась.");
+                if (!Control<Button>("StopScheduleButton").IsEnabled)
+                    throw new InvalidOperationException("Проверка остановила планировщик окна.");
+            }
+            finally { Click("StopScheduleButton"); }
+            await WaitUntil(() => Control<Button>("StartScheduleButton").IsEnabled, "Планировщик не остановился после сценария проверки.");
             if (Control<DataGrid>("Copies").Items.Count != 0 || Control<DataGrid>("RunHistory").Items.Count != 0
                 || File.ReadAllText(temporaryMarker) != "keep unrelated files")
                 throw new InvalidOperationException("Проверка доступа создала копию, запуск или изменила посторонний файл.");
@@ -540,6 +555,9 @@ internal static partial class DesktopSmoke
                 || capacityDetails.Contains("Не удалось определить") || !capacityDetails.Contains("байт")
                 || !capacityDetails.Contains("размер будущего архива заранее неизвестен"))
                 throw new InvalidOperationException("Проверка хранилищ не показывает доступное место временной папки и двух хранилищ.");
+            if (!capacityDetails.Contains("Проверка из окна программы.") || !capacityDetails.Contains("Пользователь:")
+                || !capacityDetails.Contains("Доступ службы Windows может отличаться"))
+                throw new InvalidOperationException("Локальная проверка не объясняет своего пользователя и отличие от службы.");
             Control<Expander>("StorageCheckResults").IsExpanded = true;
             await WaitUntil(() =>
             {

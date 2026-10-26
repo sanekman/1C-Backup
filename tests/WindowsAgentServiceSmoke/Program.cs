@@ -121,7 +121,7 @@ internal static class Program
             checks.Add("scm-distinct-account-automatic-start");
             var control = new LocalAgentControlStore(directory);
             LocalAgentState? state = null;
-            await Wait(async () => (state = await control.ReadAsync()) is { Phase: LocalAgentPhase.Running, CanRunManually: true }, "Non-interactive agent did not become ready.");
+            await Wait(async () => (state = await control.ReadAsync()) is { Phase: LocalAgentPhase.Running, CanRunManually: true, CanCheckStorages: true }, "Non-interactive agent did not become ready.");
             var firstSession = state!.SessionId;
             Require(new BackupEngineCoordinator(directory).IsHeldElsewhere(), "Service did not exclusively own the execution profile.");
             checks.Add("non-interactive-host-and-engine-lock");
@@ -144,6 +144,21 @@ internal static class Program
             var startupRun = (await history.ReadAsync()).Single(run => run.JobId == startup.Id);
             Require(startupRun.Status == BackupRunStatus.Succeeded, "Startup backup failed under the service account: " + startupRun.Error);
             checks.Add("startup-backup-without-interactive-login");
+            var storageChecks = new LocalStorageCheckQueue(directory);
+            var beforeProbeHistory = await File.ReadAllBytesAsync(Path.Combine(directory, "runs.json"));
+            var beforeProbeCatalog = await File.ReadAllBytesAsync(Path.Combine(directory, "copies.json"));
+            var probeRequest = await storageChecks.EnqueueAsync(firstSession, manual);
+            var probe = await storageChecks.WaitAsync(probeRequest);
+            Require(probe.ExecutionIdentity is { WindowsSid: not null } probeIdentity && probeIdentity.WindowsSid == selected.Sid && probeIdentity.WindowsSid != sid,
+                "Storage probe did not run under the actual distinct service identity.");
+            Require(probe.TemporaryError is null && probe.Destinations.All(item => item.Succeeded), "Service storage access probe failed.");
+            var afterProbeHistory = await File.ReadAllBytesAsync(Path.Combine(directory, "runs.json"));
+            var afterProbeCatalog = await File.ReadAllBytesAsync(Path.Combine(directory, "copies.json"));
+            Require(beforeProbeHistory.SequenceEqual(afterProbeHistory) && beforeProbeCatalog.SequenceEqual(afterProbeCatalog),
+                "Storage access probe changed backup history or catalog.");
+            Require((await control.ReadAsync()) is { SessionId: var probeSession, Phase: LocalAgentPhase.Running, RunsSchedules: true }
+                && probeSession == firstSession, "Storage probe stopped or restarted the scheduler host.");
+            checks.Add("storage-probe-under-service-identity-without-backup-or-schedule-stop");
             var queue = new LocalManualRunQueue(directory);
             var command = await queue.EnqueueAsync(firstSession, manual.Id);
             LocalManualRunReceipt? receipt = null;

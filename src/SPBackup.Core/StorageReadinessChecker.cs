@@ -10,6 +10,7 @@ public sealed record StorageCheckResult(string Destination, bool Succeeded, stri
 public sealed record StorageCheckReport(string TemporaryDirectory, string? TemporaryError,
     IReadOnlyList<StorageCheckResult> Destinations, bool Cancelled)
 {
+    public StorageCheckIdentity? ExecutionIdentity { get; init; }
     public long? TemporaryAvailableBytes { get; init; }
     public string TemporaryAvailableSpaceDescription => TemporaryAvailableBytes is { } bytes ? BackupDiskSpace.Format(bytes) : "Не удалось определить";
 }
@@ -22,6 +23,7 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
         var errors = job.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         cancellationToken.ThrowIfCancellationRequested();
+        var identity = StorageCheckIdentity.Current();
         var root = Path.GetFullPath(job.TemporaryDirectory ?? defaultWorkRoot);
         var work = Path.Combine(root, "storage-check-" + Guid.NewGuid().ToString("N"));
         var probe = Path.Combine(work, "onec-storage-check-" + Guid.NewGuid().ToString("N") + ".probe");
@@ -103,7 +105,7 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
             }
         }
         return new(root, temporaryError, results, cancelled || cancellationToken.IsCancellationRequested)
-        { TemporaryAvailableBytes = temporaryError is null && !cancelled && !cancellationToken.IsCancellationRequested
+        { ExecutionIdentity = identity, TemporaryAvailableBytes = temporaryError is null && !cancelled && !cancellationToken.IsCancellationRequested
             ? BackupDiskSpace.AvailableBytes(root) : null };
     }
 }

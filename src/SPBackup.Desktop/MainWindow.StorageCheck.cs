@@ -6,6 +6,10 @@ namespace SPBackup.Desktop;
 
 public partial class MainWindow
 {
+    private bool BackgroundAcceptsStorageChecks => backgroundBusy && !backgroundStarting
+        && LocalStorageCheckQueue.IsAvailable(backgroundState, DateTimeOffset.UtcNow);
+    internal bool SmokeBackgroundStorageReady => BackgroundAcceptsStorageChecks;
+
     private void StorageCheckResults_Expanded(object sender, RoutedEventArgs e)
     {
         // The actions panel has its own scrollbar; wait for the new report height before revealing it.
@@ -31,8 +35,9 @@ public partial class MainWindow
     private async void CheckStorage_Click(object sender, RoutedEventArgs e)
     {
         if (!CheckStorageButton.IsEnabled || Jobs.SelectedItem is not BackupJob job) return;
-        using var lease = AcquireEngineOrReport();
-        if (lease is null) return;
+        var throughAgent = BackgroundAcceptsStorageChecks;
+        using var lease = throughAgent ? null : AcquireEngineOrReport();
+        if (!throughAgent && lease is null) return;
         using var cancellation = new CancellationTokenSource();
         copyVerification = cancellation;
         checkingStorages = true;
@@ -40,18 +45,34 @@ public partial class MainWindow
         StorageCheckResults.Visibility = Visibility.Visible;
         StorageCheckResults.IsExpanded = false;
         StorageCheckResults.Header = "Проверяются хранилища: " + job.Name;
-        StorageCheckDetails.Text = "Проверяется временная папка и запись, чтение и удаление тестового файла.";
+        StorageCheckDetails.Text = throughAgent ? "Запрос передаётся работающему агенту. Будут проверены временная папка и доступ к хранилищам от его пользователя."
+            : "Проверка выполняется из окна программы: временная папка и запись, чтение и удаление тестового файла.";
         Status.Text = "Проверяются хранилища: " + job.Name;
         UpdateRunControls();
         try
         {
-            var checker = new StorageReadinessChecker(backupStorage, Path.Combine(DesktopPaths.DataDirectory, "work"));
-            var report = await Task.Run(() => checker.CheckAsync(job, cancellation.Token));
+            StorageCheckReport report;
+            if (throughAgent)
+            {
+                var queue = new LocalStorageCheckQueue(DesktopPaths.DataDirectory);
+                var request = await queue.EnqueueAsync(backgroundState!.SessionId, job, cancellation.Token);
+                report = await queue.WaitAsync(request, cancellation.Token);
+            }
+            else
+            {
+                var checker = new StorageReadinessChecker(backupStorage, Path.Combine(DesktopPaths.DataDirectory, "work"));
+                report = await Task.Run(() => checker.CheckAsync(job, cancellation.Token));
+            }
             var passed = report.Destinations.Count(result => result.Succeeded);
-            var all = report.TemporaryError is null && passed == job.StorageJobs.Count && !report.Cancelled;
+            var all = report.TemporaryError is null && report.Destinations.Count == job.StorageJobs.Count
+                && passed == job.StorageJobs.Count && !report.Cancelled;
             StorageCheckResults.Header = report.Cancelled ? "Проверка отменена: " + job.Name
-                : all ? "Все хранилища доступны: " + job.Name : $"Проверено хранилищ: {passed} из {job.StorageJobs.Count} — {job.Name}";
-            var details = new List<string> { "Задание: " + job.Name };
+                : all ? "Все хранилища доступны (" + (throughAgent ? "агент" : "окно") + "): " + job.Name
+                    : $"Проверено хранилищ: {passed} из {job.StorageJobs.Count} — {job.Name}";
+            var details = new List<string> { "Задание: " + job.Name,
+                (throughAgent ? "Проверка через работающего агента." : "Проверка из окна программы.")
+                    + " Пользователь: " + (report.ExecutionIdentity?.Account ?? "не определён") };
+            if (!throughAgent) details.Add("Доступ службы Windows может отличаться. Для проверки её доступа запустите службу и нажмите эту кнопку ещё раз.");
             if (report.TemporaryError is not null)
                 details.Add("Ошибка временной папки: " + report.TemporaryDirectory + "\n" + report.TemporaryError);
             details.AddRange(report.Destinations.Where(result => !result.Succeeded)
@@ -68,8 +89,9 @@ public partial class MainWindow
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            StorageCheckResults.Header = Status.Text = "Проверка отменена: " + job.Name;
-            StorageCheckDetails.Text = "Проверка отменена до обращения к хранилищам.";
+            StorageCheckResults.Header = Status.Text = (throughAgent ? "Ожидание проверки отменено: " : "Проверка отменена: ") + job.Name;
+            StorageCheckDetails.Text = throughAgent ? "Ожидание отменено. Исполнитель может ещё убирать свои тестовые файлы. Проверьте его состояние перед повтором; расписание продолжает работать."
+                : "Проверка отменена до обращения к хранилищам.";
         }
         catch (Exception ex)
         { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
