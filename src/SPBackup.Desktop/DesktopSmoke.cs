@@ -532,7 +532,15 @@ internal static partial class DesktopSmoke
                 await WaitUntil(() => window.SmokeReady && Control<Expander>("StorageCheckResults").Header.ToString()!.StartsWith("Все хранилища доступны"),
                     "Проверка хранилищ не завершилась через интерфейс.");
             }
-            Click("StartScheduleButton");
+            void RevealWindowScheduler(string action)
+            {
+                Click("AgentNavigation"); Click("BackgroundSettingsButton");
+                var button = Control<Button>(action);
+                for (DependencyObject? parent = button; parent is not null; parent = LogicalTreeHelper.GetParent(parent))
+                    if (parent is Expander expander) expander.IsExpanded = true;
+                button.BringIntoView(); window.UpdateLayout();
+            }
+            RevealWindowScheduler("StartScheduleButton"); Click("StartScheduleButton"); Click("JobsNavigation");
             try
             {
                 await WaitUntil(() => Control<Button>("StopScheduleButton").IsEnabled && Control<Button>("CheckStorageButton").IsEnabled,
@@ -545,7 +553,7 @@ internal static partial class DesktopSmoke
                 if (!Control<Button>("StopScheduleButton").IsEnabled)
                     throw new InvalidOperationException("Проверка остановила планировщик окна.");
             }
-            finally { Click("StopScheduleButton"); }
+            finally { RevealWindowScheduler("StopScheduleButton"); Click("StopScheduleButton"); Click("JobsNavigation"); }
             await WaitUntil(() => Control<Button>("StartScheduleButton").IsEnabled, "Планировщик не остановился после сценария проверки.");
             if (Control<DataGrid>("Copies").Items.Count != 0 || Control<DataGrid>("RunHistory").Items.Count != 0
                 || File.ReadAllText(temporaryMarker) != "keep unrelated files")

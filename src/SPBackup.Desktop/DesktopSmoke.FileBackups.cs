@@ -107,6 +107,10 @@ internal static partial class DesktopSmoke
                     || beforeProbeHistory.Count != (await history.ReadAsync()).Count || beforeProbeCatalog.Count != (await catalog.ReadAsync()).Count
                     || host.IsCompleted)
                     throw new InvalidOperationException("Проверка не показывает своего исполнителя или создаёт копию/останавливает агент.");
+                Control<Expander>("StorageCheckResults").IsExpanded = true;
+                await Task.Delay(100); window.UpdateLayout(); Control<Expander>("StorageCheckResults").BringIntoView();
+                window.UpdateLayout(); screenshot("storage-check-through-agent");
+                Control<Expander>("StorageCheckResults").IsExpanded = false;
                 Click("RunButton");
                 if (Control<Button>("RunButton").IsEnabled) throw new InvalidOperationException("Повторный щелчок дублирует принятый ручной запуск.");
                 await WaitUntil(() => window.SmokeReady && Control<Button>("RunButton").IsEnabled,
