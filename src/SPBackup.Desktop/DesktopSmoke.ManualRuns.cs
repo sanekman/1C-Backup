@@ -65,8 +65,31 @@ internal static partial class DesktopSmoke
             if (runButton.IsEnabled || !runButton.ToolTip.ToString()!.Contains("уже принят"))
                 throw new InvalidOperationException("Повторно открытое окно допускает дублирование принятого ручного запуска.");
             screenshot("manual-queue-reopened-window", reopened);
-            grid.SelectedItem = grid.Items.OfType<BackupJob>().First(j => j.Id != job.Id);
-            if (!runButton.IsEnabled) throw new InvalidOperationException("Принятая команда блокирует другие сохранённые задания.");
+            var otherJob = grid.Items.OfType<BackupJob>().First(j => j.Id != job.Id);
+            var status = (TextBlock)reopened.FindName("Status");
+            var acceptedReceipt = (await queue.ReadReceiptAsync(request.RequestId))!;
+            try
+            {
+                // A restored receipt may have the right filename/request ID but belong to
+                // another session or job. It cannot finish the real blocked command.
+                foreach (var mismatched in new[]
+                {
+                    acceptedReceipt with { SessionId = Guid.NewGuid(), Phase = LocalManualRunPhase.Finished },
+                    acceptedReceipt with { JobId = otherJob.Id, Phase = LocalManualRunPhase.Finished }
+                })
+                {
+                    grid.SelectedItem = grid.Items.OfType<BackupJob>().Single(j => j.Id == job.Id);
+                    status.Text = "";
+                    await queue.WriteReceiptAsync(mismatched);
+                    await WaitUntil(() => status.Text.Contains("Не удалось прочитать подтверждение ручного запуска"),
+                        "Чужое подтверждение ручного запуска не вызвало предупреждение.");
+                    if (host.IsCompleted || runButton.IsEnabled || !runButton.ToolTip.ToString()!.Contains("уже принят"))
+                        throw new InvalidOperationException("Чужое подтверждение сняло защиту выполняющегося задания от повторного запуска.");
+                    grid.SelectedItem = otherJob;
+                    if (!runButton.IsEnabled) throw new InvalidOperationException("Повреждённое подтверждение блокирует другие сохранённые задания.");
+                }
+            }
+            finally { await queue.WriteReceiptAsync(acceptedReceipt); }
         }
         finally
         {

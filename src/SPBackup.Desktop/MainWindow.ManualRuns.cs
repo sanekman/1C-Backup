@@ -80,7 +80,12 @@ public partial class MainWindow
         foreach (var request in backgroundManualRuns.Values.ToArray())
         {
             LocalManualRunReceipt? receipt;
-            try { receipt = await manualQueue.ReadReceiptAsync(request.RequestId); }
+            try
+            {
+                receipt = await manualQueue.ReadReceiptAsync(request.RequestId);
+                if (receipt is not null && (receipt.SessionId != request.SessionId || receipt.JobId != request.JobId))
+                    throw new System.IO.InvalidDataException("Подтверждение относится к другому сеансу агента или заданию.");
+            }
             catch(Exception error) when(error is System.IO.IOException or UnauthorizedAccessException or System.Text.Json.JsonException or System.IO.InvalidDataException)
             {
                 // Keep this job guarded against a duplicate click, but still refresh all other requests.
