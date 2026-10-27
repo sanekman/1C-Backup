@@ -311,6 +311,8 @@
     </StackPanel>
     <TextBlock x:Name="PgExternalAuthenticationHint" Text="Используется существующая настройка PostgreSQL: например, pgpass.conf, сертификат или вход Windows. Для обычного входа по паролю выберите вариант выше."
      TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
+    <TextBlock Text="Защита соединения зависит от настроек PostgreSQL на сервере и компьютере исполнителя. Попросите администратора проверить шифрование и сертификат сервера. Сохранение пароля само по себе не защищает соединение."
+     TextWrapping="Wrap" Margin="0,0,0,10" />
     <Button x:Name="FindPostgreSqlToolsButton" Content="Найти PostgreSQL на этом компьютере" Click="FindPostgreSqlTools_Click" HorizontalAlignment="Left" Margin="0,0,0,6" />
     <ComboBox x:Name="PostgreSqlToolsPicker" DisplayMemberPath="Label" SelectionChanged="PostgreSqlTools_Changed" Visibility="Collapsed" Margin="0,0,0,6" />
     <TextBlock x:Name="PostgreSqlToolsStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
@@ -325,7 +327,7 @@
    </DockPanel>
     </StackPanel></Expander>
     <Expander Header="Дополнительно: ограничение времени" Margin="0,0,0,10"><StackPanel><TextBlock Text="Ограничение времени, минут" /><TextBox x:Name="PgTimeout" Text="120" Margin="0,4,0,10" /></StackPanel></Expander>
-    <TextBlock Text="Пароль задаётся через файл паролей PostgreSQL текущего пользователя. Запрос пароля отключён. Создаётся custom-дамп с проверкой каталога через pg_restore."
+    <TextBlock Text="Создаётся дамп PostgreSQL с проверкой его каталога. Для уверенности проверьте восстановление в отдельную базу."
      TextWrapping="Wrap" Margin="0,0,0,10" />
    </StackPanel>
 </StackPanel>
