@@ -368,6 +368,8 @@ public partial class MainWindow : Window
         SqlAuthenticationPicker.SelectedValue = job.SqlServer?.Authentication ?? SqlServerAuthentication.Windows;
         UpdateSqlCredentialStatus();
         ResetPostgreSqlTools();
+        PgTlsRequired.IsChecked = job.PostgreSql?.Tls is not null;
+        PgTlsRootCertificate.Text = job.PostgreSql?.Tls?.RootCertificatePath ?? "";
         PgHost.Text = job.PostgreSql?.Host ?? "localhost"; PgPort.Text = (job.PostgreSql?.Port ?? 5432).ToString();
         PgUsername.Text = job.PostgreSql?.Username ?? "postgres";
         PgDumpPath.Text = job.PostgreSql?.PgDumpPath ?? ""; PgRestorePath.Text = job.PostgreSql?.PgRestorePath ?? "";
@@ -424,6 +426,7 @@ public partial class MainWindow : Window
         _ = RefreshOneCBasesAsync();
         SqlBackupServer.Clear(); SqlServerDirectory.Clear(); SqlAgentDirectory.Clear(); SqlBackupTimeout.Text = "120";
         sqlCredentialKey = null; SqlAuthenticationPicker.SelectedValue = SqlServerAuthentication.Windows; UpdateSqlCredentialStatus();
+        PgTlsRequired.IsChecked = false; PgTlsRootCertificate.Text = "";
         PgHost.Text = "localhost"; PgPort.Text = "5432"; PgUsername.Text = "postgres";
         postgreSqlCredentialKey = null; PgAuthenticationPicker.SelectedIndex = 0; UpdatePostgreSqlCredentialStatus();
         ResetPostgreSqlTools(); PgDumpPath.Clear(); PgRestorePath.Clear(); PgTimeout.Text = "120";

@@ -11,6 +11,9 @@ internal static class PostgreSqlTlsPolicy
         return new Dictionary<string, string?>
         {
             ["PGSSLMODE"] = "verify-full",
+            ["PGGSSENCMODE"] = "disable",
+            ["PGSERVICE"] = null,
+            ["PGSERVICEFILE"] = null,
             // Do not silently inherit a different destination or trust anchor.
             ["PGHOSTADDR"] = null,
             ["PGSSLROOTCERT"] = rootCertificatePath

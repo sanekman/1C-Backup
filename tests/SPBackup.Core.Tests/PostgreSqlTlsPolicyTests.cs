@@ -30,7 +30,7 @@ public sealed class PostgreSqlTlsPolicyTests
     {
         var root = Path.Combine(Path.GetTempPath(), "trusted-ca.pem");
         var command = new BackupProcess(OperatingSystem.IsWindows() ? "python" : "python3",
-            ["-c", "import os,sys; sys.exit(0 if os.environ.get('PGSSLMODE') == 'verify-full' and 'PGHOSTADDR' not in os.environ and os.environ.get('PGSSLROOTCERT') == sys.argv[1] else 1)", root],
+            ["-c", "import os,sys; sys.exit(0 if os.environ.get('PGSSLMODE') == 'verify-full' and os.environ.get('PGGSSENCMODE') == 'disable' and 'PGHOSTADDR' not in os.environ and os.environ.get('PGSSLROOTCERT') == sys.argv[1] else 1)", root],
             Path.GetTempPath()) { Environment = PostgreSqlTlsPolicy.VerifyFull(root) };
         Assert.Equal(0, await new BackupProcessRunner().RunAsync(command, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15)));
     }

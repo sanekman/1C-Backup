@@ -18,6 +18,8 @@ internal sealed class PostgreSqlConnectionEnvironment : IDisposable
     {
         var result = new PostgreSqlConnectionEnvironment();
         var settings = job.PostgreSql!;
+        var tls = settings.Tls is null ? null : PostgreSqlTlsPolicy.VerifyFull(settings.Tls.RootCertificatePath);
+        if (tls is not null) result.Environment = tls;
         if (settings.CredentialKey is null) return result; // Keep existing libpq authentication unchanged.
         if (credentials is null)
         {
@@ -62,11 +64,13 @@ internal sealed class PostgreSqlConnectionEnvironment : IDisposable
                 finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes); }
             }
             token.ThrowIfCancellationRequested();
-            result.Environment = new Dictionary<string, string?>
+            var environment = new Dictionary<string, string?>
             {
                 ["PGPASSFILE"] = file, ["PGPASSWORD"] = null, ["PGSERVICE"] = null,
                 ["PGSERVICEFILE"] = null, ["PGHOSTADDR"] = null
             };
+            foreach (var pair in tls ?? new Dictionary<string, string?>()) environment[pair.Key] = pair.Value;
+            result.Environment = environment;
             return result;
         }
         catch { result.Dispose(); throw; }

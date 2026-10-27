@@ -24,7 +24,7 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
     private Dictionary<string, string?> Authentication => new()
     {
         ["PGPASSFILE"] = Path.Combine(root, "pgpass.conf"), ["PGPASSWORD"] = null, ["PGSERVICE"] = null,
-        ["PGSERVICEFILE"] = null, ["PGHOSTADDR"] = null, ["PGCLIENTENCODING"] = "UTF8"
+        ["PGSERVICEFILE"] = null, ["PGHOSTADDR"] = null, ["PGSSLMODE"] = "verify-full", ["PGSSLROOTCERT"] = RootCertificatePath, ["PGCLIENTENCODING"] = "UTF8"
     };
     private async Task<string> Run(string name, IEnumerable<string> args, bool capture = true)
     {
@@ -151,6 +151,9 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
         await Run("initdb", ["--pgdata=" + Path.Combine(root, "cluster"), "--username=" + user, "--auth=scram-sha-256",
             "--pwfile=" + passwordFile, "--encoding=UTF8", "--locale=C"]);
         initialized = true; File.Delete(passwordFile);
+        await PostgreSqlTlsFixture.CreateAsync(root, Path.Combine(root, "cluster"));
+        await File.AppendAllTextAsync(Path.Combine(root, "cluster", "postgresql.conf"), "\nssl=on\nssl_cert_file='server.crt'\nssl_key_file='server.key'\n");
+        await File.WriteAllTextAsync(Path.Combine(root, "cluster", "pg_hba.conf"), "hostnossl all all 127.0.0.1/32 reject\nhostssl all all 127.0.0.1/32 scram-sha-256\n");
         await Run("pg_ctl", ["start", "-D", Path.Combine(root, "cluster"), "-w", "-t", "60", "-l", Path.Combine(root, "postgres.log"),
             "-o", $"-h 127.0.0.1 -p {port}"], capture: false);
         await Sql("postgres", "CREATE DATABASE service_source;");
@@ -163,6 +166,7 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
         PostgreSql = new() { Host = "127.0.0.1", Port = port, Username = user, CredentialKey = key,
             PgDumpPath = Tool("pg_dump"), PgRestorePath = Tool("pg_restore"), TimeoutMinutes = 2 }
     };
+    public string RootCertificatePath => Path.Combine(root, "ca.pem");
     public string Username => user;
     public string DumpExecutablePath => Tool("pg_dump");
     public async Task AssertRestoresAsync(string dump)

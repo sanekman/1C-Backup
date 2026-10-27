@@ -181,6 +181,8 @@ public partial class MainWindow
                     ? "учётная запись Windows исполнителя" : "сохранённый логин MS SQL");
             if (Kind.SelectedItem is DatabaseKind.PostgreSql)
                 WizardSummary.Text += "\nВход в PostgreSQL: " + (UseSavedPostgreSqlPassword ? "пароль, сохранённый в Windows" : "существующие настройки PostgreSQL исполнителя");
+            if (Kind.SelectedItem is DatabaseKind.PostgreSql)
+                WizardSummary.Text += "\nЗащита подключения: " + (PgTlsRequired.IsChecked == true ? "TLS с проверкой сертификата и имени сервера" : "прежние настройки PostgreSQL исполнителя");
             if (Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav && FileBackupModePicker.SelectedValue is FileBackupMode.Incremental)
                 WizardSummary.Text += "\n" + FullBackupPlanDescription + " Нужные предшествующие архивы сохраняются сверх лимита хранилища.";
             ReviewTechnicalDetails.IsExpanded = false;

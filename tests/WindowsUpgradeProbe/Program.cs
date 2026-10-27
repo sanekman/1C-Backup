@@ -17,7 +17,8 @@ if (args.Length != 3) throw new ArgumentException("Expected phase, private state
 var state = Path.GetFullPath(args[1]); var installation = Path.GetFullPath(args[2]);
 // Framework-dependent probe; additional dependencies come from the verified installed package.
 AssemblyLoadContext.Default.Resolving += (_, name) => {
-    var path = Path.Combine(installation, name.Name + ".dll");
+    var local = Path.Combine(AppContext.BaseDirectory, name.Name + ".dll");
+    var path = File.Exists(local) ? local : Path.Combine(installation, name.Name + ".dll");
     return File.Exists(path) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(path) : null;
 };
 return await Probe.RunAsync(args[0], state);
@@ -35,6 +36,50 @@ internal static class Probe
 
     public static async Task<int> RunAsync(string phase, string state)
     {
+        if (phase is "tls-write" or "tls-old-read")
+        {
+            var folder = Path.Combine(state, "tls-compat"); Directory.CreateDirectory(folder);
+            var store = new JobStore(Path.Combine(folder, "jobs.json"));
+            var ordinaryId = Guid.Parse("88222c70-1960-4d7d-8893-1fd9a327c081");
+            var securedId = Guid.Parse("cd338aac-ce0d-45e0-bb6e-74bb32a5ea15");
+            if (phase == "tls-write")
+            {
+#if LEGACY
+                throw new InvalidOperationException("TLS configuration requires the updated writer.");
+#else
+                var source = Path.Combine(folder, "source"); Directory.CreateDirectory(source);
+                await File.WriteAllTextAsync(Path.Combine(source, "1Cv8.1CD"), Payload);
+                var ordinary = new BackupJob { Id = ordinaryId, Name = "ordinary legacy compatibility", Source = source,
+                    DestinationDirectory = Path.Combine(folder, "copies"), OneCMethod = OneCBackupMethod.FileArchive, ScheduleKind = ScheduleKind.Manual };
+                var secure = ordinary with { Id = securedId, Name = "TLS only", Kind = DatabaseKind.PostgreSql, Source = "fixture",
+                    PostgreSql = new() { PgDumpPath = Path.Combine(folder, "pg_dump.exe"), PgRestorePath = Path.Combine(folder, "pg_restore.exe"), Tls = new() } };
+                await store.SaveAsync([ordinary, secure]);
+                Require((await store.LoadAsync()).Count == 2, "Updated writer lost its protected job.");
+#endif
+            }
+            else
+            {
+#if !LEGACY
+                throw new InvalidOperationException("The compatibility reader must use the published old assembly.");
+#else
+                Require(typeof(BackupJob).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                    == "0.2.0-alpha.25+2c0dfb62aa3a8244956479d2f0d1b7a09cc50692", "The TLS compatibility reader is not the published alpha.25 assembly.");
+                var loaded = await store.LoadAsync();
+                Require(loaded.Count == 1 && loaded[0].Id == ordinaryId, "Legacy reader can see a TLS-only job.");
+                var host = new LocalAgentHost(folder, new DatabaseBackupExecutor(new BackupProcessRunner()), new WindowsFtpCredentialStore());
+                Require(await host.RunAsync(ordinaryId) == 0, "Legacy agent cannot execute the ordinary job.");
+                try { await host.RunAsync(securedId); throw new InvalidOperationException("Legacy agent accepted a protected job."); }
+                catch (InvalidDataException) { }
+                var records = await new BackupCatalog(Path.Combine(folder, "copies.json")).ReadAsync();
+                Require(records.Count == 1, "Legacy agent produced unexpected copies.");
+                var restoreDirectory = Path.Combine(folder, "restored"); Directory.CreateDirectory(restoreDirectory);
+                var restored = await new OneCArchiveExtractor().ExtractAsync(records[0], loaded[0], restoreDirectory);
+                Require(await File.ReadAllTextAsync(restored.Path) == Payload, "Legacy ordinary copy did not restore.");
+#endif
+            }
+            Console.WriteLine(JsonSerializer.Serialize(new { success = true, phase })); return 0;
+        }
+
         if (phase is not ("prepare" or "snapshot" or "verify-one" or "verify-two" or "verify-after-uninstall" or "cleanup"))
             throw new ArgumentException("Unknown upgrade verification phase.");
         var metadata = Path.Combine(state, "fixture.json");

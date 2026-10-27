@@ -74,6 +74,23 @@ internal static partial class DesktopSmoke
             Click("EditJobButton");
             Require(Control<ComboBox>("PgAuthenticationPicker").SelectedIndex == 0 && Control<TextBlock>("PgCredentialStatus").Text.Contains("сохранён"),
                 "Повторное открытие потеряло способ входа.");
+            Control<CheckBox>("PgTlsRequired").IsChecked = true;
+            var certificate = Path.Combine(root, "public-ca.pem");
+            await File.WriteAllTextAsync(certificate, "public certificate fixture, never connect");
+            Control<TextBox>("PgTlsRootCertificate").Text = certificate;
+            Click("NextStepButton"); Click("NextStepButton"); Click("NextStepButton"); Click("SaveButton");
+            await WaitUntil(() => window.SmokeReady && Control<Border>("JobListCard").IsVisible, "TLS-настройка PostgreSQL не сохранилась.");
+            var protectedJob = (await jobStore.LoadAsync()).Single(item => item.Id == job.Id);
+            Require(protectedJob.PostgreSql!.Tls?.RootCertificatePath == certificate, "TLS-сертификат потерян при сохранении.");
+            using (var legacy = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"))))
+                Require(!legacy.RootElement.EnumerateArray().Any(item => item.GetProperty("Id").GetGuid() == job.Id), "Защищённое задание доступно старому агенту.");
+            Click("EditJobButton");
+            Require(Control<CheckBox>("PgTlsRequired").IsChecked == true && Control<TextBox>("PgTlsRootCertificate").Text == certificate,
+                "Редактор не восстановил защищённое подключение.");
+            Control<CheckBox>("PgTlsRequired").IsChecked = false;
+            Click("NextStepButton"); Click("NextStepButton"); Click("NextStepButton"); Click("SaveButton");
+            await WaitUntil(() => window.SmokeReady && Control<Border>("JobListCard").IsVisible, "Возврат прежнего подключения не сохранился.");
+            Click("EditJobButton");
             Control<TextBox>("PgHost").Text = "other.example";
             RequireNewPassword();
             Click("CancelEditorButton");

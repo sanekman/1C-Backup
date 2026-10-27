@@ -12,4 +12,5 @@
   <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" PrivateAssets="all" />
   <ProjectReference Include="../../src/SPBackup.Core/SPBackup.Core.csproj" />
  </ItemGroup>
+  <ItemGroup><Compile Include="../shared/PostgreSqlTlsFixture.cs" Link="PostgreSqlTlsFixture.cs" /></ItemGroup>
 </Project>

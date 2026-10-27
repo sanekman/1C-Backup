@@ -133,7 +133,10 @@ internal static class Program
                 DestinationDirectory = Path.Combine(directory, "copies", "manual"), ScheduleKind = ScheduleKind.Manual };
             var startup = manual with { Id = Guid.NewGuid(), Name = "startup service fixture", Enabled = true,
                 DestinationDirectory = Path.Combine(directory, "copies", "startup"), ScheduleKind = ScheduleKind.SystemStartup };
+            var publicCertificate = Path.Combine(directory, "pg-ca.pem");
+            File.Copy(postgres.RootCertificatePath, publicCertificate);
             var pgJob = postgres.Job(Path.Combine(directory, "copies", "postgresql"), pgKey, archiveKey);
+            pgJob = pgJob with { PostgreSql = pgJob.PostgreSql! with { Tls = new() { RootCertificatePath = publicCertificate } } };
             var network = manual with { Id = Guid.NewGuid(), Name = "service-account UNC fixture",
                 StorageKind = StorageKind.NetworkShare, DestinationDirectory = smb.UncPath };
             var deniedNetwork = network with { Id = Guid.NewGuid(), Name = "service-account denied UNC fixture",

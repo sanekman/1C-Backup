@@ -13,8 +13,15 @@ public partial class MainWindow
     {
         Host = PgHost.Text.Trim(), Port = port, Username = PgUsername.Text.Trim(),
         PgDumpPath = PgDumpPath.Text.Trim(), PgRestorePath = PgRestorePath.Text.Trim(), TimeoutMinutes = timeout,
+        Tls = PgTlsRequired.IsChecked == true ? new PostgreSqlTlsSettings
+        { RootCertificatePath = string.IsNullOrWhiteSpace(PgTlsRootCertificate.Text) ? null : PgTlsRootCertificate.Text.Trim() } : null,
         CredentialKey = UseSavedPostgreSqlPassword ? postgreSqlCredentialKey : null
     };
+    private void BrowsePostgreSqlCertificate_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = "Корневой сертификат PostgreSQL", Filter = "Сертификаты PEM|*.pem;*.crt|Все файлы|*.*", CheckFileExists = true };
+        if (dialog.ShowDialog(this) == true) PgTlsRootCertificate.Text = dialog.FileName;
+    }
     private void PgAuthentication_Changed(object sender, RoutedEventArgs e)
     {
         if (PgCredentialsPanel is null) return;

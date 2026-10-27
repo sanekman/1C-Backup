@@ -1,6 +1,7 @@
 """Install the published alpha.25, create an encrypted backup, then upgrade in place."""
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -74,6 +75,10 @@ def main():
         stage = 'legacy-profile-and-backup'
         run('dotnet', 'build', project, '-c', 'Release', '-o', old_probe.parent,
             '-p:LegacyDistribution=' + str(installation), '-m:1', '-nr:false', '-p:UseSharedCompilation=false')
+        # Preserve the published companion assemblies before the installer replaces them.
+        for dependency in installation.glob('*.dll'):
+            if dependency.name.startswith(('OneCBackup.', 'ICSharpCode.', 'FluentFTP')):
+                shutil.copy2(dependency, old_probe.parent / dependency.name)
         run('dotnet', old_probe, 'prepare', state, installation)
         fixture = json.loads((state / 'fixture.json').read_text())
         job_id = fixture['JobId']
@@ -100,6 +105,9 @@ def main():
         checks.append('new-shortcuts-and-compatible-apphosts')
         stage = 'read-old-secrets-and-restore'
         run('dotnet', 'build', project, '-c', 'Release', '-o', new_probe.parent, '-m:1', '-nr:false', '-p:UseSharedCompilation=false')
+        run('dotnet', new_probe, 'tls-write', state, installation)
+        run('dotnet', old_probe, 'tls-old-read', state, installation)
+        checks.append('legacy-agent-skips-protected-job-and-restores-ordinary-copy')
         run('dotnet', new_probe, 'verify-one', state, installation)
         checks.append('unchanged-profile-vault-dpapi-export-and-old-copy-restoration')
         stage = 'legacy-desktop-launch-and-autostart-migration'

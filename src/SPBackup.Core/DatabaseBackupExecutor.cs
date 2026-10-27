@@ -31,8 +31,15 @@ public sealed record SqlServerBackupSettings
     }
 }
 
+public sealed record PostgreSqlTlsSettings
+{
+    public string? RootCertificatePath { get; init; }
+}
+
 public sealed record PostgreSqlBackupSettings
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public PostgreSqlTlsSettings? Tls { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? CredentialKey { get; init; }
     public string Host { get; init; } = "localhost";
@@ -49,6 +56,13 @@ public sealed record PostgreSqlBackupSettings
             errors.Add("Сохраните пароль PostgreSQL заново.");
         if (CredentialKey is not null && (new[] { Host, Username }.Any(value => value is null || value == "*" || value.Any(char.IsControl)) || Host.Contains(',')))
             errors.Add("Для сохранённого пароля PostgreSQL укажите один конкретный сервер и пользователя без управляющих символов.");
+        if (Tls is not null)
+        {
+            try { PostgreSqlTlsPolicy.VerifyFull(Tls.RootCertificatePath); }
+            catch (ArgumentException error) { errors.Add(error.Message); }
+            if (string.IsNullOrWhiteSpace(Host) || Host.Contains(',') || Host.Any(char.IsControl))
+                errors.Add("Для TLS укажите одно имя сервера PostgreSQL.");
+        }
         if (Port is < 1 or > 65535) errors.Add("Укажите порт PostgreSQL от 1 до 65535.");
         if (string.IsNullOrWhiteSpace(PgDumpPath) || !Path.IsPathFullyQualified(PgDumpPath) ||
             string.IsNullOrWhiteSpace(PgRestorePath) || !Path.IsPathFullyQualified(PgRestorePath))

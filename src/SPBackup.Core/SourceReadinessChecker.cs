@@ -131,7 +131,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
                 { DiscardStandardOutput = true, ErrorLogPath = Path.Combine(work, "psql.log"), Environment = connection.Environment }, token);
             token.ThrowIfCancellationRequested();
             return code == 0
-                ? new(true, "Подключение к базе PostgreSQL проверено через psql и SELECT 1. Дамп не создавался. Доступ к данным всех таблиц, совместимость pg_dump и восстановление проверяются первой копией и тестовым восстановлением.")
+                ? new(true, (settings.Tls is not null ? "TLS: сертификат и имя сервера проверены. " : "") + "Подключение к базе PostgreSQL проверено через psql и SELECT 1. Дамп не создавался. Доступ к данным всех таблиц, совместимость pg_dump и восстановление проверяются первой копией и тестовым восстановлением.")
                 : new(false, $"Не удалось проверить подключение к PostgreSQL (psql, код {code}). Проверьте сервер, порт, имя базы и пользователя. В редакторе задания проверьте выбранный способ входа и при необходимости задайте пароль заново. Если сервер требует TLS, попросите администратора проверить настройки и сертификаты. Код выхода не определяет точную причину; дамп при этой проверке не создавался.");
         }
         finally

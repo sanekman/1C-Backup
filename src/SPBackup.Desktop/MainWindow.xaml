@@ -311,8 +311,14 @@
     </StackPanel>
     <TextBlock x:Name="PgExternalAuthenticationHint" Text="Используется существующая настройка PostgreSQL: например, pgpass.conf, сертификат или вход Windows. Для обычного входа по паролю выберите вариант выше."
      TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
-    <TextBlock Text="Защита соединения зависит от настроек PostgreSQL на сервере и компьютере исполнителя. Попросите администратора проверить шифрование и сертификат сервера. Сохранение пароля само по себе не защищает соединение."
+    <TextBlock Text="Для шифрования с проверкой сертификата включите защищённое подключение ниже. Сохранение пароля само по себе не защищает соединение."
      TextWrapping="Wrap" Margin="0,0,0,10" />
+    <Expander Header="Защищённое подключение к PostgreSQL" Margin="0,0,0,10"><StackPanel>
+     <CheckBox x:Name="PgTlsRequired" Content="Проверять сертификат и имя сервера (TLS)" />
+     <TextBlock Text="Корневой сертификат PEM на компьютере исполнителя. Пустое поле — стандартное доверие PostgreSQL. Для изменения защищённого задания остановите исполнитель." TextWrapping="Wrap" Margin="0,6,0,6" />
+     <DockPanel><Button DockPanel.Dock="Right" Content="Выбрать сертификат…" Click="BrowsePostgreSqlCertificate_Click" Margin="6,0,0,0" />
+     <TextBox x:Name="PgTlsRootCertificate" ToolTip="Полный путь к открытому корневому сертификату; службе нужен доступ на чтение" /></DockPanel>
+    </StackPanel></Expander>
     <Button x:Name="FindPostgreSqlToolsButton" Content="Найти PostgreSQL на этом компьютере" Click="FindPostgreSqlTools_Click" HorizontalAlignment="Left" Margin="0,0,0,6" />
     <ComboBox x:Name="PostgreSqlToolsPicker" DisplayMemberPath="Label" SelectionChanged="PostgreSqlTools_Changed" Visibility="Collapsed" Margin="0,0,0,6" />
     <TextBlock x:Name="PostgreSqlToolsStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
