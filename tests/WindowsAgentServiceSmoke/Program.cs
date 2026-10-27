@@ -8,7 +8,7 @@ using Microsoft.Win32;
 using SPBackup.Core;
 using ICSharpCode.SharpZipLib.Zip;
 
-internal static class Program
+internal static partial class Program
 {
     private static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
     private static async Task Wait(Func<Task<bool>> condition, string message)
@@ -84,13 +84,20 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
-        if (Environment.GetEnvironmentVariable("ONECBACKUP_NATIVE_SERVICE_TEST") != "1" || args.Length != 2)
+        if (Environment.GetEnvironmentVariable("ONECBACKUP_NATIVE_SERVICE_TEST") != "1" || args.Length is < 2 or > 3)
             throw new InvalidOperationException("Explicit isolated Windows CI opt-in, agent path and output folder are required.");
+        if (args.Length == 3 && args[2] == "--verify-reboot") return await VerifyRebootAsync(args[0], args[1]);
+        var prepareReboot = args.Length == 3 && args[2] == "--prepare-reboot";
+        var domainSmb = args.Length == 3 && args[2] == "--domain-smb"
+            ? JsonSerializer.Deserialize<DomainSmbSettings>(await Console.In.ReadToEndAsync())
+                ?? throw new InvalidDataException("Domain SMB settings are required on standard input.") : null;
+        Require(args.Length == 2 || prepareReboot || domainSmb is not null, "Unknown isolated service fixture mode.");
+        domainSmb?.Validate();
         var executable = Path.GetFullPath(args[0]); var output = Path.GetFullPath(args[1]); Directory.CreateDirectory(output);
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var directory = Path.Combine(local, "OneCBackup");
-        var account = "ocb" + Guid.NewGuid().ToString("N")[..12];
-        var password = "OcB!a9-" + Guid.NewGuid().ToString("N");
+        var account = domainSmb?.Account ?? "ocb" + Guid.NewGuid().ToString("N")[..12];
+        var password = domainSmb?.Password ?? "OcB!a9-" + Guid.NewGuid().ToString("N");
         var archivePassword = "CI encrypted service fixture password";
         var profileCreated = false; var userCreated = false;
         var archiveStore = new WindowsArchivePasswordStore(); string? archiveKey = null;
@@ -108,11 +115,13 @@ internal static class Program
             Require(File.Exists(executable), "Published agent not found.");
             postgres = new PostgreSqlFixture(); await postgres.StartAsync();
             pgStore.Save(pgKey, postgres.Username, postgres.Password);
-            Native.AddUser(account, password); userCreated = true;
+            if (domainSmb is null) { Native.AddUser(account, password); userCreated = true; }
             var selected = WindowsServiceAccounts.Resolve(account);
             var sid = WindowsIdentity.GetCurrent().User!.Value;
             Require(selected.Sid != sid, "The service must use a distinct non-interactive account.");
-            smb = await WindowsSmbFixture.CreateAsync(selected.Name, selected.Sid);
+            if (domainSmb is null) smb = await WindowsSmbFixture.CreateAsync(selected.Name, selected.Sid);
+            else Require(new SecurityIdentifier(selected.Sid).AccountDomainSid?.Value == domainSmb.DomainSid,
+                "The configured service identity is not a member of the actual test domain.");
             var binary = new DirectoryInfo(Path.GetDirectoryName(executable)!);
             var binaryAcl = binary.GetAccessControl();
             binaryAcl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(selected.Sid), FileSystemRights.ReadAndExecute,
@@ -138,9 +147,9 @@ internal static class Program
             var pgJob = postgres.Job(Path.Combine(directory, "copies", "postgresql"), pgKey, archiveKey);
             pgJob = pgJob with { PostgreSql = pgJob.PostgreSql! with { Tls = new() { RootCertificatePath = publicCertificate } } };
             var network = manual with { Id = Guid.NewGuid(), Name = "service-account UNC fixture",
-                StorageKind = StorageKind.NetworkShare, DestinationDirectory = smb.UncPath };
+                StorageKind = StorageKind.NetworkShare, DestinationDirectory = domainSmb?.AllowedUnc ?? smb!.UncPath };
             var deniedNetwork = network with { Id = Guid.NewGuid(), Name = "service-account denied UNC fixture",
-                DestinationDirectory = smb.DeniedUncPath };
+                DestinationDirectory = domainSmb?.DeniedUnc ?? smb!.DeniedUncPath };
             var jobs = new[] { manual, startup, pgJob, network, deniedNetwork };
             var jobStore = new JobStore(Path.Combine(directory, "jobs.json")); await jobStore.SaveAsync(jobs);
             var originalJobs = await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json"));
@@ -246,7 +255,7 @@ internal static class Program
             var networkRun = (await history.ReadAsync()).Single(run => run.JobId == network.Id);
             Require(networkRun.Status == BackupRunStatus.Succeeded, "Service UNC backup failed: " + networkRun.Error);
             var networkCopy = (await catalog.ReadAsync()).Single(record => record.JobId == network.Id);
-            var networkArchive = smb.LocalPath(networkCopy.Backup.Location);
+            var networkArchive = ReadableArchive(networkCopy.Backup.Location);
             Require(new FileInfo(networkArchive).GetAccessControl().GetOwner(typeof(SecurityIdentifier))?.Value == selected.Sid,
                 "The real SMB archive was not created by the distinct service identity.");
             await using (var input = File.OpenRead(networkArchive))
@@ -327,10 +336,11 @@ internal static class Program
             var completedRuns = await history.ReadAsync();
             var activeCrashSession = state!.SessionId;
             BackupRun interrupted;
+            LocalManualRunRequest activeCommand;
             int dumpBackend;
             await using (await postgres.HoldBackupAsync())
             {
-                var activeCommand = await queue.EnqueueAsync(activeCrashSession, pgJob.Id);
+                activeCommand = await queue.EnqueueAsync(activeCrashSession, pgJob.Id);
                 dumpBackend = await postgres.WaitForBlockedDumpAsync();
                 interrupted = (await history.ReadAsync()).Single(run => run.JobId == pgJob.Id && run.Status == BackupRunStatus.Running);
                 Require((await queue.ReadReceiptAsync(activeCommand.RequestId))?.Phase == LocalManualRunPhase.Accepted,
@@ -345,6 +355,10 @@ internal static class Program
                     "The real service dump was not active at the crash barrier.");
                 Console.WriteLine(JsonSerializer.Serialize(new { phase = "active-backup-crash-barrier", runId = interrupted.RunId,
                     agentPid = state.ProcessId, dumpPid = childId, backendPid = dumpBackend }));
+                if (prepareReboot)
+                    await ArmRebootAsync(executable, directory, output, account, archiveKey, pgKey, postgres, smb!,
+                        state, interrupted, activeCommand, startup.Id, manual.Id, pgJob.Id, completedRuns, originalJobs,
+                        archiveHashes.ToDictionary(entry => ReadableArchive(entry.Key), entry => entry.Value), checks);
                 await TerminateAgent(state.ProcessId, executable);
                 // Keep the database barrier closed until the actual child exits. A restart must never
                 // release the profile to a second executor while an orphan is still writing a dump.
@@ -362,6 +376,8 @@ internal static class Program
                 && state.SessionId != activeCrashSession, "Service did not become ready after an active backup crash.");
             await Wait(async () => (await history.ReadAsync()).Single(run => run.RunId == interrupted.RunId).Status == BackupRunStatus.Interrupted,
                 "The actually interrupted backup remained Running after recovery.");
+            await Wait(async () => (await queue.ReadReceiptAsync(activeCommand.RequestId)) is { Phase: LocalManualRunPhase.Interrupted },
+                "The consumed command retained an Accepted receipt after the service process died.");
             await Wait(async () => (await queue.ReadReceiptAsync(staleCommand.RequestId))?.Phase == LocalManualRunPhase.Rejected,
                 "Restart accepted a command belonging to the crashed session.");
             await Wait(async () => (await control.ReadAsync()) is { Phase: LocalAgentPhase.Running } observed
@@ -407,6 +423,7 @@ internal static class Program
             await Wait(() => Task.FromResult(WindowsAgentService.QueryInfo() is null), "Service registration was not removed.");
             Require((await catalog.ReadAsync()).Count == baselineCopyCount + 1 && File.Exists(Path.Combine(directory, "jobs.json")), "Removing the service erased owner data.");
             checks.Add("service-removal-preserves-jobs-and-copies");
+            if (domainSmb is not null) checks.Add("separate-domain-smb-server-with-domain-service-identity-allow-deny-backup-and-restore");
         }
         catch (Exception error)
         {

@@ -86,6 +86,11 @@ public sealed class LocalAgentHostTests : IDisposable
         var oldSession = (await new LocalAgentControlStore(directory).ReadAsync())!.SessionId;
         var queue = new LocalManualRunQueue(directory);
         var oldCommand = await queue.EnqueueAsync(oldSession, job.Id);
+        // A crash can leave an acceptance after its command was consumed. It must receive a
+        // terminal result without needing the command to be delivered again.
+        var abandoned = await queue.EnqueueAsync(oldSession, job.Id);
+        await queue.WriteReceiptAsync(new(abandoned.RequestId, oldSession, job.Id, LocalManualRunPhase.Accepted));
+        queue.Consume(abandoned.RequestId);
         // A restored command can outlive its already recorded result. Restart must preserve
         // the actual completion instead of changing it to a stale-session rejection.
         var deliveredCommand = await queue.EnqueueAsync(oldSession, job.Id);
@@ -98,6 +103,7 @@ public sealed class LocalAgentHostTests : IDisposable
         try
         {
             await WaitForReceipt(queue, oldCommand.RequestId, LocalManualRunPhase.Rejected);
+            await WaitForReceipt(queue, abandoned.RequestId, LocalManualRunPhase.Interrupted);
             await WaitForConsumed(queue, deliveredCommand.RequestId);
             Assert.Equal(LocalManualRunPhase.Finished, (await queue.ReadReceiptAsync(deliveredCommand.RequestId))!.Phase);
             Assert.Equal(receiptBefore, await File.ReadAllBytesAsync(receiptPath));

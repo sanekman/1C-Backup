@@ -46,4 +46,32 @@ public sealed class LocalManualRunQueueTests : IDisposable
     }
 
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+
+    [Fact]
+    public async Task AbandonedReceiptsPreserveBindingsAndIgnoreLiveTerminalAndCorruptReceipts()
+    {
+        var queue = new LocalManualRunQueue(directory);
+        var liveSession = Guid.NewGuid();
+        var job = Guid.NewGuid();
+        var old = new LocalManualRunReceipt(Guid.NewGuid(), Guid.NewGuid(), job, LocalManualRunPhase.Accepted);
+        await queue.WriteReceiptAsync(old);
+        var live = old with { RequestId = Guid.NewGuid(), SessionId = liveSession };
+        var done = old with { RequestId = Guid.NewGuid(), Phase = LocalManualRunPhase.Finished };
+        await queue.WriteReceiptAsync(live); await queue.WriteReceiptAsync(done);
+        var corrupt = Path.Combine(directory, "manual-runs", "receipts", Guid.NewGuid().ToString("N") + ".json");
+        await File.WriteAllTextAsync(corrupt, "{broken");
+        var result = Assert.Single(await queue.AbandonedAsync(liveSession));
+        Assert.Equal(old.RequestId, result.RequestId);
+        Assert.Equal(old.SessionId, result.SessionId);
+        Assert.Equal(job, result.JobId);
+        Assert.Equal(LocalManualRunPhase.Interrupted, result.Phase);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
+        // Discovery never writes; the exclusive host publishes through its normal retry queue.
+        Assert.Equal(old, await queue.ReadReceiptAsync(old.RequestId));
+        await queue.WriteReceiptAsync(result);
+        Assert.Empty(await queue.AbandonedAsync(liveSession));
+        Assert.Equal(live, await queue.ReadReceiptAsync(live.RequestId));
+        Assert.Equal(done, await queue.ReadReceiptAsync(done.RequestId));
+        Assert.Equal("{broken", await File.ReadAllTextAsync(corrupt));
+    }
 }

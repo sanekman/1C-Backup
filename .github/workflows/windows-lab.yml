@@ -1,0 +1,33 @@
+name: Prepare isolated Windows lab bundle
+
+on:
+  push:
+    branches: ['feature/**']
+    paths:
+      - '.github/workflows/windows-lab.yml'
+      - 'tools/*windows_lab*.ps1'
+      - 'tests/WindowsAgentServiceSmoke/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - name: Build agent, native probes and pinned Windows SDK for the stand
+        shell: pwsh
+        run: |
+          if (-not $env:PGBIN) { throw 'The hosted runner must provide PostgreSQL tools.' }
+          ./tools/build_windows_lab.ps1 -Output artifacts/windows-lab -PostgreSqlRoot (Split-Path $env:PGBIN -Parent)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-lab-${{ github.sha }}
+          path: artifacts/windows-lab/
+          retention-days: 14

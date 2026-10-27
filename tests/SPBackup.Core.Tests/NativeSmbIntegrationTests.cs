@@ -147,9 +147,11 @@ public sealed class NativeSmbIntegrationTests(ITestOutputHelper output)
         private readonly string account = WindowsIdentity.GetCurrent().Name;
         private readonly string name;
         private readonly string marker;
+        private readonly string? remoteRoot;
+        private readonly string? controller;
         public string Root { get; }
-        public string BackingDirectory => Path.Combine(Root, "share");
-        public string UncPath => @"\\" + Environment.MachineName + @"\" + name;
+        public string BackingDirectory => remoteRoot is null ? Path.Combine(Root, "share") : UncPath;
+        public string UncPath => remoteRoot is null ? @"\\" + Environment.MachineName + @"\" + name : Path.Combine(remoteRoot, id);
 
         private SmbFixture()
         {
@@ -157,7 +159,49 @@ public sealed class NativeSmbIntegrationTests(ITestOutputHelper output)
             marker = "Owned SP Backup native SMB fixture " + id;
             Root = Path.Combine(Path.GetTempPath(), "SPBackup-native-smb-" + id);
             if (Directory.Exists(Root) || File.Exists(Root)) throw new IOException("Refusing to reuse an existing SMB fixture directory.");
+            var settingsPath = Environment.GetEnvironmentVariable("SPBACKUP_REMOTE_SMB_SETTINGS");
+            if (settingsPath is not null)
+            {
+                if (Environment.GetEnvironmentVariable("SPBACKUP_REMOTE_SMB_TEST") != "1")
+                    throw new InvalidOperationException("Separate-server SMB needs explicit disposable lab opt-in.");
+                var settings = JsonSerializer.Deserialize<RemoteSmbSettings>(File.ReadAllText(settingsPath))
+                    ?? throw new InvalidDataException("Missing separate-server SMB settings.");
+                var parts = settings.UncRoot.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+                if (!settings.UncRoot.StartsWith(@"\\", StringComparison.Ordinal) || parts.Length != 2
+                    || parts[0].Equals(Environment.MachineName, StringComparison.OrdinalIgnoreCase)
+                    || parts[0] is "localhost" or "." or "127.0.0.1" or "::1"
+                    || !Guid.TryParseExact(settings.Marker, "N", out _)
+                    || File.ReadAllText(Path.Combine(settings.UncRoot, "fixture-owner.txt")) != settings.Marker
+                    || !Path.IsPathFullyQualified(settings.ControllerDirectory)
+                    || Directory.Exists(settings.ControllerDirectory))
+                    throw new InvalidDataException("The separate SMB server/controller ownership preconditions failed.");
+                remoteRoot = settings.UncRoot; controller = settings.ControllerDirectory;
+                Directory.CreateDirectory(controller);
+                Directory.CreateDirectory(Root);
+            }
             Directory.CreateDirectory(BackingDirectory);
+        }
+
+        private sealed record RemoteSmbSettings(string UncRoot, string Marker, string ControllerDirectory);
+        private async Task ExchangeAsync(string action, string? temporary = null)
+        {
+            var requestId = Guid.NewGuid();
+            var request = Path.Combine(controller!, action + "-request.json");
+            var response = Path.Combine(controller!, action + "-response.json");
+            var temporaryRequest = request + ".tmp";
+            await File.WriteAllTextAsync(temporaryRequest, JsonSerializer.Serialize(new { requestId,
+                relativeDirectory = id, temporary = temporary is null ? null : Path.GetFileName(temporary) }));
+            File.Move(temporaryRequest, request); // Publish the complete controller message.
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(60);
+            while (!File.Exists(response))
+            {
+                if (DateTimeOffset.UtcNow >= deadline) throw new TimeoutException("The separate SMB controller did not confirm " + action);
+                await Task.Delay(100);
+            }
+            using var json = JsonDocument.Parse(await File.ReadAllTextAsync(response));
+            if (json.RootElement.GetProperty("requestId").GetGuid() != requestId
+                || !json.RootElement.GetProperty("succeeded").GetBoolean())
+                throw new IOException("The separate SMB controller rejected " + action);
         }
 
         public static async Task<SmbFixture> CreateAsync()
@@ -168,6 +212,11 @@ public sealed class NativeSmbIntegrationTests(ITestOutputHelper output)
             var fixture = new SmbFixture();
             try
             {
+                if (fixture.remoteRoot is not null)
+                {
+                    OutputRemoteFixture(fixture);
+                    return fixture;
+                }
                 await fixture.RunAsync("""
                     if ((Get-Service -Name LanmanServer -ErrorAction Stop).Status -ne 'Running') {
                         throw 'LanmanServer must already be running; the fixture does not change services or network policy.'
@@ -192,11 +241,15 @@ public sealed class NativeSmbIntegrationTests(ITestOutputHelper output)
             }
         }
 
+        private static void OutputRemoteFixture(SmbFixture fixture) => Console.WriteLine(
+            "Using separate SMB server: " + fixture.remoteRoot + "; controlled first-block interruption, not a local share.");
+
         public async Task DisconnectAsync(string temporary)
         {
             if (!string.Equals(Path.GetDirectoryName(temporary), UncPath, StringComparison.OrdinalIgnoreCase)
                 || !Path.GetFileName(temporary).EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Refusing to disconnect a file outside the owned SMB fixture.");
+            if (remoteRoot is not null) { await ExchangeAsync("disconnect", temporary); return; }
             await RunAsync("""
                 if (-not (Find-OwnedShare)) { throw 'The owned share disappeared before the fault barrier.' }
                 $opened = @(Get-SmbOpenFile | Where-Object { $_.Path -ieq $settings.temporary })
@@ -213,7 +266,7 @@ public sealed class NativeSmbIntegrationTests(ITestOutputHelper output)
                 """, Path.Combine(BackingDirectory, Path.GetFileName(temporary)));
         }
 
-        public Task RestoreAsync() => RunAsync("""
+        public Task RestoreAsync() => remoteRoot is not null ? ExchangeAsync("restore") : RunAsync("""
             if (Find-OwnedShare) { throw 'The share was unexpectedly restored before the production retry.' }
             New-OwnedShare
             """);
@@ -263,6 +316,12 @@ public sealed class NativeSmbIntegrationTests(ITestOutputHelper output)
 
         public async ValueTask DisposeAsync()
         {
+            if (remoteRoot is not null)
+            {
+                if (Directory.Exists(UncPath)) Directory.Delete(UncPath, recursive: true);
+                if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
+                return; // The separate controller owns the share; never invoke local SMB administration.
+            }
             await RunAsync("""
                 if (Find-OwnedShare) {
                     Remove-SmbShare -Name $settings.name -Force -Confirm:$false -ErrorAction Stop

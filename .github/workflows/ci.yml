@@ -30,6 +30,15 @@ jobs:
       - run: dotnet build SPBackup.slnx --no-restore -m:1 -nr:false
       - run: python -m unittest discover -s tests/postgresql -v
       - run: python -m unittest discover -s tests/distribution -v
+      - name: Parse isolated Windows lab controllers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($file in Get-ChildItem tools/*windows_lab*.ps1) {
+            $errors = $null; $tokens = $null
+            $null = [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors) { throw ($errors | Out-String) }
+          }
       - name: Verify concurrent profile snapshots before long backup tests
         run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'FullyQualifiedName~ProfileSnapshotConcurrencyTests'
       - if: runner.os == 'Linux'

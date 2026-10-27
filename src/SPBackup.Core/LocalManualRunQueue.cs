@@ -72,5 +72,26 @@ public sealed class LocalManualRunQueue(string directory)
         return value;
     }
     public Task WriteReceiptAsync(LocalManualRunReceipt value,CancellationToken token=default) => new AgentJsonFile<LocalManualRunReceipt>(Receipt(value.RequestId)).WriteAsync(value,token);
+    /// <summary>Called only by the new exclusive host. Accepted commands from a dead session must never remain live or be replayed.</summary>
+    public async Task<IReadOnlyList<LocalManualRunReceipt>> AbandonedAsync(Guid sessionId,CancellationToken token=default)
+    {
+        if(sessionId==Guid.Empty) throw new ArgumentException("Не указан сеанс агента.");
+        if(!Directory.Exists(ReceiptDirectory)) return [];
+        var result=new List<LocalManualRunReceipt>();
+        foreach(var path in Directory.EnumerateFiles(ReceiptDirectory,"*.json"))
+        {
+            token.ThrowIfCancellationRequested();
+            if(!Guid.TryParseExact(Path.GetFileNameWithoutExtension(path),"N",out var id)) continue;
+            try
+            {
+                var receipt=await ReadReceiptAsync(id,token);
+                if(receipt is { Phase: LocalManualRunPhase.Accepted } && receipt.SessionId!=sessionId)
+                    result.Add(receipt with { Phase=LocalManualRunPhase.Interrupted,
+                        Error="Предыдущий сеанс агента завершён. Проверьте историю перед новым запуском." });
+            }
+            catch(Exception error) when(error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException) { }
+        }
+        return result;
+    }
     public void Consume(Guid id) => File.Delete(Pending(id));
 }

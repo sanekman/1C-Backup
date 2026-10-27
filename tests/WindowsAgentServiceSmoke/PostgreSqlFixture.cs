@@ -8,6 +8,7 @@ using SPBackup.Core;
 /// <summary>Fresh SCRAM cluster; the service cannot read the owner's private fixture password file.</summary>
 internal sealed class PostgreSqlFixture : IAsyncDisposable
 {
+    internal sealed record Snapshot(string Root, string Bin, string Username, int Port);
     private readonly string root = Path.Combine(Path.GetTempPath(), "OneCBackup-service-pg-" + Guid.NewGuid().ToString("N"));
     private readonly string bin = Environment.GetEnvironmentVariable("PGBIN") ?? throw new InvalidOperationException("PGBIN is required for service authentication verification.");
     private readonly string user = "ocbpg_" + Guid.NewGuid().ToString("N")[..12];
@@ -15,6 +16,20 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
     private int port;
     private bool initialized;
     private BackupHold? backupHold;
+    public PostgreSqlFixture() { }
+    private PostgreSqlFixture(Snapshot snapshot, string password)
+    {
+        root = snapshot.Root; bin = snapshot.Bin; user = snapshot.Username; port = snapshot.Port;
+        Password = password; initialized = true;
+        if (Path.GetFileName(root) is not { } name || !name.StartsWith("OneCBackup-service-pg-", StringComparison.Ordinal)
+            || File.GetAttributes(root).HasFlag(FileAttributes.ReparsePoint)
+            || File.ReadAllText(Path.Combine(root, "fixture-owner.txt")) != user)
+            throw new InvalidDataException("The persisted PostgreSQL fixture ownership marker changed.");
+    }
+    public Snapshot Capture() => new(root, bin, user, port);
+    public static PostgreSqlFixture Reopen(Snapshot snapshot, string password) => new(snapshot, password);
+    public Task RestartAfterBootAsync() => Run("pg_ctl", ["start", "-D", Path.Combine(root, "cluster"), "-w", "-t", "60",
+        "-l", Path.Combine(root, "postgres.log"), "-o", $"-h 127.0.0.1 -p {port}"], capture: false);
     private string Tool(string name)
     {
         var path = Path.Combine(bin, name + ".exe");
@@ -144,6 +159,7 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
             acl.AddAccessRule(new FileSystemAccessRule(account, FileSystemRights.FullControl,
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         new DirectoryInfo(root).Create(acl);
+        await File.WriteAllTextAsync(Path.Combine(root, "fixture-owner.txt"), user);
         var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
         var passwordFile = Path.Combine(root, "init-password"); await File.WriteAllTextAsync(passwordFile, Password);
         await File.WriteAllTextAsync(Path.Combine(root, "pgpass.conf"), $"127.0.0.1:{port}:*:{user}:"

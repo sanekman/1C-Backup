@@ -177,6 +177,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             await initialized;
             var queue = new LocalManualRunQueue(directory);
             var pendingReceipts = new Dictionary<Guid, LocalManualRunReceipt>();
+            var abandonedReceiptsLoaded = false;
             var failures = new Dictionary<Guid, (DateTimeOffset RetryAfter, Exception Error)>();
             async Task FlushReceipt(LocalManualRunReceipt receipt)
             {
@@ -249,6 +250,12 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             {
                 try
                 {
+                    if (!abandonedReceiptsLoaded)
+                    {
+                        foreach (var abandoned in await queue.AbandonedAsync(state.SessionId, lifetime.Token))
+                            pendingReceipts[abandoned.RequestId] = abandoned;
+                        abandonedReceiptsLoaded = true;
+                    }
                     foreach (var receipt in pendingReceipts.Values.ToArray())
                         await TryCommand(receipt.RequestId, () => FlushReceipt(receipt));
                     var requests = await queue.PendingAsync(lifetime.Token);

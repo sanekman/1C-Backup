@@ -9,6 +9,7 @@ using System.Text.Json;
 [SupportedOSPlatform("windows")]
 internal sealed class WindowsSmbFixture : IAsyncDisposable
 {
+    internal sealed record Snapshot(string Id, string Root, string Account, string ServiceSid);
     private readonly string id = Guid.NewGuid().ToString("N");
     private readonly string account;
     private readonly string serviceSid;
@@ -26,8 +27,9 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
     public string UncPath => @"\\" + Environment.MachineName + @"\" + name;
     public string DeniedUncPath => @"\\" + Environment.MachineName + @"\" + deniedName;
 
-    private WindowsSmbFixture(string account, string serviceSid)
+    private WindowsSmbFixture(string account, string serviceSid, Snapshot? snapshot = null)
     {
+        if (snapshot is not null) id = snapshot.Id;
         using var identity = WindowsIdentity.GetCurrent();
         ownerSid = identity.User ?? throw new InvalidOperationException("The isolated runner has no user SID.");
         ownerAccount = identity.Name;
@@ -39,7 +41,17 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
         name = "SPBackupServiceCI_" + id;
         deniedName = "SPBackupDeniedCI_" + id;
         marker = "Owned SP Backup service SMB fixture " + id;
-        Root = Path.Combine(Path.GetTempPath(), "SPBackup-service-smb-" + id);
+        Root = snapshot?.Root ?? Path.Combine(Path.GetTempPath(), "SPBackup-service-smb-" + id);
+    }
+
+    public Snapshot Capture() => new(id, Root, account, serviceSid);
+    public static WindowsSmbFixture Reopen(Snapshot snapshot)
+    {
+        if (!Guid.TryParseExact(snapshot.Id, "N", out _) || Path.GetFileName(snapshot.Root) != "SPBackup-service-smb-" + snapshot.Id
+            || File.GetAttributes(snapshot.Root).HasFlag(FileAttributes.ReparsePoint)
+            || File.ReadAllText(Path.Combine(snapshot.Root, "fixture-owner.txt")) != "Owned SP Backup service SMB fixture " + snapshot.Id)
+            throw new InvalidDataException("The persisted SMB fixture ownership marker changed.");
+        return new(snapshot.Account, snapshot.ServiceSid, snapshot) { rootCreated = true };
     }
 
     public static async Task<WindowsSmbFixture> CreateAsync(string account, string serviceSid)
