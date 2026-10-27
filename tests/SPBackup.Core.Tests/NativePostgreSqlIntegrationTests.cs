@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using ICSharpCode.SharpZipLib.Zip;
 using SPBackup.Core;
 using Xunit;
@@ -9,6 +11,31 @@ namespace SPBackup.Core.Tests;
 
 public sealed class NativePostgreSqlIntegrationTests
 {
+    private static async Task CreateTlsCertificates(string root, string cluster)
+    {
+        using var authorityKey = RSA.Create(2048);
+        var authorityRequest = new CertificateRequest("CN=SP Backup isolated test CA", authorityKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        authorityRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        authorityRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
+        var since = DateTimeOffset.UtcNow.AddMinutes(-5);
+        using var authority = authorityRequest.CreateSelfSigned(since, since.AddDays(2));
+        await File.WriteAllTextAsync(Path.Combine(root, "ca.pem"), authority.ExportCertificatePem());
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest("CN=isolated PostgreSQL", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var names = new SubjectAlternativeNameBuilder(); names.AddIpAddress(IPAddress.Loopback);
+        request.CertificateExtensions.Add(names.Build());
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new("1.3.6.1.5.5.7.3.1") }, false));
+        using var server = request.Create(authority, since, since.AddDays(1), RandomNumberGenerator.GetBytes(16));
+        await File.WriteAllTextAsync(Path.Combine(cluster, "server.crt"), server.ExportCertificatePem());
+        await File.WriteAllTextAsync(Path.Combine(cluster, "server.key"), key.ExportPkcs8PrivateKeyPem());
+        using var unrelatedKey = RSA.Create(2048);
+        using var unrelated = new CertificateRequest("CN=Unrelated test CA", unrelatedKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+            .CreateSelfSigned(since, since.AddDays(2));
+        await File.WriteAllTextAsync(Path.Combine(root, "wrong-ca.pem"), unrelated.ExportCertificatePem());
+    }
+
     private sealed class FixturePassword(string value) : IArchivePasswordStore
     {
         public Task<string> GetAsync(string key, CancellationToken cancellationToken = default)
@@ -56,6 +83,11 @@ public sealed class NativePostgreSqlIntegrationTests
             ["PGCLIENTENCODING"] = "UTF8"
         };
         var previous = environment.Keys.ToDictionary(key => key, Environment.GetEnvironmentVariable);
+        foreach (var pair in PostgreSqlTlsPolicy.VerifyFull(Path.Combine(root, "ca.pem")))
+        {
+            previous.TryAdd(pair.Key, Environment.GetEnvironmentVariable(pair.Key));
+            environment[pair.Key] = pair.Value;
+        }
         var initialized = false;
         async Task<string> Sql(string database, string sql) => await NativeSqlTestTools.RunAsync(Tool("psql"),
             ["--no-password", "--host=127.0.0.1", "--port=" + port, "--username=" + user,
@@ -66,6 +98,10 @@ public sealed class NativePostgreSqlIntegrationTests
                 "--auth=scram-sha-256", "--pwfile=" + passwordFile, "--encoding=UTF8", "--locale=C"]);
             initialized = true;
             File.Delete(passwordFile);
+            await CreateTlsCertificates(root, cluster);
+            await File.AppendAllTextAsync(Path.Combine(cluster, "postgresql.conf"), "\nssl=on\nssl_cert_file='server.crt'\nssl_key_file='server.key'\n");
+            await File.WriteAllTextAsync(Path.Combine(cluster, "pg_hba.conf"),
+                "hostnossl all all 127.0.0.1/32 reject\nhostssl all all 127.0.0.1/32 scram-sha-256\n");
             // The background server can inherit redirected pipe handles on Windows.
             // pg_ctl reports readiness itself; server diagnostics go to its private log.
             await NativeSqlTestTools.RunAsync(Tool("pg_ctl"), ["start", "-D", cluster, "-w", "-t", "60",
@@ -78,6 +114,7 @@ public sealed class NativePostgreSqlIntegrationTests
             Environment.SetEnvironmentVariable("PGSERVICE", "missing-ambient-service");
             Environment.SetEnvironmentVariable("PGHOSTADDR", "192.0.2.1");
             await Sql("postgres", "CREATE DATABASE source_fixture;");
+            Assert.Equal("t", await Sql("source_fixture", "SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid();"));
             await Sql("source_fixture", "CREATE TABLE backup_fixture (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO backup_fixture VALUES (1,'first'),(2,'second');");
             var catalog = new BackupCatalog(Path.Combine(root, "copies.json"));
             var history = new BackupRunHistory(Path.Combine(root, "runs.json"));
@@ -90,6 +127,11 @@ public sealed class NativePostgreSqlIntegrationTests
                     PgDumpPath = Tool("pg_dump"), PgRestorePath = Tool("pg_restore"), TimeoutMinutes = 2 } };
             var sourceChecker = new SourceReadinessChecker(new BackupProcessRunner(), Path.Combine(root, "unused-work"));
             var ready = await sourceChecker.CheckAsync(job); Assert.True(ready.Succeeded, ready.Details);
+            // The certificate names only 127.0.0.1: a valid login cannot bypass name validation.
+            Assert.False((await sourceChecker.CheckAsync(job with { PostgreSql = job.PostgreSql! with { Host = "localhost" } })).Succeeded);
+            Environment.SetEnvironmentVariable("PGSSLROOTCERT", Path.Combine(root, "wrong-ca.pem"));
+            try { Assert.False((await sourceChecker.CheckAsync(job)).Succeeded); }
+            finally { Environment.SetEnvironmentVariable("PGSSLROOTCERT", Path.Combine(root, "ca.pem")); }
             credentials.Save(credentialKey, user, "incorrect saved password");
             Assert.False((await sourceChecker.CheckAsync(job)).Succeeded);
             credentials.Save(credentialKey, user, password);
