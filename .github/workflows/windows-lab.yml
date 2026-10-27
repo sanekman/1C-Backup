@@ -7,6 +7,11 @@ on:
       - '.github/workflows/windows-lab.yml'
       - 'tools/*windows_lab*.ps1'
       - 'tests/WindowsAgentServiceSmoke/**'
+      - 'tests/SPBackup.Core.Tests/**'
+      - 'tests/shared/**'
+      - 'src/SPBackup.Core/**'
+      - 'src/SPBackup.Agent/**'
+      - 'src/SPBackup.Remote/**'
   workflow_dispatch:
 
 permissions:

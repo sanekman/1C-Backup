@@ -44,10 +44,17 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $Output 'controller') | Out-Null
     Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*windows_lab*.ps1' | Copy-Item -Destination (Join-Path $Output 'controller')
     Copy-Item -LiteralPath (Join-Path $repo 'docs/windows-lab.md') -Destination (Join-Path $Output 'controller')
+    # Exercise the copied SDK/runner itself; a system SDK passing tests does not prove portability.
+    $runner = Join-Path $Output 'dotnet\dotnet.exe'
+    if ((& $runner --version).Trim() -ne '10.0.402' -or $LASTEXITCODE -ne 0) { throw 'The copied Windows SDK cannot run.' }
+    & $runner vstest (Join-Path $Output 'tests\SPBackup.Core.Tests.dll') `
+        '/TestCaseFilter:FullyQualifiedName~LocalManualRunQueueTests' `
+        "/ResultsDirectory:$(Join-Path (Split-Path $Output -Parent) 'lab-runner-smoke')"
+    if ($LASTEXITCODE -ne 0) { throw 'The copied test runner failed its real manual-queue tests.' }
     $files = @(Get-ChildItem -LiteralPath $Output -File -Recurse | ForEach-Object {
         @{ path = $_.FullName.Substring($Output.Length + 1); sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
     })
-    @{ format = 1; revision = $revision; sdk = '10.0.402'; runtime = '10.0.13'; files = $files } |
+    @{ format = 1; revision = $revision; sdk = '10.0.402'; runtime = '10.0.13'; runnerVerified = $true; files = $files } |
         ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $Output 'bundle.json') -Encoding UTF8
 } finally { Pop-Location }
 Write-Output "Lab bundle prepared at $Output; source $revision. No release was published."

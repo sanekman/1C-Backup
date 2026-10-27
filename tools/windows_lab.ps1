@@ -49,7 +49,7 @@ if ($Action -eq 'Create') {
     $BaseVhdx = (Resolve-Path -LiteralPath $BaseVhdx).Path
     $Bundle = (Resolve-Path -LiteralPath $Bundle).Path
     $manifest = Get-Content -LiteralPath (Join-Path $Bundle 'bundle.json') -Raw | ConvertFrom-Json
-    if ($manifest.format -ne 1 -or $manifest.sdk -ne '10.0.402' -or $manifest.runtime -ne '10.0.13') { throw 'Unexpected lab bundle format/SDK/runtime.' }
+    if ($manifest.format -ne 1 -or $manifest.sdk -ne '10.0.402' -or $manifest.runtime -ne '10.0.13' -or -not $manifest.runnerVerified) { throw 'Unexpected or unverified lab bundle format/SDK/runtime.' }
     foreach ($file in $manifest.files) {
         $path = [IO.Path]::GetFullPath((Join-Path $Bundle $file.path))
         if (-not $path.StartsWith($Bundle + '\', [StringComparison]::OrdinalIgnoreCase) -or

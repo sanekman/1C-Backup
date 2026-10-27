@@ -33,7 +33,19 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         });
         var control = new LocalAgentControlStore(directory);
         var now = DateTimeOffset.UtcNow;
-        var state = new LocalAgentState(Guid.NewGuid(), Environment.ProcessId, now, now, LocalAgentPhase.Running) { CanCancelCurrentRun = true, CanRunManually = manual is null, RunsSchedules = manual is null };
+        var state = new LocalAgentState(Guid.NewGuid(), Environment.ProcessId, now, now, LocalAgentPhase.Running) { CanCancelCurrentRun = true, RunsSchedules = manual is null };
+        var stateGate = new object();
+        IReadOnlyList<LocalManualRunReceipt>? abandonedManualReceipts = null;
+        if (manual is null)
+        {
+            try
+            {
+                // Capture the prior session before publishing a new session clients can use.
+                abandonedManualReceipts = await new LocalManualRunQueue(directory).AbandonedAsync(state.SessionId, cancellationToken);
+                state = state with { CanRunManually = true };
+            }
+            catch (Exception error) when (AgentRuntimeWarnings.Recoverable(error)) { warnings.Set("Восстановление ручных команд", error); }
+        }
         try { await control.WriteAsync(state, cancellationToken); }
         catch (Exception error) when (manual is null && AgentRuntimeWarnings.Recoverable(error)) { warnings.Set("Управление агентом", error); }
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -112,7 +124,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         async Task StorageCheckLoop()
         {
             await initialized;
-            Volatile.Write(ref state, Volatile.Read(ref state) with { CanCheckStorages = true });
+            lock (stateGate) Volatile.Write(ref state, state with { CanCheckStorages = true });
             await new LocalStorageCheckProcessor(directory, store, new(storage, Path.Combine(directory, "work")))
                 .RunAsync(state.SessionId, error => warnings.Set("Проверка хранилищ", error), lifetime.Token);
         }
@@ -176,8 +188,8 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         {
             await initialized;
             var queue = new LocalManualRunQueue(directory);
-            var pendingReceipts = new Dictionary<Guid, LocalManualRunReceipt>();
-            var abandonedReceiptsLoaded = false;
+            var pendingReceipts = (abandonedManualReceipts ?? []).ToDictionary(receipt => receipt.RequestId);
+            var abandonedReceiptsLoaded = abandonedManualReceipts is not null;
             var failures = new Dictionary<Guid, (DateTimeOffset RetryAfter, Exception Error)>();
             async Task FlushReceipt(LocalManualRunReceipt receipt)
             {
@@ -255,6 +267,10 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                         foreach (var abandoned in await queue.AbandonedAsync(state.SessionId, lifetime.Token))
                             pendingReceipts[abandoned.RequestId] = abandoned;
                         abandonedReceiptsLoaded = true;
+                        warnings.Set("Восстановление ручных команд", null);
+                        // Advertise readiness only after the old-session snapshot is captured.
+                        // A client can then create new receipts without racing startup recovery.
+                        lock (stateGate) Volatile.Write(ref state, state with { CanRunManually = true });
                     }
                     foreach (var receipt in pendingReceipts.Values.ToArray())
                         await TryCommand(receipt.RequestId, () => FlushReceipt(receipt));
