@@ -39,6 +39,7 @@ jobs:
             $null = [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
             if ($errors) { throw ($errors | Out-String) }
           }
+          ./tests/windows_lab/controller_tests.ps1
       - name: Verify concurrent profile snapshots before long backup tests
         run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'FullyQualifiedName~ProfileSnapshotConcurrencyTests'
       - if: runner.os == 'Linux'

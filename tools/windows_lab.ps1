@@ -19,8 +19,14 @@ function Save-Lab {
 function Open-Guest([string]$Name, [PSCredential]$Credential) {
     $deadline = [DateTime]::UtcNow.AddMinutes(10)
     do {
-        try { return New-PSSession -VMName $Name -Credential $Credential -ErrorAction Stop }
-        catch { if ([DateTime]::UtcNow -gt $deadline) { throw }; Start-Sleep -Seconds 3 }
+        try { $session = New-PSSession -VMName $Name -Credential $Credential -ErrorAction Stop }
+        catch { if ([DateTime]::UtcNow -gt $deadline) { throw }; Start-Sleep -Seconds 3; continue }
+        try {
+            # The host's preference is not inherited by a remote runspace. Every subsequent
+            # provisioning/verification command in this session must stop on a cmdlet error.
+            $null = Invoke-Command -Session $session -ScriptBlock { $global:ErrorActionPreference = 'Stop' } -ErrorAction Stop
+            return $session
+        } catch { Remove-PSSession $session; throw }
     } while ($true)
 }
 function Assert-VM($Item) {
@@ -39,6 +45,14 @@ function Assert-Switch {
     if ($network.Name -ne $lab.SwitchName -or $network.SwitchType -ne 'Private' -or $network.Notes -ne "Owned SP Backup lab $($lab.Id)") {
         throw 'The lab switch ownership/isolation changed.'
     }
+}
+function Restart-Guest($Item) {
+    $vm = Assert-VM $Item
+    # Role installation, promotion and domain join require an orderly guest shutdown.
+    # The intentional abrupt power cycle exists only at the active-backup fault barrier.
+    Stop-VM -VM $vm -ErrorAction Stop
+    if ((Get-VM -Id $Item.Id -ErrorAction Stop).State -ne 'Off') { throw 'The guest did not shut down; refusing to reset pending Windows configuration.' }
+    Start-VM -VM $vm -ErrorAction Stop | Out-Null
 }
 if ($Action -eq 'Create') {
     if (-not $BaseCredential -or -not (Test-Path -LiteralPath $BaseVhdx -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $Bundle 'bundle.json'))) {
@@ -96,7 +110,8 @@ if ($Action -eq 'Create') {
             Set-NetIPInterface -InterfaceIndex $nic.ifIndex -Dhcp Disabled
             New-NetIPAddress -InterfaceIndex $nic.ifIndex -IPAddress 192.168.253.10 -PrefixLength 24 | Out-Null
             Set-DnsClientServerAddress -InterfaceIndex $nic.ifIndex -ServerAddresses 192.168.253.10
-            Install-WindowsFeature AD-Domain-Services -IncludeManagementTools | Out-Null
+            $role = Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
+            if (-not $role.Success) { throw 'AD DS role installation failed; the domain was not provisioned.' }
         }
         Invoke-Command -Session $agent -ScriptBlock {
             Rename-Computer -NewName SPB-AGENT -Force
@@ -107,7 +122,7 @@ if ($Action -eq 'Create') {
             Set-DnsClientServerAddress -InterfaceIndex $nic.ifIndex -ServerAddresses 192.168.253.10
         }
     } finally { Remove-PSSession $dc, $agent }
-    foreach ($item in $lab.VMs) { Restart-VM -VM (Assert-VM $item) -Force }
+    foreach ($item in $lab.VMs) { Restart-Guest $item }
     $dc = Open-Guest $lab.VMs[0].Name $BaseCredential
     try {
         Invoke-Command -Session $dc -ArgumentList $BaseCredential.Password -ScriptBlock {
@@ -116,7 +131,7 @@ if ($Action -eq 'Create') {
                 -SafeModeAdministratorPassword $password -NoRebootOnCompletion -Force | Out-Null
         }
     } finally { Remove-PSSession $dc }
-    Restart-VM -VM (Assert-VM $lab.VMs[0]) -Force
+    Restart-Guest $lab.VMs[0]
     $domain = New-Object Management.Automation.PSCredential('SPBLAB\Administrator', $BaseCredential.Password)
     $domain | Export-Clixml -LiteralPath (Join-Path $Root 'domain-credential.xml')
     $dc = Open-Guest $lab.VMs[0].Name $domain
@@ -139,7 +154,7 @@ if ($Action -eq 'Create') {
         }
         Copy-Item -LiteralPath $Bundle -Destination 'C:\SPBackupLab' -ToSession $agent -Recurse
     } finally { Remove-PSSession $dc, $agent }
-    Restart-VM -VM (Assert-VM $lab.VMs[1]) -Force
+    Restart-Guest $lab.VMs[1]
     $bytes = New-Object byte[] 24
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
     try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
@@ -236,13 +251,16 @@ try {
         $env:ONECBACKUP_NATIVE_SERVICE_TEST = '1'; $env:PGBIN = 'C:\SPBackupLab\postgresql\bin'; $env:GITHUB_SHA = $revision
         if (Test-Path 'C:\SPBackupLab\reboot-result') { throw 'Reboot results already exist; create a new lab rather than replacing evidence.' }
         New-Item -ItemType Directory 'C:\SPBackupLab\reboot-result' | Out-Null
-        Start-Process 'C:\SPBackupLab\probe\WindowsAgentServiceSmoke.exe' -ArgumentList @(
+        $global:spBackupRebootPreparation = Start-Process 'C:\SPBackupLab\probe\WindowsAgentServiceSmoke.exe' -ArgumentList @(
             'C:\SPBackupLab\agent\SPBackup.Agent.exe', 'C:\SPBackupLab\reboot-result', '--prepare-reboot') `
-            -RedirectStandardOutput 'C:\SPBackupLab\reboot-result\prepare.log' -RedirectStandardError 'C:\SPBackupLab\reboot-result\prepare-error.log' | Out-Null
+            -RedirectStandardOutput 'C:\SPBackupLab\reboot-result\prepare.log' -RedirectStandardError 'C:\SPBackupLab\reboot-result\prepare-error.log' -PassThru
     }
     $deadline = [DateTime]::UtcNow.AddMinutes(8)
     do {
         $ready = Invoke-Command -Session $agent -ScriptBlock {
+            if ($global:spBackupRebootPreparation.HasExited) {
+                throw "Reboot preparation exited before the fault barrier (code $($global:spBackupRebootPreparation.ExitCode)); inspect prepare.log and service-result.json."
+            }
             $path = 'C:\SPBackupLab\reboot-result\reboot-ready.json'
             if (Test-Path $path) { try { Get-Content $path -Raw | ConvertFrom-Json } catch { } }
         }

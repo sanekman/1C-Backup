@@ -9,6 +9,7 @@ on:
       - 'tests/WindowsAgentServiceSmoke/**'
       - 'tests/SPBackup.Core.Tests/**'
       - 'tests/shared/**'
+      - 'tests/windows_lab/**'
       - 'src/SPBackup.Core/**'
       - 'src/SPBackup.Agent/**'
       - 'src/SPBackup.Remote/**'
@@ -30,6 +31,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not $env:PGBIN) { throw 'The hosted runner must provide PostgreSQL tools.' }
+          ./tests/windows_lab/controller_tests.ps1
           ./tools/build_windows_lab.ps1 -Output artifacts/windows-lab -PostgreSqlRoot (Split-Path $env:PGBIN -Parent)
       - uses: actions/upload-artifact@v4
         with:
