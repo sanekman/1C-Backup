@@ -52,6 +52,7 @@ public sealed class ServerMonitoringClient : IDisposable
         using var request = new HttpRequestMessage(HttpMethod.Put,$"api/v1/agents/{settings.AgentId:D}/monitoring")
         { Content = JsonContent.Create(snapshot,options:Json) };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer",bearer);
+        request.Headers.Add(AgentCapabilities.Header, AgentCapabilities.HeaderValue);
         using var response = await client.SendAsync(request,token);
         response.EnsureSuccessStatusCode();
         foreach (var run in runs) await SendRunAsync(settings,bearer,run,token);

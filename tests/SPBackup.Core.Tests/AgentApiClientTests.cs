@@ -27,6 +27,10 @@ public sealed class AgentApiClientTests
             Assert.Equal(HttpMethod.Get, request.Method);
             Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
             Assert.Equal("fixture-token", request.Headers.Authorization.Parameter);
+            var capabilities = AgentCapabilities.Parse(string.Join(",", request.Headers.GetValues(AgentCapabilities.Header)));
+            Assert.Contains(AgentCapabilities.StrictConfigurationV1, capabilities);
+            Assert.Contains(AgentCapabilities.PostgreSqlTlsV1, capabilities);
+            Assert.DoesNotContain(AgentCapabilities.ManagedExecutionV1, capabilities);
             Assert.Equal("\"1\"", Assert.Single(request.Headers.IfNoneMatch).Tag);
             return new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(configuration, WireOptions), Encoding.UTF8, "application/json") };
         }));

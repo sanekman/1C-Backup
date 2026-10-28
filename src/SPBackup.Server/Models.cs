@@ -9,6 +9,7 @@ public sealed record AgentRecord(Guid AgentId, string Name, DateTimeOffset Regis
     DateTimeOffset? ReceivedUtc, DateTimeOffset? SentUtc, string? AgentVersion, bool BackupExecutionAvailable,
     long? ReportedRevision, long DesiredRevision);
 public sealed record AgentPage(IReadOnlyList<AgentRecord> Agents, int Total, int Page, int PageSize);
+public sealed record AgentCapabilityState(Guid AgentId, DateTimeOffset? ReceivedUtc, IReadOnlyList<string> Capabilities);
 public sealed record Invitation(Guid InvitationId, string Code, DateTimeOffset ExpiresUtc);
 public sealed record EnrollmentRequest(string InvitationCode, Guid AgentId, string Name);
 public sealed record EnrollmentResponse(Guid AgentId, string Token, int ProtocolVersion = 1);

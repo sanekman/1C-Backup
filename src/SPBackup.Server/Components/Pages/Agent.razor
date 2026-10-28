@@ -69,6 +69,7 @@
             <dt>Ревизия на сервере</dt><dd>@agent.DesiredRevision</dd>
             <dt>Ревизия, сообщённая агентом</dt><dd>@(agent.ReportedRevision?.ToString() ?? "Нет сигнала")</dd>
             <dt>Исполнитель копирования</dt><dd>@(agent.ReceivedUtc is null ? "Нет данных" : agent.BackupExecutionAvailable ? "Агент сообщает готовность" : "Агент сообщает, что недоступен")</dd>
+            <dt>Серверные задания</dt><dd>@(Monitoring?.Snapshot.ConfigurationCapabilities is not { } caps ? "Агент не передал сведения о поддержке" : caps.Contains(AgentCapabilities.ManagedExecutionV1) ? "Поддержка заявлена агентом" : "Задания настраиваются на компьютере агента")</dd>
         </dl>
         <p class="muted">Данные актуальны на время последнего сигнала. Готовность исполнителя не подтверждает успешное создание копии.</p>
         @if (agent.Revoked) { <p class="error">Доступ отозван. Сервер не принимает этот агентский токен. Принятое локальное расписание само по себе не отменяется.</p><a href="@($"connect?agentId={Id}")">Создать приглашение для повторного подключения</a> }

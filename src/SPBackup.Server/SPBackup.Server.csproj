@@ -13,6 +13,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.13" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
     <Compile Include="../SPBackup.Core/ServerMonitoringContracts.cs" Link="Monitoring/Contracts.cs" />
+    <Compile Include="../SPBackup.Core/AgentCapabilities.cs" Link="Configuration/AgentCapabilities.cs" />
     <EmbeddedResource Include="Migrations/*.sql" />
     <Content Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

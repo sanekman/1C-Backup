@@ -41,6 +41,7 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IDispo
         var request = new HttpRequestMessage(method, address);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Add(AgentCapabilities.Header, AgentCapabilities.HeaderValue);
         return request;
     }
 

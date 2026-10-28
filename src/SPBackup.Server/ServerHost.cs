@@ -170,7 +170,11 @@ public static partial class ServerHost
         });
         agents.MapGet("/configuration", async (Guid agentId, HttpContext context, ServerStore store, CancellationToken token) =>
         {
+            context.Response.Headers.CacheControl = "private, no-cache";
+            context.Response.Headers.Append("Vary", AgentCapabilities.Header);
+            var capabilities = ConfigurationCompatibility.ReadHeader(context);
             var configuration = await store.ConfigurationAsync(agentId, token);
+            ConfigurationCompatibility.RequireSupport(configuration.Document, capabilities);
             var etag = '"' + configuration.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture) + '"';
             context.Response.Headers.ETag = etag;
             if (context.Request.GetTypedHeaders().IfNoneMatch?.Any(value => value.Tag.Value == etag || value.Tag.Value == "*") == true) return Results.StatusCode(304);
@@ -178,13 +182,24 @@ public static partial class ServerHost
         });
         agents.MapPost("/heartbeat", async (Guid agentId, HeartbeatRequest request, ServerStore store, CancellationToken token) =>
         { await store.HeartbeatAsync(agentId, request, token); return Results.NoContent(); });
-        agents.MapPut("/monitoring", async (Guid agentId, Monitoring.MonitoringSnapshot request, ServerStore store, CancellationToken token) =>
-        { await store.SaveMonitoringAsync(agentId, request, token); return Results.NoContent(); });
+        agents.MapPut("/monitoring", async (Guid agentId, Monitoring.MonitoringSnapshot request, HttpContext context, ServerStore store, CancellationToken token) =>
+        {
+            var capabilities = ConfigurationCompatibility.ReadHeader(context);
+            await store.SaveMonitoringAsync(agentId, request with { ConfigurationCapabilities = capabilities }, token);
+            return Results.NoContent();
+        });
         agents.MapPost("/runs", async (Guid agentId, Monitoring.MonitoredRun request, ServerStore store, CancellationToken token) =>
         { await store.SaveRunAsync(agentId, request, token); return Results.NoContent(); });
         var management = app.MapGroup("/api/v1/management").RequireAuthorization(ServerAuthentication.Administrator);
         management.MapGet("/session", (HttpContext context, IAntiforgery anti) => Results.Json(new { name = context.User.Identity!.Name, csrfToken = anti.GetAndStoreTokens(context).RequestToken }));
         management.MapGet("/agents/{id:guid}/monitoring", async (Guid id, ServerStore store, CancellationToken token) => Results.Json(await store.MonitoringAsync(id,token)));
+        management.MapGet("/agents/{id:guid}/capabilities", async (Guid id, ServerStore store, CancellationToken token) =>
+        {
+            if (await store.AgentAsync(id, token) is null) return Results.NotFound();
+            var state = await store.MonitoringAsync(id, token);
+            var capabilities = state?.Snapshot.ConfigurationCapabilities;
+            return Results.Json(new AgentCapabilityState(id, capabilities is null ? null : state!.ReceivedUtc, capabilities ?? []));
+        });
         management.MapGet("/agents/{id:guid}/runs", async (Guid id, int? page, ServerStore store, CancellationToken token) => Results.Json(await store.RunsAsync(id,page ?? 0,token)));
         management.MapGet("/agents", async (int? page, ServerStore store, CancellationToken token) => Results.Json(await store.AgentsAsync(page ?? 0, token)));
         management.MapGet("/agents/{id:guid}", async (Guid id, ServerStore store, CancellationToken token) => await store.AgentAsync(id, token) is { } agent ? Results.Json(agent) : Results.NotFound());

@@ -21,6 +21,15 @@ public sealed class ServerFactAttribute : FactAttribute
     }
 }
 
+public sealed class ServerTheoryAttribute : TheoryAttribute
+{
+    public ServerTheoryAttribute()
+    {
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ONECBACKUP_SERVER_TEST_CONNECTION_FILE")))
+            Skip = "Set ONECBACKUP_SERVER_TEST_CONNECTION_FILE for isolated real PostgreSQL + HTTPS tests.";
+    }
+}
+
 public sealed class ServerFixture : IAsyncLifetime
 {
     public readonly string Root = Path.Combine(Path.GetTempPath(), "onec-server-tests-" + Guid.NewGuid().ToString("N"));
