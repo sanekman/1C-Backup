@@ -18,18 +18,8 @@ public sealed class OneCFileArchiveExecutor(IArchivePasswordStore? passwords = n
         if (File.GetAttributes(database).HasFlag(FileAttributes.ReparsePoint))
             throw new IOException("Выберите настоящий файл базы, а не символическую ссылку.");
 
-        FileStream input;
-        try
-        {
-            input = new FileStream(database, FileMode.Open, FileAccess.Read, job.AllowOpenOneCDatabase ? FileShare.ReadWrite : FileShare.None,
-                81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        }
-        catch (IOException ex)
-        {
-            throw new IOException(job.AllowOpenOneCDatabase
-                ? "Не удалось прочитать 1Cv8.1CD с совместным доступом. Другой процесс может запрещать чтение; закройте сеансы 1С и проверьте доступ к файлу."
-                : "Не удалось получить эксклюзивный доступ к 1Cv8.1CD. Закройте сеансы 1С и проверьте доступ к файлу.", ex);
-        }
+        var input = OpenDatabase(database, job.AllowOpenOneCDatabase, out var shared);
+        if (shared) BackupWarningContext.Report(OpenDatabaseWarning);
         await using (input)
         {
             if (input.Length == 0) throw new InvalidDataException("Файл базы 1Cv8.1CD пуст.");
@@ -39,5 +29,29 @@ public sealed class OneCFileArchiveExecutor(IArchivePasswordStore? passwords = n
             return await new BackupArchiver().CreateZipAsync(input, "1Cv8.1CD", archive,
                 cancellationToken: cancellationToken, password: password);
         }
+    }
+
+    internal static FileStream OpenDatabase(string database, bool allowOpen, out bool shared)
+    {
+        shared = false;
+        try { return Open(FileShare.None); }
+        catch (IOException ex) when (!allowOpen)
+        { throw new IOException("Не удалось получить эксклюзивный доступ к 1Cv8.1CD. Закройте сеансы 1С и проверьте доступ к файлу.", ex); }
+        catch (IOException sharingError) when ((sharingError.HResult & 0xffff) is 32 or 33
+            || !OperatingSystem.IsWindows() && (sharingError.HResult & 0xffff) == 11)
+        {
+            // Retain this exact handle through archiving. A separate probe followed by
+            // reopening with shared access would let 1C open a previously closed base.
+            try
+            {
+                var input = Open(FileShare.ReadWrite);
+                shared = true;
+                return input;
+            }
+            catch (IOException ex)
+            { throw new IOException("Не удалось прочитать 1Cv8.1CD с совместным доступом. Другой процесс может запрещать чтение; закройте сеансы 1С и проверьте доступ к файлу.", ex); }
+        }
+        FileStream Open(FileShare share) => new(database, FileMode.Open, FileAccess.Read, share,
+            81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
     }
 }

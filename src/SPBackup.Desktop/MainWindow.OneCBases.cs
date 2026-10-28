@@ -55,6 +55,8 @@ public partial class MainWindow
     }
     private void OneCSource_Changed(object sender, TextChangedEventArgs e)
     {
+        if (Source is null || JobName is null) return;
+        UpdateCopiedSourceName();
         if (changingOneCBasePicker || OneCPlatformVersion is null || OneCBasePicker?.SelectedItem is not OneCUserBase selected || selected.Directory.Length == 0) return;
         if (!Source.Text.Equals(selected.Directory, StringComparison.OrdinalIgnoreCase))
         { ResetOneCBasePicker(); OneCPlatformVersion.Clear(); }
@@ -65,6 +67,7 @@ public partial class MainWindow
         Source.Text = selected.Directory;
         OneCPlatformVersion.Text = selected.PlatformVersion;
         AutoOneCPlatform.IsChecked = true;
+        if (selected.Directory.Length != 0) UpdateCopiedSourceName(selected.Name);
         if (selected.Directory.Length != 0 && string.IsNullOrWhiteSpace(JobName.Text)) JobName.Text = selected.Name;
         UpdateOneCPlatformControls();
     }

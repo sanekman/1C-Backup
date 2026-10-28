@@ -12,6 +12,7 @@ public partial class MainWindow
     private int wizardStep;
     private bool editorOpen;
     private BackupJob? selectionBeforeEdit;
+    private string? copiedSourceName;
 
     private void EditorFieldChanged(object sender, RoutedEventArgs e)
     {
@@ -44,6 +45,7 @@ public partial class MainWindow
         editorOpen = false;
         editorBaseline = null;
         editorContainsImportedDraft = false;
+        copiedSourceName = null;
         EditorCard.Visibility = Visibility.Collapsed;
         JobListCard.Visibility = Visibility.Visible;
         WizardError.Visibility = Visibility.Collapsed;
@@ -69,10 +71,30 @@ public partial class MainWindow
         while (jobs.Any(existing => string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase)))
             name = job.Name + " — копия " + suffix++;
         JobName.Text = name;
+        copiedSourceName = name;
         Enabled.IsChecked = false;
         OpenEditor();
-        WizardHint.Text = "Настройки перенесены из «" + job.Name + "». Измените название и источник. Автоматические запуски новой копии задания отключены.";
+        WizardHint.Text = "Настройки перенесены из «" + job.Name + "». Выберите другой источник: название подставится автоматически. Его можно изменить вручную. Автоматические запуски новой копии задания отключены.";
         JobName.SelectAll();
+    }
+
+    private void UpdateCopiedSourceName(string? baseName = null)
+    {
+        if (!editorOpen || copiedSourceName is null || JobName.Text != copiedSourceName
+            || Kind.SelectedItem is not (DatabaseKind.OneCFile or DatabaseKind.FilesAndFolders)) return;
+        try
+        {
+            var source = Source.Text.Trim();
+            if (!Path.IsPathFullyQualified(source)) return;
+            var path = source.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (Kind.SelectedItem is DatabaseKind.OneCFile
+                && Path.GetFileName(path).Equals("1Cv8.1CD", StringComparison.OrdinalIgnoreCase))
+                path = Path.GetDirectoryName(path) ?? "";
+            var name = string.IsNullOrWhiteSpace(baseName) ? Path.GetFileName(path) : baseName;
+            if (string.IsNullOrWhiteSpace(name)) return;
+            JobName.Text = copiedSourceName = name;
+        }
+        catch (ArgumentException) { /* Incomplete manually entered paths are not a name suggestion. */ }
     }
 
     private void Jobs_DoubleClick(object sender, MouseButtonEventArgs e)

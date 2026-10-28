@@ -351,6 +351,7 @@ public partial class MainWindow : Window
 
     private void LoadJobEditor(BackupJob job)
     {
+        copiedSourceName = null;
         editingId = job.Id;
         AllowOpenOneCDatabase.IsChecked = job.AllowOpenOneCDatabase;
         ResetOneCBasePicker();

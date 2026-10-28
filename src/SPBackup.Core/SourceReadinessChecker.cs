@@ -72,10 +72,12 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         if (File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint))
             throw new IOException("Выберите настоящий файл базы, а не символическую ссылку.");
         FileStream input;
+        var shared = false;
         try
         {
-            input = new FileStream(file, FileMode.Open, FileAccess.Read,
-                job.OneCMethod == OneCBackupMethod.FileArchive && !job.AllowOpenOneCDatabase ? FileShare.None : FileShare.ReadWrite);
+            input = job.OneCMethod == OneCBackupMethod.FileArchive
+                ? OneCFileArchiveExecutor.OpenDatabase(file, job.AllowOpenOneCDatabase, out shared)
+                : new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         }
         catch (IOException) when (job.OneCMethod == OneCBackupMethod.FileArchive)
         { throw new IOException(job.AllowOpenOneCDatabase
@@ -87,7 +89,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
             token.ThrowIfCancellationRequested();
         }
         return new(true, job.OneCMethod == OneCBackupMethod.FileArchive
-            ? job.AllowOpenOneCDatabase
+            ? shared
                 ? "Файл базы найден; доступ на чтение проверен. " + OneCFileArchiveExecutor.OpenDatabaseWarning
                 : "Файл базы найден; эксклюзивный доступ получен и освобождён. Сеансы должны быть закрыты также при копировании. Содержимое базы не проверялось."
             : "Файл базы и программа 1С найдены; доступ на чтение проверен. Платформа не запускалась. Выгрузка .dt и эксклюзивное подключение проверяются первой копией.");

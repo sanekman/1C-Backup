@@ -65,8 +65,19 @@ public sealed class SourceReadinessCheckerTests : IDisposable
         await using var held = new FileStream(Database, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         var result = await Checker(NoProcess()).CheckAsync(FileJob with { AllowOpenOneCDatabase = true });
         Assert.True(result.Succeeded, result.Details);
-        Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, result.Details);
+        if (OperatingSystem.IsWindows()) Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, result.Details);
         Assert.False(Directory.Exists(Work));
+    }
+
+    [Fact]
+    public async Task ClosedDatabaseCheckWithOptInDoesNotReportSharedAccessWarning()
+    {
+        await File.WriteAllTextAsync(Database, "fixture");
+        var result = await Checker(NoProcess()).CheckAsync(FileJob with { AllowOpenOneCDatabase = true });
+        Assert.True(result.Succeeded, result.Details);
+        Assert.DoesNotContain(OneCFileArchiveExecutor.OpenDatabaseWarning, result.Details);
+        Assert.Contains("эксклюзивный доступ получен", result.Details);
+        using var released = new FileStream(Database, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
     }
 
     [Fact]

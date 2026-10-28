@@ -772,6 +772,19 @@ internal static partial class DesktopSmoke
                 || Control<Button>("RunButton").IsEnabled)
                 throw new InvalidOperationException("Новое задание потеряло настройки или допускает запуск несохранённого черновика.");
             Screenshot("duplicate-job-start");
+            var pickedBase = new OneCUserBase("Бухгалтерия выбранного предприятия",
+                Path.Combine(DesktopPaths.DataDirectory, "selected-company"), "");
+            Control<ComboBox>("OneCBasePicker").ItemsSource = new[] { ownBase, pickedBase };
+            Control<ComboBox>("OneCBasePicker").SelectedItem = pickedBase;
+            if (Control<TextBox>("JobName").Text != pickedBase.Name)
+                throw new InvalidOperationException("Название копии задания не изменилось на название выбранной базы 1С.");
+            Control<TextBox>("Source").Text = Path.Combine(DesktopPaths.DataDirectory, "manual-base", "1Cv8.1CD");
+            if (Control<TextBox>("JobName").Text != "manual-base")
+                throw new InvalidOperationException("Название базы по прямому пути 1Cv8.1CD не взято из её папки.");
+            Control<TextBox>("JobName").Text = "Название пользователя";
+            Control<TextBox>("Source").Text = Path.Combine(DesktopPaths.DataDirectory, "other-base");
+            if (Control<TextBox>("JobName").Text != "Название пользователя")
+                throw new InvalidOperationException("Автоматическое название затёрло название пользователя.");
             Control<TextBox>("TemporaryFolder").Text = "unsaved duplicate folder";
             Click("CancelEditorButton");
             if (Control<DataGrid>("Jobs").Items.Count != 1
@@ -783,6 +796,8 @@ internal static partial class DesktopSmoke
             Directory.CreateDirectory(secondSource);
             File.WriteAllText(Path.Combine(secondSource, "1Cv8.1CD"), "second isolated database fixture");
             Control<TextBox>("Source").Text = secondSource;
+            if (Control<TextBox>("JobName").Text != "second-base")
+                throw new InvalidOperationException("Название копии задания не изменилось по новой папке базы.");
             Click("NextStepButton"); Click("NextStepButton");
             Control<TextBox>("KeepLast").Text = "1";
             Click("NextStepButton");
@@ -806,7 +821,8 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Копия задания удалила резервные копии исходного задания.");
             Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(job => job.Id == original.Id);
             Click("DuplicateJobButton");
-            if (Control<TextBox>("JobName").Text != original.Name + " — копия 2")
+            if (Control<TextBox>("JobName").Text != original.Name + " — копия"
+                || Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Any(job => job.Name == Control<TextBox>("JobName").Text))
                 throw new InvalidOperationException("Повторное копирование не предложило уникальное название.");
             Click("CancelEditorButton");
             Screenshot("duplicate-job-saved");

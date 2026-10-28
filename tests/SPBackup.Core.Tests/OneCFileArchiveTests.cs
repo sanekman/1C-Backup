@@ -83,14 +83,53 @@ public sealed class OneCFileArchiveTests : IDisposable
         }
         var result = await Runner.RunAsync(Job with { AllowOpenOneCDatabase = true });
         Assert.Equal(BackupRunStatus.Succeeded, result.Status);
-        Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, result.Warnings!);
+        if (OperatingSystem.IsWindows()) Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, result.Warnings!);
         using var zip = ZipFile.OpenRead(result.Backup!.Location);
         using var output = new MemoryStream();
         await Assert.Single(zip.Entries).Open().CopyToAsync(output);
         Assert.Equal(before, output.ToArray());
         Assert.True(activeSession.CanWrite);
         var saved = Assert.Single(await new BackupRunHistory(Path.Combine(root, "history.json")).ReadAsync(), run => run.RunId == result.RunId);
-        Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, saved.Warnings!);
+        if (OperatingSystem.IsWindows()) Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, saved.Warnings!);
+    }
+
+    [Fact]
+    public async Task OptInForClosedDatabaseKeepsExclusiveHandleAndFinishesWithoutWarnings()
+    {
+        var observed = false;
+        var blocked = false;
+        var runner = new LocalBackupRunner(new OneCBackupExecutor(new ForbiddenProcess()),
+            new BackupCompletion(new FileBackupStorage(), new BackupCatalog(Path.Combine(root, "catalog.json"))),
+            new BackupRunHistory(Path.Combine(root, "history.json")), Path.Combine(root, "work"), progress: snapshot =>
+            {
+                if (snapshot.Progress.Stage != BackupStage.Archiving) return;
+                observed = true;
+                try { using var unexpected = new FileStream(SourceFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None); }
+                catch (IOException) { blocked = true; }
+            });
+        var result = await runner.RunAsync(Job with { AllowOpenOneCDatabase = true });
+        Assert.True(observed);
+        Assert.True(blocked, "The closed database must remain exclusively held while it is archived.");
+        Assert.Equal(BackupRunStatus.Succeeded, result.Status);
+        Assert.Empty(result.Warnings!);
+        var saved = Assert.Single(await new BackupRunHistory(Path.Combine(root, "history.json")).ReadAsync());
+        Assert.Empty(saved.Warnings!);
+        using var released = new FileStream(SourceFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+    }
+
+    [Fact]
+    public async Task ClosedRunDoesNotInheritPreviousSharedRunWarning()
+    {
+        var runner = Runner;
+        await using (var held = new FileStream(SourceFile, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            var shared = await runner.RunAsync(Job with { AllowOpenOneCDatabase = true });
+            Assert.Equal(BackupRunStatus.Succeeded, shared.Status);
+            if (OperatingSystem.IsWindows()) Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, shared.Warnings!);
+        }
+        var closed = await runner.RunAsync(Job with { AllowOpenOneCDatabase = true });
+        Assert.Equal(BackupRunStatus.Succeeded, closed.Status);
+        Assert.Empty(closed.Warnings!);
     }
 
     [Fact]

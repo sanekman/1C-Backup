@@ -21,9 +21,10 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             var clock = System.Diagnostics.Stopwatch.StartNew();
             log.Write(DiagnosticEvent.RunStarted, values: new(Count: job.StorageJobs.Count));
             var work = Path.Combine(Path.GetFullPath(job.TemporaryDirectory ?? workRoot), id.ToString("N"));
+            var warnings = new List<string>();
+            using var warningScope = BackupWarningContext.Begin(warnings.Add);
             var run = new BackupRun(id, job.Id, job.Name, (timeProvider ?? TimeProvider.System).GetUtcNow(), null, BackupRunStatus.Running, work)
-            { Warnings = job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.FileArchive && job.AllowOpenOneCDatabase
-                ? new[] { OneCFileArchiveExecutor.OpenDatabaseWarning } : null };
+            { Warnings = warnings };
             // A corrupt or unwritable history prevents starting an untracked operation.
             try { await history.SaveAsync(run, cancellationToken); }
             catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }
@@ -52,7 +53,6 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                     fileManifest = await FileBackupZip.ReadManifestAsync(dump,
                         await ArchivePasswords.ResolveAsync(job.ArchivePasswordKey, completion.Passwords, cancellationToken), cancellationToken);
                 log.Write(DiagnosticEvent.BackupDeliveryStarted);
-                var warnings = new List<string>(run.Warnings ?? []);
                 if (fileManifest?.SkippedPaths is { Count: > 0 } skipped)
                 {
                     log.Write(DiagnosticEvent.SourceItemsSkipped, DiagnosticLevel.Warning, values: new(Count: skipped.Count));

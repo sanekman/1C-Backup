@@ -137,6 +137,13 @@ internal static partial class DesktopSmoke
 
             Click("DuplicateJobButton");
             Require(window.HasUnsavedJob, "Новая копия задания не защищена до первого изменения поля.");
+            Control<TextBox>("Source").Text = Path.Combine(root, "Новая папка") + Path.DirectorySeparatorChar;
+            Require(Control<TextBox>("JobName").Text == "Новая папка", "Задание на основе папки сохранило прежнее название.");
+            Control<TextBox>("Source").Text = Path.Combine(root, "Ещё одна папка");
+            Require(Control<TextBox>("JobName").Text == "Ещё одна папка", "Повторный выбор папки не обновил автоматическое название.");
+            Control<TextBox>("JobName").Text = "Мои документы";
+            Control<TextBox>("Source").Text = Path.Combine(root, "Другая папка");
+            Require(Control<TextBox>("JobName").Text == "Мои документы", "Выбор папки затёр название пользователя.");
             beforePrompt = prompts;
             Click("CancelEditorButton");
             Require(prompts == beforePrompt + 1 && !window.HasUnsavedJob, "Дублированное задание потеряно без подтверждения.");
