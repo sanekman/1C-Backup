@@ -19,6 +19,7 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IDispo
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         RespectRequiredConstructorParameters = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
     };
 

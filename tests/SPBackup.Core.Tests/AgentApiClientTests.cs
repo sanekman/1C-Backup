@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
 using SPBackup.Core;
 using Xunit;
 
@@ -145,6 +146,49 @@ public sealed class AgentApiClientTests
 
     private static Handler JsonHandler(string json) => new(_ => new(HttpStatusCode.OK)
         { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+
+    [Theory]
+    [InlineData("configuration")]
+    [InlineData("job")]
+    [InlineData("postgresql")]
+    [InlineData("tls")]
+    public async Task UnknownServerSecurityOptionRejectsWholeRevisionAndPreservesAcceptedCache(string target)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "SPBackup-config-wire-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var job = new BackupJob { Name = "TLS database", Kind = DatabaseKind.PostgreSql, Source = "appdb",
+                DestinationDirectory = directory, PostgreSql = new() { Host = "db.example.test", Username = "backup",
+                    PgDumpPath = Path.Combine(directory, "pg_dump.exe"), PgRestorePath = Path.Combine(directory, "pg_restore.exe"),
+                    Tls = new() { RootCertificatePath = Path.Combine(directory, "ca.pem") } } };
+            var valid = new ServerConfiguration(settings.AgentId, 1, [job]);
+            var future = JsonSerializer.SerializeToNode(valid with { Revision = 2 }, WireOptions)!;
+            var container = target switch
+            {
+                "job" => future["jobs"]![0]!,
+                "postgresql" => future["jobs"]![0]!["postgreSql"]!,
+                "tls" => future["jobs"]![0]!["postgreSql"]!["tls"]!,
+                _ => future
+            };
+            container["futureRequiredSecurityPolicy"] = "must-not-be-ignored";
+            var calls = 0;
+            using var client = new AgentApiClient(new FixtureCredentials(), new Handler(_ => new(HttpStatusCode.OK)
+            { Content = new StringContent(++calls == 1 ? JsonSerializer.Serialize(valid, WireOptions) : future.ToJsonString(), Encoding.UTF8, "application/json") }));
+            var cachePath = Path.Combine(directory, "server-jobs.json");
+            var configuration = new AgentConfiguration(new JobStore(Path.Combine(directory, "jobs.json")), new(cachePath), client);
+            Assert.True((await configuration.SynchronizeAsync(settings, DateTimeOffset.UtcNow)).Succeeded);
+            var accepted = await File.ReadAllBytesAsync(cachePath);
+            var refused = await configuration.SynchronizeAsync(settings, DateTimeOffset.UtcNow);
+            Assert.False(refused.Succeeded);
+            Assert.IsType<JsonException>(refused.Error);
+            Assert.Equal(1, refused.Revision);
+            Assert.Equal(accepted, await File.ReadAllBytesAsync(cachePath));
+            Assert.Equal(job, Assert.Single(await configuration.GetEffectiveJobsAsync(settings)));
+            Assert.Equal(2, calls);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
 
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {

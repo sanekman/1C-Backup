@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace SPBackup.Core;
 
 public sealed record ServerConfiguration(Guid AgentId, long Revision, IReadOnlyList<BackupJob> Jobs, int ProtocolVersion = 1);
@@ -16,11 +19,20 @@ public interface IAgentApi
 public sealed class AgentConfigurationCache(string path)
 {
     private readonly AgentJsonFile<CachedAgentConfiguration> file = new(path);
+    private static readonly JsonSerializerOptions ReadOptions = new()
+    {
+        RespectRequiredConstructorParameters = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
+    };
 
     public async Task<CachedAgentConfiguration?> LoadAsync(CancellationToken cancellationToken = default)
     {
-        var cached = await file.ReadAsync(cancellationToken);
-        if (cached is not null) Validate(cached.Configuration);
+        await using var stream = await AtomicProfileFile.OpenReadAsync(path, cancellationToken);
+        if (stream is null) return null;
+        var cached = await JsonSerializer.DeserializeAsync<CachedAgentConfiguration>(stream, ReadOptions, cancellationToken)
+            ?? throw new InvalidDataException("Кэш конфигурации сервера содержит null.");
+        Validate(cached.Configuration);
         return cached;
     }
 

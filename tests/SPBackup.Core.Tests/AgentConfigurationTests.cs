@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using SPBackup.Core;
 using Xunit;
 
@@ -149,6 +151,25 @@ public sealed class AgentConfigurationTests : IDisposable
         Assert.NotEmpty((managed with { ServerAddress = address }).Validate());
 
     public void Dispose() => Directory.Delete(directory, true);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnknownCachedPolicyCannotBeSilentlyDroppedOnRestart(bool nestedJob)
+    {
+        var local = Job("local"); await Local.SaveAsync([local]);
+        await Cache.SaveAsync(new(managed.NormalizedServerAddress, new(managed.AgentId, 1, [Job("remote")]), DateTimeOffset.UtcNow));
+        var path = Path.Combine(directory, "server-jobs.json");
+        var snapshot = JsonNode.Parse(await File.ReadAllTextAsync(path))!;
+        var container = nestedJob ? snapshot["Configuration"]!["Jobs"]![0]! : snapshot;
+        container["FutureRequiredSecurityPolicy"] = true;
+        await File.WriteAllTextAsync(path, snapshot.ToJsonString());
+        var original = await File.ReadAllBytesAsync(path);
+        var configuration = new AgentConfiguration(Local, Cache);
+        await Assert.ThrowsAsync<JsonException>(() => configuration.GetEffectiveJobsAsync(managed));
+        Assert.Equal(original, await File.ReadAllBytesAsync(path));
+        Assert.Equal(local, Assert.Single(await configuration.GetEffectiveJobsAsync(managed with { Mode = AgentMode.Standalone })));
+    }
 }
 
 internal sealed class FakeAgentApi : IAgentApi
