@@ -1,8 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Net.Security;
-using System.Security.Cryptography;
 using System.Text.Json;
 using SPBackup.Core.Monitoring;
 
@@ -14,7 +12,8 @@ public sealed record ServerMonitoringSettings(string Address, Guid AgentId, stri
     {
         if (!Uri.TryCreate(Address, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.UserInfo.Length != 0
             || uri.Query.Length != 0 || uri.Fragment.Length != 0 || AgentId == Guid.Empty || string.IsNullOrWhiteSpace(CredentialKey)
-            || CertificateSha256.Length != 0 && (CertificateSha256.Length != 64 || !CertificateSha256.All(Uri.IsHexDigit)))
+            || CredentialKey.Length > 512 || CredentialKey.Any(char.IsControl)
+            || CertificateSha256 is null || CertificateSha256.Length != 0 && (CertificateSha256.Length != 64 || !CertificateSha256.All(Uri.IsHexDigit)))
             throw new InvalidDataException("Укажите HTTPS-адрес сервера и SHA-256 сертификата из его панели.");
     }
 }
@@ -27,15 +26,8 @@ public sealed class ServerMonitoringClient : IDisposable
     public ServerMonitoringClient(ServerMonitoringSettings settings, HttpMessageHandler? transport = null)
     {
         settings.Validate();
-        client = new(transport ?? new HttpClientHandler
-        {
-            AllowAutoRedirect = false,
-            ServerCertificateCustomValidationCallback = (_, cert, _, errors) => cert is not null &&
-                (settings.CertificateSha256.Length == 0 ? errors == SslPolicyErrors.None :
-                (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) == SslPolicyErrors.None &&
-                DateTime.UtcNow >= cert.NotBefore.ToUniversalTime() && DateTime.UtcNow <= cert.NotAfter.ToUniversalTime() &&
-                CryptographicOperations.FixedTimeEquals(SHA256.HashData(cert.RawData),Convert.FromHexString(settings.CertificateSha256)))
-        }) { BaseAddress = new(settings.Address.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(20) };
+        client = new(transport ?? ServerHttpsTransport.Create(settings.CertificateSha256))
+        { BaseAddress = new(settings.Address.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(20) };
     }
     public async Task<string> EnrollAsync(Guid agentId, string invitationCode, string name, CancellationToken token = default)
     {

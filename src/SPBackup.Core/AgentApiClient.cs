@@ -16,6 +16,7 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgent
 {
     private readonly HttpClient client;
     private readonly IAgentCredentialProvider credentials;
+    private readonly ServerMonitoringSettings? connection;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         RespectRequiredConstructorParameters = true,
@@ -27,8 +28,15 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgent
     public AgentApiClient(IAgentCredentialProvider credentials, HttpMessageHandler? transport = null)
     {
         this.credentials = credentials;
-        client = new HttpClient(transport ?? new HttpClientHandler { AllowAutoRedirect = false })
+        client = new HttpClient(transport ?? ServerHttpsTransport.Create(""))
         { Timeout = TimeSpan.FromSeconds(30) };
+    }
+
+    /// <summary>Bind API requests to an enrolled connection, including its certificate and delegated Windows credentials.</summary>
+    public AgentApiClient(ServerMonitoringSettings connection, IFtpCredentialStore credentials, HttpMessageHandler? transport = null)
+        : this(new StoredAgentCredentialProvider(connection, credentials), transport ?? ServerHttpsTransport.Create(connection.CertificateSha256))
+    {
+        this.connection = connection;
     }
 
     private async Task<HttpRequestMessage> RequestAsync(AgentSettings settings, HttpMethod method, string endpoint,
@@ -36,6 +44,10 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgent
     {
         if (settings.Mode != AgentMode.Managed || settings.Validate().Count != 0)
             throw new ArgumentException("Для API требуется настроенный серверный режим.", nameof(settings));
+        if (connection is not null && (settings.AgentId != connection.AgentId || settings.CredentialKey != connection.CredentialKey
+            || !string.Equals(new Uri(settings.NormalizedServerAddress).AbsoluteUri,
+                new Uri(connection.Address.TrimEnd('/') + "/").AbsoluteUri, StringComparison.Ordinal)))
+            throw new InvalidOperationException("Настройки агента не совпадают с сохранённым подключением к серверу. Подключитесь заново при остановленном исполнителе.");
         var token = await credentials.GetBearerTokenAsync(settings.CredentialKey, cancellationToken);
         if (string.IsNullOrWhiteSpace(token)) throw new InvalidOperationException("Не заданы учётные данные агента.");
         var address = new Uri(new Uri(settings.NormalizedServerAddress), $"api/v1/agents/{settings.AgentId:D}/{endpoint}");
