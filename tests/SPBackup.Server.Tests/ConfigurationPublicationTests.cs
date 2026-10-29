@@ -26,6 +26,9 @@ public sealed class ConfigurationPublicationTests(ServerFixture fixture) : IClas
         if (etag is not null) request.Headers.TryAddWithoutValidation("If-Match", etag);
         request.Content = chunked ? new UnknownLengthContent(Encoding.UTF8.GetBytes(json)) : new StringContent(json, Encoding.UTF8, "application/json");
         request.Content.Headers.ContentType = new("application/json");
+        // Let the server reject an oversized declared body before uploading it.
+        // HTTP/1.1 may otherwise close an unread oversized upload on Windows.
+        if (!chunked && Encoding.UTF8.GetByteCount(json) > 1024 * 1024) request.Headers.ExpectContinue = true;
         return await (client ?? fixture.Administrator).SendAsync(request);
     }
     private async Task<int> Audits(Guid id) => (await fixture.Store.AuditPageAsync(0)).Entries.Count(e => e.AgentId == id && e.Event == "ConfigurationPublished");
