@@ -588,8 +588,15 @@ public sealed class LocalAgentHostTests : IDisposable
             var state = await WaitForState(control, s => s.Phase == LocalAgentPhase.Running);
             Assert.Equal(LocalAgentPhase.Running, state.Phase);
             await WaitForState(control, s => s.Warning is null);
+            // Hold the write failure before requesting stop. A heartbeat can republish
+            // the file between deletion and directory creation; retry only that race.
+            for (var attempt = 0; ; attempt++)
+            {
+                try { File.Delete(statePath); Directory.CreateDirectory(statePath); break; }
+                catch (IOException) when (attempt < 20 && File.Exists(statePath)) { await Task.Delay(10); }
+            }
+            Assert.True(Directory.Exists(statePath));
             await control.RequestStopAsync(state.SessionId);
-            File.Delete(statePath); Directory.CreateDirectory(statePath);
             Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(5)));
             Assert.Equal(BackupRunStatus.Cancelled, Assert.Single(await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync()).Status);
             Assert.False(new BackupEngineCoordinator(directory).IsHeldElsewhere());
