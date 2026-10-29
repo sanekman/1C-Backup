@@ -1,0 +1,50 @@
+@page "/agents/{Id:guid}/jobs"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+@inject ServerOptions Settings
+<PageTitle>Задания агента — @Settings.DisplayName</PageTitle>
+<a href="@($"agents/{Id}")">← Карточка агента</a>
+<h1>Задания на сервере</h1>
+@if (Agent is { } agent)
+{
+    <p>@agent.Name. Пути и расписание относятся к этому компьютеру агента.</p>
+    @if (agent.Revoked) { <p class="error">Доступ агента отозван. Изменение заданий недоступно до повторного подключения.</p> }
+    @if (Error is not null) { <p class="error" role="alert">@Error</p> }
+    @if (Configuration is { } configuration)
+    {
+        <section class="card">
+            <div class="heading"><h2>Сохранённая ревизия @configuration.Revision</h2>
+                @if (!agent.Revoked) { <a class="button" href="@($"agents/{Id}/jobs/new")">Создать задание</a> }</div>
+            <p>После сохранения агент должен получить и принять настройки. Это ещё не означает, что копия создана.
+                Принятие ревизии и результаты копирования показаны в <a href="@($"agents/{Id}")">карточке агента</a>.</p>
+            <p class="muted">В Windows-программе подключите сервер по приглашению, выберите «Задания с сервера», примените режим и включите автоматическую работу.
+                При недоступном сервере агент продолжает последний принятый план.</p>
+            @if (configuration.Jobs.Count == 0) { <p>Заданий пока нет. Создайте первое: выберите источник, время и папку копий.</p> }
+            @foreach (var job in configuration.Jobs)
+            {
+                <article class="job-summary">
+                    <h3>@job.Name</h3><p>@(job.Kind == "OneCFile" ? "Файловая база 1С, архив ZIP" : "Файлы и папки")</p>
+                    <dl><dt>Источник</dt><dd class="path">@job.Source</dd><dt>Копии</dt><dd class="path">@job.DestinationDirectory</dd>
+                        <dt>Запуск</dt><dd>@FileJobDraft.ScheduleLabel(job.ScheduleKind)@if (job.ScheduleKind != "Manual") { <span> · @(job.Enabled ? "расписание включено" : "расписание выключено")</span> }</dd></dl>
+                    @if (!agent.Revoked)
+                    { <div class="actions"><a href="@($"agents/{Id}/jobs/{job.Id}/edit")">Изменить</a><a href="@($"agents/{Id}/jobs/{job.Id}/remove")">Удалить…</a></div> }
+                </article>
+            }
+        </section>
+    }
+}
+else { <p>Агент не найден.</p> }
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private AgentRecord? Agent;
+    private ManagedFileConfiguration? Configuration;
+    private string? Error;
+    protected override async Task OnParametersSetAsync()
+    {
+        Agent = await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted);
+        if (Agent is null) { Http.HttpContext.Response.StatusCode = 404; return; }
+        try { Configuration = await Store.ReadFileConfigurationAsync(Id, Http.HttpContext.RequestAborted); }
+        catch (ServerRequestException) { Error = "Эта конфигурация содержит параметры, которые мастер пока не поддерживает. Она сохранена без изменений."; }
+    }
+}

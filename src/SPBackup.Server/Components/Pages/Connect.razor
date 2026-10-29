@@ -11,7 +11,7 @@
     @if (Created is { } invitation)
     {
         <h2>Приглашение готово</h2>
-        <p>В Windows-программе откройте «Мониторинг на сервере Windows → Подключить по приглашению» и перенесите эти поля.</p>
+        <p>В Windows-программе откройте «Настройки → Подключения → Подключить по приглашению» и перенесите эти поля.</p>
         <label>Имя сервера<input readonly value="@Settings.DisplayName" /></label>
         <label>Адрес сервера<input readonly value="@ServerAddress" /></label>
         @if (Fingerprint is not null) { <label>SHA-256 сертификата<textarea readonly rows="2">@Fingerprint</textarea></label> }

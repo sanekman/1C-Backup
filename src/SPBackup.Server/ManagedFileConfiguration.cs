@@ -117,13 +117,13 @@ internal static class FileConfigurationContract
             || !Overlap(source, j.TemporaryDirectory) && !Overlap(j.DestinationDirectory, j.TemporaryDirectory));
     }
     private static string Normal(string path) => path.Replace('/', '\\').TrimEnd('\\');
-    private static bool Overlap(string left, string right)
+    internal static bool Overlap(string left, string right)
     {
         left = Normal(left); right = Normal(right);
         return left.Equals(right, StringComparison.OrdinalIgnoreCase) || left.StartsWith(right + "\\", StringComparison.OrdinalIgnoreCase)
             || right.StartsWith(left + "\\", StringComparison.OrdinalIgnoreCase);
     }
-    private static bool WindowsPath(string? path)
+    internal static bool WindowsPath(string? path)
     {
         if (!Text(path, 4096)) return false;
         var p = path!.Replace('/', '\\');
