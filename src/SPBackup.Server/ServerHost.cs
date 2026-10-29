@@ -109,7 +109,7 @@ public static partial class ServerHost
         app.MapGet("/health/live", () => Results.Text("live"));
         app.MapGet("/health/ready", async (ServerStore store, CancellationToken token) => await store.ReadyAsync(token) ? Results.Text("ready") : Results.StatusCode(503));
         app.MapOpenApi().RequireAuthorization(ServerAuthentication.Administrator);
-        MapSessions(app); MapApi(app); MapAdministration(app);
+        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app);
         app.MapRazorComponents<App>();
         return app;
     }
