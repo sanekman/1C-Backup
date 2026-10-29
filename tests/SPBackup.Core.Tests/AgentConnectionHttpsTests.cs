@@ -84,9 +84,11 @@ public sealed class AgentConnectionHttpsTests
 
         public async ValueTask DisposeAsync()
         {
-            stop.Cancel(); listener.Stop();
+            // Drain token-aware accepts/handshakes before stopping the listener. Schannel
+            // may complete a failed handshake concurrently with teardown and enter Accept again.
+            stop.Cancel();
             try { await loop; }
-            finally { certificate.Dispose(); stop.Dispose(); }
+            finally { listener.Stop(); certificate.Dispose(); stop.Dispose(); }
         }
     }
 
