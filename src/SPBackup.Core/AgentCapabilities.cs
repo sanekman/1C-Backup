@@ -14,11 +14,12 @@ public static class AgentCapabilities
     public const string ManagedExecutionV1 = "managed-execution-v1";
     public const string ConfigurationReceiptsV1 = "configuration-receipts-v1";
 
-    // LocalAgentHost still rejects Managed. Do not advertise execution merely because
-    // the library can parse/cache settings or perform standalone backups.
+    // Standalone and library clients do not claim managed execution. The initialized
+    // Managed host explicitly opts in for its bound API and monitoring connection.
     public static IReadOnlyList<string> Reported { get; } = Array.AsReadOnly(new[]
         { ConfigurationV1, StrictConfigurationV1, PostgreSqlTlsV1, ConfigurationReceiptsV1 });
     public static string HeaderValue => string.Join(",", Reported);
+    internal static string ExecutionHeaderValue(bool managed) => managed ? HeaderValue + "," + ManagedExecutionV1 : HeaderValue;
 
     private static bool First(char c) => c is >= 'a' and <= 'z' or >= '0' and <= '9';
     public static bool Valid(IReadOnlyList<string>? values) => values is { Count: <= 32 }

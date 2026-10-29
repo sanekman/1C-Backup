@@ -22,7 +22,7 @@ public partial class MainWindow
         UpdateRunControls();
         try
         {
-            var checker = new LatestBackupAudit(backupStorage, catalog);
+            var checker = new LatestBackupAudit(backupStorage, EffectiveCatalog);
             var report = await Task.Run(() => checker.CheckAsync(job, cancellation.Token));
             var passed = report.Destinations.Count(result => result.Status == BackupAuditStatus.Verified);
             var incomplete = report.Destinations.Count(result => result.Record?.Backup.FileSnapshot?.IsIncomplete == true);

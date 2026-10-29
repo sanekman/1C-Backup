@@ -8,7 +8,7 @@ public partial class MainWindow
     {
         try
         {
-            await verificationState.RememberAsync(entries, await catalog.ReadAsync());
+            await verificationState.RememberAsync(entries, await EffectiveCatalog.ReadAsync());
             await RefreshCopiesAsync();
             return "";
         }

@@ -54,7 +54,7 @@ public partial class MainWindow
         var progress = BeginFileRestoreProgress();
         try
         {
-            var result = await Task.Run(() => new FileBackupRestorer(backupStorage, catalog, Path.Combine(DesktopPaths.DataDirectory, "work"), new WindowsArchivePasswordStore())
+            var result = await Task.Run(() => new FileBackupRestorer(backupStorage, EffectiveCatalog, EffectiveWorkDirectory, new WindowsArchivePasswordStore())
                 .RestoreAsync(row.Record, job, parentDirectory, cancellation.Token, passwordOverride, progress));
             CopyVerificationStatus.Text = $"Восстановлено файлов: {result.Files}; архивов в цепочке: {result.Archives}. Папка: {result.Directory}";
             Status.Text = $"Файлы восстановлены в новую папку. Файлов: {result.Files}; архивов: {result.Archives}.";

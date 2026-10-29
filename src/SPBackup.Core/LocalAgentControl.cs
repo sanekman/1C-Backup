@@ -4,6 +4,10 @@ public enum LocalAgentPhase { Running, Stopping, Stopped, Faulted }
 public sealed record LocalAgentState(Guid SessionId, int ProcessId, DateTimeOffset StartedUtc,
     DateTimeOffset UpdatedUtc, LocalAgentPhase Phase, string? Error = null, string? MonitoringError = null)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public AgentMode? ExecutionMode { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public long? ConfigurationRevision { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool CanCancelCurrentRun { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
@@ -27,6 +31,7 @@ public sealed class LocalAgentControlStore(string directory)
     private static void Validate(LocalAgentState value)
     {
         if (value.SessionId == Guid.Empty || value.ProcessId <= 0 || value.StartedUtc == default ||
+            value.ExecutionMode is { } mode && !Enum.IsDefined(mode) || value.ConfigurationRevision is <= 0 ||
             value.UpdatedUtc < value.StartedUtc || !Enum.IsDefined(value.Phase))
             throw new InvalidDataException("Некорректное состояние фонового агента.");
     }

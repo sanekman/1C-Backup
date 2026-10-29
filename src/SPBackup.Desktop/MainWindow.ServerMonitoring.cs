@@ -31,11 +31,15 @@ public partial class MainWindow
     private void ConnectServerMonitoring_Click(object sender,RoutedEventArgs e)
     {
         if (!ready || agentSettings is null) return;
+        using var lease = agentSettings.Mode == AgentMode.Managed ? AcquireEngineOrReport() : null;
+        if (agentSettings.Mode == AgentMode.Managed && lease is null) return;
         if (new ServerMonitoringWindow(agentSettings.AgentId,ftpCredentials) { Owner=this }.ShowDialog()==true)
         { serverMonitoringNext=DateTimeOffset.MinValue; ServerMonitoringStatus.Text="Подключено. Фоновый агент отправляет состояние каждые 15 секунд."; }
     }
     private void DisconnectServerMonitoring_Click(object sender,RoutedEventArgs e)
     {
+        using var lease = agentSettings?.Mode == AgentMode.Managed ? AcquireEngineOrReport() : null;
+        if (agentSettings?.Mode == AgentMode.Managed && lease is null) return;
         try
         {
             File.Delete(Path.Combine(DesktopPaths.DataDirectory,"server-monitoring.json"));

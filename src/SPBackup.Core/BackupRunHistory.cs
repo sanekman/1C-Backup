@@ -7,6 +7,8 @@ public sealed record BackupRun(Guid RunId, Guid JobId, string JobName, DateTimeO
     StoredBackup? Backup = null, string? Error = null, IReadOnlyList<string>? Warnings = null)
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public BackupConfigurationStamp? Configuration { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<DestinationResult>? Destinations { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public string StatusDescription => Status switch
@@ -73,6 +75,7 @@ public sealed class BackupRunHistory(string path)
     private static void Validate(List<BackupRun> runs)
     {
         if (runs.Any(r => r is null || r.RunId == Guid.Empty || r.JobId == Guid.Empty ||
+            r.Configuration is { Valid: false } ||
             !Enum.IsDefined(r.Status) || string.IsNullOrWhiteSpace(r.WorkDirectory) ||
             (r.Status == BackupRunStatus.Running) != (r.FinishedUtc is null)) ||
             runs.Select(r => r.RunId).Distinct().Count() != runs.Count)

@@ -9,6 +9,9 @@ public enum FileBackupMode { Full, Incremental }
 // Credentials belong in the Windows credential store, never in this document.
 public sealed record BackupJob
 {
+    // Execution provenance travels with the selected immutable job, never with its configuration JSON.
+    [JsonIgnore]
+    internal BackupConfigurationStamp? ExecutionConfiguration { get; init; }
     [JsonRequired]
     public Guid Id { get; init; } = Guid.NewGuid();
     public string Name { get; init; } = "";

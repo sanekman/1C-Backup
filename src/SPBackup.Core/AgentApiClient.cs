@@ -17,6 +17,7 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgent
     private readonly HttpClient client;
     private readonly IAgentCredentialProvider credentials;
     private readonly ServerMonitoringSettings? connection;
+    private bool managedExecution;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         RespectRequiredConstructorParameters = true,
@@ -39,6 +40,9 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgent
         this.connection = connection;
     }
 
+    internal static AgentApiClient ForManagedHost(ServerMonitoringSettings connection, IFtpCredentialStore credentials) =>
+        new(connection, credentials) { managedExecution = true };
+
     private async Task<HttpRequestMessage> RequestAsync(AgentSettings settings, HttpMethod method, string endpoint,
         CancellationToken cancellationToken)
     {
@@ -54,7 +58,7 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgent
         var request = new HttpRequestMessage(method, address);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Add(AgentCapabilities.Header, AgentCapabilities.HeaderValue);
+        request.Headers.Add(AgentCapabilities.Header, AgentCapabilities.ExecutionHeaderValue(managedExecution));
         return request;
     }
 

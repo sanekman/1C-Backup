@@ -14,6 +14,9 @@
     @if (Monitoring is { } monitoring)
     {
         <p>Состояние получено @Home.Time(monitoring.ReceivedUtc). Ожидает передачи запусков: @monitoring.Snapshot.PendingRuns.</p>
+        @if (monitoring.Snapshot.ExecutionMode == "Managed")
+        { <p>Задания с сервера. Принятая ревизия: @(monitoring.Snapshot.ConfigurationRevision?.ToString() ?? "ожидает первого подключения").
+            @(monitoring.Snapshot.BackupExecutionAvailable == true && agent.BackupExecutionAvailable ? "Исполнитель работает." : "Исполнение не подтверждено.")</p> }
         @if (monitoring.Snapshot.CollectionWarnings > 0) { <p class="error">Не удалось передать часть локальной истории: @monitoring.Snapshot.CollectionWarnings. Проверьте журнал агента.</p> }
         @if (DateTimeOffset.UtcNow - monitoring.ReceivedUtc > TimeSpan.FromSeconds(Settings.OfflineAfterSeconds))
         { <p class="error">Нет свежих данных от агента. Показаны последние полученные сведения.</p> }
@@ -51,6 +54,7 @@
             <details><summary>@run.JobName · @Status(run) · @Home.Time(run.FinishedUtc)</summary>
             <p>Начало: @Home.Time(run.StartedUtc). Конец: @Home.Time(run.FinishedUtc). Предупреждений: @run.WarningCount.</p>
             @if (run.CopyKind is not null) { <p>Тип копии: @(run.CopyKind == "Full" ? "Полная" : "Инкрементная").</p> }
+            @if (run.ConfigurationRevision is { } revision) { <p>Ревизия настроек этого запуска: @revision.</p> }
             @if (run.Incomplete) { <p class="error">Копия неполная: часть файлов пропущена. Для непрочитанных файлов может требоваться прежняя версия из цепочки.</p> }
             @if (run.Evidence is { } evidence) { <p>Подтверждение внешней копии: @Evidence(evidence). Данные получены из внешнего источника; агент не выполнял доставку этой копии.</p> }
             @foreach (var destination in run.Destinations)

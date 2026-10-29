@@ -192,7 +192,8 @@ public sealed class AgentConfiguration(JobStore localJobs, AgentConfigurationCac
 
     private static bool Matches(CachedAgentConfiguration? cached, AgentSettings settings) =>
         cached is not null && cached.Configuration.AgentId == settings.AgentId &&
-        string.Equals(cached.ServerAddress, settings.NormalizedServerAddress, StringComparison.Ordinal);
+        cached.ServerAddress is not null && Uri.TryCreate(cached.ServerAddress.TrimEnd('/') + "/", UriKind.Absolute, out var address) &&
+        string.Equals(address.AbsoluteUri, new Uri(settings.NormalizedServerAddress).AbsoluteUri, StringComparison.Ordinal);
 
     private static void ValidateSettings(AgentSettings settings)
     {

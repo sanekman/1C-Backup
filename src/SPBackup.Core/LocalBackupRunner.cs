@@ -24,7 +24,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             var warnings = new List<string>();
             using var warningScope = BackupWarningContext.Begin(warnings.Add);
             var run = new BackupRun(id, job.Id, job.Name, (timeProvider ?? TimeProvider.System).GetUtcNow(), null, BackupRunStatus.Running, work)
-            { Warnings = warnings };
+            { Warnings = warnings, Configuration = job.ExecutionConfiguration };
             // A corrupt or unwritable history prevents starting an untracked operation.
             try { await history.SaveAsync(run, cancellationToken); }
             catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }

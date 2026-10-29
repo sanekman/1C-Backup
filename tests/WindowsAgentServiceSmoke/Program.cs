@@ -419,6 +419,7 @@ internal static partial class Program
             checks.Add("explicit-backup-after-active-crash-restores-real-data");
             WindowsAgentService.Stop(executable, directory); await WaitService(1);
             await WaitProcessExit(state!.ProcessId, executable);
+            await VerifyManagedService(executable, directory, checks);
             WindowsAgentService.Remove(executable, directory);
             await Wait(() => Task.FromResult(WindowsAgentService.QueryInfo() is null), "Service registration was not removed.");
             Require((await catalog.ReadAsync()).Count == baselineCopyCount + 1 && File.Exists(Path.Combine(directory, "jobs.json")), "Removing the service erased owner data.");

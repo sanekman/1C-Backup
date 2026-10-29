@@ -7,5 +7,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../../src/SPBackup.Core/SPBackup.Core.csproj" /></ItemGroup>
+  <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup>
   <ItemGroup><Compile Include="../shared/PostgreSqlTlsFixture.cs" Link="PostgreSqlTlsFixture.cs" /></ItemGroup>
 </Project>

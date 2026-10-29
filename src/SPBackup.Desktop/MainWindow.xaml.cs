@@ -296,14 +296,17 @@ public partial class MainWindow : Window
         canSave = false;
         JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = false;
         jobs = []; Jobs.ItemsSource = jobs; editingId = null;
-        var configuration = new AgentConfiguration(store, agentCache);
+        copyRows = []; Copies.ItemsSource = copyRows; Copies.SelectedItem = null;
+        var configuration = agentSettings!.Mode == AgentMode.Managed
+            ? new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings).CreateConfiguration()
+            : new AgentConfiguration(store, agentCache);
         jobs = (await configuration.GetEffectiveJobsAsync(agentSettings!)).ToList();
         Jobs.ItemsSource = jobs;
         ApplyJobFilter();
         canSave = agentSettings!.Mode == AgentMode.Standalone;
         JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = canSave;
         Status.Text = canSave ? jobs.Count == 0 ? "Начните с первого задания: выберите базу, папку копий и расписание." : "Выберите задание, чтобы создать копию или изменить настройки."
-            : "Серверный режим: сохранённые серверные задания доступны только для просмотра. Автоматическая связь ещё не подключена.";
+            : "Задания этого серверного подключения доступны только для просмотра. Интерфейс включения управляемой службы ещё разрабатывается.";
         UpdateRunControls();
         await RefreshCopiesAsync();
     }
@@ -902,7 +905,8 @@ public partial class MainWindow : Window
         UpdateRunControls();
         try
         {
-            var records = await Task.Run(() => catalog.ReadAsync());
+            var selectedCatalog = EffectiveCatalog;
+            var records = await Task.Run(() => selectedCatalog.ReadAsync());
             IReadOnlyList<BackupVerificationEntry> checks = [];
             string? checkReadError = null;
             try { checks = await verificationState.ReadAsync(); }
@@ -968,7 +972,7 @@ public partial class MainWindow : Window
         string? error = null;
         try
         {
-            var checkedArchives = await Task.Run(() => new BackupPointVerifier(backupStorage, catalog).VerifyAsync(row.Record, job, cancellation.Token));
+            var checkedArchives = await Task.Run(() => new BackupPointVerifier(backupStorage, EffectiveCatalog).VerifyAsync(row.Record, job, cancellation.Token));
             outcome = BackupVerificationOutcome.Verified;
             CopyVerificationStatus.Text = row.Record.Backup.FileSnapshot is null
                 ? "Размер и SHA256 совпадают с журналом: " + row.DisplayLocation + ". Проверка не заменяет пробное восстановление базы."

@@ -211,12 +211,12 @@ public sealed class LocalAgentHostTests : IDisposable
     }
 
     [Fact]
-    public async Task ManagedModeIsRejectedBeforeStartingBackup()
+    public async Task ManagedWithoutEnrollmentIsRejectedBeforeStartingBackup()
     {
         var job = await CreateJob();
         await new AgentSettingsStore(Path.Combine(directory, "agent.json")).SaveAsync(new AgentSettings
             { Mode = AgentMode.Managed, ServerAddress = "https://backup.example.test", CredentialKey = "agent-key" });
-        await Assert.ThrowsAsync<NotSupportedException>(() =>
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
             new LocalAgentHost(directory, new BlockingExecutor(), new NoCredentials()).RunAsync(job.Id));
         Assert.False(File.Exists(Path.Combine(directory, "runs.json")));
         Assert.False(new BackupEngineCoordinator(directory).IsHeldElsewhere());

@@ -22,10 +22,12 @@ public sealed record ServerMonitoringSettings(string Address, Guid AgentId, stri
 public sealed class ServerMonitoringClient : IDisposable
 {
     private readonly HttpClient client;
+    private readonly bool managedExecution;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    public ServerMonitoringClient(ServerMonitoringSettings settings, HttpMessageHandler? transport = null)
+    public ServerMonitoringClient(ServerMonitoringSettings settings, HttpMessageHandler? transport = null, bool managedExecution = false)
     {
         settings.Validate();
+        this.managedExecution = managedExecution;
         client = new(transport ?? ServerHttpsTransport.Create(settings.CertificateSha256))
         { BaseAddress = new(settings.Address.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(20) };
     }
@@ -44,7 +46,7 @@ public sealed class ServerMonitoringClient : IDisposable
         using var request = new HttpRequestMessage(HttpMethod.Put,$"api/v1/agents/{settings.AgentId:D}/monitoring")
         { Content = JsonContent.Create(snapshot,options:Json) };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer",bearer);
-        request.Headers.Add(AgentCapabilities.Header, AgentCapabilities.HeaderValue);
+        request.Headers.Add(AgentCapabilities.Header, AgentCapabilities.ExecutionHeaderValue(managedExecution));
         using var response = await client.SendAsync(request,token);
         response.EnsureSuccessStatusCode();
         foreach (var run in runs) await SendRunAsync(settings,bearer,run,token);
@@ -60,7 +62,8 @@ public sealed class ServerMonitoringClient : IDisposable
     public void Dispose() => client.Dispose();
 }
 
-public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialStore credentials)
+public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialStore credentials,
+    AgentExecutionJobSource? managedJobs = null, ServerMonitoringSettings? fixedConnection = null)
 {
     private readonly AgentJsonFile<ServerMonitoringSettings> configuration = new(Path.Combine(directory,"server-monitoring.json"));
     // One cursor per destination + enrollment: switching servers never loses history on the new server.
@@ -78,11 +81,23 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
     }
     public async Task PollAsync(CancellationToken token = default)
     {
-        var settings = await configuration.ReadAsync(token);
+        var settings = fixedConnection ?? await configuration.ReadAsync(token);
         if (settings is null) return;
         settings.Validate();
         var history = await new BackupRunHistory(Path.Combine(directory,"runs.json")).ReadAsync(token);
-        var jobs = await new JobStore(Path.Combine(directory,"jobs.json"),useLocalTime:true).LoadAsync(token);
+        var connectionId = ManagedAgentProfile.Identity(new AgentSettings { Mode = AgentMode.Managed,
+            AgentId = settings.AgentId, ServerAddress = settings.Address, CredentialKey = settings.CredentialKey });
+        history = history.Where(r => r.Configuration is null || r.Configuration.ConnectionId == connectionId).ToArray();
+        var effective = managedJobs;
+        if (effective is null && await new AgentJsonFile<AgentSettings>(Path.Combine(directory, "agent.json")).ReadAsync(token) is { Mode: AgentMode.Managed } agentSettings)
+        {
+            var profile = new ManagedAgentProfile(directory, agentSettings, settings);
+            effective = new(profile.CreateConfiguration(), agentSettings);
+        }
+        if (effective is not null && effective.ConnectionId != connectionId)
+            throw new InvalidDataException("Источник заданий не относится к подключению мониторинга.");
+        var selected = effective is null ? null : await effective.LoadSnapshotAsync(token);
+        var jobs = selected?.Jobs ?? await new JobStore(Path.Combine(directory,"jobs.json"),useLocalTime:true).LoadAsync(token);
         var acknowledged = await receipts.ReadAsync(token);
         if (acknowledged is null || acknowledged.Address != settings.Address || acknowledged.AgentId != settings.AgentId || acknowledged.CredentialKey != settings.CredentialKey)
             acknowledged = new(settings.Address,settings.AgentId,settings.CredentialKey,[]);
@@ -114,9 +129,12 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
             progress is { Finished:false } && history.Any(r=>r.RunId==progress.RunId && r.Status==BackupRunStatus.Running) ? new(progress.RunId,progress.JobId,
                 progress.Progress.Stage == BackupStage.RetryingStorage ? "ConnectingStorage" : progress.Progress.Stage.ToString(),progress.Progress.Percent,progress.UpdatedUtc) : null,pending.Length,
             monitors.Select(m=>new MonitoredSource(m.Id,Label(m.Name),m.Kind.ToString(),m.Enabled,polling.FirstOrDefault(p=>p.MonitorId==m.Id)?.PolledUtc,
-                polling.FirstOrDefault(p=>p.MonitorId==m.Id)?.Error is not null)).ToArray(),collectionWarnings);
+                polling.FirstOrDefault(p=>p.MonitorId==m.Id)?.Error is not null)).ToArray(),collectionWarnings)
+        { ExecutionMode = selected is null ? "Standalone" : "Managed", ConfigurationRevision = selected?.Revision,
+            BackupExecutionAvailable = selected is null ? null : managedJobs is not null && fixedConnection is not null };
         var batch = pending.Where(r=>!acknowledged.RetryAfter!.TryGetValue(r.RunId,out var time) || time <= DateTimeOffset.UtcNow).Take(25).ToArray();
-        using var client = new ServerMonitoringClient(settings);
+        // Only the initialized host opts in. A GUI reading a managed cache does not claim execution readiness.
+        using var client = new ServerMonitoringClient(settings, managedExecution: managedJobs is not null && fixedConnection is not null);
         var secret = await credentials.GetAsync(settings.CredentialKey,token);
         await client.SendAsync(settings,secret.Password,snapshot,[],token);
         acknowledged.Runs.IntersectWith(reports.Select(r=>r.RunId));
@@ -152,7 +170,8 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
         var snapshot = r.Backup?.FileSnapshot ?? r.Destinations?.Select(d=>d.Record?.Backup.FileSnapshot).FirstOrDefault(s=>s is not null);
         return new(r.RunId,r.JobId,Label(r.JobName),r.StartedUtc,r.FinishedUtc ?? throw new InvalidDataException("Запуск ещё выполняется."),r.Status.ToString(),r.Warnings?.Count ?? 0,
             snapshot?.IsIncomplete == true,snapshot is null ? null : snapshot.IsFull ? "Full" : "Incremental",r.Destinations?.Select((d,i)=>new MonitoredDestination(i,d.Record is not null,d.Record?.Backup.Length ?? 0,d.Record?.Backup.FileSnapshot?.IsIncomplete == true)).ToArray()
-                ?? (r.Backup is { } backup ? [new(0,true,backup.Length,backup.FileSnapshot?.IsIncomplete == true)] : []));
+                ?? (r.Backup is { } backup ? [new(0,true,backup.Length,backup.FileSnapshot?.IsIncomplete == true)] : []))
+        { ConfigurationRevision = r.Configuration?.Revision };
     }
     public static Task SaveSettingsAsync(string directory, ServerMonitoringSettings settings, CancellationToken token = default)
     { settings.Validate(); return new AgentJsonFile<ServerMonitoringSettings>(Path.Combine(directory,"server-monitoring.json")).WriteAsync(settings,token); }

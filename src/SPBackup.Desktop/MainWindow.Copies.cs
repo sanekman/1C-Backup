@@ -1,11 +1,27 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.IO;
+using SPBackup.Core;
 
 namespace SPBackup.Desktop;
 
 public partial class MainWindow
 {
+    private BackupCatalog? managedViewCatalog;
+    private string? managedViewCatalogPath;
+    private BackupCatalog EffectiveCatalog
+    {
+        get
+        {
+            if (agentSettings?.Mode != AgentMode.Managed) return catalog;
+            var path = new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings).CatalogPath;
+            if (managedViewCatalogPath != path) { managedViewCatalogPath = path; managedViewCatalog = new(path); }
+            return managedViewCatalog!;
+        }
+    }
+    private string EffectiveWorkDirectory => agentSettings?.Mode == AgentMode.Managed
+        ? new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings).WorkDirectory : Path.Combine(DesktopPaths.DataDirectory, "work");
     private sealed record CopyJobChoice(Guid? Id, string Label);
     private List<BackupCopyRow> copyRows = [];
     private bool updatingCopyFilters;
