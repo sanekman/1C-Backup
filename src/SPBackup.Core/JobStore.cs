@@ -5,7 +5,7 @@ namespace SPBackup.Core;
 
 // The caller owns synchronization. A temporary file in the same directory avoids
 // exposing a partial JSON document when writing fails or the process stops.
-public sealed class JobStore(string path, bool useLocalTime = false)
+public sealed class JobStore(string path, bool useLocalTime = false) : IBackupJobSource
 {
     internal string StartupSchedulePath => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "startup-schedule.json");
 

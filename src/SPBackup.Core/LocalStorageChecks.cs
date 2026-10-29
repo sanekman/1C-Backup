@@ -148,7 +148,7 @@ public sealed class LocalStorageCheckQueue(string directory)
 }
 
 /// <summary>Runs only disposable storage probes. Never invokes an executor or changes backup history/catalog.</summary>
-internal sealed class LocalStorageCheckProcessor(string directory, JobStore jobs, StorageReadinessChecker checker)
+internal sealed class LocalStorageCheckProcessor(string directory, IBackupJobSource jobs, StorageReadinessChecker checker)
 {
     private static bool Recoverable(Exception error) => AgentRuntimeWarnings.Recoverable(error)
         || error is InvalidDataException or JsonException or ArgumentException or NotSupportedException;

@@ -79,13 +79,27 @@ public sealed class AgentConfiguration(JobStore localJobs, AgentConfigurationCac
     private readonly SemaphoreSlim syncGate = new(1, 1);
 
     public async Task<IReadOnlyList<BackupJob>> GetEffectiveJobsAsync(AgentSettings settings,
+        CancellationToken cancellationToken = default) => (await GetSnapshotAsync(settings, cancellationToken)).Jobs;
+
+    /// <summary>Reads the revision and its jobs together; callers never combine two cache generations.</summary>
+    public async Task<AgentJobSnapshot> GetSnapshotAsync(AgentSettings settings,
         CancellationToken cancellationToken = default)
     {
         ValidateSettings(settings);
-        if (settings.Mode == AgentMode.Standalone) return await localJobs.LoadAsync(cancellationToken);
+        if (settings.Mode == AgentMode.Standalone)
+            return new(settings.Mode, settings.AgentId, null, null, Freeze(await localJobs.LoadAsync(cancellationToken)));
         var cached = await cache.LoadAsync(cancellationToken);
-        return Matches(cached, settings) ? cached!.Configuration.Jobs : [];
+        var matches = Matches(cached, settings);
+        return new(settings.Mode, settings.AgentId, settings.NormalizedServerAddress,
+            matches ? cached!.Configuration.Revision : null,
+            Freeze(matches ? cached!.Configuration.Jobs : []));
     }
+
+    private static IReadOnlyList<BackupJob> Freeze(IReadOnlyList<BackupJob> jobs) => Array.AsReadOnly(jobs.Select(job => job with
+    {
+        AdditionalDailyTimes = job.AdditionalDailyTimes is null ? null : Array.AsReadOnly(job.AdditionalDailyTimes.ToArray()),
+        AdditionalDestinations = job.AdditionalDestinations is null ? null : Array.AsReadOnly(job.AdditionalDestinations.ToArray())
+    }).ToArray());
 
     public async Task<long?> GetActiveRevisionAsync(AgentSettings settings, CancellationToken cancellationToken = default)
     {

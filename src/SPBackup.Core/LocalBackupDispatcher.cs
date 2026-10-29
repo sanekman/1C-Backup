@@ -1,14 +1,35 @@
 namespace SPBackup.Core;
 
 /// <summary>Shares one execution gate between manual runs and a restartable local schedule loop.</summary>
-public sealed class LocalBackupDispatcher(JobStore store, Func<BackupJob, CancellationToken, Task> execute)
+public sealed class LocalBackupDispatcher
 {
-    private readonly BackupScheduler scheduler = new(new StartupBackupSchedule(store.StartupSchedulePath));
+    private readonly IBackupJobSource store;
+    private readonly Func<BackupJob, CancellationToken, Task> execute;
+    private readonly BackupScheduler scheduler;
     private readonly SemaphoreSlim executionGate = new(1, 1);
     private int scheduling;
 
+    public LocalBackupDispatcher(JobStore store, Func<BackupJob, CancellationToken, Task> execute)
+        : this(store, store.StartupSchedulePath, execute) { }
+
+    public LocalBackupDispatcher(IBackupJobSource store, string startupSchedulePath, Func<BackupJob, CancellationToken, Task> execute)
+    {
+        this.store = store;
+        this.execute = execute;
+        scheduler = new(new StartupBackupSchedule(startupSchedulePath));
+    }
+
     public static bool Supports(BackupJob job) => Enum.IsDefined(job.Kind) &&
         Enum.IsDefined(job.StorageKind);
+
+    /// <summary>Resolve a manual command from the same source as the schedule, then retain its snapshot.</summary>
+    public async Task ExecuteByIdAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        var jobs = await store.LoadAsync(cancellationToken);
+        var job = jobs.SingleOrDefault(job => job.Id == jobId)
+            ?? throw new InvalidDataException("Задание не найдено в текущей конфигурации исполнителя.");
+        await ExecuteAsync(job, cancellationToken);
+    }
 
     public async Task ExecuteAsync(BackupJob job, CancellationToken cancellationToken = default)
     {
