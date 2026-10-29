@@ -12,7 +12,8 @@ public partial class MainWindow
 
     private bool ConfigurationWorkInProgress => changingAgentConfiguration || serviceManaging || installingUpdate
         || trayStopping || persisting || jobFileTransfer || activeRun is not null || manualPending
-        || copyVerification is not null || schedulingTask is not null || editorOpen || backgroundStarting;
+        || copyVerification is not null || schedulingTask is not null || editorOpen || backgroundStarting
+        || historyRefreshing || copiesRefreshing || refreshingBackground;
 
     private bool RequireConfigurationIdle()
     {

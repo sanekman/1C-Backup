@@ -302,6 +302,8 @@ public partial class MainWindow : Window
         JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = false;
         jobs = []; Jobs.ItemsSource = jobs; editingId = null;
         copyRows = []; Copies.ItemsSource = copyRows; Copies.SelectedItem = null;
+        historyRuns = []; RunHistory.ItemsSource = historyRuns; LatestJobRuns = JobRunOverview.Unavailable;
+        ApplyHistoryFilter();
         AgentConfiguration configuration;
         if (agentSettings!.Mode == AgentMode.Managed)
         {

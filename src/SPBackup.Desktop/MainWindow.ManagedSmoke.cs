@@ -16,6 +16,8 @@ public partial class MainWindow
     internal async Task SmokeVerifyManagedModeAsync(Action<string> screenshot)
     {
         if (!SmokeMode || agentSettings is null) throw new InvalidOperationException("An isolated smoke profile is required.");
+        var timerEnabled = backgroundTimer.IsEnabled;
+        backgroundTimer.Stop();
         var original = agentSettings;
         var root = DesktopPaths.DataDirectory;
         var files = new[] { "jobs.json", "server-monitoring.json", "runs.json" };
@@ -39,6 +41,7 @@ public partial class MainWindow
         }
         try
         {
+            await WaitAsync(() => Task.FromResult(!ConfigurationWorkInProgress), "Desktop background refresh did not finish before the mode check.");
             File.Delete(Path.Combine(root, "server-monitoring.json"));
             AgentModePicker.SelectedValue = AgentMode.Managed;
             await ApplyAgentModeAsync();
@@ -98,6 +101,7 @@ public partial class MainWindow
             backgroundStarting = false;
             await LoadEffectiveJobsAsync(); await RefreshBackgroundStateAsync(); await RefreshHistoryAsync(); await RefreshServerConnectionLabelAsync();
             if (Directory.Exists(profile.DirectoryPath)) Directory.Delete(profile.DirectoryPath, true);
+            if (timerEnabled) backgroundTimer.Start();
         }
     }
 }
