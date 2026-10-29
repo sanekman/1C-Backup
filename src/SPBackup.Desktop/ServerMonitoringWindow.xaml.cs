@@ -19,8 +19,8 @@ public partial class ServerMonitoringWindow : Window
             using var client = new ServerMonitoringClient(settings);
             var secret = await client.EnrollAsync(agentId,Invitation.Password.Trim(),Environment.MachineName,timeout.Token);
             credentials.Save(key,"agent",secret);
-            await ServerMonitoringDispatcher.SaveSettingsAsync(DesktopPaths.DataDirectory,settings,timeout.Token);
             await credentials.ExportForServiceAsync(key,timeout.Token);
+            await ServerMonitoringDispatcher.SaveSettingsAsync(DesktopPaths.DataDirectory,settings,timeout.Token);
             Invitation.Clear(); DialogResult=true;
         }
         catch (Exception error) { Status.Text="Подключение не выполнено: "+error.Message; }

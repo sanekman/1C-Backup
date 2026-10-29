@@ -28,21 +28,41 @@ public partial class MainWindow
             ?? throw new InvalidDataException("Не прочитаны настройки мониторинга.");
         await ftpCredentials.ExportForServiceAsync(settings.CredentialKey);
     }
-    private void ConnectServerMonitoring_Click(object sender,RoutedEventArgs e)
+    private async void ConnectServerMonitoring_Click(object sender,RoutedEventArgs e)
     {
         if (!ready || agentSettings is null) return;
+        if (ConfigurationWorkInProgress || agentSettings.Mode == AgentMode.Managed && !RequireConfigurationIdle())
+        { Status.Text = "Дождитесь окончания операций и остановите серверный агент перед сменой подключения."; return; }
         using var lease = agentSettings.Mode == AgentMode.Managed ? AcquireEngineOrReport() : null;
         if (agentSettings.Mode == AgentMode.Managed && lease is null) return;
-        if (new ServerMonitoringWindow(agentSettings.AgentId,ftpCredentials) { Owner=this }.ShowDialog()==true)
-        { serverMonitoringNext=DateTimeOffset.MinValue; ServerMonitoringStatus.Text="Подключено. Фоновый агент отправляет состояние каждые 15 секунд."; }
+        changingAgentConfiguration = true; UpdateRunControls();
+        try
+        {
+            if (new ServerMonitoringWindow(agentSettings.AgentId,ftpCredentials) { Owner=this }.ShowDialog()!=true) return;
+            if (agentSettings.Mode == AgentMode.Managed)
+            {
+                configurationReady = false;
+                var connection = await ServerMonitoringDispatcher.LoadSettingsAsync(DesktopPaths.DataDirectory);
+                var updated = AgentModeTransition.Prepare(agentSettings, AgentMode.Managed, connection);
+                await agentSettingsStore.SaveAsync(updated); agentSettings = updated;
+                await LoadEffectiveJobsAsync(); await RefreshHistoryAsync();
+            }
+            await RefreshServerConnectionLabelAsync();
+            serverMonitoringNext=DateTimeOffset.MinValue;
+            ServerMonitoringStatus.Text="Сервер подключён. Выберите, откуда получать задания, и нажмите «Применить режим».";
+        }
+        catch (Exception error) { Status.Text = "Подключение требует внимания: " + error.Message + " Нажмите «Применить режим» после исправления."; }
+        finally { changingAgentConfiguration = false; UpdateRunControls(); }
     }
     private void DisconnectServerMonitoring_Click(object sender,RoutedEventArgs e)
     {
-        using var lease = agentSettings?.Mode == AgentMode.Managed ? AcquireEngineOrReport() : null;
-        if (agentSettings?.Mode == AgentMode.Managed && lease is null) return;
+        if (ConfigurationWorkInProgress) { Status.Text = "Сначала дождитесь окончания операций."; return; }
+        if (agentSettings?.Mode != AgentMode.Standalone)
+        { Status.Text = "Сначала выберите «Задания на этом компьютере» и нажмите «Применить режим». Затем отключите сервер."; return; }
         try
         {
             File.Delete(Path.Combine(DesktopPaths.DataDirectory,"server-monitoring.json"));
+            ServerAddress.Text = "Подключение не настроено";
             ServerMonitoringStatus.Text="Мониторинг отключён. Доступ можно отозвать в панели сервера.";
         }
         catch (Exception error) { ServerMonitoringStatus.Text=error.Message; }

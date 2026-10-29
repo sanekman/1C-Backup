@@ -22,6 +22,9 @@ public partial class MainWindow : Window
     private AgentSettings? agentSettings;
     private Guid? editingId;
     private bool canSave;
+    private bool configurationReady;
+    private bool changingAgentConfiguration;
+    private long? managedRevision;
     private bool persisting;
     private readonly BackupRunHistory history = new(Path.Combine(DesktopPaths.DataDirectory, "runs.json"));
     private readonly LocalBackupRunner runner;
@@ -82,8 +85,8 @@ public partial class MainWindow : Window
         SourceInitialized += (_, _) => FitInitialWindowToWorkArea();
         AgentModePicker.ItemsSource = new Dictionary<AgentMode, string>
         {
-            [AgentMode.Standalone] = "Автономный агент",
-            [AgentMode.Managed] = "Управление через сервер"
+            [AgentMode.Standalone] = "Задания на этом компьютере",
+            [AgentMode.Managed] = "Задания с сервера"
         };
         AgentModePicker.SelectedValue = AgentMode.Standalone;
         FullBackupDayPicker.ItemsSource = new Dictionary<int, string>
@@ -131,9 +134,9 @@ public partial class MainWindow : Window
                 AgentIdentity.Text = "Агент: " + agentSettings.AgentId;
                 AgentModePicker.SelectedValue = agentSettings.Mode;
                 ServerAddress.Text = agentSettings.ServerAddress;
-                AgentCredentialKey.Text = agentSettings.CredentialKey;
                 SyncInterval.Text = agentSettings.SyncIntervalSeconds.ToString();
                 await LoadEffectiveJobsAsync();
+                await RefreshServerConnectionLabelAsync();
                 try { using var lease = engine.Acquire(); await history.RecoverInterruptedAsync(); }
                 catch (BackupEngineBusyException) { /* The background owner recovers its own history. */ }
                 await RefreshHistoryAsync();
@@ -161,6 +164,7 @@ public partial class MainWindow : Window
             { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
                 ShowFromTray();
                 canSave = false;
+                configurationReady = false;
                 JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = RunButton.IsEnabled = false;
                 Status.Text = "Не удалось прочитать настройки. Сохранение отключено, чтобы не затереть файл: " + ex.Message;
             }
@@ -293,20 +297,35 @@ public partial class MainWindow : Window
 
     private async Task LoadEffectiveJobsAsync()
     {
+        configurationReady = false;
         canSave = false;
         JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = false;
         jobs = []; Jobs.ItemsSource = jobs; editingId = null;
         copyRows = []; Copies.ItemsSource = copyRows; Copies.SelectedItem = null;
-        var configuration = agentSettings!.Mode == AgentMode.Managed
-            ? new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings).CreateConfiguration()
-            : new AgentConfiguration(store, agentCache);
-        jobs = (await configuration.GetEffectiveJobsAsync(agentSettings!)).ToList();
+        AgentConfiguration configuration;
+        if (agentSettings!.Mode == AgentMode.Managed)
+        {
+            try
+            {
+                var connection = await ServerMonitoringDispatcher.LoadSettingsAsync(DesktopPaths.DataDirectory)
+                    ?? throw new InvalidOperationException("Сначала подключитесь к серверу по приглашению.");
+                configuration = new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings, connection).CreateConfiguration();
+            }
+            catch (Exception error)
+            { Status.Text = "Серверное подключение требует настройки: " + error.Message + " Затем нажмите «Применить режим»."; UpdateRunControls(); return; }
+        }
+        else configuration = new AgentConfiguration(store, agentCache);
+        var snapshot = await configuration.GetSnapshotAsync(agentSettings);
+        jobs = snapshot.Jobs.ToList(); managedRevision = snapshot.Revision;
         Jobs.ItemsSource = jobs;
         ApplyJobFilter();
         canSave = agentSettings!.Mode == AgentMode.Standalone;
+        configurationReady = true;
         JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = canSave;
         Status.Text = canSave ? jobs.Count == 0 ? "Начните с первого задания: выберите базу, папку копий и расписание." : "Выберите задание, чтобы создать копию или изменить настройки."
-            : "Задания этого серверного подключения доступны только для просмотра. Интерфейс включения управляемой службы ещё разрабатывается.";
+            : managedRevision is null ? "Подключение настроено. Нажмите «Включить автоматически»: агент получит задания с сервера."
+            : jobs.Count == 0 ? "Сервер ещё не назначил заданий. Добавьте их в панели сервера."
+            : "Задания получены с сервера. Их можно запускать вручную; настройки меняются в панели сервера.";
         UpdateRunControls();
         await RefreshCopiesAsync();
     }
@@ -317,30 +336,7 @@ public partial class MainWindow : Window
             ServerPanel.Visibility = AgentModePicker.SelectedValue is AgentMode.Managed ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private async void SaveAgentSettings_Click(object sender, RoutedEventArgs e)
-    {
-        if (agentSettings is null || schedulingTask is not null || manualPending || activeRun is not null || copyVerification is not null) return;
-        using var lease = AcquireEngineOrReport();
-        if (lease is null) return;
-        var mode = (AgentMode)AgentModePicker.SelectedValue;
-        var interval = agentSettings.SyncIntervalSeconds;
-        if (mode == AgentMode.Managed && !int.TryParse(SyncInterval.Text, out interval))
-        { Status.Text = "Укажите целое число секунд в поле интервала связи."; return; }
-        var updated = agentSettings with { Mode = mode, ServerAddress = ServerAddress.Text.Trim(),
-            CredentialKey = AgentCredentialKey.Text.Trim(), SyncIntervalSeconds = interval };
-        var errors = updated.Validate();
-        if (errors.Count != 0) { Status.Text = string.Join(" ", errors); return; }
-        SaveAgentSettingsButton.IsEnabled = false;
-        canSave = false; JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = false;
-        try
-        {
-            await agentSettingsStore.SaveAsync(updated);
-            agentSettings = updated;
-            await LoadEffectiveJobsAsync();
-        }
-        catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); Status.Text = "Не удалось применить настройки агента: " + ex.Message; }
-        finally { UpdateRunControls(); }
-    }
+    private async void SaveAgentSettings_Click(object sender, RoutedEventArgs e) => await ApplyAgentModeAsync();
 
     private void Jobs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -496,7 +492,7 @@ public partial class MainWindow : Window
     {
         if (ExportDiagnosticsButton is not null) ExportDiagnosticsButton.IsEnabled = ready && !jobFileTransfer;
         UpdateTray();
-        var idle = !serviceManaging && !installingUpdate && !trayStopping && !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
+        var idle = !changingAgentConfiguration && !serviceManaging && !installingUpdate && !trayStopping && !persisting && !jobFileTransfer && activeRun is null && !manualPending && !schedulerStopping && copyVerification is null;
         var engineAvailable = !backgroundBusy && !backgroundStarting;
         NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle && !editorOpen;
         ImportJobSettingsMenuItem.IsEnabled = NewJobButton.IsEnabled && !editorOpen;
@@ -570,7 +566,7 @@ public partial class MainWindow : Window
         CancelCopyVerificationButton.IsEnabled = copyVerification is { IsCancellationRequested: false };
         CancelCopyVerificationButton.Visibility = copyVerification is not null && !checkingStorages ? Visibility.Visible : Visibility.Collapsed;
         OpenCopyDirectoryButton.IsEnabled = ready && Copies.SelectedItem is BackupCopyRow { CanOpenDirectory: true };
-        StartBackgroundButton.IsEnabled = ready && canSave && agentSettings?.Mode == AgentMode.Standalone && idle && engineAvailable && schedulingTask is null && !editorOpen && !backgroundStarting
+        StartBackgroundButton.IsEnabled = ready && configurationReady && idle && engineAvailable && schedulingTask is null && !editorOpen && !backgroundStarting
             && automationService is AutomationService.None or AutomationService.Stopped;
         StopBackgroundButton.IsEnabled = ready && !serviceManaging && (backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running
             || schedulingTask is not null && !schedulerStopping || automationService == AutomationService.Running);
@@ -597,7 +593,7 @@ public partial class MainWindow : Window
 
     private async Task RefreshBackgroundStateAsync()
     {
-        if (refreshingBackground) return;
+        if (refreshingBackground || changingAgentConfiguration) return;
         refreshingBackground = true;
         try
         {
@@ -623,6 +619,7 @@ public partial class MainWindow : Window
             if (backgroundBusy && DateTimeOffset.UtcNow - lastBackgroundRefresh > TimeSpan.FromSeconds(10))
             {
                 lastBackgroundRefresh = DateTimeOffset.UtcNow;
+                if (agentSettings?.Mode == AgentMode.Managed) await RefreshManagedJobsAsync();
                 await RefreshHistoryAsync(); await RefreshCopiesAsync();
             }
         }
@@ -635,8 +632,11 @@ public partial class MainWindow : Window
         if (!StartBackgroundButton.IsEnabled) return;
         var executable = Path.Combine(AppContext.BaseDirectory, "SPBackup.Agent.exe");
         if (!File.Exists(executable)) { Status.Text = "Фоновый агент не найден рядом с приложением. Используйте полный дистрибутив Windows."; return; }
+        backgroundStarting = true; UpdateRunControls();
         try
         {
+            await ValidateExecutionConnectionAsync();
+            if (agentSettings?.Mode == AgentMode.Managed) await ExportServerMonitoringForServiceAsync();
             if (OwnService() is not null)
             {
                 WindowsAgentService.Start(executable, DesktopPaths.DataDirectory);
@@ -677,8 +677,7 @@ public partial class MainWindow : Window
         if (!ready) return;
         try
         {
-            if (agentSettings?.Mode != AgentMode.Standalone)
-                throw new InvalidOperationException("Сначала сохраните автономный режим в настройках агента.");
+            if (!configurationReady) throw new InvalidOperationException("Сначала примените настройки агента.");
             CurrentUserAgentStartup.Save(true);
             AgentStartup.IsChecked = true;
             StartupScheduleStatus.Text = "Автозапуск включён. Агент запустится при следующем входе в Windows. Задание нужно сохранить отдельно.";
@@ -696,8 +695,8 @@ public partial class MainWindow : Window
         if (!ready) return;
         try
         {
-            if (AgentStartup.IsChecked == true && agentSettings?.Mode != AgentMode.Standalone)
-                throw new InvalidOperationException("Автозапуск фонового агента доступен в автономном режиме. Сначала сохраните этот режим в настройках агента.");
+            if (AgentStartup.IsChecked == true && !configurationReady)
+                throw new InvalidOperationException("Сначала примените настройки агента.");
             CurrentUserAgentStartup.Save(AgentStartup.IsChecked == true);
             StartupStatus.Text = AgentStartup.IsChecked == true ? "Агент будет запускаться при входе текущего пользователя в Windows. После переноса папки программы сохраните настройку заново."
                 : "Автозапуск этой программы выключен. Уже работающий агент можно остановить кнопкой «Остановить агент».";
@@ -796,7 +795,11 @@ public partial class MainWindow : Window
         UpdateRunControls();
         try
         {
-            historyRuns = (await history.ReadAsync()).OrderByDescending(r => r.StartedUtc).ToList();
+            var connectionId = agentSettings?.Mode == AgentMode.Managed
+                ? new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings).ConnectionId : null;
+            historyRuns = (await history.ReadAsync()).Where(run => connectionId is null
+                ? run.Configuration is null : run.Configuration?.ConnectionId == connectionId)
+                .OrderByDescending(r => r.StartedUtc).ToList();
             LatestJobRuns = JobRunOverview.From(historyRuns);
             var selectedId = (RunHistory.SelectedItem as BackupRun)?.RunId;
             RunHistory.ItemsSource = historyRuns;

@@ -73,7 +73,7 @@ internal static partial class DesktopSmoke
                     if (!button.IsVisible || position.Y < 0 || position.Y + button.ActualHeight > scroll.TranslatePoint(new Point(), Control<Grid>("AgentView")).Y + 1)
                         throw new InvalidOperationException("Навигация настроек скрыта: " + category);
                 }
-                if (Control<ComboBox>("AgentModePicker").IsVisible || Control<PasswordBox>("GitHubUpdateToken").IsVisible
+                if (Control<ComboBox>("AgentModePicker").IsVisible != (section == "Connections") || Control<PasswordBox>("GitHubUpdateToken").IsVisible
                     || Control<ComboBox>("ServiceAccount").IsVisible)
                     throw new InvalidOperationException("Технические настройки открыты по умолчанию.");
                 if (section == "Help")

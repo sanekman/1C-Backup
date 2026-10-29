@@ -53,9 +53,9 @@ public partial class MainWindow
                 : "Служба установлена для другой папки программы или профиля.";
             if (info is null && !ApplicationUpdateHandoff.IsInstalled())
                 ServiceStatus.Text += " Для установки службы используйте установщик Windows.";
-            InstallServiceButton.IsEnabled = ready && !serviceManaging && info is null && ApplicationUpdateHandoff.IsInstalled();
+            InstallServiceButton.IsEnabled = ready && configurationReady && !ConfigurationWorkInProgress && info is null && ApplicationUpdateHandoff.IsInstalled();
             RemoveServiceButton.IsEnabled = ready && !serviceManaging && owned && info!.State == 1;
-            StartServiceButton.IsEnabled = ready && !serviceManaging && owned && info!.State == 1;
+            StartServiceButton.IsEnabled = ready && configurationReady && !ConfigurationWorkInProgress && !backgroundBusy && owned && info!.State == 1;
             StopServiceButton.IsEnabled = ready && !serviceManaging && owned && info!.State == 4;
         }
         catch (Exception error) { automationService = AutomationService.Unavailable; ServiceStatus.Text = error.Message; }
@@ -64,14 +64,14 @@ public partial class MainWindow
     private async void RemoveService_Click(object sender, RoutedEventArgs e) => await ManageServiceAsync("remove");
     private async Task ManageServiceAsync(string action)
     {
-        if (!ready || serviceManaging || SmokeMode) return;
+        if (!ready || ConfigurationWorkInProgress || SmokeMode) return;
         serviceManaging = true; ServiceAccount.IsEnabled = ServicePassword.IsEnabled = false; UpdateRunControls();
         try
         {
             if (!ApplicationUpdateHandoff.IsInstalled()) throw new InvalidOperationException("Для службы установите программу установщиком Windows.");
             if (backgroundBusy || activeRun is not null || schedulingTask is not null || manualPending || persisting)
                 throw new InvalidOperationException("Сначала остановите автоматическое копирование и дождитесь окончания операций.");
-            if (agentSettings?.Mode != AgentMode.Standalone) throw new InvalidOperationException("Сначала сохраните автономный режим агента.");
+            if (action == "install") await ValidateExecutionConnectionAsync();
             var identity = WindowsIdentity.GetCurrent(); var sid = identity.User!.Value;
             var account = identity.Name;
             if (action == "install")
@@ -85,7 +85,9 @@ public partial class MainWindow
                     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)) { ServiceSid = selected.Sid };
                 await profile.SaveAsync(DesktopPaths.DataDirectory);
                 WindowsFtpCredentialStore.SetServiceCache(new(DesktopPaths.DataDirectory, sid, selected.Sid));
-                await WindowsFtpCredentialStore.ExportProfileForServiceAsync(jobs, await catalog.ReadAsync());
+                var allJobs = (await store.LoadAsync()).Concat(jobs).ToArray();
+                var allCopies = (await catalog.ReadAsync()).Concat(await EffectiveCatalog.ReadAsync()).DistinctBy(copy => copy.Id).ToArray();
+                await WindowsFtpCredentialStore.ExportProfileForServiceAsync(allJobs, allCopies);
                 await new WindowsSqlServerCredentialStore().ExportMonitorsForServiceAsync(
                     await new ExternalBackupMonitorStore(Path.Combine(DesktopPaths.DataDirectory, "external-monitors.json")).LoadAsync());
                 await ExportServerMonitoringForServiceAsync();
@@ -116,8 +118,15 @@ public partial class MainWindow
     }
     private async void StartService_Click(object sender, RoutedEventArgs e)
     {
-        try { WindowsAgentService.Start(ServiceExecutable, DesktopPaths.DataDirectory); await RefreshBackgroundStateAsync(); }
-        catch (Exception error) { Status.Text = error.Message; }
+        if (!StartServiceButton.IsEnabled || ConfigurationWorkInProgress || !configurationReady) return;
+        backgroundStarting = true; UpdateRunControls();
+        try
+        {
+            await ValidateExecutionConnectionAsync();
+            if (agentSettings?.Mode == AgentMode.Managed) await ExportServerMonitoringForServiceAsync();
+            WindowsAgentService.Start(ServiceExecutable, DesktopPaths.DataDirectory); await RefreshBackgroundStateAsync();
+        }
+        catch (Exception error) { backgroundStarting = false; Status.Text = error.Message; UpdateRunControls(); }
         RefreshService();
     }
     private async void StopService_Click(object sender, RoutedEventArgs e)

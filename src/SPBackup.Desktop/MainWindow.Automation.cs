@@ -30,11 +30,22 @@ public partial class MainWindow
         if (NextAutomaticRun is null) return;
         UpdateAutomationLayout();
         if (!ready) { ShowAutomationNotice("Проверка состояния…", ""); return; }
-        if (!canSave) { ShowAutomationNotice("Настройки не удалось загрузить. Проверьте сообщение внизу окна.", "Расписание не подтверждено."); return; }
+        if (!configurationReady) { ShowAutomationNotice("Настройки требуют внимания. Откройте «Настройки → Подключения».", "Работа заданий пока не подтверждена."); return; }
         if (agentSettings?.Mode == AgentMode.Managed)
         {
-            ShowAutomationNotice("Управление с сервера ещё разрабатывается. Для копий выберите автономный режим.",
-                "Настройки → Подключения → Режим работы агента.");
+            var live = backgroundBusy && BackgroundExecutionMatchesMode
+                && backgroundState is { Phase: LocalAgentPhase.Running, RunsSchedules: true }
+                && DateTimeOffset.UtcNow - backgroundState.UpdatedUtc < TimeSpan.FromSeconds(10);
+            var revision = managedRevision is null ? "Ожидается первая конфигурация с сервера."
+                : jobs.Count == 0 ? $"Ревизия {managedRevision}: сервер ещё не назначил заданий."
+                : $"Ревизия {managedRevision} · заданий: {jobs.Count}. Настройки меняются в панели сервера.";
+            var message = automationReadFailed ? "Не удалось проверить агент. Работа заданий пока не подтверждена."
+                : backgroundStarting || automationService == AutomationService.Starting ? "Агент подключается к серверу…"
+                : backgroundBusy && !BackgroundExecutionMatchesMode ? "Работает агент с другим режимом. Остановите и включите его снова."
+                : backgroundState?.Phase == LocalAgentPhase.Faulted ? "Агент остановлен с ошибкой. Откройте историю и включите его снова."
+                : live ? "Агент выполняет задания с сервера." : "Серверный режим настроен. Нажмите «Включить автоматически».";
+            ShowAutomationNotice(message,
+                backgroundState?.Warning is { Length: > 0 } warning && live ? revision + "\nСообщение агента: " + warning : revision);
             return;
         }
         var observation = new AutomationObservation(DateTimeOffset.UtcNow, backgroundBusy, backgroundState,

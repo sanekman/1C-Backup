@@ -175,4 +175,9 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
     }
     public static Task SaveSettingsAsync(string directory, ServerMonitoringSettings settings, CancellationToken token = default)
     { settings.Validate(); return new AgentJsonFile<ServerMonitoringSettings>(Path.Combine(directory,"server-monitoring.json")).WriteAsync(settings,token); }
+    public static async Task<ServerMonitoringSettings?> LoadSettingsAsync(string directory, CancellationToken token = default)
+    {
+        var settings = await new AgentJsonFile<ServerMonitoringSettings>(Path.Combine(directory, "server-monitoring.json")).ReadAsync(token);
+        settings?.Validate(); return settings;
+    }
 }

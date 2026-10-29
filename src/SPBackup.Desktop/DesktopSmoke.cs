@@ -237,6 +237,7 @@ internal static partial class DesktopSmoke
             if (expectedRevision is not null && ApplicationBuildInfo.Revision != expectedRevision)
                 throw new InvalidOperationException("Идентификатор сборки не соответствует исходному коду.");
             await VerifySettingsSectionsAsync(window, label => Screenshot(label));
+            await window.SmokeVerifyManagedModeAsync(label => Screenshot(label));
             Click("AgentNavigation"); Click("HelpSettingsButton");
             Click("CopyBuildInfoButton");
             if (Clipboard.GetText() != ApplicationBuildInfo.SupportText || Control<TextBox>("BuildInfo").Text != Clipboard.GetText()

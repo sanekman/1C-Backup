@@ -631,9 +631,17 @@
        <StackPanel x:Name="ConnectionsSettingsSection" Visibility="Collapsed">
         <TextBlock Text="Подключения" FontSize="22" FontWeight="SemiBold" />
         <TextBlock Text="Дополнительные возможности. Для обычного копирования подключать сервер не нужно." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,20" />
-        <TextBlock Text="Мониторинг на сервере" FontSize="16" FontWeight="SemiBold" />
+        <TextBlock Text="Сервер и задания" FontSize="16" FontWeight="SemiBold" />
         <WrapPanel Margin="0,10,0,0"><Button x:Name="ConnectServerMonitoringButton" Content="Подключить по приглашению…" Click="ConnectServerMonitoring_Click"/><Button Content="Отключить" Margin="8,0,0,0" Click="DisconnectServerMonitoring_Click"/></WrapPanel>
         <TextBlock x:Name="ServerMonitoringStatus" Text="Сервер показывает результаты и состояние компьютеров в общей панели." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,20" />
+        <TextBlock Text="Откуда получать задания" FontSize="16" FontWeight="SemiBold" />
+        <ComboBox x:Name="AgentModePicker" Width="360" HorizontalAlignment="Left" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="AgentMode_Changed" Margin="0,10,0,10" />
+        <StackPanel x:Name="ServerPanel" Visibility="Collapsed">
+         <TextBlock Text="Подключённый сервер" /><TextBox x:Name="ServerAddress" IsReadOnly="True" Margin="0,6,0,10" />
+         <TextBlock Text="Задания настраивает администратор в панели сервера. После применения режима нажмите «Включить автоматически» вверху окна." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
+        </StackPanel>
+        <Button x:Name="SaveAgentSettingsButton" Content="Применить режим" HorizontalAlignment="Left" Click="SaveAgentSettings_Click" IsEnabled="False" />
+        <TextBlock Text="Локальные задания и копии сохраняются при смене режима. Для переключения остановите автоматическую работу." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,20" />
         <TextBlock Text="Оповещения в Telegram и MAX" FontSize="16" FontWeight="SemiBold" />
         <Button Content="Настроить оповещения" Click="Notifications_Click" HorizontalAlignment="Left" Margin="0,10,0,0"/>
         <TextBlock x:Name="NotificationsStatus" TextWrapping="Wrap" Margin="0,10,0,20"/>
@@ -644,16 +652,10 @@
           <Button Content="Инструкция по подключению шлюзов" Click="StorageBridgeHelp_Click" HorizontalAlignment="Left" Margin="0,10,0,0"/>
           <TextBlock x:Name="HubStatus" Text="Узел выключен по умолчанию." TextWrapping="Wrap" Margin="0,10,0,0"/>
          </StackPanel></Expander>
-         <Expander Header="Управление через сервер — в разработке" Margin="0,12,0,0"><StackPanel Margin="0,10,0,0">
+         <Expander Header="Связь с сервером и диагностика" Margin="0,12,0,0"><StackPanel Margin="0,10,0,0">
           <TextBlock x:Name="AgentIdentity" Margin="0,0,0,10" />
-          <ComboBox x:Name="AgentModePicker" Width="300" HorizontalAlignment="Left" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="AgentMode_Changed" Margin="0,0,0,10" />
-          <StackPanel x:Name="ServerPanel" Visibility="Collapsed">
-           <TextBlock Text="HTTPS-адрес сервера управления" /><TextBox x:Name="ServerAddress" Margin="0,6,0,10" />
-           <TextBlock Text="Идентификатор учётных данных агента" /><TextBox x:Name="AgentCredentialKey" Margin="0,6,0,10" />
-           <TextBlock Text="Интервал связи, секунд" /><TextBox x:Name="SyncInterval" Text="60" Width="120" HorizontalAlignment="Left" Margin="0,6,0,10" />
-          </StackPanel>
-          <Button x:Name="SaveAgentSettingsButton" Content="Сохранить режим агента" HorizontalAlignment="Left" Click="SaveAgentSettings_Click" IsEnabled="False" />
-          <TextBlock Text="Для локального копирования этот режим не требуется." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0" />
+          <TextBlock Text="Интервал связи, секунд" /><TextBox x:Name="SyncInterval" Text="60" Width="120" HorizontalAlignment="Left" Margin="0,6,0,10" />
+          <TextBlock Text="Изменение интервала сохраняется кнопкой «Применить режим»." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
          </StackPanel></Expander>
         </StackPanel></Expander>
        </StackPanel>

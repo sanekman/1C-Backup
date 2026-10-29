@@ -14,6 +14,7 @@ public partial class MainWindow
     internal Func<Guid, Task<IReadOnlyList<LocalManualRunHandle>>>? ManualQueueRecoveryOverride { get; set; }
 
     private bool BackgroundManualSessionLive => backgroundBusy && !backgroundStarting
+        && BackgroundExecutionMatchesMode
         && backgroundState is { Phase: LocalAgentPhase.Running, CanRunManually: true }
         && DateTimeOffset.UtcNow - backgroundState.UpdatedUtc < TimeSpan.FromSeconds(10);
 
@@ -24,18 +25,21 @@ public partial class MainWindow
         var selected = Jobs.SelectedItem as BackupJob;
         var queued = selected is not null && (localManualRuns.ContainsKey(selected.Id)
             || backgroundManualRuns.Values.Any(r => r.JobId == selected.Id && r.SessionId == backgroundState?.SessionId));
-        RunButton.IsEnabled = ready && canSave && !editorOpen && !serviceManaging && !installingUpdate
+        RunButton.IsEnabled = ready && configurationReady && (canSave || BackgroundAcceptsManualRuns) && !changingAgentConfiguration && !editorOpen && !serviceManaging && !installingUpdate
             && !trayStopping && !persisting && !jobFileTransfer && !schedulerStopping && copyVerification is null
             && !submittingManualRun && !backgroundStarting && (!backgroundBusy || BackgroundAcceptsManualRuns)
             && selected is not null && !queued;
         RunButton.ToolTip = queued ? "Ручной запуск этого задания уже принят. Другие задания можно добавить в очередь."
             : BackgroundManualSessionLive && !BackgroundAcceptsManualRuns ? "Проверяется очередь ручных запусков. До завершения проверки запуск недоступен."
             : backgroundBusy && !BackgroundAcceptsManualRuns ? "Дождитесь готовности агента. Если используется старая версия, обновите и перезапустите агент."
+            : agentSettings?.Mode == AgentMode.Managed && !BackgroundAcceptsManualRuns ? "Нажмите «Включить автоматически», чтобы запускать серверные задания через агента."
             : "Выполнить сохранённое задание вручную. Если копирование уже идёт, задание дождётся своей очереди. Расписание продолжит работать.";
     }
 
     private async Task RunManualAsync(BackupJob job)
     {
+        if (agentSettings?.Mode == AgentMode.Managed && (!configurationReady || !BackgroundAcceptsManualRuns))
+        { Status.Text = "Сначала включите автоматическую работу агента. Серверные задания выполняются через него."; return; }
         if (backgroundBusy)
         {
             if (!BackgroundAcceptsManualRuns) return;
