@@ -70,17 +70,16 @@ def main():
     manifest_path = args.artifacts / 'server-release.json'
     manifest_path.write_text(content)
     files.append(manifest_path)
+    notes_path = Path(__file__).resolve().parents[1] / 'docs/release-notes-server.md'
+    notes = notes_path.read_text(encoding='utf-8')
+    if notes.splitlines()[0] != '# SP Backup Server ' + version:
+        raise RuntimeError('Server release notes must match the new version.')
+    notes = notes.replace('(docs/', '(https://github.com/' + REPOSITORY + '/blob/' + source + '/docs/')
+    notes += '\n\nИсходный коммит: `' + source + '`. Контрольные суммы находятся рядом с файлами и в server-release.json.'
     # Each distribution branch is created once, containing the commit/checksum manifest.
     # Large offline installers stay in release assets (not Git blobs).
     tree = api('git/trees', {'tree': [{'path': 'server-release.json', 'mode': '100644', 'type': 'blob', 'content': content}]})
     commit = api('git/commits', {'message': 'Immutable server distribution ' + version, 'tree': tree['sha'], 'parents': []})
-    notes = ('Windows: скачайте setup.exe, задайте понятное имя системы мониторинга, полный HTTPS-адрес подключения и пароль администратора; PostgreSQL 17, .NET 10.0.13, HTTPS и службы Windows входят в пакет. '
-             'Название СУБД в панели приведено к «MS SQL». В панели: связь с агентами, задания, прогресс, история, неполные копии, результаты хранилищ и внешние SQL-копии. '
-             'Для подключения требуется клиент 0.2.0-alpha.20 или новее. Локальное расписание сохраняется. '
-             'Проверены установка с нуля, вход, переустановка, перезапуск служб и сохранение БД при удалении. '
-             'Управление заданиями с сервера остаётся следующим этапом.\n\n'
-             'Инструкция: https://github.com/' + REPOSITORY + '/blob/' + source + '/docs/server-start.md\n\n'
-             'Исходный коммит: `' + source + '`. Контрольные суммы находятся рядом с файлами и в server-release.json.')
     release = api('releases', {'tag_name': tag, 'target_commitish': source, 'name': 'SP Backup Server ' + version,
                               'body': notes, 'draft': True, 'prerelease': True, 'make_latest': 'false'})
     upload_base = release['upload_url'].split('{')[0]

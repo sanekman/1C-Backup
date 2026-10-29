@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -28,7 +29,10 @@ def main():
     from legacy_apphosts import copy_legacy_apphosts
     copy_legacy_apphosts(output, ["Server"], windows=args.runtime == "win-x64")
     (output / "VERSION.txt").write_text(version + "\n", encoding="utf-8")
-    (output / "START-HERE.md").write_text((repository / "docs/server-start.md").read_text(encoding="utf-8"), encoding="utf-8")
+    shutil.copytree(repository / "docs", output / "docs")
+    start = (repository / "docs/server-start.md").read_text(encoding="utf-8")
+    start = re.sub(r'\]\(([\w-]+\.md(?:#[^)]*)?)\)', r'](docs/\1)', start)
+    (output / "START-HERE.md").write_text(start, encoding="utf-8")
     shutil.copy(repository / "deploy/server/server.env.example", output)
     if args.runtime == "win-x64":
         shutil.copytree(repository / "deploy/server/windows", output / "windows")
