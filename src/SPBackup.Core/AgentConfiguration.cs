@@ -1,10 +1,15 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
 
 namespace SPBackup.Core;
 
 public sealed record ServerConfiguration(Guid AgentId, long Revision, IReadOnlyList<BackupJob> Jobs, int ProtocolVersion = 1);
-public sealed record CachedAgentConfiguration(string ServerAddress, ServerConfiguration Configuration, DateTimeOffset ReceivedUtc);
+public sealed record CachedAgentConfiguration(string ServerAddress, ServerConfiguration Configuration, DateTimeOffset ReceivedUtc)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public Guid? OfferId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? ConfigurationHash { get; init; }
+}
 public sealed record AgentHeartbeat(Guid AgentId, string AgentVersion, bool BackupExecutionAvailable,
     long? ConfigurationRevision, DateTimeOffset SentUtc);
 
@@ -19,10 +24,15 @@ public interface IAgentApi
 public sealed class AgentConfigurationCache(string path)
 {
     private readonly AgentJsonFile<CachedAgentConfiguration> file = new(path);
+    internal ConfigurationReceiptOutbox Receipts { get; } = new(path + ".receipts");
+    private static readonly JsonSerializerOptions HashJson = new() { Converters = { new JsonStringEnumConverter(allowIntegerValues: false) } };
+    internal static string Digest(ServerConfiguration configuration) => Convert.ToHexStringLower(SHA256.HashData(
+        JsonSerializer.SerializeToUtf8Bytes(configuration with { Jobs = configuration.Jobs.OrderBy(j => j.Id).ToArray() }, HashJson)));
     private static readonly JsonSerializerOptions ReadOptions = new()
     {
         RespectRequiredConstructorParameters = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        AllowDuplicateProperties = false,
         Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
     };
 
@@ -33,13 +43,22 @@ public sealed class AgentConfigurationCache(string path)
         var cached = await JsonSerializer.DeserializeAsync<CachedAgentConfiguration>(stream, ReadOptions, cancellationToken)
             ?? throw new InvalidDataException("Кэш конфигурации сервера содержит null.");
         Validate(cached.Configuration);
+        ValidateReceiptBinding(cached);
         return cached;
     }
 
     public Task SaveAsync(CachedAgentConfiguration cached, CancellationToken cancellationToken = default)
     {
         Validate(cached.Configuration);
+        ValidateReceiptBinding(cached);
         return file.WriteAsync(cached, cancellationToken);
+    }
+
+    private static void ValidateReceiptBinding(CachedAgentConfiguration cached)
+    {
+        if (cached.OfferId is null && cached.ConfigurationHash is null) return; // Legacy cache remains readable.
+        if (cached.OfferId is null || cached.OfferId == Guid.Empty
+            || cached.ConfigurationHash != Digest(cached.Configuration)) throw new InvalidDataException("Повреждена привязка кэша к предложению сервера.");
     }
 
     internal static void Validate(ServerConfiguration configuration)
@@ -51,7 +70,8 @@ public sealed class AgentConfigurationCache(string path)
     }
 }
 
-public sealed record AgentSyncResult(bool Enabled, bool Succeeded, long? Revision, Exception? Error);
+public sealed record AgentSyncResult(bool Enabled, bool Succeeded, long? Revision, Exception? Error)
+{ public bool ReceiptPending { get; init; } }
 
 /// <summary>Server configuration and local jobs are separate; offline never means an empty schedule.</summary>
 public sealed class AgentConfiguration(JobStore localJobs, AgentConfigurationCache cache, IAgentApi? api = null)
@@ -90,31 +110,69 @@ public sealed class AgentConfiguration(JobStore localJobs, AgentConfigurationCac
         if (settings.Mode == AgentMode.Standalone) return new(false, false, null, null);
         await syncGate.WaitAsync(cancellationToken);
         long? revision = null;
+        AgentConfigurationOffer? offer = null;
+        var receiptApi = api as IAgentConfigurationReceiptApi;
+        var reason = "InvalidConfiguration";
+        AgentSyncResult result;
         try
         {
-            var cached = await cache.LoadAsync(cancellationToken);
-            if (Matches(cached, settings)) revision = cached!.Configuration.Revision;
-            if (api is null) throw new InvalidOperationException("Адаптер API сервера ещё не подключён.");
-            var configuration = await api.GetConfigurationAsync(settings, revision, cancellationToken);
-            if (configuration is null)
+            try
             {
-                if (revision is null) throw new InvalidDataException("Сервер не прислал конфигурацию для первого подключения.");
-                await cache.SaveAsync(cached! with { ReceivedUtc = now.ToUniversalTime() }, cancellationToken);
-                return new(true, true, revision, null);
+                var cached = await cache.LoadAsync(cancellationToken);
+                if (Matches(cached, settings)) revision = cached!.Configuration.Revision;
+                if (api is null) throw new InvalidOperationException("Адаптер API сервера ещё не подключён.");
+                offer = receiptApi is null ? null : await receiptApi.GetConfigurationOfferAsync(settings, revision, cancellationToken);
+                if (offer?.NotModified == true && offer.OfferId is not null && (cached?.OfferId != offer.OfferId || offer.Revision != revision))
+                {
+                    offer = null;
+                    offer = await receiptApi!.GetConfigurationOfferAsync(settings, null, cancellationToken); // Upgrade an unbound legacy cache with a full response.
+                }
+                if (offer?.Error is not null) throw offer.Error;
+                if (offer?.OfferId is not null && (offer.OfferId == Guid.Empty || offer.Revision is null or <= 0))
+                { offer = null; throw new InvalidDataException("Не удалось привязать предложение конфигурации."); }
+                var configuration = receiptApi is null ? await api.GetConfigurationAsync(settings, revision, cancellationToken) : offer!.Configuration;
+                if (configuration is null)
+                {
+                    if (revision is null) throw new InvalidDataException("Сервер не прислал конфигурацию для первого подключения.");
+                    if (offer is { NotModified: false }) throw new InvalidDataException("Сервер не прислал конфигурацию.");
+                    if (offer?.OfferId is not null && (offer.Revision != revision || offer.OfferId != cached?.OfferId))
+                        throw new InvalidDataException("Предложение не относится к сохранённому кэшу.");
+                    reason = "CacheWriteFailed";
+                    await cache.SaveAsync(cached! with { ReceivedUtc = now.ToUniversalTime() }, cancellationToken);
+                    result = new(true, true, revision, null);
+                }
+                else
+                {
+                    if (offer?.OfferId is not null && offer.Revision != configuration.Revision)
+                        throw new InvalidDataException("Ревизия предложения не совпадает с конфигурацией.");
+                    AgentConfigurationCache.Validate(configuration);
+                    if (configuration.AgentId != settings.AgentId)
+                        throw new InvalidDataException("Сервер вернул настройки другого агента.");
+                    if (revision is not null && configuration.Revision < revision)
+                        throw new InvalidDataException("Сервер вернул устаревшую конфигурацию.");
+                    if (revision == configuration.Revision && AgentConfigurationCache.Digest(cached!.Configuration) != AgentConfigurationCache.Digest(configuration))
+                        throw new InvalidDataException("Содержимое конфигурации изменилось без новой ревизии.");
+                    reason = "CacheWriteFailed";
+                    await cache.SaveAsync(new(settings.NormalizedServerAddress, configuration, now.ToUniversalTime())
+                        { OfferId = offer?.OfferId, ConfigurationHash = offer?.OfferId is null ? null : AgentConfigurationCache.Digest(configuration) }, cancellationToken);
+                    result = new(true, true, configuration.Revision, null);
+                }
             }
-            AgentConfigurationCache.Validate(configuration);
-            if (configuration.AgentId != settings.AgentId)
-                throw new InvalidDataException("Сервер вернул настройки другого агента.");
-            if (revision is not null && configuration.Revision < revision)
-                throw new InvalidDataException("Сервер вернул устаревшую конфигурацию.");
-            if (revision == configuration.Revision && !cached!.Configuration.Jobs.OrderBy(j => j.Id)
-                .SequenceEqual(configuration.Jobs.OrderBy(j => j.Id)))
-                throw new InvalidDataException("Содержимое конфигурации изменилось без новой ревизии.");
-            await cache.SaveAsync(new(settings.NormalizedServerAddress, configuration, now.ToUniversalTime()), cancellationToken);
-            return new(true, true, configuration.Revision, null);
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex) { result = new(true, false, revision, ex); }
+            var pending = false;
+            if (receiptApi is not null)
+            {
+                if (offer is { OfferId: { } id, Revision: { } offeredRevision })
+                {
+                    try { await cache.Receipts.SaveAsync(settings, new(settings.AgentId, offeredRevision, id, result.Succeeded ? "Accepted" : "Rejected", result.Succeeded ? null : reason, now.ToUniversalTime()), cancellationToken); }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (Exception) { pending = true; }
+                }
+                pending |= await cache.Receipts.FlushAsync(settings, receiptApi, cancellationToken);
+            }
+            return result with { ReceiptPending = pending };
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception ex) { return new(true, false, revision, ex); }
         finally { syncGate.Release(); }
     }
 

@@ -14,6 +14,7 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
     <Compile Include="../SPBackup.Core/ServerMonitoringContracts.cs" Link="Monitoring/Contracts.cs" />
     <Compile Include="../SPBackup.Core/AgentCapabilities.cs" Link="Configuration/AgentCapabilities.cs" />
+    <Compile Include="../SPBackup.Core/ConfigurationReceiptContracts.cs" Link="Configuration/ReceiptContracts.cs" />
     <EmbeddedResource Include="Migrations/*.sql" />
     <Content Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -67,11 +67,17 @@
             <dt>Последняя связь, время сервера</dt><dd>@Home.Time(Monitoring?.ReceivedUtc ?? agent.ReceivedUtc)</dd>
             <dt>Последняя отметка времени агента</dt><dd>@Home.Time(Monitoring?.Snapshot.SentUtc ?? agent.SentUtc)</dd>
             <dt>Ревизия на сервере</dt><dd>@agent.DesiredRevision</dd>
+            @if (Decisions is { } decisions)
+            {
+                <dt>Настройки серверной ревизии</dt><dd>@DecisionLabel(decisions)</dd>
+                <dt>Последняя проверенная и сохранённая агентом</dt><dd>@(decisions.LastAccepted is { } accepted ? $"Ревизия {accepted.Revision} · подтверждение получено {Home.Time(accepted.ReceivedUtc)}" : "Подтверждения ещё нет")</dd>
+            }
             <dt>Ревизия, сообщённая агентом</dt><dd>@(agent.ReportedRevision?.ToString() ?? "Нет сигнала")</dd>
             <dt>Исполнитель копирования</dt><dd>@(agent.ReceivedUtc is null ? "Нет данных" : agent.BackupExecutionAvailable ? "Агент сообщает готовность" : "Агент сообщает, что недоступен")</dd>
             <dt>Серверные задания</dt><dd>@(Monitoring?.Snapshot.ConfigurationCapabilities is not { } caps ? "Агент не передал сведения о поддержке" : caps.Contains(AgentCapabilities.ManagedExecutionV1) ? "Поддержка заявлена агентом" : "Задания настраиваются на компьютере агента")</dd>
         </dl>
         <p class="muted">Данные актуальны на время последнего сигнала. Готовность исполнителя не подтверждает успешное создание копии.</p>
+        <p class="muted">Агент подтверждает проверку и сохранение настроек. Это не подтверждает запуск расписания или создание резервной копии.</p>
         @if (agent.Revoked) { <p class="error">Доступ отозван. Сервер не принимает этот агентский токен. Принятое локальное расписание само по себе не отменяется.</p><a href="@($"connect?agentId={Id}")">Создать приглашение для повторного подключения</a> }
         else
         {
@@ -86,6 +92,7 @@ else { <h1>Агент не найден</h1> }
     [Parameter] public Guid Id { get; set; }
     [SupplyParameterFromQuery] public int RunPage { get; set; }
     private AgentRecord? Data;
+    private ConfigurationDecisionState? Decisions;
     private MonitoringState? Monitoring;
     private MonitoredRunPage? Runs;
     private IReadOnlyList<MonitoredRun> Latest = [];
@@ -103,9 +110,18 @@ else { <h1>Агент не найден</h1> }
     };
     private static string Status(MonitoredRun r) => r.Incomplete ? "Неполная копия" : r.Status switch
     { "Succeeded" => r.WarningCount > 0 ? "С предупреждениями" : "Успешно", "Failed" => "Ошибка", "PartiallySucceeded"=>"Частичная доставка", "Cancelled"=>"Отменено", _=>"Прервано" };
+    private static string DecisionLabel(ConfigurationDecisionState state) => state.Revoked ? "Доступ агента отозван" : state.Current switch
+    {
+        null => "Ревизия ещё не выдана с запросом подтверждения",
+        { Status: "Awaiting" } => "Ожидается подтверждение агента",
+        { Status: "Accepted" } => "Проверена и сохранена агентом",
+        { Reason: "CacheWriteFailed" } => "Агент не смог сохранить настройки",
+        _ => "Агент отклонил настройки"
+    };
     protected override async Task OnParametersSetAsync()
     {
         Data = await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted);
+        Decisions = Data is null ? null : await Store.ConfigurationDecisionsAsync(Id, Http.HttpContext.RequestAborted);
         Monitoring = await Store.MonitoringAsync(Id, Http.HttpContext!.RequestAborted);
         Runs = await Store.RunsAsync(Id,RunPage,Http.HttpContext.RequestAborted);
         Successful = await Store.LastSuccessfulRunsAsync(Id,Http.HttpContext.RequestAborted);

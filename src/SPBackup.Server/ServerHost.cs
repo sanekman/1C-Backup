@@ -175,6 +175,8 @@ public static partial class ServerHost
             var capabilities = ConfigurationCompatibility.ReadHeader(context);
             var configuration = await store.ConfigurationAsync(agentId, token);
             ConfigurationCompatibility.RequireSupport(configuration.Document, capabilities);
+            if (capabilities.Contains(AgentCapabilities.ConfigurationReceiptsV1))
+                context.Response.Headers[ConfigurationReceipt.OfferHeader] = (await store.RegisterConfigurationOfferAsync(agentId, configuration.Revision, configuration.Document, ServerAuthentication.AgentGeneration(context.User), token)).ToString("D");
             var etag = '"' + configuration.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture) + '"';
             context.Response.Headers.ETag = etag;
             if (context.Request.GetTypedHeaders().IfNoneMatch?.Any(value => value.Tag.Value == etag || value.Tag.Value == "*") == true) return Results.StatusCode(304);
@@ -182,6 +184,20 @@ public static partial class ServerHost
         });
         agents.MapPost("/heartbeat", async (Guid agentId, HeartbeatRequest request, ServerStore store, CancellationToken token) =>
         { await store.HeartbeatAsync(agentId, request, token); return Results.NoContent(); });
+        agents.MapPost("/configuration-receipt", async (Guid agentId, HttpContext context, ServerStore store, CancellationToken token) =>
+        {
+            if (!context.Request.HasJsonContentType()) throw new ServerRequestException(415, "json_required");
+            ConfigurationReceipt request;
+            try
+            {
+                request = await System.Text.Json.JsonSerializer.DeserializeAsync<ConfigurationReceipt>(context.Request.Body,
+                    new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+                    { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
+                        AllowDuplicateProperties = false, RespectRequiredConstructorParameters = true }, token) ?? throw new System.Text.Json.JsonException();
+            }
+            catch (System.Text.Json.JsonException) { throw new ServerRequestException(400, "invalid_configuration_receipt"); }
+            await store.SaveConfigurationReceiptAsync(agentId, request, ServerAuthentication.AgentGeneration(context.User), token); return Results.NoContent();
+        });
         agents.MapPut("/monitoring", async (Guid agentId, Monitoring.MonitoringSnapshot request, HttpContext context, ServerStore store, CancellationToken token) =>
         {
             var capabilities = ConfigurationCompatibility.ReadHeader(context);
@@ -200,6 +216,8 @@ public static partial class ServerHost
             var capabilities = state?.Snapshot.ConfigurationCapabilities;
             return Results.Json(new AgentCapabilityState(id, capabilities is null ? null : state!.ReceivedUtc, capabilities ?? []));
         });
+        management.MapGet("/agents/{id:guid}/configuration-state", async (Guid id, ServerStore store, CancellationToken token) =>
+            Results.Json(await store.ConfigurationDecisionsAsync(id, token)));
         management.MapGet("/agents/{id:guid}/runs", async (Guid id, int? page, ServerStore store, CancellationToken token) => Results.Json(await store.RunsAsync(id,page ?? 0,token)));
         management.MapGet("/agents", async (int? page, ServerStore store, CancellationToken token) => Results.Json(await store.AgentsAsync(page ?? 0, token)));
         management.MapGet("/agents/{id:guid}", async (Guid id, ServerStore store, CancellationToken token) => await store.AgentAsync(id, token) is { } agent ? Results.Json(agent) : Results.NotFound());

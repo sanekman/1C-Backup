@@ -12,11 +12,12 @@ public static class AgentCapabilities
     public const string StrictConfigurationV1 = "strict-configuration-v1";
     public const string PostgreSqlTlsV1 = "postgresql-tls-verify-full-v1";
     public const string ManagedExecutionV1 = "managed-execution-v1";
+    public const string ConfigurationReceiptsV1 = "configuration-receipts-v1";
 
     // LocalAgentHost still rejects Managed. Do not advertise execution merely because
     // the library can parse/cache settings or perform standalone backups.
     public static IReadOnlyList<string> Reported { get; } = Array.AsReadOnly(new[]
-        { ConfigurationV1, StrictConfigurationV1, PostgreSqlTlsV1 });
+        { ConfigurationV1, StrictConfigurationV1, PostgreSqlTlsV1, ConfigurationReceiptsV1 });
     public static string HeaderValue => string.Join(",", Reported);
 
     private static bool First(char c) => c is >= 'a' and <= 'z' or >= '0' and <= '9';

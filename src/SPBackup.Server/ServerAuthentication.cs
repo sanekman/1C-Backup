@@ -16,7 +16,8 @@ public sealed class AgentAuthentication(IOptionsMonitor<AuthenticationSchemeOpti
         if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return AuthenticateResult.NoResult();
         var id = await store.AuthenticateAgentAsync(header[7..], Context.RequestAborted);
         if (id is null) return AuthenticateResult.Fail("Invalid agent credential.");
-        var identity = new ClaimsIdentity([new(ClaimTypes.NameIdentifier, id.Value.ToString("D"))], SchemeName);
+        var identity = new ClaimsIdentity([new(ClaimTypes.NameIdentifier, id.Value.ToString("D")),
+            new("agent_generation", Convert.ToHexString(ServerTokens.Hash(header[7..])))], SchemeName);
         return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
     }
 }
@@ -67,4 +68,5 @@ public static class ServerAuthentication
         });
     }
     public static Guid UserId(ClaimsPrincipal user) => Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+    internal static byte[] AgentGeneration(ClaimsPrincipal user) => Convert.FromHexString(user.FindFirstValue("agent_generation")!);
 }

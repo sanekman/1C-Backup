@@ -133,7 +133,7 @@ public sealed class CapabilityTests(ServerFixture fixture) : IClassFixture<Serve
         using var metadata = await fixture.Administrator.GetAsync($"api/v1/management/agents/{enrolled.AgentId}/capabilities");
         Assert.Equal(HttpStatusCode.OK, metadata.StatusCode);
         var report = JsonNode.Parse(await metadata.Content.ReadAsStringAsync())!;
-        Assert.NotNull(report["receivedUtc"]); Assert.Equal(3, report["capabilities"]!.AsArray().Count);
+        Assert.NotNull(report["receivedUtc"]); Assert.Equal(4, report["capabilities"]!.AsArray().Count);
         using var old = Agent(enrolled.Token);
         using var posted = await old.PutAsync($"api/v1/agents/{enrolled.AgentId}/monitoring", ServerFixture.Json(snapshot));
         Assert.Equal(HttpStatusCode.NoContent, posted.StatusCode);

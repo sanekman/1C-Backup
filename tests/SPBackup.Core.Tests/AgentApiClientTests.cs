@@ -29,6 +29,7 @@ public sealed class AgentApiClientTests
             Assert.Equal("fixture-token", request.Headers.Authorization.Parameter);
             var capabilities = AgentCapabilities.Parse(string.Join(",", request.Headers.GetValues(AgentCapabilities.Header)));
             Assert.Contains(AgentCapabilities.StrictConfigurationV1, capabilities);
+            Assert.Contains(AgentCapabilities.ConfigurationReceiptsV1, capabilities);
             Assert.Contains(AgentCapabilities.PostgreSqlTlsV1, capabilities);
             Assert.DoesNotContain(AgentCapabilities.ManagedExecutionV1, capabilities);
             Assert.Equal("\"1\"", Assert.Single(request.Headers.IfNoneMatch).Tag);
@@ -46,6 +47,36 @@ public sealed class AgentApiClientTests
     {
         using var client = new AgentApiClient(new FixtureCredentials(), new Handler(_ => new(HttpStatusCode.NotModified)));
         Assert.Null(await client.GetConfigurationAsync(settings, 1));
+    }
+
+    [Theory]
+    [InlineData("missing-etag")]
+    [InlineData("invalid-id")]
+    [InlineData("weak-etag")]
+    public async Task UnboundOfferHeadersCannotCreateAReceiptTarget(string failure)
+    {
+        using var client = new AgentApiClient(new FixtureCredentials(), new Handler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+            response.Headers.Add(ConfigurationReceipt.OfferHeader, failure == "invalid-id" ? "invalid" : Guid.NewGuid().ToString("D"));
+            if (failure != "missing-etag") response.Headers.ETag = new("\"1\"", failure == "weak-etag");
+            return response;
+        }));
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetConfigurationOfferAsync(settings, null));
+    }
+
+    [Fact]
+    public async Task MalformedOfferedBodyRetainsTheOfferedRevisionInsteadOfTheCachedOne()
+    {
+        var id = Guid.NewGuid();
+        using var client = new AgentApiClient(new FixtureCredentials(), new Handler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent(JsonSerializer.Serialize(new {agentId=settings.AgentId,revision=3,jobs=Array.Empty<object>(),protocolVersion=1}), Encoding.UTF8,"application/json") };
+            response.Headers.ETag = new("\"2\""); response.Headers.Add(ConfigurationReceipt.OfferHeader,id.ToString("D")); return response;
+        }));
+        var offer = await client.GetConfigurationOfferAsync(settings, 1);
+        Assert.Equal(2, offer.Revision); Assert.Equal(id, offer.OfferId); Assert.Null(offer.Configuration); Assert.IsType<InvalidDataException>(offer.Error);
     }
 
     [Theory]

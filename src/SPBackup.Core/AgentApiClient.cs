@@ -12,7 +12,7 @@ public interface IAgentCredentialProvider
 }
 
 /// <summary>API v1, outgoing HTTPS only. Redirects and invalid TLS certificates are not accepted.</summary>
-public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IDisposable
+public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgentConfigurationReceiptApi, IDisposable
 {
     private readonly HttpClient client;
     private readonly IAgentCredentialProvider credentials;
@@ -20,6 +20,7 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IDispo
     {
         RespectRequiredConstructorParameters = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        AllowDuplicateProperties = false,
         Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
     };
 
@@ -48,30 +49,71 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IDispo
     public async Task<ServerConfiguration?> GetConfigurationAsync(AgentSettings settings, long? currentRevision,
         CancellationToken cancellationToken = default)
     {
+        var offer = await GetConfigurationOfferAsync(settings, currentRevision, cancellationToken);
+        if (offer.Error is not null) throw offer.Error;
+        return offer.Configuration;
+    }
+
+    public async Task<AgentConfigurationOffer> GetConfigurationOfferAsync(AgentSettings settings, long? currentRevision,
+        CancellationToken cancellationToken = default)
+    {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
         var requestToken = timeout.Token;
         using var request = await RequestAsync(settings, HttpMethod.Get, "configuration", requestToken);
         if (currentRevision is not null) request.Headers.IfNoneMatch.Add(new EntityTagHeaderValue($"\"{currentRevision}\""));
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestToken);
-        if (response.StatusCode == HttpStatusCode.NotModified) return null;
-        response.EnsureSuccessStatusCode();
-        const int limit = 4 * 1024 * 1024;
-        if (response.Content.Headers.ContentLength > limit) throw new InvalidDataException("Конфигурация сервера слишком велика.");
-        await using var input = await response.Content.ReadAsStreamAsync(requestToken);
-        using var body = new MemoryStream();
-        var buffer = new byte[81920];
-        int read;
-        while ((read = await input.ReadAsync(buffer, requestToken)) != 0)
+        if (response.StatusCode != HttpStatusCode.NotModified) response.EnsureSuccessStatusCode();
+        Guid? offerId = null; long? offeredRevision = null;
+        if (response.Headers.TryGetValues(ConfigurationReceipt.OfferHeader, out var headers))
         {
-            if (body.Length + read > limit) throw new InvalidDataException("Конфигурация сервера слишком велика.");
-            body.Write(buffer, 0, read);
+            var values = headers.ToArray();
+            var tag = response.Headers.ETag;
+            if (values.Length != 1 || !Guid.TryParseExact(values[0], "D", out var id) || id == Guid.Empty
+                || tag is null || tag.IsWeak || tag.Tag.Length < 3
+                || !long.TryParse(tag.Tag[1..^1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number)
+                || number <= 0) throw new InvalidDataException("Неверная привязка предложения конфигурации.");
+            offerId = id; offeredRevision = number;
         }
-        var configuration = JsonSerializer.Deserialize<ServerConfiguration>(body.ToArray(), JsonOptions)
-            ?? throw new InvalidDataException("Сервер вернул пустую конфигурацию.");
-        AgentConfigurationCache.Validate(configuration);
-        if (configuration.AgentId != settings.AgentId) throw new InvalidDataException("Сервер вернул настройки другого агента.");
-        return configuration;
+        if (response.StatusCode == HttpStatusCode.NotModified)
+        {
+            if (offerId is not null && (currentRevision is null || currentRevision != offeredRevision))
+                throw new InvalidDataException("Ответ 304 не относится к текущей ревизии.");
+            return new(offeredRevision, offerId, true, null, null);
+        }
+        try
+        {
+            const int limit = 4 * 1024 * 1024;
+            if (response.Content.Headers.ContentLength > limit) throw new InvalidDataException("Конфигурация сервера слишком велика.");
+            await using var input = await response.Content.ReadAsStreamAsync(requestToken);
+            using var body = new MemoryStream();
+            var buffer = new byte[81920];
+            int read;
+            while ((read = await input.ReadAsync(buffer, requestToken)) != 0)
+            {
+                if (body.Length + read > limit) throw new InvalidDataException("Конфигурация сервера слишком велика.");
+                body.Write(buffer, 0, read);
+            }
+            var configuration = JsonSerializer.Deserialize<ServerConfiguration>(body.ToArray(), JsonOptions)
+                ?? throw new InvalidDataException("Сервер вернул пустую конфигурацию.");
+            AgentConfigurationCache.Validate(configuration);
+            if (configuration.AgentId != settings.AgentId) throw new InvalidDataException("Сервер вернул настройки другого агента.");
+            if (offerId is not null && offeredRevision != configuration.Revision) throw new InvalidDataException("Ревизия предложения не совпадает с конфигурацией.");
+            return new(offeredRevision, offerId, false, configuration, null);
+        }
+        catch (Exception error) when (offerId is not null && error is JsonException or InvalidDataException)
+        { return new(offeredRevision, offerId, false, null, error); }
+    }
+
+    public async Task SendConfigurationReceiptAsync(AgentSettings settings, ConfigurationReceipt receipt, CancellationToken cancellationToken = default)
+    {
+        if (!receipt.Valid() || receipt.AgentId != settings.AgentId) throw new ArgumentException("Неверное подтверждение конфигурации.");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        using var request = await RequestAsync(settings, HttpMethod.Post, "configuration-receipt", timeout.Token);
+        request.Content = JsonContent.Create(receipt, options: JsonOptions);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task SendHeartbeatAsync(AgentSettings settings, AgentHeartbeat heartbeat,
