@@ -9,7 +9,7 @@ namespace SPBackup.Core;
 
 /// <summary>Each operation gets its own outbound-only logon; existing SMB sessions are untouched.</summary>
 [SupportedOSPlatform("windows")]
-internal sealed class WindowsNetworkShareStorage(FileBackupStorage files, NetworkCredential credential) : IBackupStorage
+internal sealed class WindowsNetworkShareStorage(FileBackupStorage files, NetworkCredential credential, string shareRoot) : IBackupStorage
 {
     private async Task<T> RunAsync<T>(Func<Task<T>> action, CancellationToken token)
     {
@@ -22,7 +22,21 @@ internal sealed class WindowsNetworkShareStorage(FileBackupStorage files, Networ
         if (!LogonUser(username, domain, credential.Password, 9 /* NEW_CREDENTIALS */, 3 /* WINNT50 */, out var identity))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось подготовить отдельный сетевой вход.");
         using (identity)
-            return await WindowsIdentity.RunImpersonatedAsync(identity, action);
+            return await WindowsIdentity.RunImpersonatedAsync(identity, async () =>
+            {
+                // A network-only logon has no Explorer mappings. Establish this one
+                // deviceless share explicitly before filesystem APIs probe/create it.
+                var resource = new NetworkResource { Type = 1, RemoteName = shareRoot };
+                var result = AddConnection(ref resource, credential.Password, credential.UserName, 4 /* temporary, no profile update/UI */);
+                if (result != 0)
+                {
+                    var error = new Win32Exception(result);
+                    var hint = FileStorageFailures.Hint(error) ?? "Не удалось подключиться к сетевой папке. Проверьте адрес, учётные данные и разрешения на NAS.";
+                    throw new IOException(hint + $" Код Windows: {result}.", error);
+                }
+                token.ThrowIfCancellationRequested();
+                return await action();
+            });
     }
     private Task RunAsync(Func<Task> action, CancellationToken token) => RunAsync(async () => { await action(); return true; }, token);
     public async Task<StoredBackup> StoreAsync(string completedBackupPath, BackupJob job, CancellationToken cancellationToken = default)
@@ -47,4 +61,14 @@ internal sealed class WindowsNetworkShareStorage(FileBackupStorage files, Networ
     [DllImport("advapi32.dll", EntryPoint = "LogonUserW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool LogonUser(string username, string? domain, string password, int logonType, int provider, out SafeAccessTokenHandle token);
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NetworkResource
+    {
+        public uint Scope, Type, DisplayType, Usage;
+        public string? LocalName;
+        public string RemoteName;
+        public string? Comment, Provider;
+    }
+    [DllImport("mpr.dll", EntryPoint = "WNetAddConnection2W", CharSet = CharSet.Unicode)]
+    private static extern int AddConnection(ref NetworkResource resource, string password, string username, uint flags);
 }

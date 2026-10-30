@@ -12,7 +12,7 @@ internal static class FileBackupBases
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Сетевой вход доступен в Windows.");
             if (target.Validate().Count != 0) throw new InvalidDataException("Проверьте привязку сетевого входа.");
             var login = await new WindowsNetworkShareCredentialStore().GetAsync(target.NetworkShare.CredentialKey, token);
-            return await new WindowsNetworkShareStorage(new(), login).OpenArchiveReadAsync(path, token);
+            return await new WindowsNetworkShareStorage(new(), login, target.NetworkShare.ShareRoot).OpenArchiveReadAsync(path, token);
         }
         FileBackupPaths.RejectReparse(path);
         return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920,

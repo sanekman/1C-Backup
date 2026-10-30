@@ -3,7 +3,8 @@ namespace SPBackup.Core;
 internal static class FileStorageFailures
 {
     // Match native codes, never localized exception messages. Credentials and capacity require user action.
-    internal static int? Code(Exception error) => ((uint)error.HResult & 0xFFFF0000) == 0x80070000
+    internal static int? Code(Exception error) => error is System.ComponentModel.Win32Exception native ? native.NativeErrorCode
+        : ((uint)error.HResult & 0xFFFF0000) == 0x80070000
         ? error.HResult & 0xFFFF : null;
     internal static bool Transient(Exception error) => error is IOException
         && Code(error) is 53 or 54 or 58 or 59 or 64 or 121 or 1222 or 1231 or 1232 or 1236 or 1237;

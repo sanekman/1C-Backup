@@ -37,7 +37,7 @@ public sealed class RoutedBackupStorage(IFtpCredentialStore credentials, string 
                 throw new InvalidDataException("Некорректная привязка сетевого входа.");
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Отдельный вход в сетевую папку доступен в Windows.");
             var networkLogin = await new WindowsNetworkShareCredentialStore().GetAsync(job.NetworkShare.CredentialKey, cancellationToken);
-            return new WindowsNetworkShareStorage(files, networkLogin);
+            return new WindowsNetworkShareStorage(files, networkLogin, job.NetworkShare.ShareRoot);
         }
         if (job.StorageKind == StorageKind.RemoteGateway)
         {
