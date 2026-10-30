@@ -8,6 +8,7 @@ public partial class JobWizard
 {
     [Parameter] public Guid Id { get; set; }
     [Parameter] public Guid? JobId { get; set; }
+    [Parameter] public Guid? TemplateId { get; set; }
     [SupplyParameterFromForm] public FileJobDraft? Model { get; set; }
     [SupplyParameterFromForm] public string? Command { get; set; }
     private AgentRecord? Agent;
@@ -26,11 +27,13 @@ public partial class JobWizard
         if (Agent.Revoked) { Error = "Доступ агента отозван. Сначала подключите агент заново."; return; }
         try { Configuration = await Store.ReadFileConfigurationAsync(Id, context.RequestAborted); }
         catch (ServerRequestException) { Error = "Этот план содержит параметры, которые мастер пока не поддерживает. План сохранён без изменений."; return; }
-        var job = JobId is { } jobId ? Configuration.Jobs.FirstOrDefault(j => j.Id == jobId) : null;
-        if (JobId is not null && job is null)
+        var selectedId = JobId ?? TemplateId;
+        var job = selectedId is { } jobId ? Configuration.Jobs.FirstOrDefault(j => j.Id == jobId) : null;
+        if (selectedId is not null && job is null)
         { Error = "Задание не найдено. Возможно, другой администратор уже удалил его."; Configuration = null; context.Response.StatusCode = 404; return; }
         Model ??= job is null ? new() { Revision = Configuration.Revision.ToString(CultureInfo.InvariantCulture) }
-            : FileJobDraft.From(job, Configuration.Revision);
+            : TemplateId is null ? FileJobDraft.From(job, Configuration.Revision)
+            : FileJobDraft.CopyFrom(job, Configuration.Revision);
     }
 
     private async Task Submit()
@@ -42,6 +45,7 @@ public partial class JobWizard
         { Model.Step = 1; Error = "Не удалось прочитать форму. Откройте мастер заново из списка заданий."; return; }
         if (revision != Configuration.Revision)
         { ShowConflict(); return; }
+        if (Model.Step == 1 || Command == "publish") Model.UpdateSuggestedName();
         if (Command == "back") { Model.Step = Math.Max(1, Model.Step - 1); return; }
         if (Model.Step == 3 && Command == "add-storage")
         {

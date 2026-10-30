@@ -154,7 +154,7 @@ public sealed partial class JobWizardTests(ServerFixture fixture) : IClassFixtur
         step = await Post(path, weekly.Html, "next", new() { ["Model.Monday"] = "true" });
         var overlap = await Post(path, step.Html, "next", new() { ["Model.Destination"] = @"C:\Data\Copies" });
         Assert.Contains("должны находиться отдельно", WebUtility.HtmlDecode(overlap.Html));
-        var bypass = await Post(path, start, "publish", new() { ["Model.Step"] = "4", ["Model.Source"] = @"C:\Data", ["Model.Destination"] = @"D:\Copies" });
+        var bypass = await Post(path, start, "publish", new() { ["Model.Step"] = "4", ["Model.Name"] = "Invalid\nname", ["Model.Source"] = @"C:\Data", ["Model.Destination"] = @"D:\Copies" });
         Assert.DoesNotContain("Задание сохранено", WebUtility.HtmlDecode(bypass.Html));
         Assert.Equal(1, (await fixture.Store.ConfigurationAsync(agent.AgentId, default)).Revision);
     }

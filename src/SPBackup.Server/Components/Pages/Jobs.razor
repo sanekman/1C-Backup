@@ -33,7 +33,7 @@
                         }
                         <dt>Запуск</dt><dd>@FileJobDraft.ScheduleLabel(job.ScheduleKind)@if (job.ScheduleKind != "Manual") { <span> · @(job.Enabled ? "расписание включено" : "расписание выключено")</span> }</dd></dl>
                     @if (!agent.Revoked)
-                    { <div class="actions"><a href="@($"agents/{Id}/jobs/{job.Id}/edit")">Изменить</a><a href="@($"agents/{Id}/jobs/{job.Id}/remove")">Удалить…</a></div> }
+                    { <div class="actions"><a href="@($"agents/{Id}/jobs/{job.Id}/edit")">Изменить</a><a href="@($"agents/{Id}/jobs/{job.Id}/copy")">Создать на основе…</a><a href="@($"agents/{Id}/jobs/{job.Id}/remove")">Удалить…</a></div> }
                 </article>
             }
         </section>

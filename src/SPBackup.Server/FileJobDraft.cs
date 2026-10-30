@@ -9,6 +9,7 @@ public sealed partial class FileJobDraft
     public string Revision { get; set; } = "";
     public string JobId { get; set; } = Guid.NewGuid().ToString();
     public string Name { get; set; } = "";
+    public string SuggestedName { get; set; } = "";
     public string Kind { get; set; } = "FilesAndFolders";
     public string Source { get; set; } = "";
     public bool AllowOpen { get; set; }
@@ -117,7 +118,7 @@ public sealed partial class FileJobDraft
             [nameof(Schedule), nameof(Enabled), nameof(Times), nameof(TimeZone), ..Days.Select(d => d.Key)],
             [nameof(Destination), nameof(Temporary), nameof(Keep), nameof(BackupMode), nameof(FullEvery), nameof(FullDay)]];
         // Only simple explicit form properties are carried forward; computed properties are never posted.
-        string[] all = [nameof(Step), nameof(Revision), nameof(JobId), nameof(Name), nameof(Kind), nameof(Source), nameof(AllowOpen),
+        string[] all = [nameof(Step), nameof(Revision), nameof(JobId), nameof(Name), nameof(SuggestedName), nameof(Kind), nameof(Source), nameof(AllowOpen),
             nameof(Schedule), nameof(Enabled), nameof(Times), nameof(TimeZone), ..Days.Select(d => d.Key), nameof(Destination),
             nameof(Temporary), nameof(Keep), nameof(BackupMode), nameof(FullEvery), nameof(FullDay)];
         foreach (var key in all.Where(k => Step is < 1 or > 3 || !visible[Step].Contains(k)))

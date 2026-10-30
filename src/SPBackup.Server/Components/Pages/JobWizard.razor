@@ -1,12 +1,13 @@
 @page "/agents/{Id:guid}/jobs/new"
 @page "/agents/{Id:guid}/jobs/{JobId:guid}/edit"
+@page "/agents/{Id:guid}/jobs/{TemplateId:guid}/copy"
 @attribute [Authorize(Policy = ServerAuthentication.Administrator)]
 @inject ServerStore Store
 @inject IHttpContextAccessor Http
 @inject ServerOptions Settings
 <PageTitle>Мастер задания — @Settings.DisplayName</PageTitle>
 <a href="@($"agents/{Id}/jobs")">← Задания агента</a>
-<h1>@(JobId is null ? "Новое задание" : "Изменить задание")</h1>
+<h1>@(TemplateId is not null ? "Новое задание на основе существующего" : JobId is null ? "Новое задание" : "Изменить задание")</h1>
 @if (Saved is { } saved)
 {
     <section class="card narrow" role="status"><h2>Задание сохранено</h2>
@@ -18,6 +19,8 @@
 else if (Model is { } model && Configuration is not null && Agent is { Revoked: false })
 {
     <p>Компьютер: <strong>@Agent.Name</strong>. Настройки будут применены после получения агентом новой ревизии.</p>
+    @if (TemplateId is not null)
+    { <p>Это отдельное новое задание. Проверьте источник и папки копий. Расписание копии сначала выключено: при необходимости включите его на следующем шаге. Исходное задание не изменится.</p> }
     <ol class="wizard-steps" aria-label="Шаги мастера">
         @foreach (var step in Steps.Select((label, index) => (label, number: index + 1)))
         { <li class="@(model.Step == step.number ? "current" : "")" aria-current="@(model.Step == step.number ? "step" : null)">@step.number. @step.label</li> }
@@ -34,7 +37,9 @@ else if (Model is { } model && Configuration is not null && Agent is { Revoked: 
             @if (model.Step == 1)
             {
                 <h2>1. Что копировать</h2>
-                <label>Название задания<input name="Model.Name" value="@model.Name" maxlength="256" required placeholder="Например, документы бухгалтерии" /></label>
+                <label>Название задания<input name="Model.Name" value="@model.Name" maxlength="256" placeholder="Можно оставить пустым — по названию источника" /></label>
+                <p>Если название пустое, на следующем шаге появится имя папки или файла. Для 1С с файлом 1Cv8.1CD используется имя папки базы.
+                    Автоматическое название меняется вместе с источником. Введите своё название, чтобы сохранить его; очистите поле, чтобы снова использовать автоматическое.</p>
                 <label>Тип источника<select name="Model.Kind">
                     <option value="FilesAndFolders" selected="@(model.Kind == "FilesAndFolders")">Файлы и папки</option>
                     <option value="OneCFile" selected="@(model.Kind == "OneCFile")">Файловая база 1С — архив ZIP</option>
