@@ -39,6 +39,12 @@ internal static partial class DesktopSmoke
             {
                 if (!zip.Entries.Any(entry => entry.FullName.StartsWith("logs/")) || zip.GetEntry("runs-summary.json") is null || zip.GetEntry("READ-ME.txt") is null)
                     throw new InvalidOperationException("В диагностике отсутствуют логи или сведения о запусках.");
+                using var executionReader = new StreamReader(zip.GetEntry("execution-summary.json")!.Open());
+                using var execution = JsonDocument.Parse(await executionReader.ReadToEndAsync());
+                var savedJobs = execution.RootElement.GetProperty("Window").GetProperty("Jobs");
+                if (!savedJobs.EnumerateArray().Select(job => job.GetProperty("JobId").GetGuid()).Order()
+                    .SequenceEqual((await store.LoadAsync()).Select(job => job.Id).Order()))
+                    throw new InvalidOperationException("Диагностика потеряла сохранённый план заданий окна.");
                 using var infoReader = new StreamReader(zip.GetEntry("support-info.json")!.Open());
                 using var info = JsonDocument.Parse(await infoReader.ReadToEndAsync());
                 if (info.RootElement.GetProperty("Version").GetString() != ApplicationBuildInfo.Version

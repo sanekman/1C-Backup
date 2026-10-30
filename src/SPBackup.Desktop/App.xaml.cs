@@ -59,20 +59,25 @@ public partial class App : Application
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            DiagnosticLog.Current.Write(DiagnosticEvent.ProcessError, DiagnosticLevel.Error, ex);
-            if (smokeOutput is not null) { DesktopSmoke.Finish(smokeOutput, false, ex.ToString()); return; }
-            if (ex is IOException)
+            if (smokeOutput is not null)
+            {
+                DiagnosticLog.Current.Write(DiagnosticEvent.ProcessError, DiagnosticLevel.Error, ex);
+                DesktopSmoke.Finish(smokeOutput, false, ex.ToString()); return;
+            }
+            if (ex is IOException && (ex.HResult & 0xffff) is 32 or 33)
             {
                 try
                 {
                     using var existing = EventWaitHandle.OpenExisting(ShowEventName);
                     if (!StartInTray) existing.Set();
+                    DiagnosticLog.Current.Write(DiagnosticEvent.ExistingWindowSignalled);
                     Shutdown();
                     return;
                 }
                 catch (WaitHandleCannotBeOpenedException) { }
                 catch (UnauthorizedAccessException) { }
             }
+            DiagnosticLog.Current.Write(DiagnosticEvent.ProcessError, DiagnosticLevel.Error, ex);
             MessageBox.Show("Не удалось открыть рабочий каталог. Возможно, программа уже запущена. " + ex.Message, "SP Backup");
             Shutdown(1);
             return;

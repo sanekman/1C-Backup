@@ -8,7 +8,8 @@ namespace SPBackup.Core;
 public sealed record DiagnosticBundleResult(string Path, int LogFiles, int Events, int Skipped, int Runs, long Bytes);
 
 /// <summary>Exports only typed diagnostic events and an allowlisted run summary, never raw profile files.</summary>
-public sealed class DiagnosticBundle(string profileDirectory, string version, string revision)
+public sealed class DiagnosticBundle(string profileDirectory, string version, string revision,
+    DiagnosticWindowSnapshot? windowSnapshot = null)
 {
     public async Task<DiagnosticBundleResult> ExportAsync(string destination, CancellationToken token = default)
     {
@@ -85,9 +86,7 @@ public sealed class DiagnosticBundle(string profileDirectory, string version, st
                     try
                     {
                         var historyPath = Path.Combine(profile, "runs.json");
-                        if (File.Exists(historyPath) && (new FileInfo(historyPath).Length > 32 * 1024 * 1024
-                            || File.GetAttributes(historyPath).HasFlag(FileAttributes.ReparsePoint))) throw new InvalidDataException("History unavailable");
-                        var history = await new BackupRunHistory(historyPath).ReadAsync(token);
+                        var history = await new BackupRunHistory(historyPath).ReadBoundedAsync(32 * 1024 * 1024, token);
                         var selected = history.OrderByDescending(run => run.StartedUtc).Take(1000).ToArray(); runs = selected.Length;
                         runSummary = selected.Select(run => new { run.RunId, run.JobId, run.StartedUtc, run.FinishedUtc, run.Status,
                             DurationMilliseconds = run.FinishedUtc is { } end ? (long?)(end - run.StartedUtc).TotalMilliseconds : null,
@@ -95,8 +94,11 @@ public sealed class DiagnosticBundle(string profileDirectory, string version, st
                             FailedDestinations = run.Destinations?.Count(item => item.Error is not null), Warnings = run.Warnings?.Count ?? 0 });
                         historyStatus = "Available";
                     }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+                    catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or JsonException)
                     { runSummary = Array.Empty<object>(); historyStatus = "Unavailable"; skipped++; }
+                    var execution = await DiagnosticExecutionSnapshot.ReadAsync(profile, windowSnapshot, token);
+                    skipped += execution.Skipped;
+                    await WriteJson(zip, "execution-summary.json", execution.Snapshot, token);
                     await WriteJson(zip, "runs-summary.json", runSummary, token);
                     await WriteJson(zip, "support-info.json", new { Application = "SP Backup", FormatVersion = 1, Version = version, Revision = revision,
                         CreatedUtc = DateTimeOffset.UtcNow, DotNet = Environment.Version.ToString(), Architecture = RuntimeInformation.ProcessArchitecture.ToString(),
@@ -104,7 +106,7 @@ public sealed class DiagnosticBundle(string profileDirectory, string version, st
                         Runs = runs, HistoryStatus = historyStatus, LoggingFailure = DiagnosticLog.Current.LastWriteFailure }, token);
                     var readme = zip.CreateEntry("READ-ME.txt");
                     await using var readmeStream = readme.Open();
-                    await readmeStream.WriteAsync(Encoding.UTF8.GetBytes("SP Backup — диагностика\nОтправьте этот ZIP для анализа. Укажите примерное время проблемы и ожидаемый результат.\nlogs/*.jsonl: UTC, компонент, версия, ID задания/запуска, этап, коды и стек ошибки.\nruns-summary.json: до 1000 последних запусков без названий, путей и текста ошибок.\nНе включены настройки, пароли, токены, адреса серверов, исходные файлы, копии и сырой вывод SQL/1С.\nТекст Exception.Message намеренно отсутствует: сторонние программы могут включать в него секреты.\nПропущенные неполные/недоступные записи учитываются в support-info.json.\n"), token);
+                    await readmeStream.WriteAsync(Encoding.UTF8.GetBytes("SP Backup — диагностика\nОтправьте этот ZIP для анализа. Укажите примерное время проблемы и ожидаемый результат.\nlogs/*.jsonl: UTC, компонент, версия, ID задания/запуска, этап, коды и стек ошибки.\nruns-summary.json: до 1000 последних запусков без названий, путей и текста ошибок.\nexecution-summary.json: план окна, расчёт ближайших запусков, состояние агента, последний прогресс и ожидающие ручные команды; только ID и технические поля.\nПлан окна не является очередью исполнителя. Давность обновления указана явно; старое состояние не подтверждает, что процесс работает.\nНе включены настройки, пароли, токены, адреса серверов, исходные файлы, копии и сырой вывод SQL/1С.\nТекст Exception.Message намеренно отсутствует: сторонние программы могут включать в него секреты.\nПропущенные неполные/недоступные записи учитываются в support-info.json.\n"), token);
                 }
                 await output.FlushAsync(token); output.Flush(true);
             }

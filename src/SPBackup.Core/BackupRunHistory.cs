@@ -34,6 +34,18 @@ public sealed class BackupRunHistory(string path)
         finally { gate.Release(); }
     }
 
+    internal async Task<IReadOnlyList<BackupRun>> ReadBoundedAsync(long maximumBytes, CancellationToken token)
+    {
+        await gate.WaitAsync(token);
+        try
+        {
+            var runs = await file.ReadBoundedAsync(maximumBytes, token) ?? [];
+            Validate(runs);
+            return runs;
+        }
+        finally { gate.Release(); }
+    }
+
     public async Task SaveAsync(BackupRun run, CancellationToken cancellationToken = default)
     {
         await gate.WaitAsync(cancellationToken);

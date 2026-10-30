@@ -19,7 +19,11 @@ public partial class MainWindow
         DiagnosticsStatus.Text = Status.Text = "Собираются логи и сведения о программе. Копии и настройки не изменяются.";
         try
         {
-            var result = await Task.Run(() => new DiagnosticBundle(DesktopPaths.DataDirectory, ApplicationBuildInfo.Version, ApplicationBuildInfo.Revision).ExportAsync(dialog.FileName));
+            // Freeze only the saved plan; never export the editor or raw agent settings.
+            var snapshot = DiagnosticWindowSnapshot.Capture(jobs, agentSettings?.Mode, managedRevision,
+                configurationReady, schedulerCancellation is not null, activeJobId);
+            var result = await Task.Run(() => new DiagnosticBundle(DesktopPaths.DataDirectory, ApplicationBuildInfo.Version,
+                ApplicationBuildInfo.Revision, snapshot).ExportAsync(dialog.FileName));
             DiagnosticsStatus.Text = $"Диагностика сохранена: {result.Path}\nСобытий: {result.Events}; файлов логов: {result.LogFiles}; запусков: {result.Runs}. Отправьте этот ZIP для анализа."
                 + (result.Skipped > 0 ? $" Пропущено недоступных или неполных записей: {result.Skipped}." : "")
                 + (result.LogFiles == 0 ? " Логов нет: сведения о состоянии записи включены в ZIP." : "");
