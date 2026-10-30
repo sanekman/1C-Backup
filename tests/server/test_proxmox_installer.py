@@ -114,7 +114,7 @@ class ProxmoxInstallerTests(unittest.TestCase):
             if values[:2] == ['pvesm', 'path']:
                 return str(SCRIPT)  # Existing file; no template is downloaded in this test.
             if values[:2] == ['pct', 'push'] and values[3].endswith('request.json'):
-                requests.append(json.loads(Path(values[3]).read_text()))
+                requests.append(json.loads(Path(values[3]).read_text(encoding='utf-8')))
             if fail_install and '--inside-container' in values:
                 raise RuntimeError('Fixture installation failure')
             return ''
@@ -132,8 +132,8 @@ class ProxmoxInstallerTests(unittest.TestCase):
             try:
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     installer.host_create(args)
-            except (ValueError, RuntimeError):
-                return calls, requests, True
+            except (ValueError, RuntimeError) as error:
+                return calls, requests, error
         return calls, requests, False
 
     def test_occupied_id_on_another_cluster_node_is_never_adopted_or_started(self):
