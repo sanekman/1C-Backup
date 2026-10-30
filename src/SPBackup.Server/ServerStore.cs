@@ -9,7 +9,7 @@ namespace SPBackup.Server;
 /// <summary>Parameterized PostgreSQL operations. Invitation consumption, registration and audit commit together.</summary>
 public sealed partial class ServerStore(NpgsqlDataSource source)
 {
-    public const int SchemaVersion = 3;
+    public const int SchemaVersion = 4;
     private readonly PasswordHasher<ServerUser> passwords = new();
     private static NpgsqlCommand Command(NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql,
         params (string Name, object? Value)[] values)
@@ -45,6 +45,13 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
         if (version < 3)
         {
             using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("SPBackup.Server.Migrations.003-configuration-receipts.sql")!;
+            using var reader = new StreamReader(script);
+            await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
+            await migration.ExecuteNonQueryAsync(token);
+        }
+        if (version < 4)
+        {
+            using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("SPBackup.Server.Migrations.004-configuration-history.sql")!;
             using var reader = new StreamReader(script);
             await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
             await migration.ExecuteNonQueryAsync(token);
@@ -137,6 +144,7 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation) { throw new ServerRequestException(409, "agent_already_registered"); }
         var document = JsonSerializer.Serialize(new { agentId = request.AgentId, revision = 1, jobs = Array.Empty<object>(), protocolVersion = 1 });
         await using (var config = Command(connection, transaction, "INSERT INTO server_configurations(agent_id,revision,document) VALUES(@id,1,@doc::jsonb) ON CONFLICT(agent_id) DO NOTHING", ("id", request.AgentId), ("doc", document))) await config.ExecuteNonQueryAsync(token);
+        await using (var history = Command(connection, transaction, "INSERT INTO server_configuration_history(agent_id,revision,document,saved_utc) SELECT agent_id,revision,document,created_utc FROM server_configurations WHERE agent_id=@id ON CONFLICT DO NOTHING", ("id", request.AgentId))) await history.ExecuteNonQueryAsync(token);
         await using (var consume = Command(connection, transaction, "UPDATE server_invitations SET consumed_utc=now() WHERE id=@id", ("id", invitationId))) await consume.ExecuteNonQueryAsync(token);
         await AuditAsync(connection, transaction, null, request.AgentId, "AgentEnrolled", token);
         await transaction.CommitAsync(token);

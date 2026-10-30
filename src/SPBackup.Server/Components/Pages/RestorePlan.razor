@@ -1,0 +1,107 @@
+@page "/agents/{Id:guid}/jobs/history/{Revision:long}"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@using System.Security.Claims
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+@inject ServerOptions Settings
+<PageTitle>Сохранённый план — @Settings.DisplayName</PageTitle>
+<a href="@($"agents/{Id}/jobs/history")">← История планов</a>
+<h1>План ревизии @Revision</h1>
+@if (Saved is { } saved)
+{
+    <section class="card" role="status"><h2>План опубликован новой ревизией @saved</h2>
+        <p>Ожидается получение и проверка настроек агентом. Это ещё не результат копирования.</p>
+        <a href="@($"agents/{Id}")">Проверить принятие и результаты</a>
+    </section>
+}
+else
+{
+    @if (Error is not null) { <p class="error" role="alert">@Error</p> }
+    @if (Plan is { } plan && Current is { } current && Agent is { } agent)
+    {
+        <p>@agent.Name. Сейчас сохранена ревизия @current.Revision; в выбранном плане заданий: @plan.Jobs.Count.</p>
+        @if (plan.Jobs.Count == 0) { <p>Этот план пустой: после принятия агентом серверных заданий не останется.</p> }
+        @foreach (var job in plan.Jobs)
+        {
+            <section class="card"><h2>@job.Name</h2><dl>
+                <dt>Источник</dt><dd class="path">@job.Source</dd>
+                <dt>Тип</dt><dd>@(job.Kind == "OneCFile" ? "Файловая база 1С — полный ZIP" : "Файлы и папки")</dd>
+                <dt>Запуск</dt><dd>@FileJobDraft.ScheduleLabel(job.ScheduleKind) · @(job.Enabled ? "расписание включено" : "расписание выключено")</dd>
+                @if (job.ScheduleKind is "Daily" or "Weekly")
+                { <dt>Время</dt><dd>@string.Join(", ", new[] { job.DailyAt }.Concat(job.AdditionalDailyTimes ?? []).Select(t => t.ToString("HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture))) · @(job.TimeZoneId == "Local" ? "Время компьютера агента" : job.TimeZoneId)</dd> }
+                @if (job.ScheduleKind == "Weekly")
+                { <dt>Дни</dt><dd>@string.Join(", ", FileJobDraft.Days.Where(d => job.DaysOfWeek.Split(',').Select(s => s.Trim()).Contains(d.Key)).Select(d => d.Label))</dd> }
+                <dt>Хранилище 1</dt><dd class="path">@job.DestinationDirectory · Архивов хранить: @job.KeepLast</dd>
+                @for (var index = 0; index < (job.AdditionalDestinations?.Count ?? 0); index++)
+                {
+                    var destination = job.AdditionalDestinations![index];
+                    <dt>Хранилище @(index + 2)</dt><dd class="path">@destination.DestinationDirectory · Архивов хранить: @(destination.KeepLast?.ToString() ?? $"как в основном ({job.KeepLast})")</dd>
+                }
+                <dt>Копирование</dt><dd>@(job.Kind == "OneCFile" || job.FileBackupMode == "Full" ? "Полная копия" : "Полная основа и изменения")</dd>
+                @if (job.Kind == "FilesAndFolders" && job.FileBackupMode == "Incremental")
+                { <dt>Полная основа</dt><dd>@(job.FullBackupDayOfWeek is { } day ? FileJobDraft.Days.First(d => d.Key == day.ToString()).Label : $"Каждая {job.FullBackupEvery}-я копия")</dd> }
+                @if (job.TemporaryDirectory is { } temporary) { <dt>Рабочая папка</dt><dd class="path">@temporary</dd> }
+                @if (job.Kind == "OneCFile") { <dt>Открытая база</dt><dd>@(job.AllowOpenOneCDatabase ? "Архивирование разрешено, если база открыта" : "База должна быть закрыта")</dd> }
+            </dl></section>
+        }
+        @if (!agent.Revoked && Revision < current.Revision)
+        {
+            <section class="card narrow"><h2>Вернуть этот план?</h2>
+                <p>Все текущие задания будут заменены показанным планом после получения агентом новой ревизии.
+                    Проверьте расписания: ранее включённые задания снова смогут запускаться автоматически.
+                    Уже начатые копии продолжатся; архивы и история копирования не удаляются.</p>
+                <p>Текущих заданий: @current.Jobs.Count. В возвращаемом плане: @plan.Jobs.Count.
+                    Сначала сравните <a href="@($"agents/{Id}/jobs")" target="_blank" rel="noopener">текущие задания</a>.</p>
+                <form method="post" @formname="restore-plan" @onsubmit="Restore">
+                    <AntiforgeryToken /><input type="hidden" name="Expected" value="@Expected" />
+                    @if (Error is null) { <button type="submit">Опубликовать этот план новой ревизией</button> }
+                </form>
+            </section>
+        }
+        else { <p>@(agent.Revoked ? "Доступ агента отозван. Возврат плана недоступен." : "Это текущая ревизия. Возврат не требуется.")</p> }
+    }
+    @if (Plan is null || Current is null || Agent is null || Agent.Revoked || Revision >= Current.Revision)
+    { <form method="post" @formname="restore-plan" @onsubmit="Restore" hidden><AntiforgeryToken /></form> }
+}
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [Parameter] public long Revision { get; set; }
+    [SupplyParameterFromForm] public string? Expected { get; set; }
+    private AgentRecord? Agent;
+    private ManagedFileConfiguration? Plan;
+    private ManagedFileConfiguration? Current;
+    private string? Error;
+    private long? Saved;
+    protected override async Task OnParametersSetAsync()
+    {
+        var context = Http.HttpContext!;
+        Agent = await Store.AgentAsync(Id, context.RequestAborted);
+        if (Agent is null) { Error = "Агент не найден."; context.Response.StatusCode = 404; return; }
+        try
+        {
+            Plan = await Store.ReadFileConfigurationRevisionAsync(Id, Revision, context.RequestAborted);
+            Current = await Store.ReadFileConfigurationAsync(Id, context.RequestAborted);
+            if (context.Request.Method == "GET") Expected = Current.Revision.ToString(CultureInfo.InvariantCulture);
+        }
+        catch (ServerRequestException e)
+        {
+            Error = e.Status == 404 ? "План не найден. Возможно, эта ревизия уже вышла за предел последних 100." : "Формат сохранённого или текущего плана не поддерживается. Возврат запрещён; настройки не изменены.";
+            context.Response.StatusCode = e.Status;
+        }
+    }
+    private async Task Restore()
+    {
+        if (Plan is null || Current is null || Agent is not { Revoked: false } || Error is not null) return;
+        var context = Http.HttpContext!;
+        if (!long.TryParse(Expected, NumberStyles.None, CultureInfo.InvariantCulture, out var expected) || expected < 1)
+        { Error = "Откройте подтверждение возврата заново."; return; }
+        if (!Guid.TryParse(context.User.FindFirstValue("stamp"), out var stamp)) { Error = "Войдите в панель заново."; return; }
+        try { Saved = (await Store.RestoreFileConfigurationAsync(ServerAuthentication.UserId(context.User), stamp, Id, expected, Revision, context.RequestAborted)).Revision; }
+        catch (ServerRequestException e)
+        {
+            context.Response.StatusCode = e.Status;
+            Error = e.Status == 412 ? "План уже изменён в другой вкладке. Возврат не выполнен. Откройте историю заново и сравните настройки."
+                : "Возврат не выполнен. Проверьте актуальность ревизии, сеанс и доступ агента.";
+        }
+    }
+}

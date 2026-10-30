@@ -26,5 +26,5 @@
     private AuditPage? Data;
     protected override async Task OnParametersSetAsync() => Data = await Store.AuditPageAsync(Page, Http.HttpContext!.RequestAborted);
     private static string Label(string kind) => kind switch
-    { "AdministratorCreated" => "Создан администратор", "AdministratorLogin" => "Вход в панель", "AdministratorPasswordChanged" => "Изменён пароль администратора", "InvitationCreated" => "Создано приглашение", "AgentEnrolled" => "Агент подключён", "AgentRevoked" => "Отозван доступ агента", "ConfigurationPublished" => "Сохранена новая ревизия заданий", "ConfigurationAccepted" => "Агент проверил и сохранил настройки", "ConfigurationRejected" => "Агент отклонил настройки", _ => "Другое действие сервера" };
+    { "AdministratorCreated" => "Создан администратор", "AdministratorLogin" => "Вход в панель", "AdministratorPasswordChanged" => "Изменён пароль администратора", "InvitationCreated" => "Создано приглашение", "AgentEnrolled" => "Агент подключён", "AgentRevoked" => "Отозван доступ агента", "ConfigurationPublished" => "Сохранена новая ревизия заданий", "ConfigurationRestored" => "Прежний план опубликован новой ревизией", "ConfigurationAccepted" => "Агент проверил и сохранил настройки", "ConfigurationRejected" => "Агент отклонил настройки", _ => "Другое действие сервера" };
 }

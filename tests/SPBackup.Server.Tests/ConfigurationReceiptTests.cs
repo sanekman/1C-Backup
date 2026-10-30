@@ -189,7 +189,7 @@ public sealed class ConfigurationReceiptTests(ServerFixture fixture) : IClassFix
     {
         var a=await fixture.EnrollAsync(); var run=new SPBackup.Server.Monitoring.MonitoredRun(Guid.NewGuid(),Guid.NewGuid(),"Old history",DateTimeOffset.UtcNow.AddMinutes(-1),DateTimeOffset.UtcNow,"Succeeded",0,false,"Full",[]);
         await fixture.Store.SaveRunAsync(a.AgentId,run,default); var original=await fixture.Store.ConfigurationAsync(a.AgentId,default);
-        await fixture.ExecuteAsync("DROP TABLE server_configuration_offers; DELETE FROM server_schema WHERE version=3");
+        await fixture.ExecuteAsync("DROP TABLE server_configuration_history; DROP TABLE server_configuration_offers; DELETE FROM server_schema WHERE version>=3");
         Assert.False(await fixture.Store.ReadyAsync()); await fixture.Store.MigrateAsync(); await fixture.Store.MigrateAsync(); Assert.True(await fixture.Store.ReadyAsync());
         Assert.Equal(original,await fixture.Store.ConfigurationAsync(a.AgentId,default)); Assert.Contains((await fixture.Store.RunsAsync(a.AgentId,0,default)).Runs,r=>r.RunId==run.RunId);
         Assert.Equal(a.AgentId,await fixture.Store.AuthenticateAgentAsync(a.Token,default)); _=await Offer(a);
@@ -199,7 +199,7 @@ public sealed class ConfigurationReceiptTests(ServerFixture fixture) : IClassFix
     public async Task FailedSchemaThreeMigrationRollsBackItsTableAndPreservesSchemaTwo()
     {
         var a=await fixture.EnrollAsync(); var original=await fixture.Store.ConfigurationAsync(a.AgentId,default);
-        await fixture.ExecuteAsync("DROP TABLE server_configuration_offers; DELETE FROM server_schema WHERE version=3; CREATE FUNCTION fail_schema_three() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.version=3 THEN RAISE EXCEPTION 'fixture'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_schema_three BEFORE INSERT ON server_schema FOR EACH ROW EXECUTE FUNCTION fail_schema_three()");
+        await fixture.ExecuteAsync("DROP TABLE server_configuration_history; DROP TABLE server_configuration_offers; DELETE FROM server_schema WHERE version>=3; CREATE FUNCTION fail_schema_three() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.version=3 THEN RAISE EXCEPTION 'fixture'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_schema_three BEFORE INSERT ON server_schema FOR EACH ROW EXECUTE FUNCTION fail_schema_three()");
         try
         {
             await Assert.ThrowsAsync<Npgsql.PostgresException>(()=>fixture.Store.MigrateAsync());

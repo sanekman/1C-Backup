@@ -1,0 +1,45 @@
+@page "/agents/{Id:guid}/jobs/history"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+@inject ServerOptions Settings
+<PageTitle>История планов — @Settings.DisplayName</PageTitle>
+<a href="@($"agents/{Id}/jobs")">← Задания агента</a>
+<h1>История серверных планов</h1>
+<p>Каждая запись содержит весь план компьютера: задания, расписания и папки хранения. Сохраняются последние 100 ревизий.
+    История начинается с плана, действовавшего при обновлении сервера; более ранние изменения восстановить здесь нельзя.</p>
+@if (Error is not null) { <p class="error" role="alert">@Error</p> }
+@if (Data is { } data && Agent is { } agent)
+{
+    <section class="card">
+        <h2>@agent.Name</h2>
+        <p>Текущий сохранённый план: ревизия @agent.DesiredRevision. Это ещё не подтверждение принятия агентом.</p>
+        <div class="table-scroll"><table><thead><tr><th>Ревизия</th><th>Когда (UTC)</th><th>Кто</th><th>Заданий</th><th>Действие</th></tr></thead><tbody>
+        @foreach (var entry in data.Entries)
+        {
+            <tr><td>@entry.Revision@if (entry.Revision == agent.DesiredRevision) { <span> · текущая</span> }
+                @if (entry.RestoredFrom is { } previous) { <span> · возврат к @previous</span> }</td>
+                <td>@Home.Time(entry.SavedUtc)</td><td>@(entry.Author ?? "Исходный план / система")</td><td>@entry.JobCount</td>
+                <td><a href="@($"agents/{Id}/jobs/history/{entry.Revision}")">Посмотреть план</a></td></tr>
+        }
+        </tbody></table></div>
+        <div class="pagination">
+            @if (data.Page > 0) { <a href="@($"agents/{Id}/jobs/history?page={data.Page - 1}")">← Новее</a> }
+            @if ((data.Page + 1) * 20 < data.Total) { <a href="@($"agents/{Id}/jobs/history?page={data.Page + 1}")">Старее →</a> }
+        </div>
+    </section>
+}
+<p>Возврат публикует весь выбранный план новой ревизией. Он не возвращает файлы копий и не заменяет резервную копию самого сервера.</p>
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "page")] public int Page { get; set; }
+    private AgentRecord? Agent;
+    private ConfigurationHistoryPage? Data;
+    private string? Error;
+    protected override async Task OnParametersSetAsync()
+    {
+        Agent = await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted);
+        if (Agent is null) { Error = "Агент не найден."; Http.HttpContext.Response.StatusCode = 404; return; }
+        Data = await Store.FileConfigurationHistoryAsync(Id, Page, Http.HttpContext.RequestAborted);
+    }
+}
