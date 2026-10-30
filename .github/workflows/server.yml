@@ -87,9 +87,26 @@ jobs:
       - if: always() && runner.os == 'Linux'
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
 
+  proxmox-installer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify native installation with PostgreSQL and HTTPS on Debian 13
+        run: python3 tests/server/lxc_installer_smoke.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-proxmox-installer-verification
+          path: artifacts/server-tests/proxmox-installer-result.json
+          retention-days: 14
+
   publish:
     if: startsWith(github.ref, 'refs/tags/server-v')
-    needs: server
+    needs: [server, proxmox-installer]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -38,6 +38,10 @@ def main():
         shutil.copytree(repository / "deploy/server/windows", output / "windows")
     if args.runtime == "linux-x64":
         shutil.copy(repository / "deploy/server/onec-backup-server.service", output)
+        installer = (repository / "deploy/server/create-proxmox-lxc.py").read_text(encoding="utf-8")
+        if re.fullmatch(r'0\.1\.0-preview\.[1-9][0-9]*', version):
+            installer = re.sub(r'^VERSION = .*$', 'VERSION = ' + repr(version), installer, count=1, flags=re.MULTILINE)
+        (output / "create-proxmox-lxc.py").write_text(installer, encoding="utf-8")
     dependency = json.loads((output / "SPBackup.Server.deps.json").read_text(encoding="utf-8"))
     if "SPBackup.Server/" + version not in dependency["libraries"]:
         raise RuntimeError("Published server version mismatch")
