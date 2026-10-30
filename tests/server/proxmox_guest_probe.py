@@ -93,13 +93,15 @@ assert request(f'api/v1/agents/{agent_id}/configuration', headers=bearer)[0] == 
 assert fingerprints() == json.loads(Path('/tmp/initial-fingerprints.json').read_text())
 unit = Path('/etc/systemd/system/onec-backup-server.service').read_text()
 assert 'User=onec-backup-server' in unit and 'postgresql@17-main.service' in unit
-assert 'NoNewPrivileges=true' in unit and 'ProtectSystem=strict' in unit
+assert 'NoNewPrivileges=true' in unit and 'ProtectSystem=' not in unit and 'PrivateTmp=' not in unit
+subprocess.run(['systemd-analyze', 'verify', '/etc/systemd/system/onec-backup-server.service'], check=True)
 report = {'success': True, 'version': '0.1.0-preview.5', 'checks': [
     'published archive SHA256', 'Debian13 runtime dependencies', 'real PostgreSQL17 schema4',
     'loopback-only database', 'non-root server and private CA key', 'trusted HTTPS and untrusted CA rejection',
     'administrator login and CSRF', 'enrollment and agent configuration',
     'failed first service start safely resumed', 'repeat installation retains secrets and password hash',
-    'changed request refused', 'persistent session and registration after process restart'],
+    'changed request refused', 'persistent session and registration after process restart',
+    'LXC service unit parsed without nested mount namespaces'],
     'realSystemdTested': False, 'realProxmoxTested': False}
 Path('/tmp/proxmox-installer-result.json').write_text(json.dumps(report, indent=2))
 print(json.dumps(report))

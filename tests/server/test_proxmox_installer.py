@@ -48,6 +48,16 @@ class ProxmoxInstallerTests(unittest.TestCase):
             with self.subTest(ip=ip, gateway=gateway), self.assertRaises(ValueError):
                 installer.network(ip, gateway)
 
+    def test_lxc_unit_does_not_require_nesting_and_limits_low_port_capability(self):
+        unit = installer.service_unit(8443)
+        self.assertIn('User=onec-backup-server', unit)
+        self.assertIn('NoNewPrivileges=true', unit)
+        self.assertIn('After=network-online.target postgresql@17-main.service', unit)
+        self.assertNotIn('AmbientCapabilities=', unit)
+        for directive in ['ProtectSystem=', 'PrivateTmp=', 'ReadWritePaths=']:
+            self.assertNotIn(directive, unit)
+        self.assertIn('AmbientCapabilities=CAP_NET_BIND_SERVICE', installer.service_unit(443))
+
     def test_manifest_does_not_allow_arbitrary_downloads_or_duplicate_packages(self):
         asset = dict(name=installer.ARCHIVE, url=f'https://github.com/{installer.REPOSITORY}/releases/download/server-v{installer.VERSION}/{installer.ARCHIVE}', bytes=1234, sha256='a' * 64)
         manifest = dict(version=installer.VERSION, runtime='10.0.13', sourceCommit='a' * 40, assets=[asset])

@@ -288,6 +288,36 @@ def wait_ready(port):
     raise RuntimeError('Сервер не подтвердил готовность по HTTPS. Сохранены все данные; проверьте journalctl -u onec-backup-server.')
 
 
+def service_unit(port):
+    # Dedicated unprivileged LXC already provides the container boundary. Do not
+    # require nested mount namespaces (ProtectSystem/PrivateTmp/ReadWritePaths),
+    # which depend on the hypervisor's AppArmor/nesting policy. Unix ownership,
+    # the separate service UID and NoNewPrivileges remain in force.
+    capabilities = 'AmbientCapabilities=CAP_NET_BIND_SERVICE\n' if port < 1024 else ''
+    return f'''[Unit]
+Description=SP Backup management server
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target postgresql@17-main.service
+
+[Service]
+Type=notify
+User=onec-backup-server
+Group=onec-backup-server
+WorkingDirectory=/opt/onec-backup-server/current
+ExecStart=/opt/onec-backup-server/current/SPBackup.Server
+EnvironmentFile=/etc/onec-backup-server/server.env
+StateDirectory=onec-backup-server
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+Restart=on-failure
+RestartSec=5
+{capabilities}
+[Install]
+WantedBy=multi-user.target
+'''
+
+
 def guest_install(request, package_directory=None):
     import pwd
     request = validate_request(request)
@@ -371,15 +401,10 @@ def guest_install(request, package_directory=None):
     if not sql("SELECT 1 FROM pg_database WHERE datname='onecbackup';"):
         sql('CREATE DATABASE onecbackup OWNER onecbackup;')
     run(['runuser', '-u', ACCOUNT, '--', APPLICATION / 'current/SPBackup.Server', '--Server:ConfigFile', config_path, '--provision'])
-    unit = (APPLICATION / 'current/onec-backup-server.service').read_text().replace('/opt/onec-backup-server', '/opt/onec-backup-server/current')
-    unit = unit.replace('After=network-online.target', 'After=network-online.target postgresql@17-main.service')
-    unit = unit.replace('Wants=network-online.target', 'Wants=network-online.target postgresql@17-main.service')
-    if request['port'] < 1024:
-        unit = unit.replace('[Install]', 'AmbientCapabilities=CAP_NET_BIND_SERVICE\n\n[Install]')
     env_path = CONFIG / 'server.env'
     env_path.write_text('ONECBACKUP_SERVER_CONFIG_FILE=/etc/onec-backup-server/server.json\n')
     os.chmod(env_path, 0o600)
-    UNIT.write_text(unit)
+    UNIT.write_text(service_unit(request['port']))
     os.chmod(UNIT, 0o644)
     run(['systemctl', 'daemon-reload'])
     run(['systemctl', 'enable', '--now', 'onec-backup-server'])
