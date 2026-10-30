@@ -1,0 +1,53 @@
+@page "/"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject ServerOptions Settings
+@inject IHttpContextAccessor Http
+<PageTitle>Агенты — @Settings.DisplayName</PageTitle>
+<div class="heading"><div><h1>Агенты</h1><p class="muted">Компьютеры, подключённые к этому серверу.</p></div><a class="button" href="connect">Подключить агент</a></div>
+@if (Overview is { } overview)
+{
+    <section class="card"><div class="summary"><strong>Мониторинг</strong><span>Нет связи: @overview.Offline</span><span>Нет отчётов: @overview.Unreported</span><span>Проблемных заданий: @overview.Failed</span><span>Неполных копий: @overview.Incomplete</span><span>С предупреждениями: @overview.Warning</span><span>В очереди: @overview.Pending</span></div></section>
+}
+@if (Data is { } data)
+{
+    <section class="card">
+        <div class="summary"><strong>Всего: @data.Total</strong><span>Страница @(data.Page + 1)</span><a href="?page=@data.Page">Обновить</a></div>
+        @if (data.Total == 0)
+        {
+            <div class="empty"><h2>Подключите первый компьютер</h2><p>Создайте одноразовое приглашение. После подключения здесь появятся версия агента и время последней связи.</p><a href="connect">Создать приглашение</a></div>
+        }
+        else
+        {
+            <div class="table-scroll"><table><thead><tr><th>Компьютер</th><th>Связь</th><th>Последняя связь</th><th>Настройки</th></tr></thead><tbody>
+            @foreach (var agent in data.Agents)
+            {
+                <tr><td><a href="@("agents/" + agent.AgentId)">@agent.Name</a><small>@(Versions.GetValueOrDefault(agent.AgentId) ?? agent.AgentVersion ?? "Версия ещё не получена")</small></td>
+                    <td><span class="badge @(agent.Revoked ? "bad" : Online(agent) ? "good" : "pending")">@State(agent)</span></td>
+                    <td>@Time(LastSeen(agent))</td>
+                    <td><small>На сервере: @agent.DesiredRevision</small><small>Сообщено агентом: @(agent.ReportedRevision?.ToString() ?? "—")</small></td></tr>
+            }
+            </tbody></table></div>
+            <div class="pagination">@if (data.Page > 0) { <a href="?page=@(data.Page - 1)">← Назад</a> } @if ((data.Page + 1) * data.PageSize < data.Total) { <a href="?page=@(data.Page + 1)">Далее →</a> }</div>
+        }
+    </section>
+    <p class="muted note">«На связи» означает недавний ответ агента. Успех копирования определяется отдельным отчётом о запуске. Задания, прогресс, история и результаты доставки доступны в карточке компьютера.</p>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "page")] public int Page { get; set; }
+    private AgentPage? Data;
+    private ServerStore.Overview? Overview;
+    protected override async Task OnParametersSetAsync()
+    {
+        Overview = await Store.OverviewAsync(Settings.OfflineAfterSeconds,Http.HttpContext!.RequestAborted);
+        Data = await Store.AgentsAsync(Page, Http.HttpContext!.RequestAborted);
+        foreach (var agent in Data.Agents)
+            if (await Store.MonitoringAsync(agent.AgentId,Http.HttpContext.RequestAborted) is { } m) { MonitoringTimes[agent.AgentId]=m.ReceivedUtc; Versions[agent.AgentId]=m.Snapshot.AgentVersion; }
+    }
+    private readonly Dictionary<Guid, DateTimeOffset> MonitoringTimes = [];
+    private readonly Dictionary<Guid, string> Versions = [];
+    private DateTimeOffset? LastSeen(AgentRecord agent) => MonitoringTimes.TryGetValue(agent.AgentId,out var time) && (agent.ReceivedUtc is null || time > agent.ReceivedUtc) ? time : agent.ReceivedUtc;
+    private bool Online(AgentRecord agent) => LastSeen(agent) is { } time && DateTimeOffset.UtcNow - time < TimeSpan.FromSeconds(Settings.OfflineAfterSeconds);
+    private string State(AgentRecord agent) => agent.Revoked ? "Доступ отозван" : LastSeen(agent) is null ? "Ожидает первого сигнала" : Online(agent) ? "На связи" : "Нет связи";
+    internal static string Time(DateTimeOffset? value) => value?.UtcDateTime.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture) ?? "Ещё не получена";
+}

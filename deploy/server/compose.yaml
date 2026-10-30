@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: onecbackup
+      POSTGRES_DB: onecbackup
+      POSTGRES_PASSWORD_FILE: /run/secrets/database-password
+    secrets: [database-password]
+    volumes: [database:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U onecbackup -d onecbackup"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+  server:
+    build:
+      context: ../..
+      dockerfile: deploy/server/Dockerfile
+    depends_on:
+      db: {condition: service_healthy}
+    ports: ["${SERVER_BIND_IP:-127.0.0.1}:${SERVER_PORT:-7443}:7443"]
+    environment:
+      AllowedHosts: "${SERVER_HOSTS:-localhost;127.0.0.1}"
+      Server__ConnectionString: "Host=db;Database=onecbackup;Username=onecbackup"
+      Server__DatabasePasswordFile: /run/secrets/database-password
+      Server__BootstrapUser: "${SERVER_ADMIN_NAME:-admin}"
+      Server__BootstrapPasswordFile: /run/secrets/administrator-password
+      Server__HttpsCertificatePath: /run/secrets/server-certificate
+      Server__HttpsCertificatePasswordFile: /run/secrets/certificate-password
+    secrets: [database-password, administrator-password, server-certificate, certificate-password]
+    volumes: [server-data:/var/lib/onec-backup-server]
+    restart: unless-stopped
+secrets:
+  database-password: {file: "${SERVER_SECRETS_DIRECTORY:-./secrets}/database-password.txt"}
+  administrator-password: {file: "${SERVER_SECRETS_DIRECTORY:-./secrets}/administrator-password.txt"}
+  server-certificate: {file: "${SERVER_SECRETS_DIRECTORY:-./secrets}/server.pfx"}
+  certificate-password: {file: "${SERVER_SECRETS_DIRECTORY:-./secrets}/certificate-password.txt"}
+volumes:
+  database:
+  server-data:

@@ -1,0 +1,30 @@
+@page "/audit"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerOptions Settings
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+<PageTitle>Журнал действий сервера — @Settings.DisplayName</PageTitle>
+<a href="system">← Состояние сервера</a>
+<div class="heading"><div><h1>Журнал действий</h1><p class="muted">Успешные входы в панель, приглашения, подключения и изменения доступа. Время — UTC.</p></div><a href="audit">Обновить</a></div>
+@if (Data is { } data)
+{
+<section class="card">
+<p>Всего событий: @data.Total · Страница @(data.Page + 1)</p>
+<div class="table-scroll"><table><thead><tr><th>Когда (UTC)</th><th>Кто</th><th>Действие</th><th>Компьютер</th></tr></thead><tbody>
+@foreach (var item in data.Entries)
+{
+<tr><td>@Home.Time(item.ReceivedUtc)</td><td>@(item.UserName ?? "Агент / система")</td><td>@Label(item.Event)</td><td>@if (item.AgentName is { } name && item.AgentId is { } id) { <a href="@("agents/" + id)">@name</a> } else { <span>—</span> }</td></tr>
+}
+</tbody></table></div>
+@if (data.Entries.Count == 0) { <p>На этой странице событий нет.</p> }
+<div class="pagination">@if (data.Page > 0) { <a href="audit?page=@(data.Page - 1)">← Новее</a> } @if ((data.Page + 1) * data.PageSize < data.Total) { <a href="audit?page=@(data.Page + 1)">Старее →</a> }</div>
+</section>
+}
+<p class="muted">Здесь фиксируются действия на сервере. История резервного копирования находится в карточке компьютера.</p>
+@code {
+    [SupplyParameterFromQuery(Name = "page")] public int Page { get; set; }
+    private AuditPage? Data;
+    protected override async Task OnParametersSetAsync() => Data = await Store.AuditPageAsync(Page, Http.HttpContext!.RequestAborted);
+    private static string Label(string kind) => kind switch
+    { "AdministratorCreated" => "Создан администратор", "AdministratorLogin" => "Вход в панель", "AdministratorPasswordChanged" => "Изменён пароль администратора", "InvitationCreated" => "Создано приглашение", "AgentEnrolled" => "Агент подключён", "AgentRevoked" => "Отозван доступ агента", "ConfigurationPublished" => "Сохранена новая ревизия заданий", "ConfigurationRestored" => "Прежний план опубликован новой ревизией", "ConfigurationAccepted" => "Агент проверил и сохранил настройки", "ConfigurationRejected" => "Агент отклонил настройки", _ => "Другое действие сервера" };
+}

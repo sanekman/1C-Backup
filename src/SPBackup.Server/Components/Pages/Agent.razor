@@ -1,0 +1,136 @@
+@page "/agents/{Id:guid}"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@using SPBackup.Server.Monitoring
+@inject ServerOptions Settings
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+<PageTitle>Карточка агента — @Settings.DisplayName</PageTitle>
+<a href="./">← Агенты</a>
+@if (Data is { } agent)
+{
+    <h1>@agent.Name</h1>
+    <p><a class="button" href="@($"agents/{Id}/jobs")">Настроить задания на сервере</a></p>
+    <section class="card">
+    <h2>Резервное копирование</h2>
+    @if (Monitoring is { } monitoring)
+    {
+        <p>Состояние получено @Home.Time(monitoring.ReceivedUtc). Ожидает передачи запусков: @monitoring.Snapshot.PendingRuns.</p>
+        @if (monitoring.Snapshot.ExecutionMode == "Managed")
+        { <p>Задания с сервера. Принятая ревизия: @(monitoring.Snapshot.ConfigurationRevision?.ToString() ?? "ожидает первого подключения").
+            @(monitoring.Snapshot.BackupExecutionAvailable == true && agent.BackupExecutionAvailable ? "Исполнитель работает." : "Исполнение не подтверждено.")</p> }
+        @if (monitoring.Snapshot.CollectionWarnings > 0) { <p class="error">Не удалось передать часть локальной истории: @monitoring.Snapshot.CollectionWarnings. Проверьте журнал агента.</p> }
+        @if (DateTimeOffset.UtcNow - monitoring.ReceivedUtc > TimeSpan.FromSeconds(Settings.OfflineAfterSeconds))
+        { <p class="error">Нет свежих данных от агента. Показаны последние полученные сведения.</p> }
+        @if (monitoring.Snapshot.Progress is { } progress)
+        { <p class="badge pending">Выполняется: @Stage(progress.Stage) · @(progress.Percent?.ToString() ?? "—")% · @Home.Time(progress.UpdatedUtc)</p> }
+        @if (monitoring.Snapshot.Sources is { Count: > 0 } sources)
+        {
+            <h2>Внешние SQL-копии</h2>
+            @foreach (var source in sources)
+            {
+                var latest = Latest.FirstOrDefault(r=>r.JobId==source.MonitorId);
+                <p><strong>@source.Name</strong> · @Source(source.Kind) · @(source.Enabled ? source.Failed ? "Ошибка чтения истории" : "Опрос включён" : "Отключён")
+                    <small>Последний опрос: @Home.Time(source.PolledUtc). Последняя копия: @(latest is null ? "Нет данных" : Status(latest)) · @Home.Time(latest?.FinishedUtc).</small></p>
+            }
+        }
+        <div class="table-scroll"><table><thead><tr><th>Задание</th><th>Расписание</th><th>Последний результат</th><th>Последняя успешная копия без пропусков (UTC)</th><th>Следующий запуск (UTC)</th></tr></thead><tbody>
+        @foreach (var job in monitoring.Snapshot.Jobs)
+        {
+            var last = Latest.FirstOrDefault(r=>r.JobId==job.JobId);
+            <tr><td>@job.Name<small>@Source(job.SourceKind) · хранилищ: @job.DestinationCount</small></td>
+            <td>@(job.Enabled ? job.Schedule : "Отключено")</td>
+            <td>@(last is null ? "Результатов ещё нет" : Status(last))<small>@Home.Time(last?.FinishedUtc)</small></td>
+            <td>@Home.Time(Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.FinishedUtc)</td>
+            <td>@(job.NextRunUtc is null ? "По событию / вручную" : Home.Time(job.NextRunUtc))</td></tr>
+        }
+        </tbody></table></div>
+    }
+    else { <p>Отчёты ещё не получены. Подключите мониторинг в Windows-программе агента.</p> }
+    <h2>История запусков</h2>
+    <p class="muted">Неполные копии и ошибки доставки отмечены отдельно. История сохраняется при перезапуске сервера.</p>
+    @if (Runs is { } history)
+    {
+        @foreach (var run in history.Runs)
+        {
+            <details><summary>@run.JobName · @Status(run) · @Home.Time(run.FinishedUtc)</summary>
+            <p>Начало: @Home.Time(run.StartedUtc). Конец: @Home.Time(run.FinishedUtc). Предупреждений: @run.WarningCount.</p>
+            @if (run.CopyKind is not null) { <p>Тип копии: @(run.CopyKind == "Full" ? "Полная" : "Инкрементная").</p> }
+            @if (run.ConfigurationRevision is { } revision) { <p>Ревизия настроек этого запуска: @revision.</p> }
+            @if (run.Incomplete) { <p class="error">Копия неполная: часть файлов пропущена. Для непрочитанных файлов может требоваться прежняя версия из цепочки.</p> }
+            @if (run.Evidence is { } evidence) { <p>Подтверждение внешней копии: @Evidence(evidence). Данные получены из внешнего источника; агент не выполнял доставку этой копии.</p> }
+            @foreach (var destination in run.Destinations)
+            { <p>Хранилище @(destination.Index + 1): @(destination.Succeeded ? run.Evidence is not null ? "Зафиксировано во внешнем источнике" : "Доставлено и проверено" : run.Evidence is not null ? "Внешний источник сообщает ошибку" : "Ошибка доставки") · @destination.Bytes байт @(destination.Incomplete ? "· неполная копия" : "")</p> }
+            </details>
+        }
+        <div class="pagination">@if (RunPage > 0) { <a href="@($"agents/{Id}?runPage={RunPage-1}")">← Новее</a> } @if (history.Runs.Count == history.PageSize) { <a href="@($"agents/{Id}?runPage={RunPage+1}")">Старее →</a> }</div>
+    }
+    </section>
+    <section class="card narrow">
+        <dl><dt>ID</dt><dd class="mono">@agent.AgentId</dd>
+            <dt>Версия</dt><dd>@(Monitoring?.Snapshot.AgentVersion ?? agent.AgentVersion ?? "Ещё не получена")</dd>
+            <dt>Зарегистрирован</dt><dd>@Home.Time(agent.RegisteredUtc)</dd>
+            <dt>Последняя связь, время сервера</dt><dd>@Home.Time(Monitoring?.ReceivedUtc ?? agent.ReceivedUtc)</dd>
+            <dt>Последняя отметка времени агента</dt><dd>@Home.Time(Monitoring?.Snapshot.SentUtc ?? agent.SentUtc)</dd>
+            <dt>Ревизия на сервере</dt><dd>@agent.DesiredRevision</dd>
+            @if (Decisions is { } decisions)
+            {
+                <dt>Настройки серверной ревизии</dt><dd>@DecisionLabel(decisions)</dd>
+                <dt>Последняя проверенная и сохранённая агентом</dt><dd>@(decisions.LastAccepted is { } accepted ? $"Ревизия {accepted.Revision} · подтверждение получено {Home.Time(accepted.ReceivedUtc)}" : "Подтверждения ещё нет")</dd>
+            }
+            <dt>Ревизия, сообщённая агентом</dt><dd>@(agent.ReportedRevision?.ToString() ?? "Нет сигнала")</dd>
+            <dt>Исполнитель копирования</dt><dd>@(agent.ReceivedUtc is null ? "Нет данных" : agent.BackupExecutionAvailable ? "Агент сообщает готовность" : "Агент сообщает, что недоступен")</dd>
+            <dt>Серверные задания</dt><dd>@(Monitoring?.Snapshot.ConfigurationCapabilities is not { } caps ? "Агент не передал сведения о поддержке" : caps.Contains(AgentCapabilities.ManagedExecutionV1) ? "Поддержка заявлена агентом" : "Задания настраиваются на компьютере агента")</dd>
+        </dl>
+        <p class="muted">Данные актуальны на время последнего сигнала. Готовность исполнителя не подтверждает успешное создание копии.</p>
+        <p class="muted">Агент подтверждает проверку и сохранение настроек. Это не подтверждает запуск расписания или создание резервной копии.</p>
+        @if (agent.Revoked) { <p class="error">Доступ отозван. Сервер не принимает этот агентский токен. Принятое локальное расписание само по себе не отменяется.</p><a href="@($"connect?agentId={Id}")">Создать приглашение для повторного подключения</a> }
+        else
+        {
+            <details><summary>Отозвать доступ к серверу</summary><p>Агент перестанет получать настройки и отправлять состояние. Это не удаляет локальные копии и не останавливает уже принятую конфигурацию.</p>
+                <form action="@("management/agents/" + agent.AgentId + "/revoke")" method="post"><AntiforgeryToken /><button type="submit" class="danger">Отозвать доступ</button></form>
+            </details>
+        }
+    </section>
+}
+else { <h1>Агент не найден</h1> }
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [SupplyParameterFromQuery] public int RunPage { get; set; }
+    private AgentRecord? Data;
+    private ConfigurationDecisionState? Decisions;
+    private MonitoringState? Monitoring;
+    private MonitoredRunPage? Runs;
+    private IReadOnlyList<MonitoredRun> Latest = [];
+    private IReadOnlyList<MonitoredRun> Successful = [];
+    private static string Source(string value) => value switch
+    { "FilesAndFolders"=>"Файлы и папки", "OneCFile"=>"Файловая база 1С", "SqlServer"=>"MS SQL", "PostgreSql"=>"PostgreSQL", "WebDav"=>"WebDAV / Nextcloud", "SqlServerHistory"=>"История MS SQL", "PostgreSqlReports"=>"Отчёты PostgreSQL", _=>value };
+    private static string Evidence(string value) => value switch
+    { "SqlServerMsdbHistory"=>"История MS SQL (msdb)", "PgRestoreCatalogChecked"=>"Каталог дампа PostgreSQL проверен", "PostgreSqlScriptFailure"=>"Ошибка скрипта PostgreSQL", _=>"Отчёт внешнего источника" };
+    private static string Stage(string value) => value switch
+    {
+        "ConnectingSource"=>"Подключение к источнику", "PreparingStorage"=>"Подготовка хранилищ", "CreatingBackup"=>"Создание копии", "ScanningSource"=>"Поиск файлов",
+        "ProcessingFiles"=>"Обработка файлов", "DownloadingFile"=>"Скачивание файла", "ArchivingFile" or "Archiving" or "ArchivingFiles"=>"Создание архива",
+        "DownloadingAndArchivingFiles"=>"Скачивание и архивация", "ConnectingStorage"=>"Подключение к хранилищу", "CopyingToStorage"=>"Доставка копии",
+        "Verifying"=>"Проверка копии", "Retention"=>"Очистка старых копий", "Waiting"=>"Ожидание", _=>value
+    };
+    private static string Status(MonitoredRun r) => r.Incomplete ? "Неполная копия" : r.Status switch
+    { "Succeeded" => r.WarningCount > 0 ? "С предупреждениями" : "Успешно", "Failed" => "Ошибка", "PartiallySucceeded"=>"Частичная доставка", "Cancelled"=>"Отменено", _=>"Прервано" };
+    private static string DecisionLabel(ConfigurationDecisionState state) => state.Revoked ? "Доступ агента отозван" : state.Current switch
+    {
+        null => "Ревизия ещё не выдана с запросом подтверждения",
+        { Status: "Awaiting" } => "Ожидается подтверждение агента",
+        { Status: "Accepted" } => "Проверена и сохранена агентом",
+        { Reason: "CacheWriteFailed" } => "Агент не смог сохранить настройки",
+        _ => "Агент отклонил настройки"
+    };
+    protected override async Task OnParametersSetAsync()
+    {
+        Data = await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted);
+        Decisions = Data is null ? null : await Store.ConfigurationDecisionsAsync(Id, Http.HttpContext.RequestAborted);
+        Monitoring = await Store.MonitoringAsync(Id, Http.HttpContext!.RequestAborted);
+        Runs = await Store.RunsAsync(Id,RunPage,Http.HttpContext.RequestAborted);
+        Successful = await Store.LastSuccessfulRunsAsync(Id,Http.HttpContext.RequestAborted);
+        Latest = await Store.LatestRunsAsync(Id,Http.HttpContext.RequestAborted);
+        if (Data is null) Http.HttpContext.Response.StatusCode = 404;
+    }
+}
