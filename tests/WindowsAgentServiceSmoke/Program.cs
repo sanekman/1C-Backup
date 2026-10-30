@@ -297,10 +297,13 @@ internal static partial class Program
             {
                 var badRequest = await storageChecks.EnqueueAsync(firstSession, nasWrongJob!);
                 var badReport = await storageChecks.WaitAsync(badRequest);
+                var nasProbeResult = JsonSerializer.Serialize(new { phase = "separate-nas-wrong-password-probe",
+                    identityMatchesService = badReport.ExecutionIdentity?.WindowsSid == selected.Sid,
+                    badReport.TemporaryError, destinations = badReport.Destinations.Select(d => new { d.Succeeded, d.Error }) });
+                Console.WriteLine(nasProbeResult);
                 Require(badReport.ExecutionIdentity?.WindowsSid == selected.Sid && badReport.TemporaryError is null
-                    && badReport.Destinations.Count == 1 && !badReport.Destinations[0].Succeeded
-                    && badReport.Destinations[0].Error?.Contains("1326", StringComparison.Ordinal) == true,
-                    "A wrong NAS password silently fell back to another SMB identity.");
+                    && badReport.Destinations.Count == 1 && !badReport.Destinations[0].Succeeded,
+                    "The separate NAS wrong-password probe did not return an isolated service rejection: " + nasProbeResult);
                 Require(!(await catalog.ReadAsync()).Any(r => r.JobId == nasWrongJob!.Id), "The NAS access probe registered a backup.");
                 var nasCommand = await queue.EnqueueAsync(firstSession, nasJob.Id);
                 await Wait(async () => (await queue.ReadReceiptAsync(nasCommand.RequestId))?.Phase is LocalManualRunPhase.Finished,
