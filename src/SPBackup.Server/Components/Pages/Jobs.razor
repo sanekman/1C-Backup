@@ -25,7 +25,12 @@
             {
                 <article class="job-summary">
                     <h3>@job.Name</h3><p>@(job.Kind == "OneCFile" ? "Файловая база 1С, архив ZIP" : "Файлы и папки")</p>
-                    <dl><dt>Источник</dt><dd class="path">@job.Source</dd><dt>Копии</dt><dd class="path">@job.DestinationDirectory</dd>
+                    <dl><dt>Источник</dt><dd class="path">@job.Source</dd><dt>Хранилище 1</dt><dd class="path">@job.DestinationDirectory<br />Архивов хранить: @job.KeepLast</dd>
+                        @for (var index = 0; index < (job.AdditionalDestinations?.Count ?? 0); index++)
+                        {
+                            var destination = job.AdditionalDestinations![index];
+                            <dt>Хранилище @(index + 2)</dt><dd class="path">@destination.DestinationDirectory<br />Архивов хранить: @(destination.KeepLast is { } keep ? keep.ToString() : $"как в основном ({job.KeepLast})")</dd>
+                        }
                         <dt>Запуск</dt><dd>@FileJobDraft.ScheduleLabel(job.ScheduleKind)@if (job.ScheduleKind != "Manual") { <span> · @(job.Enabled ? "расписание включено" : "расписание выключено")</span> }</dd></dl>
                     @if (!agent.Revoked)
                     { <div class="actions"><a href="@($"agents/{Id}/jobs/{job.Id}/edit")">Изменить</a><a href="@($"agents/{Id}/jobs/{job.Id}/remove")">Удалить…</a></div> }

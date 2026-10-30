@@ -26,6 +26,15 @@ public sealed record ManagedFileJob
     public DayOfWeek? FullBackupDayOfWeek { get; init; }
     public string OneCMethod { get; init; } = "FileArchive";
     public bool AllowOpenOneCDatabase { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ManagedFileDestination>? AdditionalDestinations { get; init; }
+}
+public sealed record ManagedFileDestination
+{
+    public required string StorageKind { get; init; }
+    public required string DestinationDirectory { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? KeepLast { get; init; }
 }
 public sealed record PublishFileConfiguration(Guid AgentId, int ProtocolVersion, IReadOnlyList<ManagedFileJob> Jobs);
 public sealed record ManagedFileConfiguration(Guid AgentId, long Revision, IReadOnlyList<ManagedFileJob> Jobs, int ProtocolVersion = 1);
@@ -113,8 +122,16 @@ internal static class FileConfigurationContract
         catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException) { return false; }
         var source = Normal(j.Source);
         if (j.Kind == "OneCFile" && source.EndsWith(@"\1Cv8.1CD", StringComparison.OrdinalIgnoreCase)) source = source[..source.LastIndexOf('\\')];
-        return !Overlap(source, j.DestinationDirectory) && (j.TemporaryDirectory is null
-            || !Overlap(source, j.TemporaryDirectory) && !Overlap(j.DestinationDirectory, j.TemporaryDirectory));
+        if (j.AdditionalDestinations is { Count: > 7 } || j.AdditionalDestinations?.Any(d => d is null
+            || !WindowsPath(d.DestinationDirectory) || d.StorageKind is not ("LocalDirectory" or "NetworkShare")
+            || (d.StorageKind == "NetworkShare") != d.DestinationDirectory.Replace('/', '\\').StartsWith(@"\\")
+            || d.KeepLast is < 1 or > 10000) == true) return false;
+        var destinations = new[] { j.DestinationDirectory }.Concat(j.AdditionalDestinations?.Select(d => d.DestinationDirectory) ?? []).ToArray();
+        if (destinations.Any(path => Overlap(source, path) || j.TemporaryDirectory is not null && Overlap(j.TemporaryDirectory, path))
+            || j.TemporaryDirectory is not null && Overlap(source, j.TemporaryDirectory)) return false;
+        for (var index = 0; index < destinations.Length; index++)
+            if (destinations.Skip(index + 1).Any(path => Overlap(destinations[index], path))) return false;
+        return true;
     }
     private static string Normal(string path) => path.Replace('/', '\\').TrimEnd('\\');
     internal static bool Overlap(string left, string right)

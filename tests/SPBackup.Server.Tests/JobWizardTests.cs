@@ -7,7 +7,7 @@ using Xunit;
 
 namespace SPBackup.Server.Tests;
 
-public sealed class JobWizardTests(ServerFixture fixture) : IClassFixture<ServerFixture>
+public sealed partial class JobWizardTests(ServerFixture fixture) : IClassFixture<ServerFixture>
 {
     private static string Url(Guid id) => $"agents/{id}/jobs/new";
     private static string Attribute(string html, string name) => WebUtility.HtmlDecode(Regex.Match(html, "\\b" + name + "=\"([^\"]*)\"").Groups[1].Value);

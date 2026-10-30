@@ -3,7 +3,7 @@ using System.Globalization;
 namespace SPBackup.Server;
 
 /// <summary>Browser form values remain strings until validated, so a failed step preserves the draft.</summary>
-public sealed class FileJobDraft
+public sealed partial class FileJobDraft
 {
     public int Step { get; set; } = 1;
     public string Revision { get; set; } = "";
@@ -63,12 +63,13 @@ public sealed class FileJobDraft
             if (BackupMode is not ("Full" or "Incremental")) errors.Add("Выберите полные или инкрементные копии.");
             if (!int.TryParse(FullEvery, out var every) || every is < 1 or > 365) errors.Add("Интервал полной копии должен быть от 1 до 365 архивов.");
             if (FullDay != "" && (!int.TryParse(FullDay, out var day) || day is < 0 or > 6)) errors.Add("Выберите день полной копии или вариант «По числу архивов».");
-            var source = Source?.Trim() ?? "";
+            var source = (Source?.Trim() ?? "").Replace('/', '\\');
             if (Kind == "OneCFile" && source.EndsWith("\\1Cv8.1CD", StringComparison.OrdinalIgnoreCase)) source = source[..source.LastIndexOf('\\')];
             if (FileConfigurationContract.WindowsPath(source) && FileConfigurationContract.WindowsPath(Destination?.Trim())
                 && FileConfigurationContract.Overlap(source, Destination!.Trim())) errors.Add("Источник и папка копий должны находиться отдельно: одна не должна содержать другую.");
             if (!string.IsNullOrWhiteSpace(Temporary) && (FileConfigurationContract.Overlap(source, Temporary.Trim())
                 || FileConfigurationContract.Overlap(Destination?.Trim() ?? "", Temporary.Trim()))) errors.Add("Рабочая папка не должна пересекаться с источником и папкой копий.");
+            errors.AddRange(ValidateAdditionalDestinations(source));
         }
         return errors;
     }
@@ -94,7 +95,8 @@ public sealed class FileJobDraft
             DestinationDirectory = path, StorageKind = path.StartsWith(@"\\") ? "NetworkShare" : "LocalDirectory",
             TemporaryDirectory = string.IsNullOrWhiteSpace(Temporary) ? null : Temporary.Trim(), KeepLast = int.Parse(Keep),
             FileBackupMode = Kind == "OneCFile" ? "Full" : BackupMode, FullBackupEvery = int.Parse(FullEvery),
-            FullBackupDayOfWeek = Kind == "OneCFile" || FullDay == "" ? null : (DayOfWeek)int.Parse(FullDay) };
+            FullBackupDayOfWeek = Kind == "OneCFile" || FullDay == "" ? null : (DayOfWeek)int.Parse(FullDay),
+            AdditionalDestinations = BuildAdditionalDestinations() };
         FileConfigurationContract.Validate(1, [job]); return job;
     }
     public static FileJobDraft From(ManagedFileJob job, long revision) => new() {
@@ -105,7 +107,9 @@ public sealed class FileJobDraft
         Tuesday = job.DaysOfWeek.Contains("Tuesday"), Wednesday = job.DaysOfWeek.Contains("Wednesday"), Thursday = job.DaysOfWeek.Contains("Thursday"),
         Friday = job.DaysOfWeek.Contains("Friday"), Saturday = job.DaysOfWeek.Contains("Saturday"), Sunday = job.DaysOfWeek.Contains("Sunday"),
         Destination = job.DestinationDirectory, Temporary = job.TemporaryDirectory ?? "", Keep = job.KeepLast.ToString(CultureInfo.InvariantCulture),
-        BackupMode = job.FileBackupMode, FullEvery = job.FullBackupEvery.ToString(CultureInfo.InvariantCulture), FullDay = job.FullBackupDayOfWeek is { } day ? ((int)day).ToString() : "" };
+        BackupMode = job.FileBackupMode, FullEvery = job.FullBackupEvery.ToString(CultureInfo.InvariantCulture), FullDay = job.FullBackupDayOfWeek is { } day ? ((int)day).ToString() : "",
+        AdditionalDestinations = (job.AdditionalDestinations ?? []).Select(d => new FileDestinationDraft {
+            Destination = d.DestinationDirectory, Keep = d.KeepLast?.ToString(CultureInfo.InvariantCulture) ?? "" }).ToList() };
 
     public IEnumerable<KeyValuePair<string, string>> HiddenFields()
     {
@@ -118,5 +122,11 @@ public sealed class FileJobDraft
             nameof(Temporary), nameof(Keep), nameof(BackupMode), nameof(FullEvery), nameof(FullDay)];
         foreach (var key in all.Where(k => Step is < 1 or > 3 || !visible[Step].Contains(k)))
             yield return new("Model." + key, Convert.ToString(typeof(FileJobDraft).GetProperty(key)!.GetValue(this), CultureInfo.InvariantCulture) ?? "");
+        if (Step != 3)
+            for (var index = 0; index < AdditionalDestinations.Count; index++)
+            {
+                yield return new($"Model.AdditionalDestinations[{index}].Destination", AdditionalDestinations[index]?.Destination ?? "");
+                yield return new($"Model.AdditionalDestinations[{index}].Keep", AdditionalDestinations[index]?.Keep ?? "");
+            }
     }
 }

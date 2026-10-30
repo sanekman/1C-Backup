@@ -28,6 +28,8 @@ else if (Model is { } model && Configuration is not null && Agent is { Revoked: 
         @if (Conflict) { <p>Ваши значения остались в форме. Откройте актуальный список в другой вкладке и сравните изменения. Автоматической перезаписи нет.</p><a href="@($"agents/{Id}/jobs")" target="_blank" rel="noopener">Открыть актуальный список</a> }
         <form method="post" @formname="job-wizard" @onsubmit="Submit">
             <AntiforgeryToken />
+            @if (!Conflict && model.Step < 4)
+            { <button type="submit" name="Command" value="next" class="wizard-default-submit" tabindex="-1" aria-hidden="true">Далее</button> }
             @foreach (var field in model.HiddenFields()) { <input type="hidden" name="@field.Key" value="@field.Value" /> }
             @if (model.Step == 1)
             {
@@ -67,10 +69,25 @@ else if (Model is { } model && Configuration is not null && Agent is { Revoked: 
             else if (model.Step == 3)
             {
                 <h2>3. Где хранить копии</h2>
+                <h3>Хранилище 1 — основное</h3>
                 <label>Папка резервных копий<input name="Model.Destination" value="@model.Destination" maxlength="4096" required placeholder="D:\Копии или \\хранилище\копии" spellcheck="false" /></label>
                 <p>Это диск компьютера агента или сетевая папка UNC. Для службы используйте \\сервер\папка вместо буквы подключённого сетевого диска.
                     Доступ проверяется под пользователем агента или службы. Пароль Windows в панели не задаётся.</p>
                 <label>Сколько архивов хранить<input name="Model.Keep" value="@model.Keep" inputmode="numeric" maxlength="5" required /></label>
+                @for (var index = 0; index < model.AdditionalDestinations.Count; index++)
+                {
+                    var row = model.AdditionalDestinations[index];
+                    <fieldset class="storage-row"><legend>Хранилище @(index + 2)</legend>
+                        <label>Дополнительная папка копий<input name="@($"Model.AdditionalDestinations[{index}].Destination")" value="@row?.Destination" maxlength="4096" required placeholder="E:\Копии или \\другой-сервер\копии" spellcheck="false" /></label>
+                        <label>Сколько архивов хранить<input name="@($"Model.AdditionalDestinations[{index}].Keep")" value="@row?.Keep" inputmode="numeric" maxlength="5" placeholder="Как в основном хранилище" /></label>
+                        <p>Оставьте лимит пустым, чтобы использовать основной. Папка должна находиться отдельно от источника, рабочей папки и других хранилищ.</p>
+                        <button type="submit" name="Command" value="@($"remove-storage:{index}")" class="quiet" formnovalidate>Убрать это хранилище из задания</button>
+                    </fieldset>
+                }
+                @if (model.AdditionalDestinations.Count < FileJobDraft.MaxAdditionalDestinations)
+                { <button type="submit" name="Command" value="add-storage" class="quiet" formnovalidate>Добавить ещё одну папку копий</button> }
+                <p>Можно указать до восьми папок. Архив создаётся один раз и доставляется в каждую папку; ошибка одной доставки не отменяет остальные.
+                    Убирая папку из задания, вы не удаляете уже сохранённые архивы.</p>
                 <label>Копирование файлов и папок<select name="Model.BackupMode">
                     <option value="Full" selected="@(model.BackupMode == "Full")">Каждый раз полная копия</option>
                     <option value="Incremental" selected="@(model.BackupMode == "Incremental")">Полная основа, затем только изменения</option>
@@ -96,7 +113,12 @@ else if (Model is { } model && Configuration is not null && Agent is { Revoked: 
                     <dt>Расписание</dt><dd>@FileJobDraft.ScheduleLabel(model.Schedule)@if (model.Schedule != "Manual") { <span> · @(model.Enabled ? "включено" : "выключено")</span> }</dd>
                     @if (model.Schedule is "Daily" or "Weekly") { <dt>Время</dt><dd>@model.Times · @ZoneLabel(model.TimeZone)</dd> }
                     @if (model.Schedule == "Weekly") { <dt>Дни</dt><dd>@string.Join(", ", FileJobDraft.Days.Where(d => model.DayValue(d.Key)).Select(d => d.Label))</dd> }
-                    <dt>Копии</dt><dd class="path">@model.Destination</dd><dt>Архивов хранить</dt><dd>@model.Keep</dd>
+                    <dt>Хранилище 1</dt><dd class="path">@model.Destination<br />Архивов хранить: @model.Keep</dd>
+                    @for (var index = 0; index < model.AdditionalDestinations.Count; index++)
+                    {
+                        var row = model.AdditionalDestinations[index];
+                        <dt>Хранилище @(index + 2)</dt><dd class="path">@row?.Destination<br />Архивов хранить: @(string.IsNullOrWhiteSpace(row?.Keep) ? $"как в основном ({model.Keep})" : row.Keep)</dd>
+                    }
                     <dt>Режим копирования</dt><dd>@(model.Kind == "OneCFile" || model.BackupMode == "Full" ? "Полные копии" : "Полная основа и изменения")</dd>
                     @if (model.Kind == "FilesAndFolders" && model.BackupMode == "Incremental") { <dt>Следующая полная</dt><dd>@(model.FullDay == "" ? $"Каждая {model.FullEvery}-я копия" : FileJobDraft.Days.FirstOrDefault(d => ((int)Enum.Parse<DayOfWeek>(d.Key)).ToString() == model.FullDay).Label ?? "Выберите день")</dd> }
                     @if (!string.IsNullOrWhiteSpace(model.Temporary)) { <dt>Рабочая папка</dt><dd class="path">@model.Temporary</dd> }

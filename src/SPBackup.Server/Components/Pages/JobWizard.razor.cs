@@ -43,6 +43,20 @@ public partial class JobWizard
         if (revision != Configuration.Revision)
         { ShowConflict(); return; }
         if (Command == "back") { Model.Step = Math.Max(1, Model.Step - 1); return; }
+        if (Model.Step == 3 && Command == "add-storage")
+        {
+            if (Model.AdditionalDestinations.Count >= FileJobDraft.MaxAdditionalDestinations)
+                Error = "Уже добавлено максимальное число хранилищ: 8.";
+            else Model.AdditionalDestinations.Add(new());
+            return;
+        }
+        if (Model.Step == 3 && Command?.StartsWith("remove-storage:", StringComparison.Ordinal) == true)
+        {
+            if (int.TryParse(Command["remove-storage:".Length..], NumberStyles.None, CultureInfo.InvariantCulture, out var index)
+                && index >= 0 && index < Model.AdditionalDestinations.Count) Model.AdditionalDestinations.RemoveAt(index);
+            else Error = "Не удалось выбрать хранилище для удаления из формы. Изменения плана не сохранены.";
+            return;
+        }
         if (Command == "next" && Model.Step < 4)
         {
             Errors = Model.ValidateStep(Model.Step);
