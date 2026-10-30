@@ -5,6 +5,19 @@ namespace SPBackup.Core;
 
 internal static class FileBackupBases
 {
+    private static async Task<FileStream> OpenArchiveAsync(BackupJob target, string path, CancellationToken token)
+    {
+        if (target.NetworkShare is not null)
+        {
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Сетевой вход доступен в Windows.");
+            if (target.Validate().Count != 0) throw new InvalidDataException("Проверьте привязку сетевого входа.");
+            var login = await new WindowsNetworkShareCredentialStore().GetAsync(target.NetworkShare.CredentialKey, token);
+            return await new WindowsNetworkShareStorage(new(), login).OpenArchiveReadAsync(path, token);
+        }
+        FileBackupPaths.RejectReparse(path);
+        return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+    }
     internal static async Task<FileBackupManifest?> ReadAsync(BackupJob job, string sourceIdentity, BackupCatalog catalog,
         FileBackupSnapshotStore snapshots, CancellationToken token, TimeProvider? timeProvider = null, IArchivePasswordStore? passwords = null)
     {
@@ -57,10 +70,8 @@ internal static class FileBackupBases
             {
                 token.ThrowIfCancellationRequested();
                 var path = BackupCopyVerifier.ValidateRecord(record, tip.Target);
-                FileBackupPaths.RejectReparse(path);
                 // One read handle prevents Windows writers from swapping an archive between hash and manifest reads.
-                await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920,
-                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await using var input = await OpenArchiveAsync(tip.Target, path, token);
                 BackupProgressContext.Report(BackupStage.Verifying);
                 var hash = await SHA256.HashDataAsync(input, token);
                 if (input.Length != record.Backup.Length || !Convert.ToHexString(hash).Equals(record.Backup.Sha256, StringComparison.OrdinalIgnoreCase))

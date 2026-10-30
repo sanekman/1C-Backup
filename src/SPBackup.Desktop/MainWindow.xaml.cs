@@ -231,6 +231,7 @@ public partial class MainWindow : Window
             FullBackupDayOfWeek = SelectedFullBackupDay,
             ArchivePasswordKey = EncryptArchive.IsChecked == true ? archivePasswordKey : null, StorageKind = storageKind,
             GoogleDrive = storageKind == StorageKind.GoogleDrive ? googleDriveSettings : null,
+            NetworkShare = ReadNetworkShareSettings(),
             RemoteGateway = storageKind == StorageKind.RemoteGateway ? remoteGatewaySettings : null,
             ScheduleKind = scheduleKind, DaysOfWeek = SelectedDays(),
             OneC = oneC,
@@ -277,6 +278,11 @@ public partial class MainWindow : Window
             foreach (var key in updated.Where(job => job.Kind == DatabaseKind.SqlServer && job.SqlServer?.Authentication == SqlServerAuthentication.SqlServer)
                 .Select(job => job.SqlServer?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal).Where(key => !knownSqlKeys.Contains(key)))
                 await new WindowsSqlServerCredentialStore().ExportForServiceAsync(key);
+            var knownNetworkKeys = jobs.SelectMany(job => job.StorageJobs).Select(job => job.NetworkShare?.CredentialKey)
+                .OfType<string>().ToHashSet(StringComparer.Ordinal);
+            foreach (var key in updated.SelectMany(job => job.StorageJobs).Select(job => job.NetworkShare?.CredentialKey)
+                .OfType<string>().Distinct(StringComparer.Ordinal).Where(key => !knownNetworkKeys.Contains(key)))
+                await new WindowsNetworkShareCredentialStore().ExportForServiceAsync(key);
             await store.SaveAsync(updated);
             jobs = updated;
             Jobs.ItemsSource = jobs;
@@ -403,6 +409,8 @@ public partial class MainWindow : Window
         Storage.SelectedValue = job.StorageKind;
         FtpHost.Text = job.Ftp?.Host ?? ""; FtpPort.Text = (job.Ftp?.Port ?? 21).ToString();
         FtpTls.IsChecked = job.Ftp?.UseTls ?? true; FtpCredentialKey.Text = job.Ftp?.CredentialKey ?? "";
+        networkShareSettings = job.NetworkShare;
+        NetworkUseCredentials.IsChecked = job.NetworkShare is not null; UpdateNetworkStatus();
         Schedule.SelectedValue = job.ScheduleKind;
         SetDays(job.DaysOfWeek);
         UpdateSchedulePreview();
@@ -438,6 +446,7 @@ public partial class MainWindow : Window
         UpdateArchivePasswordStatus();
         Storage.SelectedValue = StorageKind.LocalDirectory;
         FtpHost.Clear(); FtpPort.Text = "21"; FtpTls.IsChecked = true; FtpCredentialKey.Clear();
+        networkShareSettings = null; NetworkUseCredentials.IsChecked = false; UpdateNetworkStatus();
         googleDriveSettings = null; googleDriveFolder = null; UpdateGoogleDriveStatus();
         remoteGatewaySettings = null; UpdateRemoteGatewayStatus();
         Schedule.SelectedValue = ScheduleKind.Daily; SetDays(WeekDays.Monday);
@@ -547,6 +556,7 @@ public partial class MainWindow : Window
         ArchivePasswordButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         GoogleDriveConnectButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         FtpCredentialsButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
+        NetworkCredentialsButton.IsEnabled = FtpCredentialsButton.IsEnabled;
         StopScheduleButton.IsEnabled = schedulingTask is not null && !schedulerStopping;
         RefreshCopiesButton.IsEnabled = ready && !copiesRefreshing;
         VerifyCopyButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null &&
@@ -1221,6 +1231,7 @@ public partial class MainWindow : Window
     {
         if (FtpPanel is not null)
             FtpPanel.Visibility = Storage.SelectedValue is StorageKind.Ftp ? Visibility.Visible : Visibility.Collapsed;
+        if (NetworkSharePanel is not null) NetworkSharePanel.Visibility = Storage.SelectedValue is StorageKind.NetworkShare ? Visibility.Visible : Visibility.Collapsed;
         if (DestinationBrowseButton is not null)
             DestinationBrowseButton.Visibility = Storage.SelectedValue is StorageKind.Ftp or StorageKind.GoogleDrive or StorageKind.RemoteGateway ? Visibility.Collapsed : Visibility.Visible;
         if (GoogleDrivePanel is not null)

@@ -41,6 +41,11 @@ public partial class MainWindow
         try
         {
             var imported = await Task.Run(() => BackupJobTransfer.ImportAsync(dialog.FileName));
+            // A file from elsewhere cannot authorize sending an existing NAS secret.
+            imported = imported with {
+                NetworkShare = imported.NetworkShare is { } network ? network with { CredentialKey = "" } : null,
+                AdditionalDestinations = imported.AdditionalDestinations?.Select(d => d with {
+                    NetworkShare = d.NetworkShare is { } extra ? extra with { CredentialKey = "" } : null }).ToArray() };
             var requiresPostgreSqlPassword = imported.Kind == DatabaseKind.PostgreSql && imported.PostgreSql?.CredentialKey is not null;
             if (requiresPostgreSqlPassword && imported.PostgreSql is { } pg)
             {

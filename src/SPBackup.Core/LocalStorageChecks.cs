@@ -59,9 +59,8 @@ public sealed class LocalStorageCheckQueue(string directory)
             token.ThrowIfCancellationRequested();
             try
             {
-                if (!Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out var id) || new FileInfo(path).Length > 8192) continue;
-                FileBackupPaths.RejectReparse(path);
-                var r = await new AgentJsonFile<LocalStorageCheckRequest>(path).ReadAsync(token);
+                if (!Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out var id)) continue;
+                var r = await new AgentJsonFile<LocalStorageCheckRequest>(path).ReadBoundedAsync(8192, token);
                 if (r is not null && r.RequestId == id && r.SessionId != Guid.Empty && r.JobId != Guid.Empty
                     && r.SubmittedUtc != default && r.JobFingerprint is { Length: 64 } && r.JobFingerprint.All(Uri.IsHexDigit)) result.Add(r);
             }
@@ -72,12 +71,7 @@ public sealed class LocalStorageCheckQueue(string directory)
     public async Task<LocalStorageCheckReceipt?> ReadAsync(LocalStorageCheckRequest request, CancellationToken token = default)
     {
         var path = FilePath("receipts", request.RequestId);
-        if (File.Exists(path))
-        {
-            if (new FileInfo(path).Length > 2 * 1024 * 1024) throw new InvalidDataException("Результат проверки слишком велик.");
-            FileBackupPaths.RejectReparse(path);
-        }
-        var value = await new AgentJsonFile<LocalStorageCheckReceipt>(path).ReadAsync(token);
+        var value = await new AgentJsonFile<LocalStorageCheckReceipt>(path).ReadBoundedAsync(2 * 1024 * 1024, token);
         if (value is not null && (value.RequestId != request.RequestId || value.SessionId != request.SessionId
             || value.JobId != request.JobId || value.JobFingerprint != request.JobFingerprint || !Enum.IsDefined(value.Phase)
             || value.Phase == LocalStorageCheckPhase.Completed && value.Report is null))
@@ -98,8 +92,7 @@ public sealed class LocalStorageCheckQueue(string directory)
     internal async Task<bool> IsCancelledAsync(LocalStorageCheckRequest request, CancellationToken token)
     {
         var path = FilePath("cancel", request.RequestId);
-        if (File.Exists(path) && new FileInfo(path).Length > 8192) throw new InvalidDataException("Некорректная команда отмены проверки.");
-        var value = await new AgentJsonFile<LocalStorageCheckCancel>(path).ReadAsync(token);
+        var value = await new AgentJsonFile<LocalStorageCheckCancel>(path).ReadBoundedAsync(8192, token);
         return value?.RequestId == request.RequestId && value.SessionId == request.SessionId;
     }
     internal Task WriteAsync(LocalStorageCheckReceipt receipt, CancellationToken token) =>

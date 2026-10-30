@@ -42,7 +42,8 @@ public sealed class JobStore(string path, bool useLocalTime = false) : IBackupJo
     private string ProtectedPath => Path.GetFullPath(path) + ".protected.json";
     private string PendingPath => Path.GetFullPath(path) + ".pending.json";
     private sealed record ProtectedDocument(int FormatVersion, IReadOnlyList<BackupJob> Jobs);
-    private static bool Protected(BackupJob job) => job.Kind == DatabaseKind.PostgreSql && job.PostgreSql?.Tls is not null;
+    private static bool Protected(BackupJob job) => job.Kind == DatabaseKind.PostgreSql && job.PostgreSql?.Tls is not null
+        || job.NetworkShare is not null || job.AdditionalDestinations?.Any(d => d?.NetworkShare is not null) == true;
     private IReadOnlyList<BackupJob> Normalize(IReadOnlyList<BackupJob> jobs)
     {
         var normalized = useLocalTime ? jobs.Select(job => job is null ? null! : job with { TimeZoneId = BackupSchedule.LocalTimeZone }).ToArray() : jobs;

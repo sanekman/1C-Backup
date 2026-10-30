@@ -13,6 +13,7 @@ public partial class DestinationWindow : Window
     private GoogleDriveSettings? googleDriveSettings;
     private string? googleDriveFolder;
     private RemoteGatewaySettings? remoteGateway;
+    private NetworkShareSettings? networkShareSettings;
     public BackupDestination? Result { get; private set; }
 
     public DestinationWindow(WindowsFtpCredentialStore credentials, BackupDestination? initial = null)
@@ -31,6 +32,7 @@ public partial class DestinationWindow : Window
         credentialKey = initial?.Ftp?.CredentialKey;
         googleDriveSettings = initial?.GoogleDrive;
         remoteGateway = initial?.RemoteGateway;
+        networkShareSettings = initial?.NetworkShare;
         googleDriveFolder = initial?.StorageKind == StorageKind.GoogleDrive ? initial.DestinationDirectory : null;
         Destination.Text = initial?.DestinationDirectory ?? "";
         KeepLast.Text = initial?.KeepLast?.ToString() ?? "";
@@ -38,6 +40,7 @@ public partial class DestinationWindow : Window
         FtpPort.Text = (initial?.Ftp?.Port ?? 21).ToString();
         FtpTls.IsChecked = initial?.Ftp?.UseTls ?? true;
         Storage.SelectedValue = initial?.StorageKind ?? StorageKind.LocalDirectory;
+        NetworkUseCredentials.IsChecked = initial?.NetworkShare is not null; UpdateNetworkStatus();
         CredentialsStatus.Text = credentialKey is null ? "Доступ пока не задан. Пароль сохраняется в Windows." : "Для хранилища задан доступ в Windows.";
         if (initial is not null) SaveButton.Content = "Применить";
     }
@@ -46,7 +49,8 @@ public partial class DestinationWindow : Window
     {
         if (FtpPanel is null || BrowseButton is null || PathHint is null) return;
         var kind = Storage.SelectedValue is StorageKind selected ? selected : StorageKind.LocalDirectory;
-        Height = kind == StorageKind.Ftp ? 620 : 420;
+        Height = kind == StorageKind.Ftp ? 620 : kind == StorageKind.NetworkShare ? 560 : 420;
+        NetworkPanel.Visibility = kind == StorageKind.NetworkShare ? Visibility.Visible : Visibility.Collapsed;
         var cloud = kind == StorageKind.GoogleDrive;
         if (cloud && googleDriveFolder is not null) Destination.Text = googleDriveFolder;
         else if (!cloud && googleDriveFolder is not null && Destination.Text == googleDriveFolder) Destination.Clear();
@@ -59,7 +63,7 @@ public partial class DestinationWindow : Window
         BrowseButton.Visibility = kind is StorageKind.Ftp or StorageKind.GoogleDrive or StorageKind.RemoteGateway ? Visibility.Collapsed : Visibility.Visible;
         PathHint.Text = kind switch
         {
-            StorageKind.NetworkShare => @"Укажите сетевую папку: \\server\share\backups. Доступ — под текущим пользователем Windows.",
+            StorageKind.NetworkShare => @"Укажите сетевую папку: \\server\share\backups. Для NAS можно задать отдельный логин и пароль ниже.",
             StorageKind.Ftp => "Укажите папку на FTP-сервере, например /backups. FTPS проверяет сертификат сервера.",
             _ => @"Укажите полный путь, например D:\Backups. Папка будет создана при копировании."
         };
@@ -102,6 +106,7 @@ public partial class DestinationWindow : Window
         if (kind == StorageKind.Ftp && !int.TryParse(FtpPort.Text, out port))
         { Status.Text = "Порт FTP должен быть числом от 1 до 65535."; FtpPort.Focus(); return; }
         var destination = new BackupDestination { StorageKind = kind, DestinationDirectory = Destination.Text.Trim(),
+            NetworkShare = kind == StorageKind.NetworkShare && NetworkUseCredentials.IsChecked == true ? networkShareSettings ?? new() : null,
             KeepLast = keepLast, GoogleDrive = kind == StorageKind.GoogleDrive ? googleDriveSettings : null,
             RemoteGateway = kind == StorageKind.RemoteGateway ? remoteGateway : null,
             Ftp = kind == StorageKind.Ftp ? new FtpSettings { Host = FtpHost.Text.Trim(), Port = port,

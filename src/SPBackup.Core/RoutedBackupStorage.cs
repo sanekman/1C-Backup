@@ -22,6 +22,7 @@ public sealed class RoutedBackupStorage(IFtpCredentialStore credentials, string 
         var errors = job.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         if (job.StorageKind == StorageKind.Ftp) await ResolveAsync(job, cancellationToken);
+        if (job.NetworkShare is not null) await ResolveAsync(job, cancellationToken);
         if (job.StorageKind == StorageKind.GoogleDrive) await (await ResolveAsync(job, cancellationToken)).PrepareAsync(job, cancellationToken);
         if (job.StorageKind == StorageKind.RemoteGateway) await (await ResolveAsync(job, cancellationToken)).PrepareAsync(job, cancellationToken);
     }
@@ -29,7 +30,15 @@ public sealed class RoutedBackupStorage(IFtpCredentialStore credentials, string 
     private async Task<IBackupStorage> ResolveAsync(BackupJob job, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (job.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare) return files;
+        if (job.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare)
+        {
+            if (job.NetworkShare is null) return files;
+            if (job.StorageKind != StorageKind.NetworkShare || job.Validate().Count != 0)
+                throw new InvalidDataException("Некорректная привязка сетевого входа.");
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Отдельный вход в сетевую папку доступен в Windows.");
+            var networkLogin = await new WindowsNetworkShareCredentialStore().GetAsync(job.NetworkShare.CredentialKey, cancellationToken);
+            return new WindowsNetworkShareStorage(files, networkLogin);
+        }
         if (job.StorageKind == StorageKind.RemoteGateway)
         {
             if (job.RemoteGateway is null || job.Validate().Count != 0) throw new InvalidDataException("Некорректное подключение шлюза.");

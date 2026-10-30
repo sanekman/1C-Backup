@@ -55,9 +55,16 @@ public sealed class FileBackupStorage : IBackupStorage
         if (errors.Count > 0) throw new ArgumentException(string.Join(" ", errors), nameof(job));
         cancellationToken.ThrowIfCancellationRequested();
         var source = Path.GetFullPath(completedBackupPath);
-        var destination = Path.GetFullPath(Path.Combine(job.DestinationDirectory, Path.GetFileName(source)));
         await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read,
             81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return await StoreOpenAsync(input, source, job, cancellationToken);
+    }
+
+    // Open the source under the executor's normal identity before entering a network-only
+    // logon. A remote temporary/source path must never receive the destination's NAS login.
+    internal async Task<StoredBackup> StoreOpenAsync(FileStream input, string source, BackupJob job, CancellationToken cancellationToken)
+    {
+        var destination = Path.GetFullPath(Path.Combine(job.DestinationDirectory, Path.GetFileName(source)));
         var length = input.Length;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var sameFile = string.Equals(source, destination, comparison);

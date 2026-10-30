@@ -13,10 +13,10 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
 {
     private readonly string prefix;
     private readonly bool exportNewSecrets;
-    private string CredentialLabel => prefix switch { "SqlServer" => "MS SQL", "PostgreSQL" => "PostgreSQL", _ => "FTP" };
+    private string CredentialLabel => prefix switch { "SqlServer" => "MS SQL", "PostgreSQL" => "PostgreSQL", "NetworkShare" => "сетевого хранилища", _ => "FTP" };
     private static WindowsServiceCredentialCache? serviceCache;
     public static void SetServiceCache(WindowsServiceCredentialCache? cache) => serviceCache = cache;
-    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV" or "GoogleDrive" or "Notifications" or "RemoteGateway" or "SqlServer" or "PostgreSQL") && serviceCache is not null;
+    private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV" or "GoogleDrive" or "Notifications" or "RemoteGateway" or "SqlServer" or "PostgreSQL" or "NetworkShare") && serviceCache is not null;
     public async Task ExportForServiceAsync(string key, CancellationToken token = default)
     {
         var value = await GetAsync(key, token);
@@ -29,6 +29,9 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
         var google = new WindowsFtpCredentialStore("GoogleDrive");
         var sql = new WindowsFtpCredentialStore("SqlServer");
         var postgres = new WindowsFtpCredentialStore("PostgreSQL");
+        var network = new WindowsNetworkShareCredentialStore();
+        foreach (var key in jobs.SelectMany(job => job.StorageJobs).Select(job => job.NetworkShare?.CredentialKey)
+            .OfType<string>().Distinct(StringComparer.Ordinal)) await network.ExportForServiceAsync(key);
         foreach (var key in jobs.Where(job => job.Kind == DatabaseKind.PostgreSql)
             .Select(job => job.PostgreSql?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal))
             await postgres.ExportForServiceAsync(key);

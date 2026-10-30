@@ -104,8 +104,15 @@ internal static partial class Program
         var pgStore = new WindowsPostgreSqlCredentialStore(); var pgKey = Guid.NewGuid().ToString("N");
         PostgreSqlFixture? postgres = null;
         WindowsSmbFixture? smb = null;
+        WindowsSmbFixture? nasSmb = null;
+        string? nasAccount = null, nasSid = null, nasKey = null;
+        var nasCreated = false;
+        string? nasWrongKey = null;
+        var nasStore = new WindowsNetworkShareCredentialStore();
+        string ReadNasArchive(string location) => nasSmb is not null && location.StartsWith(nasSmb.UncPath + "\\", StringComparison.OrdinalIgnoreCase)
+            ? nasSmb.LocalPath(location) : location;
         string ReadableArchive(string location) => smb is not null
-            && location.StartsWith(smb.UncPath + "\\", StringComparison.OrdinalIgnoreCase) ? smb.LocalPath(location) : location;
+            && location.StartsWith(smb.UncPath + "\\", StringComparison.OrdinalIgnoreCase) ? smb.LocalPath(location) : ReadNasArchive(location);
         var checks = new List<string>(); string? failure = null;
         try
         {
@@ -150,7 +157,25 @@ internal static partial class Program
                 StorageKind = StorageKind.NetworkShare, DestinationDirectory = domainSmb?.AllowedUnc ?? smb!.UncPath };
             var deniedNetwork = network with { Id = Guid.NewGuid(), Name = "service-account denied UNC fixture",
                 DestinationDirectory = domainSmb?.DeniedUnc ?? smb!.DeniedUncPath };
-            var jobs = new[] { manual, startup, pgJob, network, deniedNetwork };
+            BackupJob? nasJob = null, nasWrongJob = null;
+            if (domainSmb is null && !prepareReboot)
+            {
+                nasAccount = "nas" + Guid.NewGuid().ToString("N")[..12];
+                var nasPassword = "NaS!b9-" + Guid.NewGuid().ToString("N");
+                Native.AddUser(nasAccount, nasPassword);
+                nasCreated = true;
+                var nasIdentity = WindowsServiceAccounts.Resolve(nasAccount); nasSid = nasIdentity.Sid;
+                Require(nasSid != selected.Sid, "The NAS login must differ from the service account.");
+                nasSmb = await WindowsSmbFixture.CreateAsync(nasIdentity.Name, nasSid);
+                nasKey = "nas-" + Guid.NewGuid().ToString("N"); nasStore.Save(nasKey, nasIdentity.Name, nasPassword);
+                nasJob = network with { Id = Guid.NewGuid(), Name = "separate NAS login service fixture", DestinationDirectory = nasSmb.UncPath,
+                    NetworkShare = new() { ShareRoot = NetworkShareSettings.Root(nasSmb.UncPath), CredentialKey = nasKey } };
+                nasWrongKey = "nas-wrong-" + Guid.NewGuid().ToString("N");
+                nasStore.Save(nasWrongKey, nasIdentity.Name, "Wrong!" + Guid.NewGuid().ToString("N"));
+                nasWrongJob = nasJob with { Id = Guid.NewGuid(), Name = "wrong NAS password probe fixture",
+                    NetworkShare = nasJob.NetworkShare! with { CredentialKey = nasWrongKey } };
+            }
+            var jobs = new[] { manual, startup, pgJob, network, deniedNetwork }.Concat(nasJob is null ? [] : new[] { nasJob, nasWrongJob! }).ToArray();
             var jobStore = new JobStore(Path.Combine(directory, "jobs.json")); await jobStore.SaveAsync(jobs);
             var originalJobs = await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json"));
             WindowsFtpCredentialStore.SetServiceCache(new(directory, sid, selected.Sid));
@@ -268,10 +293,33 @@ internal static partial class Program
                 using var reader = new StreamReader(input);
                 Require(await reader.ReadToEndAsync() == payload, "The encrypted UNC backup did not restore expected source data.");
             }
+            if (nasJob is not null)
+            {
+                var badRequest = await storageChecks.EnqueueAsync(firstSession, nasWrongJob!);
+                var badReport = await storageChecks.WaitAsync(badRequest);
+                Require(badReport.ExecutionIdentity?.WindowsSid == selected.Sid && badReport.TemporaryError is null
+                    && badReport.Destinations.Count == 1 && !badReport.Destinations[0].Succeeded
+                    && badReport.Destinations[0].Error?.Contains("1326", StringComparison.Ordinal) == true,
+                    "A wrong NAS password silently fell back to another SMB identity.");
+                Require(!(await catalog.ReadAsync()).Any(r => r.JobId == nasWrongJob!.Id), "The NAS access probe registered a backup.");
+                var nasCommand = await queue.EnqueueAsync(firstSession, nasJob.Id);
+                await Wait(async () => (await queue.ReadReceiptAsync(nasCommand.RequestId))?.Phase is LocalManualRunPhase.Finished,
+                    "The separate NAS login backup did not finish.");
+                var nasRun = (await history.ReadAsync()).Single(run => run.JobId == nasJob.Id);
+                Require(nasRun.Status == BackupRunStatus.Succeeded, "Explicit NAS login backup failed: " + nasRun.Error);
+                var nasCopy = (await catalog.ReadAsync()).Single(record => record.JobId == nasJob.Id);
+                var path = ReadNasArchive(nasCopy.Backup.Location);
+                Require(new FileInfo(path).GetAccessControl().GetOwner(typeof(SecurityIdentifier))?.Value == nasSid,
+                    "The NAS archive was not written by the separate outbound user.");
+                using var nasZip = new ZipFile(path) { Password = archivePassword };
+                await using var nasInput = nasZip.GetInputStream(0); using var nasReader = new StreamReader(nasInput);
+                Require(await nasReader.ReadToEndAsync() == payload, "NAS backup did not restore exact source bytes.");
+                checks.Add("separate-nas-login-with-delegated-vault-secret-service-local-identity-and-real-encrypted-archive");
+            }
             var baselineRuns = await history.ReadAsync();
             var baselineCopyCount = (await catalog.ReadAsync()).Count;
-            Require(baselineRuns.Count == 4 && baselineRuns.All(run => run.Status == BackupRunStatus.Succeeded)
-                && baselineCopyCount == 4, "Expected four distinct successful service backups before restart checks.");
+            Require(baselineRuns.Count == (nasJob is null ? 4 : 5) && baselineRuns.All(run => run.Status == BackupRunStatus.Succeeded)
+                && baselineCopyCount == baselineRuns.Count, "Expected distinct successful service backups before restart checks.");
             checks.Add("distinct-service-account-unc-encrypted-backup-sha256-and-restoration");
             WindowsAgentService.Stop(executable, directory); await WaitService(1);
             await WaitProcessExit(state!.ProcessId, executable);
@@ -452,6 +500,9 @@ internal static partial class Program
             catch (Exception error) { failure = (failure ?? "") + "\nSCM cleanup: " + error.GetType().Name + ": " + error.Message; }
             try { if (smb is not null) await smb.DisposeAsync(); }
             catch (Exception error) { failure = (failure ?? "") + "\nSMB fixture cleanup: " + error.GetType().Name; }
+            try { if (nasSmb is not null) await nasSmb.DisposeAsync(); if (nasKey is not null) nasStore.Delete(nasKey); if (nasWrongKey is not null) nasStore.Delete(nasWrongKey); }
+            catch (Exception error) { failure = (failure ?? "") + "\nNAS fixture cleanup: " + error.GetType().Name; }
+            if (nasCreated && nasAccount is not null && Native.DeleteUser(nasAccount) != 0) failure = (failure ?? "") + "\nNAS account cleanup failed.";
             WindowsFtpCredentialStore.SetServiceCache(null);
             try { pgStore.Delete(pgKey); if (postgres is not null) await postgres.DisposeAsync(); }
             catch (Exception error) { failure = (failure ?? "") + "\nPostgreSQL fixture cleanup: " + error.GetType().Name; }

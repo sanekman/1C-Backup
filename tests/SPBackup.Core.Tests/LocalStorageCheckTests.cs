@@ -141,6 +141,60 @@ public sealed class LocalStorageCheckTests : IDisposable
     }
 
     [Fact]
+    public async Task ConcurrentReceiptReplacementNeverExposesAMissingOrPartialResult()
+    {
+        var request = await Queue.EnqueueAsync(session, Job);
+        var accepted = new LocalStorageCheckReceipt(request.RequestId, session, Job.Id, request.JobFingerprint, LocalStorageCheckPhase.Accepted);
+        var terminal = accepted with { Phase = LocalStorageCheckPhase.Rejected, Error = "fixture terminal response" };
+        await Queue.WriteAsync(accepted, default);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var writer = Task.Run(async () =>
+        {
+            for (var index = 0; index < 300; index++)
+                await Queue.WriteAsync(index % 2 == 0 ? terminal : accepted, timeout.Token);
+            await Queue.WriteAsync(terminal, timeout.Token);
+        }, timeout.Token);
+        try
+        {
+            do
+            {
+                var value = await Queue.ReadAsync(request, timeout.Token);
+                // The platform may briefly hide a replacement, but it must never throw
+                // FileNotFoundException between a presence check and a metadata read.
+                if (value is not null) Assert.Contains(value.Phase, new[] { LocalStorageCheckPhase.Accepted, LocalStorageCheckPhase.Rejected });
+            } while (!writer.IsCompleted);
+        }
+        finally { await writer; }
+        Assert.Equal(terminal, await Queue.ReadAsync(request, timeout.Token));
+    }
+
+    [Fact]
+    public async Task BoundedReceiptAndCancelReadersRejectOversizedFilesBeforeParsing()
+    {
+        var request = await Queue.EnqueueAsync(session, Job);
+        var receipt = Path.Combine(root, "storage-checks", "receipts", request.RequestId.ToString("N") + ".json");
+        Directory.CreateDirectory(Path.GetDirectoryName(receipt)!);
+        await File.WriteAllBytesAsync(receipt, new byte[2 * 1024 * 1024 + 1]);
+        await Assert.ThrowsAsync<InvalidDataException>(() => Queue.ReadAsync(request));
+        await Queue.CancelAsync(request);
+        var cancel = Path.Combine(root, "storage-checks", "cancel", request.RequestId.ToString("N") + ".json");
+        await File.WriteAllBytesAsync(cancel, new byte[8193]);
+        await Assert.ThrowsAsync<InvalidDataException>(() => Queue.IsCancelledAsync(request, default));
+    }
+
+    [Fact]
+    public async Task AReceiptSymlinkCannotBypassTheBoundedReadersLinkProtection()
+    {
+        var request = await Queue.EnqueueAsync(session, Job);
+        var foreign = Path.Combine(root, "foreign-receipt.json");
+        await new AgentJsonFile<LocalStorageCheckReceipt>(foreign).WriteAsync(new(request.RequestId, session, Job.Id,
+            request.JobFingerprint, LocalStorageCheckPhase.Accepted), default);
+        var receipt = Path.Combine(root, "storage-checks", "receipts", request.RequestId.ToString("N") + ".json");
+        Directory.CreateDirectory(Path.GetDirectoryName(receipt)!); File.CreateSymbolicLink(receipt, foreign);
+        await Assert.ThrowsAnyAsync<IOException>(() => Queue.ReadAsync(request));
+    }
+
+    [Fact]
     public async Task FailedFinalReceiptIsRetriedWithoutRepeatingTheProbe()
     {
         storage.Block = true; await Start(); var request = await Queue.EnqueueAsync(session, Job);

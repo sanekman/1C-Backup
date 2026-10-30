@@ -9,8 +9,13 @@
    <TextBlock Text="База и архив создаются один раз. В это хранилище отправляется тот же файл." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0" /></StackPanel>
   <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel>
    <TextBlock Text="Тип хранилища" /><ComboBox x:Name="Storage" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="Storage_Changed" Margin="0,4,0,10" />
-   <TextBlock x:Name="DestinationLabel" Text="Папка копий" /><DockPanel x:Name="DestinationPanel" Margin="0,4,0,10"><Button x:Name="BrowseButton" Content="Выбрать…" DockPanel.Dock="Right" Click="Browse_Click" Margin="6,0,0,0" /><TextBox x:Name="Destination" /></DockPanel>
+   <TextBlock x:Name="DestinationLabel" Text="Папка копий" /><DockPanel x:Name="DestinationPanel" Margin="0,4,0,10"><Button x:Name="BrowseButton" Content="Выбрать…" DockPanel.Dock="Right" Click="Browse_Click" Margin="6,0,0,0" /><TextBox x:Name="Destination" TextChanged="NetworkDestination_Changed" /></DockPanel>
    <TextBlock x:Name="PathHint" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
+   <StackPanel x:Name="NetworkPanel" Visibility="Collapsed" Margin="0,0,0,10">
+    <CheckBox x:Name="NetworkUseCredentials" Content="Отдельный логин и пароль NAS / сетевой папки" Checked="NetworkMode_Changed" Unchecked="NetworkMode_Changed" />
+    <Button x:Name="NetworkCredentialsButton" Content="Задать сетевой логин и пароль…" Click="NetworkCredentials_Click" HorizontalAlignment="Left" Margin="0,6,0,0" Visibility="Collapsed" />
+    <TextBlock x:Name="NetworkCredentialStatus" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" />
+   </StackPanel>
    <TextBlock Text="Хранить последних успешных копий" />
    <TextBox x:Name="KeepLast" Margin="0,4,0,4" ToolTip="Минимум 1. Пустое поле — количество из основного хранилища задания." />
    <TextBlock Text="Минимум 1. Пустое поле — как в основном хранилище задания."

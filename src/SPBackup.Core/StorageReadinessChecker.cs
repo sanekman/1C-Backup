@@ -51,7 +51,7 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
             foreach (var target in job.StorageJobs)
             {
                 var label = new BackupDestination { StorageKind = target.StorageKind,
-                    DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, GoogleDrive = target.GoogleDrive, RemoteGateway = target.RemoteGateway, KeepLast = target.KeepLast }.Description;
+                    DestinationDirectory = target.DestinationDirectory, Ftp = target.Ftp, NetworkShare = target.NetworkShare, GoogleDrive = target.GoogleDrive, RemoteGateway = target.RemoteGateway, KeepLast = target.KeepLast }.Description;
                 if (cancellationToken.IsCancellationRequested)
                 { cancelled = true; results.Add(new(label, false, "Проверка отменена.")); continue; }
                 StoredBackup? stored = null;

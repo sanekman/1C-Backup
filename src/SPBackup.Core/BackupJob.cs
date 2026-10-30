@@ -23,6 +23,8 @@ public sealed record BackupJob
     public StorageKind StorageKind { get; init; } = StorageKind.LocalDirectory;
     public FtpSettings? Ftp { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public NetworkShareSettings? NetworkShare { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public GoogleDriveSettings? GoogleDrive { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public RemoteGatewaySettings? RemoteGateway { get; init; }
@@ -97,6 +99,11 @@ public sealed record BackupJob
         if (string.IsNullOrWhiteSpace(DestinationDirectory)) errors.Add("Укажите каталог резервных копий.");
         var destination = DestinationDirectory ?? "";
         if (!Enum.IsDefined(StorageKind)) errors.Add("Неизвестный тип хранилища.");
+        if (NetworkShare is not null)
+        {
+            if (StorageKind != StorageKind.NetworkShare) errors.Add("Отдельный сетевой вход доступен только для сетевой папки UNC.");
+            errors.AddRange(NetworkShare.Validate(destination));
+        }
         if (StorageKind == StorageKind.NetworkShare &&
             (!destination.StartsWith(@"\\") || destination.Split('\\', StringSplitOptions.RemoveEmptyEntries).Length < 2))
             errors.Add(@"Для сетевого диска укажите UNC-путь, например \\server\share\backups.");

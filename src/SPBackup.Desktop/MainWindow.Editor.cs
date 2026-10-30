@@ -203,6 +203,8 @@ public partial class MainWindow
                     ? "учётная запись Windows исполнителя" : "сохранённый логин MS SQL");
             if (Kind.SelectedItem is DatabaseKind.PostgreSql)
                 WizardSummary.Text += "\nВход в PostgreSQL: " + (UseSavedPostgreSqlPassword ? "пароль, сохранённый в Windows" : "существующие настройки PostgreSQL исполнителя");
+            if (Storage.SelectedValue is StorageKind.NetworkShare)
+                WizardSummary.Text += "\nСетевой вход: " + (NetworkUseCredentials.IsChecked == true ? "отдельный логин NAS, сохранённый в Windows" : "пользователь агента или службы Windows");
             if (Kind.SelectedItem is DatabaseKind.PostgreSql)
                 WizardSummary.Text += "\nЗащита подключения: " + (PgTlsRequired.IsChecked == true ? "TLS с проверкой сертификата и имени сервера" : "прежние настройки PostgreSQL исполнителя");
             if (Kind.SelectedItem is DatabaseKind.FilesAndFolders or DatabaseKind.WebDav && FileBackupModePicker.SelectedValue is FileBackupMode.Incremental)
@@ -339,6 +341,7 @@ public partial class MainWindow
             var job = new BackupJob { Name = "check", Source = "check", DestinationDirectory = Destination.Text.Trim(), StorageKind = (StorageKind)Storage.SelectedValue,
                 TemporaryDirectory = temporary,
                 GoogleDrive = Storage.SelectedValue is StorageKind.GoogleDrive ? googleDriveSettings : null,
+                NetworkShare = ReadNetworkShareSettings(),
                 RemoteGateway = Storage.SelectedValue is StorageKind.RemoteGateway ? remoteGatewaySettings : null,
                 ArchiveCopies = EncryptArchive.IsChecked == true, ArchivePasswordKey = EncryptArchive.IsChecked == true ? archivePasswordKey : null,
                 AdditionalDestinations = additionalDestinations.Count == 0 ? null : additionalDestinations.ToArray(),
