@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace SPBackup.Server;
 
-public enum ServerEvent { Started, Stopped, StartupFailed, RequestFailed, LoginSucceeded, LoginFailed, InvitationCreated, AgentEnrolled, AgentRevoked, AdministratorPasswordChanged, PasswordChangeFailed, DiagnosticsDownloaded }
+public enum ServerEvent { Started, Stopped, StartupFailed, RequestFailed, LoginSucceeded, LoginFailed, InvitationCreated, AgentEnrolled, AgentRevoked, AdministratorPasswordChanged, PasswordChangeFailed, DiagnosticsDownloaded, TimeZoneChanged, TimeZoneChangeFailed }
 public sealed class ServerLog(ServerOptions options)
 {
     private readonly object gate = new();

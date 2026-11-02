@@ -53,6 +53,8 @@ public static partial class ServerHost
         Directory.CreateDirectory(keys);
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(keys, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         builder.Services.AddSingleton(settings);
+        builder.Services.AddSingleton<ServerTimeZone>();
+        builder.Services.AddScoped<ServerClock>(services => services.GetRequiredService<ServerTimeZone>().Snapshot());
         builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(database.ConnectionString));
         builder.Services.AddSingleton<ServerStore>(); builder.Services.AddSingleton<ServerLog>();
         builder.Services.AddSingleton<ServerDiagnostics>();

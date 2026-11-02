@@ -36,7 +36,7 @@
                 <tr><td><a href="@("agents/" + agent.AgentId)">@agent.Name</a><small>Компьютер: @(agent.ComputerName ?? agent.Name)</small>
                     <small>Папка: @(Folders.FirstOrDefault(f => f.Id == agent.FolderId)?.Path ?? "Без папки")</small><small>@(Versions.GetValueOrDefault(agent.AgentId) ?? agent.AgentVersion ?? "Версия ещё не получена")</small></td>
                     <td><span class="badge @(agent.Revoked ? "bad" : Online(agent) ? "good" : "pending")">@State(agent)</span></td>
-                    <td>@Time(LastSeen(agent))</td>
+                    <td>@Clock.Time(LastSeen(agent))</td>
                     <td><small>На сервере: @agent.DesiredRevision</small><small>Сообщено агентом: @(agent.ReportedRevision?.ToString() ?? "—")</small></td></tr>
             }
             </tbody></table></div>
@@ -71,5 +71,4 @@
     private DateTimeOffset? LastSeen(AgentRecord agent) => MonitoringTimes.TryGetValue(agent.AgentId,out var time) && (agent.ReceivedUtc is null || time > agent.ReceivedUtc) ? time : agent.ReceivedUtc;
     private bool Online(AgentRecord agent) => LastSeen(agent) is { } time && DateTimeOffset.UtcNow - time < TimeSpan.FromSeconds(Settings.OfflineAfterSeconds);
     private string State(AgentRecord agent) => agent.Revoked ? "Доступ отозван" : LastSeen(agent) is null ? "Ожидает первого сигнала" : Online(agent) ? "На связи" : "Нет связи";
-    internal static string Time(DateTimeOffset? value) => value?.UtcDateTime.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture) ?? "Ещё не получена";
 }

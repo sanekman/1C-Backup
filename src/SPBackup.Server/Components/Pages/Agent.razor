@@ -16,7 +16,7 @@
     <h2>Резервное копирование</h2>
     @if (Monitoring is { } monitoring)
     {
-        <p>Состояние получено @Home.Time(monitoring.ReceivedUtc). Ожидает передачи запусков: @monitoring.Snapshot.PendingRuns.</p>
+        <p>Состояние получено @Clock.Time(monitoring.ReceivedUtc). Ожидает передачи запусков: @monitoring.Snapshot.PendingRuns.</p>
         @if (monitoring.Snapshot.ExecutionMode == "Managed")
         { <p>Задания с сервера. Принятая ревизия: @(monitoring.Snapshot.ConfigurationRevision?.ToString() ?? "ожидает первого подключения").
             @(monitoring.Snapshot.BackupExecutionAvailable == true && agent.BackupExecutionAvailable ? "Исполнитель работает." : "Исполнение не подтверждено.")</p> }
@@ -24,7 +24,7 @@
         @if (DateTimeOffset.UtcNow - monitoring.ReceivedUtc > TimeSpan.FromSeconds(Settings.OfflineAfterSeconds))
         { <p class="error">Нет свежих данных от агента. Показаны последние полученные сведения.</p> }
         @if (monitoring.Snapshot.Progress is { } progress)
-        { <p class="badge pending">Выполняется: @Stage(progress.Stage) · @(progress.Percent?.ToString() ?? "—")% · @Home.Time(progress.UpdatedUtc)</p> }
+        { <p class="badge pending">Выполняется: @Stage(progress.Stage) · @(progress.Percent?.ToString() ?? "—")% · @Clock.Time(progress.UpdatedUtc)</p> }
         @if (monitoring.Snapshot.Sources is { Count: > 0 } sources)
         {
             <h2>Внешние SQL-копии</h2>
@@ -32,21 +32,21 @@
             {
                 var latest = Latest.FirstOrDefault(r=>r.JobId==source.MonitorId);
                 <p><strong>@source.Name</strong> · @Source(source.Kind) · @(source.Enabled ? source.Failed ? "Ошибка чтения истории" : "Опрос включён" : "Отключён")
-                    <small>Последний опрос: @Home.Time(source.PolledUtc). Последняя копия: @(latest is null ? "Нет данных" : Status(latest)) · @Home.Time(latest?.FinishedUtc).</small></p>
+                    <small>Последний опрос: @Clock.Time(source.PolledUtc). Последняя копия: @(latest is null ? "Нет данных" : Status(latest)) · @Clock.Time(latest?.FinishedUtc).</small></p>
             }
         }
-        <div class="table-scroll"><table><thead><tr><th>Задание</th><th>Расписание</th><th>Последний результат</th><th>Последняя успешная копия без пропусков (UTC)</th><th>Следующий запуск (UTC)</th></tr></thead><tbody>
+        <div class="table-scroll"><table><thead><tr><th>Задание</th><th>Расписание</th><th>Последний результат</th><th>Последняя успешная копия без пропусков</th><th>Следующий запуск</th></tr></thead><tbody>
         @foreach (var job in monitoring.Snapshot.Jobs)
         {
             var last = Latest.FirstOrDefault(r=>r.JobId==job.JobId);
             <tr><td>@job.Name<small>@Source(job.SourceKind) · хранилищ: @job.DestinationCount</small></td>
             <td>@(job.Enabled ? job.Schedule : "Отключено")</td>
-            <td>@(last is null ? "Результатов ещё нет" : Status(last))<small>@Home.Time(last?.FinishedUtc)</small>
+            <td>@(last is null ? "Результатов ещё нет" : Status(last))<small>@Clock.Time(last?.FinishedUtc)</small>
             @if (last is not null && (last.WarningCount > 0 || last.Incomplete || last.Status != "Succeeded" || last.Issues is { Count: > 0 }))
             { <details><summary>Причины и что делать</summary><RunIssueDetails Run="last" /></details> }
             </td>
-            <td>@Home.Time(Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.FinishedUtc)</td>
-            <td>@(job.NextRunUtc is null ? "По событию / вручную" : Home.Time(job.NextRunUtc))</td></tr>
+            <td>@Clock.Time(Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.FinishedUtc)</td>
+            <td>@(job.NextRunUtc is null ? "По событию / вручную" : Clock.Time(job.NextRunUtc))</td></tr>
         }
         </tbody></table></div>
     }
@@ -57,8 +57,8 @@
     {
         @foreach (var run in history.Runs)
         {
-            <details><summary>@run.JobName · @Status(run) · @Home.Time(run.FinishedUtc)</summary>
-            <p>Начало: @Home.Time(run.StartedUtc). Конец: @Home.Time(run.FinishedUtc). Предупреждений: @run.WarningCount.</p>
+            <details><summary>@run.JobName · @Status(run) · @Clock.Time(run.FinishedUtc)</summary>
+            <p>Начало: @Clock.Time(run.StartedUtc). Конец: @Clock.Time(run.FinishedUtc). Предупреждений: @run.WarningCount.</p>
             @if (run.CopyKind is not null) { <p>Тип копии: @(run.CopyKind == "Full" ? "Полная" : "Инкрементная").</p> }
             @if (run.ConfigurationRevision is { } revision) { <p>Ревизия настроек этого запуска: @revision.</p> }
             @if (run.Incomplete) { <p class="error">Копия неполная: часть файлов пропущена. Для непрочитанных файлов может требоваться прежняя версия из цепочки.</p> }
@@ -74,14 +74,14 @@
     <section class="card narrow">
         <dl><dt>ID</dt><dd class="mono">@agent.AgentId</dd>
             <dt>Версия</dt><dd>@(Monitoring?.Snapshot.AgentVersion ?? agent.AgentVersion ?? "Ещё не получена")</dd>
-            <dt>Зарегистрирован</dt><dd>@Home.Time(agent.RegisteredUtc)</dd>
-            <dt>Последняя связь, время сервера</dt><dd>@Home.Time(Monitoring?.ReceivedUtc ?? agent.ReceivedUtc)</dd>
-            <dt>Последняя отметка времени агента</dt><dd>@Home.Time(Monitoring?.Snapshot.SentUtc ?? agent.SentUtc)</dd>
+            <dt>Зарегистрирован</dt><dd>@Clock.Time(agent.RegisteredUtc)</dd>
+            <dt>Последняя связь, время сервера</dt><dd>@Clock.Time(Monitoring?.ReceivedUtc ?? agent.ReceivedUtc)</dd>
+            <dt>Последняя отметка времени агента</dt><dd>@Clock.Time(Monitoring?.Snapshot.SentUtc ?? agent.SentUtc)</dd>
             <dt>Ревизия на сервере</dt><dd>@agent.DesiredRevision</dd>
             @if (Decisions is { } decisions)
             {
                 <dt>Настройки серверной ревизии</dt><dd>@DecisionLabel(decisions)</dd>
-                <dt>Последняя проверенная и сохранённая агентом</dt><dd>@(decisions.LastAccepted is { } accepted ? $"Ревизия {accepted.Revision} · подтверждение получено {Home.Time(accepted.ReceivedUtc)}" : "Подтверждения ещё нет")</dd>
+                <dt>Последняя проверенная и сохранённая агентом</dt><dd>@(decisions.LastAccepted is { } accepted ? $"Ревизия {accepted.Revision} · подтверждение получено {Clock.Time(accepted.ReceivedUtc)}" : "Подтверждения ещё нет")</dd>
             }
             <dt>Ревизия, сообщённая агентом</dt><dd>@(agent.ReportedRevision?.ToString() ?? "Нет сигнала")</dd>
             <dt>Исполнитель копирования</dt><dd>@(agent.ReceivedUtc is null ? "Нет данных" : agent.BackupExecutionAvailable ? "Агент сообщает готовность" : "Агент сообщает, что недоступен")</dd>

@@ -17,7 +17,7 @@
         <label>Имя сервера<input readonly value="@Settings.DisplayName" /></label>
         <label>Адрес сервера<input readonly value="@ServerAddress" /></label>
         @if (Fingerprint is not null) { <label>SHA-256 сертификата<textarea readonly rows="2">@Fingerprint</textarea></label> }
-        <p>Код действует до <strong>@invitation.ExpiresUtc.ToString("dd.MM.yyyy HH:mm 'UTC'")</strong> и может быть использован один раз. Скопируйте его сейчас: при повторном открытии он не показывается.</p>
+        <p>Код действует до <strong>@Clock.Time(invitation.ExpiresUtc)</strong> и может быть использован один раз. Скопируйте его сейчас: при повторном открытии он не показывается.</p>
         <label>Код приглашения<textarea readonly rows="2" aria-label="Код приглашения">@invitation.Code</textarea></label>
         <p class="muted">Передайте код только администратору подключаемого компьютера. Это временное разрешение на регистрацию, не пароль пользователя.</p>
         <a href="connect">Создать другое приглашение</a>

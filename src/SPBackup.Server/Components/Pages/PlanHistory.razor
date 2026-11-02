@@ -14,12 +14,12 @@
     <section class="card">
         <h2>@agent.Name</h2>
         <p>Текущий сохранённый план: ревизия @agent.DesiredRevision. Это ещё не подтверждение принятия агентом.</p>
-        <div class="table-scroll"><table><thead><tr><th>Ревизия</th><th>Когда (UTC)</th><th>Кто</th><th>Заданий</th><th>Действие</th></tr></thead><tbody>
+        <div class="table-scroll"><table><thead><tr><th>Ревизия</th><th>Когда</th><th>Кто</th><th>Заданий</th><th>Действие</th></tr></thead><tbody>
         @foreach (var entry in data.Entries)
         {
             <tr><td>@entry.Revision@if (entry.Revision == agent.DesiredRevision) { <span> · текущая</span> }
                 @if (entry.RestoredFrom is { } previous) { <span> · возврат к @previous</span> }</td>
-                <td>@Home.Time(entry.SavedUtc)</td><td>@(entry.Author ?? "Исходный план / система")</td><td>@entry.JobCount</td>
+                <td>@Clock.Time(entry.SavedUtc)</td><td>@(entry.Author ?? "Исходный план / система")</td><td>@entry.JobCount</td>
                 <td><a href="@($"agents/{Id}/jobs/history/{entry.Revision}")">Посмотреть план</a></td></tr>
         }
         </tbody></table></div>

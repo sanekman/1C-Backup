@@ -29,6 +29,26 @@ public static partial class ServerHost
             return Results.Redirect(context.Request.PathBase + "/account?error=" + code);
         }).RequireAuthorization(ServerAuthentication.Administrator).RequireRateLimiting("maintenance");
 
+        app.MapPost("/management/time-zone", async (HttpContext context, IAntiforgery anti, ServerTimeZone zones, ServerLog log) =>
+        {
+            await anti.ValidateRequestAsync(context);
+            if (!context.Request.HasFormContentType) return Results.StatusCode(415);
+            var form = await context.Request.ReadFormAsync(context.RequestAborted);
+            if (form["timeZoneId"].Count != 1) return Results.Redirect(context.Request.PathBase + "/system?timeZone=invalid");
+            try
+            {
+                await zones.SaveAsync(form["timeZoneId"].ToString(), context.RequestAborted);
+                log.Write(ServerEvent.TimeZoneChanged);
+                return Results.Redirect(context.Request.PathBase + "/system?timeZone=saved");
+            }
+            catch (ServerRequestException) { return Results.Redirect(context.Request.PathBase + "/system?timeZone=invalid"); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                log.Write(ServerEvent.TimeZoneChangeFailed, error);
+                return Results.Redirect(context.Request.PathBase + "/system?timeZone=failed");
+            }
+        }).RequireAuthorization(ServerAuthentication.Administrator).RequireRateLimiting("maintenance");
+
         app.MapPost("/api/v1/management/diagnostics", async (HttpContext context, IAntiforgery anti, ServerDiagnostics diagnostics, ServerLog log) =>
         {
             await anti.ValidateRequestAsync(context);

@@ -11,7 +11,8 @@
     </div>
 </header>
 <main>@Body</main>
-<footer>Связь с агентом и результат резервного копирования — отдельные состояния. Время показано в UTC.
+<footer>Связь с агентом и результат резервного копирования — отдельные состояния. Время показано в поясе: @Clock.ZoneLabel. Смещение относительно UTC указано рядом с датой.
+    @if (Clock.LoadWarning) { <p class="error">Настройку часового пояса прочитать не удалось. Временно используется UTC; сохраните нужный пояс в настройках сервера.</p> }
     <small>Сборка: @Build</small></footer>
 @code {
     private static string Build => typeof(ServerHost).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)

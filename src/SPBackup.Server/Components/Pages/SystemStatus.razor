@@ -5,15 +5,32 @@
 @inject IHttpContextAccessor Http
 <PageTitle>Состояние сервера — @Settings.DisplayName</PageTitle>
 <h1>Состояние сервера</h1>
+<section class="card narrow">
+<h2>Часовой пояс панели</h2>
+<p>Выберите, в каком часовом поясе показывать время всем пользователям этого сервера.</p>
+@if (TimeZoneResult == "saved") { <p role="status">Часовой пояс сохранён. Все даты панели показаны в выбранном поясе.</p> }
+@if (TimeZoneResult == "invalid") { <p class="error" role="alert">Выберите допустимый часовой пояс из списка.</p> }
+@if (TimeZoneResult == "failed") { <p class="error" role="alert">Не удалось сохранить часовой пояс. Проверьте право записи службы в папку данных сервера.</p> }
+<form action="management/time-zone" method="post">
+<AntiforgeryToken />
+<label>Часовой пояс<select name="timeZoneId">
+@foreach (var choice in ServerTimeZone.Options(Clock.ZoneId))
+{ <option value="@choice.Id" selected="@(choice.Id == Clock.ZoneId)">@choice.Label</option> }
+</select></label>
+<p>Сейчас в сохранённом поясе: @Clock.Time(DateTimeOffset.UtcNow).</p>
+<p class="muted">Настройка меняет отображение времени, а не часы Windows/Linux и не расписания заданий агентов. В обмене и диагностике время остаётся в UTC. Перезапуск не требуется.</p>
+<button type="submit">Сохранить часовой пояс</button>
+</form>
+</section>
 <section class="card"><dl>
 <dt>Имя сервера</dt><dd>@Settings.DisplayName</dd>
 <dt>Адрес подключения</dt><dd>@(Settings.PublicAddress ?? "Определяется по адресу открытой панели")</dd>
 <dt>База данных</dt><dd>@(Ready ? "Доступна, схема актуальна" : "Недоступна / требуется миграция")</dd>
 <dt>Версия схемы</dt><dd>@ServerStore.SchemaVersion</dd>
-<dt>Время сервера (UTC)</dt><dd>@Home.Time(DateTimeOffset.UtcNow)</dd>
-<dt>Работает с (UTC)</dt><dd>@Home.Time(new DateTimeOffset(System.Diagnostics.Process.GetCurrentProcess().StartTime).ToUniversalTime())</dd>
+<dt>Время сервера</dt><dd>@Clock.Time(DateTimeOffset.UtcNow)</dd>
+<dt>Работает с</dt><dd>@Clock.Time(new DateTimeOffset(System.Diagnostics.Process.GetCurrentProcess().StartTime).ToUniversalTime())</dd>
 <dt>Свободно на диске данных</dt><dd>@Disk</dd>
-<dt>HTTPS-сертификат до (UTC)</dt><dd>@CertificateExpiry</dd>
+<dt>HTTPS-сертификат до</dt><dd>@CertificateExpiry</dd>
 <dt>Память процесса</dt><dd>@(Environment.WorkingSet / 1024 / 1024) МБ</dd>
 </dl>
 <p>Проверка готовности: <a href="health/ready">health/ready</a>. Панель обновляется каждые 30 секунд.</p>
@@ -27,6 +44,7 @@
 <p class="muted">В ZIP — состояние сервера и последние события. База, настройки, пароли, токены и сертификаты не включаются. Это не резервная копия сервера.</p>
 </section>
 @code {
+    [SupplyParameterFromQuery(Name = "timeZone")] public string? TimeZoneResult { get; set; }
     private bool Ready;
     private string Disk = "Нет данных";
     private string CertificateExpiry = "Завершается на обратном прокси / системном endpoint";
@@ -38,7 +56,7 @@
         {
             using var cert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12FromFile(path,
                 Settings.HttpsCertificatePasswordFile is { } file ? ServerHost.ReadSecret(file) : null);
-            CertificateExpiry = Home.Time(new DateTimeOffset(cert.NotAfter).ToUniversalTime());
+            CertificateExpiry = Clock.Time(new DateTimeOffset(cert.NotAfter).ToUniversalTime());
             if (cert.NotAfter.ToUniversalTime() < DateTime.UtcNow.AddDays(30)) CertificateExpiry += " — требуется обновить сертификат";
         }
     }
