@@ -44,8 +44,10 @@ settings = json.loads((config / 'server.json').read_text())
 assert settings['Server']['DisplayName'] == 'Тестовый сервер'
 assert settings['Server']['PublicAddress'] == 'https://192.0.2.120:8443/'
 assert 'Password=' not in settings['Server']['ConnectionString']
+# This fixture installs the immutable published preview.5, whose schema is 4.
+# Workspace schema upgrades are exercised by FolderMigrationTests.
 assert subprocess.check_output(['runuser', '-u', 'postgres', '--', 'psql', '-X', '-qAt', '-d', 'onecbackup',
-                                '-c', 'SELECT max(version) FROM server_schema'], text=True).strip() == '5'
+                                '-c', 'SELECT max(version) FROM server_schema'], text=True).strip() == '4'
 assert subprocess.check_output(['runuser', '-u', 'postgres', '--', 'psql', '-X', '-qAt',
                                 '-c', 'SHOW listen_addresses'], text=True).strip() == 'localhost'
 
@@ -96,7 +98,7 @@ assert 'User=onec-backup-server' in unit and 'postgresql@17-main.service' in uni
 assert 'NoNewPrivileges=true' in unit and 'ProtectSystem=' not in unit and 'PrivateTmp=' not in unit
 subprocess.run(['systemd-analyze', 'verify', '/etc/systemd/system/onec-backup-server.service'], check=True)
 report = {'success': True, 'version': '0.1.0-preview.5', 'checks': [
-    'published archive SHA256', 'Debian13 runtime dependencies', 'real PostgreSQL17 schema5',
+    'published archive SHA256', 'Debian13 runtime dependencies', 'real PostgreSQL17 schema4',
     'loopback-only database', 'non-root server and private CA key', 'trusted HTTPS and untrusted CA rejection',
     'administrator login and CSRF', 'enrollment and agent configuration',
     'failed first service start safely resumed', 'repeat installation retains secrets and password hash',
