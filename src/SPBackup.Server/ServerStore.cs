@@ -9,7 +9,7 @@ namespace SPBackup.Server;
 /// <summary>Parameterized PostgreSQL operations. Invitation consumption, registration and audit commit together.</summary>
 public sealed partial class ServerStore(NpgsqlDataSource source)
 {
-    public const int SchemaVersion = 4;
+    public const int SchemaVersion = 5;
     private readonly PasswordHasher<ServerUser> passwords = new();
     private static NpgsqlCommand Command(NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql,
         params (string Name, object? Value)[] values)
@@ -52,6 +52,13 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
         if (version < 4)
         {
             using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("SPBackup.Server.Migrations.004-configuration-history.sql")!;
+            using var reader = new StreamReader(script);
+            await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
+            await migration.ExecuteNonQueryAsync(token);
+        }
+        if (version < 5)
+        {
+            using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("SPBackup.Server.Migrations.005-agent-folders.sql")!;
             using var reader = new StreamReader(script);
             await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
             await migration.ExecuteNonQueryAsync(token);
@@ -107,13 +114,17 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > 128 || request.Name.Any(char.IsControl)
             || request.Minutes is < 1 or > 60 || request.AgentId == Guid.Empty) throw new ServerRequestException(400, "invalid_invitation");
+        var displayName = request.DisplayName is null ? null : OrganizationName(request.DisplayName, folder: false);
+        var organization = request.DisplayName is not null || request.FolderId is not null || request.NewFolderName is not null;
         var id = Guid.NewGuid(); var code = ServerTokens.Create();
         await using var connection = await source.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(token);
+        await OrganizationLockAsync(connection, transaction, token);
+        var folderId = await ResolveFolderAsync(connection, transaction, userId, request.FolderId, request.NewFolderName, token);
         DateTimeOffset expiry;
         await using (var cmd = Command(connection, transaction,
-            "INSERT INTO server_invitations(id,name,agent_id,token_hash,expires_utc,created_by) VALUES(@id,@name,@agent,@hash,now()+make_interval(mins=>@minutes),@user) RETURNING expires_utc",
-            ("id", id), ("name", request.Name.Trim()), ("agent", request.AgentId), ("hash", ServerTokens.Hash(code)), ("minutes", request.Minutes), ("user", userId)))
+            "INSERT INTO server_invitations(id,name,agent_id,token_hash,expires_utc,created_by,agent_display_name,folder_id,organization_configured) VALUES(@id,@name,@agent,@hash,now()+make_interval(mins=>@minutes),@user,@display,@folder,@organization) RETURNING expires_utc",
+            ("id", id), ("name", request.Name.Trim()), ("agent", request.AgentId), ("hash", ServerTokens.Hash(code)), ("minutes", request.Minutes), ("user", userId), ("display", displayName), ("folder", folderId), ("organization", organization)))
             expiry = new((DateTime)(await cmd.ExecuteScalarAsync(token))!);
         await AuditAsync(connection, transaction, userId, request.AgentId, "InvitationCreated", token);
         await transaction.CommitAsync(token);
@@ -125,20 +136,24 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
             || request.Name.Length > 128 || request.Name.Any(char.IsControl)) throw new ServerRequestException(400, "invalid_enrollment");
         await using var connection = await source.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(token);
-        Guid invitationId; bool replaceRevoked;
+        await OrganizationLockAsync(connection, transaction, token);
+        Guid invitationId; bool replaceRevoked; string? displayName; Guid? folderId; bool organization;
         await using (var cmd = Command(connection, transaction,
-            "SELECT id,agent_id FROM server_invitations WHERE token_hash=@hash AND expires_utc>now() AND consumed_utc IS NULL FOR UPDATE", ("hash", ServerTokens.Hash(request.InvitationCode))))
+            "SELECT id,agent_id,agent_display_name,folder_id,organization_configured FROM server_invitations WHERE token_hash=@hash AND expires_utc>now() AND consumed_utc IS NULL FOR UPDATE", ("hash", ServerTokens.Hash(request.InvitationCode))))
         {
             await using var reader = await cmd.ExecuteReaderAsync(token);
             if (!await reader.ReadAsync(token)) throw new ServerRequestException(403, "invitation_unavailable");
+            displayName = reader.IsDBNull(2) ? null : reader.GetString(2);
+            folderId = reader.IsDBNull(3) ? null : reader.GetGuid(3); organization = reader.GetBoolean(4);
             invitationId = reader.GetGuid(0); replaceRevoked = !reader.IsDBNull(1) && reader.GetGuid(1) == request.AgentId;
             if (!reader.IsDBNull(1) && reader.GetGuid(1) != request.AgentId) throw new ServerRequestException(403, "invitation_agent_mismatch");
         }
         var bearer = ServerTokens.Create();
         try
         {
-            await using var insert = Command(connection, transaction, "INSERT INTO server_agents(id,name,token_hash) VALUES(@id,@name,@hash) ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash,revoked=false,name=excluded.name WHERE server_agents.revoked AND @replace",
-                ("id", request.AgentId), ("name", request.Name.Trim()), ("hash", ServerTokens.Hash(bearer)), ("replace",replaceRevoked));
+            await using var insert = Command(connection, transaction, "INSERT INTO server_agents(id,name,token_hash,computer_name,folder_id) VALUES(@id,@name,@hash,@computer,@folder) ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash,revoked=false,name=coalesce(@display::text,server_agents.name),computer_name=excluded.computer_name,folder_id=CASE WHEN @organization THEN excluded.folder_id ELSE server_agents.folder_id END WHERE server_agents.revoked AND @replace",
+                ("id", request.AgentId), ("name", displayName ?? request.Name.Trim()), ("hash", ServerTokens.Hash(bearer)), ("replace",replaceRevoked),
+                ("computer", request.Name.Trim()), ("folder", folderId), ("display", displayName), ("organization", organization));
             if (await insert.ExecuteNonQueryAsync(token)!=1) throw new ServerRequestException(409,"agent_already_registered");
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation) { throw new ServerRequestException(409, "agent_already_registered"); }
@@ -177,14 +192,23 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
             ("id", agentId), ("sent", request.SentUtc), ("version", request.AgentVersion), ("available", request.BackupExecutionAvailable), ("revision", request.ConfigurationRevision));
         if (await cmd.ExecuteNonQueryAsync(token) != 1) throw new ServerRequestException(409, "heartbeat_revision_unavailable");
     }
-    public async Task<AgentPage> AgentsAsync(int page, CancellationToken token)
+    public async Task<AgentPage> AgentsAsync(int page, CancellationToken token, Guid? folderId = null, bool unfiledOnly = false)
     {
         if (page is < 0 or > 10000) throw new ServerRequestException(400, "invalid_page");
         await using var connection = await source.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
+        if (folderId == Guid.Empty || folderId is not null && unfiledOnly) throw new ServerRequestException(400, "invalid_folder_filter");
+        if (folderId is { } selected)
+        {
+            await using var exists = Command(connection, transaction, "SELECT EXISTS(SELECT 1 FROM server_agent_folders WHERE id=@id)", ("id", selected));
+            if (await exists.ExecuteScalarAsync(token) is not true) throw new ServerRequestException(404, "folder_not_found");
+        }
+        const string subtree = "WITH RECURSIVE branch(id) AS (SELECT id FROM server_agent_folders WHERE id=@folder UNION SELECT f.id FROM server_agent_folders f JOIN branch b ON f.parent_id=b.id) ";
+        var prefix = folderId is null ? "" : subtree;
+        var filter = unfiledOnly ? " WHERE a.folder_id IS NULL" : folderId is not null ? " WHERE a.folder_id IN (SELECT id FROM branch)" : "";
         int total;
-        await using (var count = Command(connection, transaction, "SELECT count(*)::integer FROM server_agents")) total = (int)(await count.ExecuteScalarAsync(token))!;
-        await using var cmd = Command(connection, transaction, "SELECT a.id,a.name,a.registered_utc,a.revoked,a.received_utc,a.sent_utc,a.agent_version,a.execution_available,a.reported_revision,c.revision FROM server_agents a JOIN server_configurations c ON c.agent_id=a.id ORDER BY a.registered_utc DESC,a.id LIMIT 50 OFFSET @offset", ("offset", page * 50));
+        await using (var count = Command(connection, transaction, prefix + "SELECT count(*)::integer FROM server_agents a" + filter, ("folder", folderId))) total = (int)(await count.ExecuteScalarAsync(token))!;
+        await using var cmd = Command(connection, transaction, prefix + "SELECT a.id,a.name,a.registered_utc,a.revoked,a.received_utc,a.sent_utc,a.agent_version,a.execution_available,a.reported_revision,c.revision,a.computer_name,a.folder_id FROM server_agents a JOIN server_configurations c ON c.agent_id=a.id" + filter + " ORDER BY a.registered_utc DESC,a.id LIMIT 50 OFFSET @offset", ("offset", page * 50), ("folder", folderId));
         var agents = new List<AgentRecord>();
         await using (var reader = await cmd.ExecuteReaderAsync(token)) while (await reader.ReadAsync(token)) agents.Add(ReadAgent(reader));
         await transaction.CommitAsync(token);
@@ -193,13 +217,14 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
     public async Task<AgentRecord?> AgentAsync(Guid id, CancellationToken token)
     {
         await using var connection = await source.OpenConnectionAsync(token);
-        await using var cmd = Command(connection, null, "SELECT a.id,a.name,a.registered_utc,a.revoked,a.received_utc,a.sent_utc,a.agent_version,a.execution_available,a.reported_revision,c.revision FROM server_agents a JOIN server_configurations c ON c.agent_id=a.id WHERE a.id=@id", ("id", id));
+        await using var cmd = Command(connection, null, "SELECT a.id,a.name,a.registered_utc,a.revoked,a.received_utc,a.sent_utc,a.agent_version,a.execution_available,a.reported_revision,c.revision,a.computer_name,a.folder_id FROM server_agents a JOIN server_configurations c ON c.agent_id=a.id WHERE a.id=@id", ("id", id));
         await using var reader = await cmd.ExecuteReaderAsync(token);
         return await reader.ReadAsync(token) ? ReadAgent(reader) : null;
     }
     private static AgentRecord ReadAgent(NpgsqlDataReader reader) => new(reader.GetGuid(0), reader.GetString(1), reader.GetFieldValue<DateTimeOffset>(2), reader.GetBoolean(3),
         reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4), reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
-        reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetBoolean(7), reader.IsDBNull(8) ? null : reader.GetInt64(8), reader.GetInt64(9));
+        reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetBoolean(7), reader.IsDBNull(8) ? null : reader.GetInt64(8), reader.GetInt64(9))
+        { ComputerName = reader.IsDBNull(10) ? null : reader.GetString(10), FolderId = reader.IsDBNull(11) ? null : reader.GetGuid(11) };
     public async Task RevokeAsync(Guid userId, Guid agentId, CancellationToken token)
     {
         await using var connection = await source.OpenConnectionAsync(token);

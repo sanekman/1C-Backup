@@ -109,7 +109,7 @@ public static partial class ServerHost
         app.MapGet("/health/live", () => Results.Text("live"));
         app.MapGet("/health/ready", async (ServerStore store, CancellationToken token) => await store.ReadyAsync(token) ? Results.Text("ready") : Results.StatusCode(503));
         app.MapOpenApi().RequireAuthorization(ServerAuthentication.Administrator);
-        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app);
+        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app);
         app.MapRazorComponents<App>();
         return app;
     }
@@ -219,7 +219,7 @@ public static partial class ServerHost
         management.MapGet("/agents/{id:guid}/configuration-state", async (Guid id, ServerStore store, CancellationToken token) =>
             Results.Json(await store.ConfigurationDecisionsAsync(id, token)));
         management.MapGet("/agents/{id:guid}/runs", async (Guid id, int? page, ServerStore store, CancellationToken token) => Results.Json(await store.RunsAsync(id,page ?? 0,token)));
-        management.MapGet("/agents", async (int? page, ServerStore store, CancellationToken token) => Results.Json(await store.AgentsAsync(page ?? 0, token)));
+        management.MapGet("/agents", async (int? page, Guid? folderId, bool? unfiledOnly, ServerStore store, CancellationToken token) => Results.Json(await store.AgentsAsync(page ?? 0, token, folderId, unfiledOnly ?? false)));
         management.MapGet("/agents/{id:guid}", async (Guid id, ServerStore store, CancellationToken token) => await store.AgentAsync(id, token) is { } agent ? Results.Json(agent) : Results.NotFound());
         management.MapPost("/invitations", async (InviteRequest request, HttpContext context, IAntiforgery anti, ServerStore store, ServerLog log) =>
         {

@@ -7,7 +7,11 @@ namespace SPBackup.Server;
 public sealed record ServerUser(Guid Id, string Name, string PasswordHash, Guid SecurityStamp);
 public sealed record AgentRecord(Guid AgentId, string Name, DateTimeOffset RegisteredUtc, bool Revoked,
     DateTimeOffset? ReceivedUtc, DateTimeOffset? SentUtc, string? AgentVersion, bool BackupExecutionAvailable,
-    long? ReportedRevision, long DesiredRevision);
+    long? ReportedRevision, long DesiredRevision)
+{
+    public string? ComputerName { get; init; }
+    public Guid? FolderId { get; init; }
+}
 public sealed record AgentPage(IReadOnlyList<AgentRecord> Agents, int Total, int Page, int PageSize);
 public sealed record AgentCapabilityState(Guid AgentId, DateTimeOffset? ReceivedUtc, IReadOnlyList<string> Capabilities);
 public sealed record Invitation(Guid InvitationId, string Code, DateTimeOffset ExpiresUtc);
@@ -16,7 +20,12 @@ public sealed record EnrollmentResponse(Guid AgentId, string Token, int Protocol
 // API DTOs deliberately do not depend on Windows executors or platform-specific job validation.
 public sealed record HeartbeatRequest(Guid AgentId, string AgentVersion, bool BackupExecutionAvailable,
     long? ConfigurationRevision, DateTimeOffset SentUtc);
-public sealed record InviteRequest(string Name, Guid? AgentId = null, int Minutes = 30);
+public sealed record InviteRequest(string Name, Guid? AgentId = null, int Minutes = 30,
+    string? DisplayName = null, Guid? FolderId = null, string? NewFolderName = null);
+public sealed record AgentFolder(Guid Id, Guid? ParentId, string Name);
+public sealed record AgentFolderOption(Guid Id, Guid? ParentId, string Name, string Path, int Depth);
+public sealed record FolderRequest(string Name, Guid? ParentId = null);
+public sealed record AgentIdentityRequest(string Name, Guid? FolderId = null, string? NewFolderName = null);
 public sealed record ServerProblem(int Status, string Title, string Code, string TraceId);
 public sealed class ServerRequestException(int status, string code) : Exception
 { public int Status { get; } = status; public string Code { get; } = code; }

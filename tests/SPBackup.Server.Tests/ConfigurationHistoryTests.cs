@@ -120,6 +120,7 @@ public sealed class ConfigurationHistoryTests(ServerFixture fixture) : IClassFix
     {
         var agent = await fixture.EnrollAsync(); await Publish(agent.AgentId, 1, Job());
         var before = await fixture.Store.ConfigurationAsync(agent.AgentId, default);
+        await fixture.RemoveFolderSchemaForMigrationTestAsync();
         await fixture.ExecuteAsync("DROP TABLE server_configuration_history; DELETE FROM server_schema WHERE version=4");
         Assert.False(await fixture.Store.ReadyAsync()); await fixture.Store.MigrateAsync(); await fixture.Store.MigrateAsync();
         Assert.True(await fixture.Store.ReadyAsync()); Assert.Equal(before, await fixture.Store.ConfigurationAsync(agent.AgentId, default));
@@ -132,6 +133,7 @@ public sealed class ConfigurationHistoryTests(ServerFixture fixture) : IClassFix
     public async Task FailedSchemaFourMigrationPreservesSchemaThreeAndCanBeRetried()
     {
         var agent = await fixture.EnrollAsync(); var before = await fixture.Store.ConfigurationAsync(agent.AgentId, default);
+        await fixture.RemoveFolderSchemaForMigrationTestAsync();
         await fixture.ExecuteAsync("DROP TABLE server_configuration_history; DELETE FROM server_schema WHERE version=4; CREATE FUNCTION fail_schema_four() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.version=4 THEN RAISE EXCEPTION 'fixture'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_schema_four BEFORE INSERT ON server_schema FOR EACH ROW EXECUTE FUNCTION fail_schema_four()");
         try
         {

@@ -1,0 +1,86 @@
+@page "/folders"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerOptions Settings
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+<PageTitle>Папки агентов — @Settings.DisplayName</PageTitle>
+<a href="./">← Агенты</a>
+<h1>Папки агентов</h1>
+<p class="muted">Например: Клиенты → Компания → Офис. Агент находится в одной папке; его задания и копии от этого не меняются.</p>
+@if (Error is not null) { <p class="error" role="alert">@Error</p> }
+@if (Notice is not null) { <p role="status">@Notice</p> }
+<section class="card narrow">
+<h2>@(Model?.Id is null ? "Новая папка" : "Изменить папку")</h2>
+<form method="post" @formname="folder" @onsubmit="Save">
+<AntiforgeryToken />
+<input type="hidden" name="Model.Id" value="@Model!.Id" />
+<label>Имя папки<input name="Model.Name" value="@Model.Name" required maxlength="128" placeholder="Например, Бухгалтерия" /></label>
+<label>Родительская папка<select name="Model.ParentId">
+<option value="">Верхний уровень</option>
+@foreach (var folder in Options)
+{ <option value="@folder.Id" selected="@(Model.ParentId == folder.Id.ToString())">@folder.Path</option> }
+</select></label>
+<p class="hint">Чтобы создать подпапку, выберите её родителя. При изменении папки вместе с ней переместятся все её подпапки.</p>
+<button type="submit">@(Model.Id is null ? "Создать папку" : "Сохранить папку")</button>
+@if (Model.Id is not null) { <a class="button secondary" href="folders">Отмена</a> }
+</form>
+@if (Model.Id is { } selectedId)
+{
+<details><summary>Удалить эту папку</summary><p>Удаляется только пустая папка. Агенты и подпапки автоматически не удаляются.</p>
+<form method="post" @formname="delete-folder" @onsubmit="Delete">
+<AntiforgeryToken /><input type="hidden" name="Removal.Id" value="@selectedId" /><button class="danger" type="submit">Удалить пустую папку</button>
+</form></details>
+}
+</section>
+<section class="card">
+<h2>Структура</h2>
+@if (Options.Count == 0) { <p>Папок пока нет. Агенты доступны в разделе «Без папки».</p> }
+@foreach (var folder in Options)
+{
+<div class="folder-row">
+<a href="@($"?edit={folder.Id}")">@folder.Path</a>
+<span><a href="@($"?parent={folder.Id}")">Добавить подпапку</a> · <a href="@($"./?folder={folder.Id}")">Открыть агентов</a></span>
+
+</div>
+}
+</section>
+@code {
+    [SupplyParameterFromQuery(Name = "edit")] public Guid? Editing { get; set; }
+    [SupplyParameterFromQuery(Name = "parent")] public Guid? Parent { get; set; }
+    [SupplyParameterFromForm(FormName = "folder")] public FolderForm? Model { get; set; }
+    [SupplyParameterFromForm(FormName = "delete-folder")] public RemovalForm? Removal { get; set; }
+    private IReadOnlyList<AgentFolderOption> Options = [];
+    private string? Error, Notice;
+    protected override async Task OnInitializedAsync()
+    {
+        var initialize = Model is null; Model ??= new();
+        Options = await Store.FoldersAsync(Http.HttpContext!.RequestAborted);
+        if (!initialize) return;
+        var selected = Options.FirstOrDefault(f => f.Id == Editing);
+        Model = new() { Id = selected?.Id, Name = selected?.Name ?? "", ParentId = (selected?.ParentId ?? Parent)?.ToString() };
+    }
+    private async Task Save()
+    {
+        try
+        {
+            var request = new FolderRequest(Model!.Name, OrganizationText.FolderId(Model.ParentId));
+            var user = ServerAuthentication.UserId(Http.HttpContext!.User);
+            if (Model.Id is { } id) await Store.UpdateFolderAsync(user, id, request, Http.HttpContext.RequestAborted);
+            else await Store.CreateFolderAsync(user, request, Http.HttpContext.RequestAborted);
+            Notice = "Папка сохранена."; Model = new();
+            Options = await Store.FoldersAsync(Http.HttpContext.RequestAborted);
+        }
+        catch (ServerRequestException error) { Error = OrganizationText.Error(error); }
+    }
+    private async Task Delete()
+    {
+        try
+        {
+            await Store.DeleteFolderAsync(ServerAuthentication.UserId(Http.HttpContext!.User), Removal!.Id, Http.HttpContext.RequestAborted);
+            Options = await Store.FoldersAsync(Http.HttpContext.RequestAborted); Model = new(); Notice = "Пустая папка удалена.";
+        }
+        catch (ServerRequestException error) { Error = OrganizationText.Error(error); }
+    }
+    public sealed class FolderForm { public Guid? Id { get; set; } public string Name { get; set; } = ""; public string? ParentId { get; set; } }
+    public sealed class RemovalForm { public Guid Id { get; set; } }
+}

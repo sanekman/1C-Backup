@@ -144,6 +144,12 @@ public sealed class ServerFixture : IAsyncLifetime
         foreach (var item in values) cmd.Parameters.AddWithValue(item.Name, item.Value);
         await cmd.ExecuteNonQueryAsync();
     }
+    public Task RemoveFolderSchemaForMigrationTestAsync() => ExecuteAsync("""
+        ALTER TABLE server_invitations DROP COLUMN agent_display_name, DROP COLUMN folder_id, DROP COLUMN organization_configured;
+        ALTER TABLE server_agents DROP COLUMN computer_name, DROP COLUMN folder_id;
+        DROP TABLE server_agent_folders;
+        DELETE FROM server_schema WHERE version>=5;
+        """);
     public async Task RestartAsync()
     {
         await App.StopAsync(); await App.DisposeAsync(); App = Build(); await App.StartAsync();

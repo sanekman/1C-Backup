@@ -9,6 +9,8 @@
 @if (Data is { } agent)
 {
     <h1>@agent.Name</h1>
+    <p>Компьютер: @(agent.ComputerName ?? agent.Name) · Папка: @(Folders.FirstOrDefault(f => f.Id == agent.FolderId)?.Path ?? "Без папки")</p>
+    <p><a href="@($"agents/{Id}/edit")">Изменить имя и папку</a></p>
     <p><a class="button" href="@($"agents/{Id}/jobs")">Настроить задания на сервере</a></p>
     <section class="card">
     <h2>Резервное копирование</h2>
@@ -101,6 +103,7 @@ else { <h1>Агент не найден</h1> }
     [Parameter] public Guid Id { get; set; }
     [SupplyParameterFromQuery] public int RunPage { get; set; }
     private AgentRecord? Data;
+    private IReadOnlyList<AgentFolderOption> Folders = [];
     private ConfigurationDecisionState? Decisions;
     private MonitoringState? Monitoring;
     private MonitoredRunPage? Runs;
@@ -129,6 +132,7 @@ else { <h1>Агент не найден</h1> }
     };
     protected override async Task OnParametersSetAsync()
     {
+        Folders = await Store.FoldersAsync(Http.HttpContext!.RequestAborted);
         Data = await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted);
         Decisions = Data is null ? null : await Store.ConfigurationDecisionsAsync(Id, Http.HttpContext.RequestAborted);
         Monitoring = await Store.MonitoringAsync(Id, Http.HttpContext!.RequestAborted);
