@@ -90,7 +90,11 @@ public sealed class OneCFileArchiveTests : IDisposable
         Assert.Equal(before, output.ToArray());
         Assert.True(activeSession.CanWrite);
         var saved = Assert.Single(await new BackupRunHistory(Path.Combine(root, "history.json")).ReadAsync(), run => run.RunId == result.RunId);
-        if (OperatingSystem.IsWindows()) Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, saved.Warnings!);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, saved.Warnings!);
+            Assert.Contains(saved.Issues!, i => i.Code == "OneCOpenDatabase" && i.Stage == "Source");
+        }
     }
 
     [Fact]

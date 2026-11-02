@@ -19,7 +19,11 @@ public sealed class OneCFileArchiveExecutor(IArchivePasswordStore? passwords = n
             throw new IOException("Выберите настоящий файл базы, а не символическую ссылку.");
 
         var input = OpenDatabase(database, job.AllowOpenOneCDatabase, out var shared);
-        if (shared) BackupWarningContext.Report(OpenDatabaseWarning);
+        if (shared)
+        {
+            BackupWarningContext.Report(OpenDatabaseWarning);
+            BackupRunIssueContext.Report("OneCOpenDatabase", "Source");
+        }
         await using (input)
         {
             if (input.Length == 0) throw new InvalidDataException("Файл базы 1Cv8.1CD пуст.");

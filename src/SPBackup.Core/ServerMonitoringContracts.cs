@@ -6,6 +6,20 @@ namespace SPBackup.Core.Monitoring;
 #endif
 
 // Deliberately excludes source paths, connection strings, credentials and exception text.
+public sealed record MonitoredIssue(string Code, string Severity, string Stage,
+    int? DestinationIndex = null, int? NativeCode = null);
+public static class MonitoredIssueCodes
+{
+    public static bool Known(string? code) => code is "AccessDenied" or "NetworkLogonFailed" or "NetworkCredentialConflict"
+        or "NetworkUnavailable" or "DiskFull" or "FileNotFound" or "FileBusy" or "Timeout" or "TlsFailed"
+        or "HttpFailed" or "ExternalBackupFailed" or "BackupFailed" or "SourceIncomplete" or "OneCOpenDatabase" or "RetentionChainPreserved"
+        or "RetentionIncompletePreserved" or "RetentionSkippedIncomplete" or "RetentionFailed"
+        or "SnapshotIndexNotSaved" or "WorkCleanupFailed" or "Cancelled" or "Interrupted" or "AdditionalWarnings";
+    public static bool Valid(MonitoredIssue? issue) => issue is not null && Known(issue.Code)
+        && issue.Severity is "Warning" or "Error"
+        && issue.Stage is "Source" or "Storage" or "Retention" or "WorkDirectory" or "SnapshotIndex" or "Backup"
+        && issue.DestinationIndex is null or >= 0 and < 100 && issue.NativeCode is null or >= 0 and <= 65535;
+}
 public sealed record MonitoredJob(Guid JobId, string Name, string SourceKind, bool Enabled, string Schedule,
     DateTimeOffset? NextRunUtc, int DestinationCount);
 public sealed record MonitoredDestination(int Index, bool Succeeded, long Bytes, bool Incomplete);
@@ -15,6 +29,8 @@ public sealed record MonitoredRun(Guid RunId, Guid JobId, string JobName, DateTi
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public long? ConfigurationRevision { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<MonitoredIssue>? Issues { get; init; }
 }
 public sealed record MonitoredProgress(Guid RunId, Guid JobId, string Stage, int? Percent, DateTimeOffset UpdatedUtc);
 public sealed record MonitoredSource(Guid MonitorId, string Name, string Kind, bool Enabled, DateTimeOffset? PolledUtc, bool Failed);
@@ -54,6 +70,7 @@ public static class MonitoringValidation
         && r.Status is "Succeeded" or "Failed" or "Cancelled" or "Interrupted" or "PartiallySucceeded"
         && r.Evidence is null or "SqlServerMsdbHistory" or "PgRestoreCatalogChecked" or "PostgreSqlScriptFailure" or "ExternalReport"
         && r.WarningCount >= 0 && (r.CopyKind is null or "Full" or "Incremental")
+        && (r.Issues is null || r.Issues.Count <= 256 && r.Issues.All(MonitoredIssueCodes.Valid))
         && r.Destinations is { Count: <= 100 } && r.Destinations.All(d=> d is not null && d.Index >= 0 && d.Bytes >= 0)
         && r.Destinations.Select(d=>d.Index).Distinct().Count() == r.Destinations.Count;
 }

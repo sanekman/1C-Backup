@@ -333,6 +333,8 @@ public sealed class FileFolderBackupTests : IDisposable
             var records = await catalog.ReadAsync(); Assert.Equal(2, records.Count);
             Assert.Contains(records, record => record.Backup.Location == first.Backup.Location);
             Assert.True(records.Single(record => record.Backup.Location == result.Backup!.Location).Backup.FileSnapshot!.IsIncomplete);
+            Assert.Contains(result.Issues!, i => i.Code == "SourceIncomplete");
+            Assert.Contains(result.Issues!, i => i.Code == "RetentionSkippedIncomplete");
         }
         Assert.True(File.Exists(first.Backup.Location));
         Assert.False((await Run()).Backup.FileSnapshot!.IsFull);

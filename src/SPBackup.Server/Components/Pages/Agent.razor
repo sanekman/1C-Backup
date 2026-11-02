@@ -39,7 +39,10 @@
             var last = Latest.FirstOrDefault(r=>r.JobId==job.JobId);
             <tr><td>@job.Name<small>@Source(job.SourceKind) · хранилищ: @job.DestinationCount</small></td>
             <td>@(job.Enabled ? job.Schedule : "Отключено")</td>
-            <td>@(last is null ? "Результатов ещё нет" : Status(last))<small>@Home.Time(last?.FinishedUtc)</small></td>
+            <td>@(last is null ? "Результатов ещё нет" : Status(last))<small>@Home.Time(last?.FinishedUtc)</small>
+            @if (last is not null && (last.WarningCount > 0 || last.Incomplete || last.Status != "Succeeded" || last.Issues is { Count: > 0 }))
+            { <details><summary>Причины и что делать</summary><RunIssueDetails Run="last" /></details> }
+            </td>
             <td>@Home.Time(Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.FinishedUtc)</td>
             <td>@(job.NextRunUtc is null ? "По событию / вручную" : Home.Time(job.NextRunUtc))</td></tr>
         }
@@ -58,6 +61,7 @@
             @if (run.ConfigurationRevision is { } revision) { <p>Ревизия настроек этого запуска: @revision.</p> }
             @if (run.Incomplete) { <p class="error">Копия неполная: часть файлов пропущена. Для непрочитанных файлов может требоваться прежняя версия из цепочки.</p> }
             @if (run.Evidence is { } evidence) { <p>Подтверждение внешней копии: @Evidence(evidence). Данные получены из внешнего источника; агент не выполнял доставку этой копии.</p> }
+            <RunIssueDetails Run="run" />
             @foreach (var destination in run.Destinations)
             { <p>Хранилище @(destination.Index + 1): @(destination.Succeeded ? run.Evidence is not null ? "Зафиксировано во внешнем источнике" : "Доставлено и проверено" : run.Evidence is not null ? "Внешний источник сообщает ошибку" : "Ошибка доставки") · @destination.Bytes байт @(destination.Incomplete ? "· неполная копия" : "")</p> }
             </details>

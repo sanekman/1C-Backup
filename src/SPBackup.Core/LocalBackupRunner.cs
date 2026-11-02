@@ -22,6 +22,8 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             log.Write(DiagnosticEvent.RunStarted, values: new(Count: job.StorageJobs.Count));
             var work = Path.Combine(Path.GetFullPath(job.TemporaryDirectory ?? workRoot), id.ToString("N"));
             var warnings = new List<string>();
+            using var issues = BackupRunIssueContext.Begin();
+            var issueStage = "WorkDirectory";
             using var warningScope = BackupWarningContext.Begin(warnings.Add);
             var run = new BackupRun(id, job.Id, job.Name, (timeProvider ?? TimeProvider.System).GetUtcNow(), null, BackupRunStatus.Running, work)
             { Warnings = warnings, Configuration = job.ExecutionConfiguration };
@@ -33,6 +35,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 Directory.CreateDirectory(work);
                 log.Write(DiagnosticEvent.SourcePreparationStarted);
                 BackupProgressContext.Report(BackupStage.PreparingStorage);
+                issueStage = "Storage";
                 await completion.PrepareAsync(job, cancellationToken);
                 log.Write(DiagnosticEvent.SourcePreparationCompleted);
                 var fileSnapshots = new FileBackupSnapshotStore(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(workRoot))!, "file-snapshots"));
@@ -46,6 +49,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 log.Write(DiagnosticEvent.BackupCreationStarted);
                 BackupProgressContext.Report(BackupStage.ConnectingSource);
                 BackupProgressContext.Report(BackupStage.CreatingBackup);
+                issueStage = "Source";
                 var dump = await selectedExecutor.CreateAsync(job, work, cancellationToken);
                 log.Write(DiagnosticEvent.BackupCreationCompleted, values: new(Bytes: new FileInfo(dump).Length));
                 FileBackupManifest? fileManifest = null;
@@ -56,12 +60,14 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 if (fileManifest?.SkippedPaths is { Count: > 0 } skipped)
                 {
                     log.Write(DiagnosticEvent.SourceItemsSkipped, DiagnosticLevel.Warning, values: new(Count: skipped.Count));
+                    BackupRunIssueContext.Report("SourceIncomplete", "Source");
                     warnings.Add("Копия неполная: не удалось прочитать файлов / папок: " + skipped.Count + ".");
                     if (fileManifest.ParentSnapshotId is not null)
                         warnings.Add("Для пропущенных файлов сохранены последние доступные версии из предыдущих архивов, если они были скопированы ранее. Полные и инкрементные копии продолжаются по заданному плану.");
                     warnings.AddRange(skipped.Take(100).Select(path => "Не удалось скопировать (недоступен, занят, изменился или ошибка чтения): " + path));
                     if (skipped.Count > 100) warnings.Add("Полный список пропусков: onec-backup-manifest.json внутри архива.");
                 }
+                issueStage = "Storage";
                 if (job.AdditionalDestinations?.Count > 0)
                 {
                     var completed = await completion.CompleteManyAsync(job, dump, Path.Combine(work, "archive"),
@@ -90,22 +96,22 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 if (fileManifest is not null && run.Backup is not null)
                 {
                     try { await fileSnapshots.SaveAsync(job.Id, fileManifest, CancellationToken.None); }
-                    catch (Exception ex) { log.Write(DiagnosticEvent.SnapshotCacheFailed, DiagnosticLevel.Warning, ex); warnings.Add("Индекс инкрементной копии не сохранён. При следующем запуске программа попробует восстановить его по проверенным локальным или сетевым архивам: " + ex.Message); }
+                    catch (Exception ex) { log.Write(DiagnosticEvent.SnapshotCacheFailed, DiagnosticLevel.Warning, ex); BackupRunIssueContext.Report("SnapshotIndexNotSaved", "SnapshotIndex"); warnings.Add("Индекс инкрементной копии не сохранён. При следующем запуске программа попробует восстановить его по проверенным локальным или сетевым архивам: " + ex.Message); }
                 }
                 // Own working files are removed only after verified delivery and registration.
                 if (run.Status == BackupRunStatus.Succeeded)
                 {
                     try { Directory.Delete(work, recursive: true); }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    { log.Write(DiagnosticEvent.WorkCleanupFailed, DiagnosticLevel.Warning, ex); warnings.Add("Не удалось удалить рабочие файлы: " + ex.Message); }
+                    { log.Write(DiagnosticEvent.WorkCleanupFailed, DiagnosticLevel.Warning, ex); BackupRunIssueContext.Report("WorkCleanupFailed", "WorkDirectory"); warnings.Add("Не удалось удалить рабочие файлы: " + ex.Message); }
                 }
                 run = run with { Warnings = warnings };
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            { log.Write(DiagnosticEvent.RunCancelled); run = run with { Status = BackupRunStatus.Cancelled, Error = "Операция отменена. Рабочие файлы сохранены." }; }
+            { log.Write(DiagnosticEvent.RunCancelled); BackupRunIssueContext.Report("Cancelled", "Backup"); run = run with { Status = BackupRunStatus.Cancelled, Error = "Операция отменена. Рабочие файлы сохранены." }; }
             catch (Exception ex)
-            { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); run = run with { Status = BackupRunStatus.Failed, Error = ex.Message }; }
-            run = run with { FinishedUtc = (timeProvider ?? TimeProvider.System).GetUtcNow() };
+            { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); BackupRunIssueContext.Report(ex, issueStage, "Error", issueStage == "Storage" && job.AdditionalDestinations?.Count is not > 0 ? 0 : null); run = run with { Status = BackupRunStatus.Failed, Error = ex.Message }; }
+            run = run with { FinishedUtc = (timeProvider ?? TimeProvider.System).GetUtcNow(), Issues = issues.Snapshot() };
             // Cancellation must not discard the terminal report.
             try { await history.SaveAsync(run, CancellationToken.None); }
             catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }

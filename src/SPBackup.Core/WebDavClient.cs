@@ -51,7 +51,7 @@ public sealed class WebDavClient : IDisposable
         catch (HttpRequestException ex)
         {
             DiagnosticLog.Current.Write(DiagnosticEvent.WebDavRequestFailed, DiagnosticLevel.Error, ex);
-            throw new IOException("Не удалось подключиться к WebDAV. Проверьте сеть, адрес и сертификат HTTPS.");
+            throw new IOException("Не удалось подключиться к WebDAV. Проверьте сеть, адрес и сертификат HTTPS.", ex);
         }
         if (!response.IsSuccessStatusCode)
         {
@@ -63,7 +63,7 @@ public sealed class WebDavClient : IDisposable
                 >= 300 and < 400 => "WebDAV перенаправляет запрос. Укажите конечный HTTPS-адрес папки.",
                 412 => "Файл WebDAV изменился во время копирования. Повторите запуск.",
                 _ => $"Запрос WebDAV завершился ошибкой HTTP {code}. Копия не зарегистрирована."
-            });
+            }, new HttpRequestException("WebDAV request failed.", null, (System.Net.HttpStatusCode)code));
         }
         if (response.Content.Headers.ContentEncoding.Any(value => !value.Equals("identity", StringComparison.OrdinalIgnoreCase)))
         { response.Dispose(); throw new InvalidDataException("WebDAV вернул непредусмотренное кодирование содержимого."); }

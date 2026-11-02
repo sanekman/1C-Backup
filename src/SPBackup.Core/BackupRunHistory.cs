@@ -9,6 +9,8 @@ public sealed record BackupRun(Guid RunId, Guid JobId, string JobName, DateTimeO
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public BackupConfigurationStamp? Configuration { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<Monitoring.MonitoredIssue>? Issues { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<DestinationResult>? Destinations { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public string StatusDescription => Status switch
@@ -71,6 +73,7 @@ public sealed class BackupRunHistory(string path)
                 DiagnosticLog.Current.Write(DiagnosticEvent.RunInterrupted, DiagnosticLevel.Warning, jobId: interrupted.JobId, runId: interrupted.RunId);
             runs = runs.Select(r => r.Status == BackupRunStatus.Running
                 ? r with { Status = BackupRunStatus.Interrupted, FinishedUtc = DateTimeOffset.UtcNow,
+                    Issues = [new("Interrupted", "Error", "Backup")],
                     Error = "Предыдущее исполнение не завершилось. Проверьте рабочий каталог и журнал платформы." } : r).ToList();
             await file.WriteAsync(runs, cancellationToken);
         }

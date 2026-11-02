@@ -163,7 +163,8 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
         return new(report.ReportId,report.MonitorId,Label(monitors.FirstOrDefault(m=>m.Id==report.MonitorId)?.Name ?? "Внешняя SQL-копия"),start,finish,
             o.Outcome==ExternalBackupOutcome.Completed ? "Succeeded" : "Failed",0,false,null,
             [new(0,o.Outcome==ExternalBackupOutcome.Completed,(long)Math.Clamp(o.SizeBytes ?? 0,0,long.MaxValue),false)],
-            o.Evidence is "SqlServerMsdbHistory" or "PgRestoreCatalogChecked" or "PostgreSqlScriptFailure" ? o.Evidence : "ExternalReport");
+            o.Evidence is "SqlServerMsdbHistory" or "PgRestoreCatalogChecked" or "PostgreSqlScriptFailure" ? o.Evidence : "ExternalReport")
+        { Issues = o.Outcome == ExternalBackupOutcome.Completed ? null : [new("ExternalBackupFailed", "Error", "Source")] };
     }
     public static MonitoredRun ToReport(BackupRun r)
     {
@@ -171,7 +172,7 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
         return new(r.RunId,r.JobId,Label(r.JobName),r.StartedUtc,r.FinishedUtc ?? throw new InvalidDataException("Запуск ещё выполняется."),r.Status.ToString(),r.Warnings?.Count ?? 0,
             snapshot?.IsIncomplete == true,snapshot is null ? null : snapshot.IsFull ? "Full" : "Incremental",r.Destinations?.Select((d,i)=>new MonitoredDestination(i,d.Record is not null,d.Record?.Backup.Length ?? 0,d.Record?.Backup.FileSnapshot?.IsIncomplete == true)).ToArray()
                 ?? (r.Backup is { } backup ? [new(0,true,backup.Length,backup.FileSnapshot?.IsIncomplete == true)] : []))
-        { ConfigurationRevision = r.Configuration?.Revision };
+        { ConfigurationRevision = r.Configuration?.Revision, Issues = r.Issues };
     }
     public static Task SaveSettingsAsync(string directory, ServerMonitoringSettings settings, CancellationToken token = default)
     { settings.Validate(); return new AgentJsonFile<ServerMonitoringSettings>(Path.Combine(directory,"server-monitoring.json")).WriteAsync(settings,token); }

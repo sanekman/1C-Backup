@@ -9,7 +9,7 @@ public sealed record RetentionResult(IReadOnlyList<Guid> Deleted, IReadOnlyList<
 public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storage)
 {
     public async Task<RetentionResult> ApplyAsync(BackupJob job, BackupRecord newest,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, int? destinationIndex = null)
     {
         BackupProgressContext.Report(BackupStage.Retention);
         if (job.KeepLast < 1) throw new ArgumentException("Нужно сохранять хотя бы одну копию.", nameof(job));
@@ -21,7 +21,10 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
         await storage.VerifyAsync(newest.Backup, job, cancellationToken);
         // A partial source must never trigger deletion of earlier recoverable data.
         if (newest.Backup.FileSnapshot?.IsIncomplete == true)
+        {
+            BackupRunIssueContext.Report("RetentionSkippedIncomplete", "Retention", destinationIndex: destinationIndex);
             return new([], []) { Warnings = ["Очистка пропущена: новая копия неполная. Прежние копии сохранены."] };
+        }
         var owned = records.Where(r => r.JobId == job.Id && r.StorageIdentity == identity).ToArray();
         var keep = owned.Where(r => r.Id != newest.Id && r.Backup.FileSnapshot?.IsIncomplete != true).OrderByDescending(r => r.CompletedUtc).ThenByDescending(r => r.Id)
             .Take(job.KeepLast - 1).Select(r => r.Id).Append(newest.Id).ToHashSet();
@@ -35,9 +38,15 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
         var partialCount = owned.Count(record => record.Backup.FileSnapshot?.IsIncomplete == true);
         var warnings = new List<string>();
         if (keep.Count - partialCount > job.KeepLast && owned.Any(record => record.Backup.FileSnapshot is not null))
+        {
+            BackupRunIssueContext.Report("RetentionChainPreserved", "Retention", destinationIndex: destinationIndex);
             warnings.Add($"Для восстановления сохранено архивов: {keep.Count - partialCount}, лимит копий: {job.KeepLast}. Программа удалит старые архивы автоматически, когда они больше не понадобятся сохраняемым копиям.");
+        }
         if (partialCount > 0)
+        {
+            BackupRunIssueContext.Report("RetentionIncompletePreserved", "Retention", destinationIndex: destinationIndex);
             warnings.Add($"Неполные копии сохранены вне лимита: {partialCount}. При необходимости удалите их вручную.");
+        }
         foreach (var record in owned.Where(r => !keep.Contains(r.Id)).OrderByDescending(r => r.Backup.FileSnapshot?.Depth ?? 0).ThenBy(r => r.CompletedUtc))
         {
             if (keep.Contains(record.Id)) continue;
@@ -52,6 +61,7 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
             catch (Exception ex)
             {
                 DiagnosticLog.Current.Write(DiagnosticEvent.RetentionFailed, DiagnosticLevel.Warning, ex, jobId: job.Id, storageKind: job.StorageKind);
+                BackupRunIssueContext.Report(ex, "Retention", destinationIndex: destinationIndex);
                 failures.Add(new RetentionFailure(record.Id, ex));
                 if (record.Backup.FileSnapshot is not null)
                     foreach (var ancestor in FileBackupChains.Resolve(record, owned)) keep.Add(ancestor.Id);
@@ -94,7 +104,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
             DiagnosticLog.Current.Write(DiagnosticEvent.DestinationStored, jobId: job.Id, storageKind: job.StorageKind, destinationIndex: 1, values: new(Bytes: stored.Length));
             var record = await catalog.RegisterAsync(job, stored, completedUtc, cancellationToken);
             DiagnosticLog.Current.Write(DiagnosticEvent.DestinationRegistered, jobId: job.Id, storageKind: job.StorageKind, destinationIndex: 1);
-            var retention = await new BackupRetention(catalog, storage).ApplyAsync(job, record, cancellationToken);
+            var retention = await new BackupRetention(catalog, storage).ApplyAsync(job, record, cancellationToken, destinationIndex: 0);
             return new CompletedBackup(record, retention);
         }
         finally { gate.Release(); }
@@ -140,19 +150,22 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationStored, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index, values: new(Bytes: stored.Length));
                     record = await catalog.RegisterAsync(target, stored, completedUtc, CancellationToken.None);
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationRegistered, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
-                    var retention = await new BackupRetention(catalog, storage).ApplyAsync(target, record, cancellationToken);
+                    var retention = await new BackupRetention(catalog, storage).ApplyAsync(target, record, cancellationToken, destinationIndex: index - 1);
                     BackupProgressContext.Report(BackupStage.Completed);
                     return (new DestinationResult(destination, record, null,
                         retention.Failures.Select(f => "Очистка: " + f.Error.Message).Concat(retention.Warnings).ToArray()), false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    BackupRunIssueContext.Report("Cancelled", record is null ? "Storage" : "Retention", destinationIndex: index - 1);
                     BackupProgressContext.Report(BackupStage.Cancelled);
                     return (new DestinationResult(destination, record, record is null ? "Доставка отменена или не начата." : null,
                         record is null ? null : ["Копия сохранена; очистка отменена."]), true);
                 }
                 catch (Exception ex)
                 {
+                    BackupRunIssueContext.Report(ex, record is null ? "Storage" : "Retention",
+                        record is null ? "Error" : "Warning", index - 1);
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationFailed, DiagnosticLevel.Error, ex, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
                     BackupProgressContext.Report(BackupStage.Failed);
                     var error = ex is IOException && (target.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare) && File.Exists(target.DestinationDirectory)

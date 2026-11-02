@@ -33,7 +33,11 @@ internal static class BackupDiskSpace
     {
         var available = query(directory);
         if (available is >= 0 && available < required)
-            throw new IOException($"Недостаточно места в хранилище: {directory}. Для готового архива нужно {Format(required)}, доступно {Format(available.Value)}. Освободите место или выберите другое хранилище. Прежние копии не удаляются для освобождения места.");
+        {
+            var error = new IOException($"Недостаточно места в хранилище: {directory}. Для готового архива нужно {Format(required)}, доступно {Format(available.Value)}. Освободите место или выберите другое хранилище. Прежние копии не удаляются для освобождения места.");
+            error.Data[typeof(BackupDiskSpace)] = true;
+            throw error;
+        }
     }
 
     internal static string Format(long bytes) => bytes >= 1024L * 1024 * 1024
