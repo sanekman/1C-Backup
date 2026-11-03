@@ -27,7 +27,7 @@ import urllib.parse
 import urllib.request
 
 REPOSITORY = 'sanekman/1C-Backup'
-VERSION = '0.1.0-preview.5'
+VERSION = '0.1.0-preview.6'
 CONFIG = Path('/etc/onec-backup-server')
 APPLICATION = Path('/opt/onec-backup-server')
 DATA = Path('/var/lib/onec-backup-server')

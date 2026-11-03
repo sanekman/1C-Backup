@@ -11,6 +11,9 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('installer', ROOT / 'deploy/server/create-proxmox-lxc.py')
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
+# Keep the compatibility fixture on the immutable preview.5/schema4 package.
+# Current packages are exercised by package tests and post-publication verification.
+installer.VERSION = '0.1.0-preview.5'
 
 
 def docker(*args, **kwargs):
