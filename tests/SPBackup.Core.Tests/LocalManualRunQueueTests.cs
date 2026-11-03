@@ -45,6 +45,20 @@ public sealed class LocalManualRunQueueTests : IDisposable
         Assert.Equal(accepted.RequestId, Assert.Single(await queue.OutstandingAsync(session)).RequestId);
     }
 
+    [Fact]
+    public async Task ReceiptIsAbsentBeforePublicationAndOversizedResultsAreRejected()
+    {
+        var queue = new LocalManualRunQueue(directory);
+        var receipt = new LocalManualRunReceipt(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), LocalManualRunPhase.Accepted);
+        Assert.Null(await queue.ReadReceiptAsync(receipt.RequestId));
+        await queue.WriteReceiptAsync(receipt);
+        var path = Path.Combine(directory, "manual-runs", "receipts", receipt.RequestId.ToString("N") + ".json");
+        await File.WriteAllTextAsync(path, new string(' ', 8193));
+        await Assert.ThrowsAsync<InvalidDataException>(() => queue.ReadReceiptAsync(receipt.RequestId));
+        await queue.WriteReceiptAsync(receipt with { Phase = LocalManualRunPhase.Finished });
+        Assert.Equal(LocalManualRunPhase.Finished, (await queue.ReadReceiptAsync(receipt.RequestId))!.Phase);
+    }
+
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
 
     [Fact]

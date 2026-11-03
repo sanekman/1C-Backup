@@ -65,8 +65,9 @@ public sealed class LocalManualRunQueue(string directory)
     public async Task<LocalManualRunReceipt?> ReadReceiptAsync(Guid id,CancellationToken token=default)
     {
         var path=Receipt(id);
-        if(File.Exists(path) && new FileInfo(path).Length>8192) throw new InvalidDataException("Подтверждение команды слишком велико.");
-        var value=await new AgentJsonFile<LocalManualRunReceipt>(path).ReadAsync(token);
+        // Inspect the opened snapshot: Windows replacement may briefly hide the path
+        // between File.Exists and FileInfo.Length while the service publishes its result.
+        var value=await new AgentJsonFile<LocalManualRunReceipt>(path).ReadBoundedAsync(8192,token);
         if(value is not null && (value.RequestId!=id || value.SessionId==Guid.Empty || value.JobId==Guid.Empty || !Enum.IsDefined(value.Phase)))
             throw new InvalidDataException("Некорректное подтверждение ручного запуска.");
         return value;

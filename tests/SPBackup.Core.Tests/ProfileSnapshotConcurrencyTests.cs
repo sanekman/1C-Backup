@@ -103,5 +103,34 @@ public sealed class ProfileSnapshotConcurrencyTests : IDisposable
         Assert.Empty(Directory.EnumerateFileSystemEntries(path));
     }
 
+    [Fact]
+    public async Task ManualReceiptPollingReadsCompleteSnapshotsWhileServicePublishesResults()
+    {
+        var writer = new LocalManualRunQueue(directory);
+        var reader = new LocalManualRunQueue(directory);
+        var receipt = new LocalManualRunReceipt(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), LocalManualRunPhase.Accepted);
+        await writer.WriteReceiptAsync(receipt);
+        var reads = Task.Run(async () =>
+        {
+            for (var i = 0; i < 250; i++)
+            {
+                var observed = await reader.ReadReceiptAsync(receipt.RequestId);
+                Assert.NotNull(observed);
+                Assert.Equal(receipt.RequestId, observed.RequestId);
+                Assert.Equal(receipt.SessionId, observed.SessionId);
+                Assert.Equal(receipt.JobId, observed.JobId);
+                Assert.True(observed.Error is null || observed.Error.StartsWith("revision-", StringComparison.Ordinal));
+            }
+        });
+        var writes = Task.Run(async () =>
+        {
+            for (var i = 0; i < 100; i++) await writer.WriteReceiptAsync(receipt with { Error = "revision-" + i });
+            await writer.WriteReceiptAsync(receipt with { Phase = LocalManualRunPhase.Finished });
+        });
+        await Task.WhenAll(reads, writes).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(LocalManualRunPhase.Finished, (await reader.ReadReceiptAsync(receipt.RequestId))!.Phase);
+        Assert.Empty(Directory.EnumerateFiles(directory, "*.tmp", SearchOption.AllDirectories));
+    }
+
     public void Dispose() => Directory.Delete(directory, true);
 }
