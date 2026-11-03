@@ -42,7 +42,8 @@ public partial class MainWindow
             var root = NetworkShareSettings.Root(Destination.Text.Trim());
             // A draft never changes the secret referenced by a running/saved job.
             var key = "smb-" + Guid.NewGuid().ToString("N");
-            var dialog = new FtpCredentialsWindow(key, new WindowsNetworkShareCredentialStore().Save, "Логин и пароль NAS / сетевой папки") { Owner = this };
+            var dialog = new FtpCredentialsWindow(key, new WindowsNetworkShareCredentialStore().Save, "Логин и пароль NAS / сетевой папки")
+            { Owner = this, SizeToContent = SizeToContent.Height };
             dialog.BindingName.Text = "Укажите пользователя, которому на сетевом сервере разрешена запись в эту общую папку.";
             dialog.CredentialExplanation.Text = "Это сетевой пароль, а не PIN Windows. Здесь сохраняется только черновик доступа. Для применения остановите автоматическое копирование, сохраните задание и включите копирование снова.";
             NetworkShareCredentialsDialogOpened?.Invoke(dialog);

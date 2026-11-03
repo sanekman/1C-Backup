@@ -25,7 +25,11 @@ internal static partial class DesktopSmoke
             dialog.Dispatcher.BeginInvoke(() => {
                 ((TextBox)dialog.FindName("Username")).Text = @"NAS\fixture-backup";
                 ((PasswordBox)dialog.FindName("Password")).Password = secret;
-                ((Button)dialog.FindName("CredentialSaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                dialog.UpdateLayout();
+                var save = (Button)dialog.FindName("CredentialSaveButton");
+                Require(save.TransformToAncestor(dialog).Transform(new Point(0, save.ActualHeight)).Y <= dialog.ActualHeight,
+                    "The NAS credential explanation pushed its Save button outside the dialog.");
+                save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             });
         }
         try
