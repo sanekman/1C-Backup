@@ -1,22 +1,18 @@
 using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace SPBackup.Server;
 
 /// <summary>Support export contains fixed health fields and whitelisted event metadata, never raw files.</summary>
-public sealed class ServerDiagnostics(ServerOptions options, ServerStore store, IServiceProvider services)
+public sealed class ServerDiagnostics(ServerOptions options, ServerStore store, ServerHealth health)
 {
     private sealed record SafeEvent(DateTimeOffset Utc, string Event, int? HResult);
     public async Task<byte[]> CreateAsync(CancellationToken token = default)
     {
-        long? free = null;
-        try { free = new DriveInfo(Path.GetPathRoot(options.DataDirectory)!).AvailableFreeSpace; }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException) { }
-        var certificate = services.GetService<X509Certificate2>();
+        var status = health.Read();
         var summary = new
         {
             FormatVersion = 1, GeneratedUtc = DateTimeOffset.UtcNow,
@@ -24,8 +20,11 @@ public sealed class ServerDiagnostics(ServerOptions options, ServerStore store, 
             Runtime = Environment.Version.ToString(), Architecture = RuntimeInformation.ProcessArchitecture.ToString(),
             OperatingSystem = RuntimeInformation.OSDescription,
             SupportedSchemaVersion = ServerStore.SchemaVersion, DatabaseReady = await store.ReadyAsync(token),
-            FreeDataDiskBytes = free, CertificateNotBeforeUtc = certificate?.NotBefore.ToUniversalTime(),
-            CertificateNotAfterUtc = certificate?.NotAfter.ToUniversalTime(), CertificateManagedExternally = certificate is null
+            FreeDataDiskBytes = status.FreeDataDiskBytes, TotalDataDiskBytes = status.TotalDataDiskBytes,
+            DataDiskState = status.DiskState.ToString(), CertificateNotBeforeUtc = status.CertificateNotBeforeUtc,
+            CertificateNotAfterUtc = status.CertificateNotAfterUtc,
+            CertificateManagedExternally = status.CertificateState == ServerCertificateState.External,
+            CertificateState = status.CertificateState.ToString()
         };
         var events = new List<SafeEvent>(); var skipped = 0; long remaining = 8 * 1024 * 1024;
         var directory = Path.Combine(options.DataDirectory, "logs");

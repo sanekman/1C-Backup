@@ -2,9 +2,11 @@
 @attribute [Authorize(Policy = ServerAuthentication.Administrator)]
 @inject ServerStore Store
 @inject ServerOptions Settings
+@inject ServerHealth Health
 @inject IHttpContextAccessor Http
 <PageTitle>Агенты — @Settings.DisplayName</PageTitle>
 <div class="heading"><div><h1>Агенты</h1><p class="muted">Компьютеры, подключённые к этому серверу.</p></div><a class="button" href="@ConnectLink">Подключить агент</a></div>
+@if (HealthStatus is { } healthStatus) { <ServerHealthNotices Snapshot="healthStatus" Compact="true" /> }
 @if (Overview is { } overview)
 {
     <section class="card"><div class="summary"><strong>Мониторинг всех агентов</strong><span>Нет связи: @overview.Offline</span><span>Нет отчётов: @overview.Unreported</span><span>Проблемных заданий: @overview.Failed</span><span>Неполных копий: @overview.Incomplete</span><span>С предупреждениями: @overview.Warning</span><span>В очереди: @overview.Pending</span></div></section>
@@ -54,10 +56,12 @@
     private string FolderTitle => Folder == "root" ? "Без папки" : SelectedFolder is { } id ? Folders.First(f => f.Id == id).Path : "Все агенты";
     private string ConnectLink => SelectedFolder is { } id ? $"connect?folderId={id}" : "connect";
     private string PageLink(int page) => SelectedFolder is { } id ? $"?folder={id}&page={page}" : Folder == "root" ? $"?folder=root&page={page}" : $"?page={page}";
+    private ServerHealthSnapshot? HealthStatus;
     private AgentPage? Data;
     private ServerStore.Overview? Overview;
     protected override async Task OnParametersSetAsync()
     {
+        HealthStatus = Health.Read();
         Overview = await Store.OverviewAsync(Settings.OfflineAfterSeconds,Http.HttpContext!.RequestAborted);
         Folders = await Store.FoldersAsync(Http.HttpContext!.RequestAborted);
         SelectedFolder = Folder is null or "root" ? null : OrganizationText.FolderId(Folder);

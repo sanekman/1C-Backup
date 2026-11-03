@@ -2,9 +2,11 @@
 @attribute [Authorize(Policy = ServerAuthentication.Administrator)]
 @inject ServerStore Store
 @inject ServerOptions Settings
+@inject ServerHealth Health
 @inject IHttpContextAccessor Http
 <PageTitle>Состояние сервера — @Settings.DisplayName</PageTitle>
 <h1>Состояние сервера</h1>
+@if (Status is { } status) { <ServerHealthNotices Snapshot="status" /> }
 <section class="card narrow">
 <h2>Часовой пояс панели</h2>
 <p>Выберите, в каком часовом поясе показывать время всем пользователям этого сервера.</p>
@@ -29,13 +31,17 @@
 <dt>Версия схемы</dt><dd>@ServerStore.SchemaVersion</dd>
 <dt>Время сервера</dt><dd>@Clock.Time(DateTimeOffset.UtcNow)</dd>
 <dt>Работает с</dt><dd>@Clock.Time(new DateTimeOffset(System.Diagnostics.Process.GetCurrentProcess().StartTime).ToUniversalTime())</dd>
-<dt>Свободно на диске данных</dt><dd>@Disk</dd>
-<dt>HTTPS-сертификат до</dt><dd>@CertificateExpiry</dd>
+<dt>Свободно на диске данных</dt><dd>@ServerHealthNotices.FormatBytes(Status?.FreeDataDiskBytes)</dd>
+<dt>HTTPS-сертификат до</dt><dd>@(Status?.CertificateNotAfterUtc is { } expires ? Clock.Time(expires) : "Управляется вне приложения")</dd>
 <dt>Память процесса</dt><dd>@(Environment.WorkingSet / 1024 / 1024) МБ</dd>
 </dl>
 <p>Проверка готовности: <a href="health/ready">health/ready</a>. Панель обновляется каждые 30 секунд.</p>
 <p class="muted">Данные сервера и база должны входить в ваше системное резервное копирование. Установщик сохраняет их при обновлении и удалении программы.</p></section>
 <section class="card">
+<details><summary>Что проверяет сервер и когда нужны отдельные проверки</summary>
+<p>Предупреждение о месте появляется ниже 1 ГиБ, критическое — ниже 256 МиБ. Проверяется диск папки данных приложения. Диск PostgreSQL, отдельный том журналов и хранилища агентов проверяйте отдельно.</p>
+<p>Проверяется сертификат, загруженный при запуске приложения. Замена PFX применяется после перезапуска службы. Если перед сервером установлен обратный прокси, например Nginx Proxy Manager, дополнительно проверяйте его внешний сертификат: приложение не получает его срок действия. Эта проверка не подтверждает доверие сертификату или соответствие имени.</p>
+</details>
 <h2>Обслуживание</h2>
 <p><a class="button" href="account">Сменить пароль администратора</a> <a class="button" href="audit">Журнал действий</a></p>
 <h2>Помощь при проблеме</h2>
@@ -46,18 +52,10 @@
 @code {
     [SupplyParameterFromQuery(Name = "timeZone")] public string? TimeZoneResult { get; set; }
     private bool Ready;
-    private string Disk = "Нет данных";
-    private string CertificateExpiry = "Завершается на обратном прокси / системном endpoint";
+    private ServerHealthSnapshot? Status;
     protected override async Task OnInitializedAsync()
     {
+        Status = Health.Read();
         Ready = await Store.ReadyAsync(Http.HttpContext!.RequestAborted);
-        try { var drive = new DriveInfo(Path.GetPathRoot(Settings.DataDirectory)!); Disk=$"{drive.AvailableFreeSpace / 1024 / 1024 / 1024} ГБ"; } catch (IOException) { }
-        if (Settings.HttpsCertificatePath is { } path)
-        {
-            using var cert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12FromFile(path,
-                Settings.HttpsCertificatePasswordFile is { } file ? ServerHost.ReadSecret(file) : null);
-            CertificateExpiry = Clock.Time(new DateTimeOffset(cert.NotAfter).ToUniversalTime());
-            if (cert.NotAfter.ToUniversalTime() < DateTime.UtcNow.AddDays(30)) CertificateExpiry += " — требуется обновить сертификат";
-        }
     }
 }

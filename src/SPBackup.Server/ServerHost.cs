@@ -58,6 +58,7 @@ public static partial class ServerHost
         builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(database.ConnectionString));
         builder.Services.AddSingleton<ServerStore>(); builder.Services.AddSingleton<ServerLog>();
         builder.Services.AddSingleton<ServerDiagnostics>();
+        builder.Services.AddSingleton<ServerHealth>();
         var protection = builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(keys)).SetApplicationName("OneCBackup.Server");
         if (OperatingSystem.IsWindows()) protection.ProtectKeysWithDpapi();
         ServerAuthentication.Add(builder, settings);
