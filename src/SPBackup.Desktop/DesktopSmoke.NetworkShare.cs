@@ -53,7 +53,29 @@ internal static partial class DesktopSmoke
             Require(!(await File.ReadAllTextAsync(path + ".protected.json")).Contains(secret), "A NAS password leaked into JSON.");
             Click("EditJobButton"); Click("NextStepButton");
             Require(Control<CheckBox>("NetworkUseCredentials").IsChecked == true, "Reopening removed explicit NAS authentication.");
-            Click("CancelEditorButton");
+            // A different coordinator holds the actual executor lock, just as
+            // the background agent does. Do not fake the window's busy flags.
+            using (new BackupEngineCoordinator(DesktopPaths.DataDirectory).Acquire())
+            {
+                await WaitUntil(() => window.SmokeReady && !Control<Button>("FtpCredentialsButton").IsEnabled,
+                    "The window did not detect a running background executor.");
+                Require(Control<Button>("NetworkCredentialsButton").IsEnabled, "The background executor blocked NAS credential editing.");
+                var previousKey = job.NetworkShare!.CredentialKey;
+                Click("NetworkCredentialsButton");
+                Require(keys[^1] != previousKey, "Editing NAS credentials replaced the running job's secret.");
+                Require((await new JobStore(path).LoadAsync()).Single(j => j.Id == job.Id).NetworkShare!.CredentialKey == previousKey,
+                    "A NAS credential draft changed the saved job before confirmation.");
+                Require((await credentials.GetAsync(previousKey)).Password == secret, "A NAS draft removed the running job's password.");
+                screenshot("network-share-edit-with-agent");
+            }
+            await WaitUntil(() => window.SmokeReady && Control<Button>("FtpCredentialsButton").IsEnabled,
+                "The window did not observe the background executor stopping.");
+            Click("NextStepButton"); Click("NextStepButton"); Click("SaveButton");
+            await WaitUntil(() => window.SmokeReady && Control<Border>("JobListCard").IsVisible, "NAS changes could not save after the executor stopped.");
+            var originalKey = job.NetworkShare!.CredentialKey;
+            job = (await new JobStore(path).LoadAsync()).Single(j => j.Id == job.Id);
+            Require(job.NetworkShare!.CredentialKey == keys[^1], "The new NAS login was not applied after saving.");
+            Require((await credentials.GetAsync(originalKey)).Password == secret, "Saving removed the previous job's password.");
             var extra = new DestinationWindow(new WindowsFtpCredentialStore()) { Owner = window };
             extra.NetworkShareCredentialsDialogOpened = Fill;
             _ = extra.Dispatcher.BeginInvoke(() => {

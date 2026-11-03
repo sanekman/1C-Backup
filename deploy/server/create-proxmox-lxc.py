@@ -273,6 +273,18 @@ def sql(statement):
                capture=True, input="SET log_statement='none'; SET log_min_error_statement='panic';\n" + statement)
 
 
+def ensure_database_utf8(create=False):
+    encoding = sql("SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname='onecbackup';").strip()
+    if not encoding and create:
+        # template1 may be SQL_ASCII on minimal Debian installations. template0
+        # and the universally available C locale make this independent of it.
+        sql("CREATE DATABASE onecbackup OWNER onecbackup TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C';")
+        encoding = sql("SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname='onecbackup';").strip()
+    if encoding != 'UTF8':
+        raise ValueError('База onecbackup должна иметь кодировку UTF8; обнаружена: ' + (encoding or 'база отсутствует')
+                         + '. Данные и пароли сохранены. Для существующей базы нужен отдельный перенос в UTF8 с резервной копией; повторная установка её не преобразует.')
+
+
 def wait_ready(port):
     context = ssl.create_default_context(cafile=str(CONFIG / 'ca.crt'))
     # Only our own loopback health check bypasses HTTP proxies.
@@ -336,6 +348,7 @@ def guest_install(request, package_directory=None):
         if saved.get('request') != request or saved.get('format') != 1:
             raise ValueError('Установка уже настроена иначе. Автоматическая смена версии, адреса и паролей запрещена.')
         if saved.get('complete'):
+            ensure_database_utf8()
             wait_ready(request['port'])
             print('Сервер уже установлен; настройки и пароли сохранены. ' + request['address'])
             return
@@ -398,8 +411,7 @@ def guest_install(request, package_directory=None):
     run(['systemctl', 'restart', 'postgresql@17-main'])
     if not sql("SELECT 1 FROM pg_roles WHERE rolname='onecbackup';"):
         sql("CREATE ROLE onecbackup LOGIN PASSWORD '" + database_password.replace("'", "''") + "';")
-    if not sql("SELECT 1 FROM pg_database WHERE datname='onecbackup';"):
-        sql('CREATE DATABASE onecbackup OWNER onecbackup;')
+    ensure_database_utf8(create=True)
     run(['runuser', '-u', ACCOUNT, '--', APPLICATION / 'current/SPBackup.Server', '--Server:ConfigFile', config_path, '--provision'])
     env_path = CONFIG / 'server.env'
     env_path.write_text('ONECBACKUP_SERVER_CONFIG_FILE=/etc/onec-backup-server/server.json\n')

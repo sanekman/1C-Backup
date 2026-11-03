@@ -19,6 +19,31 @@ spec.loader.exec_module(installer)
 
 
 class ProxmoxInstallerTests(unittest.TestCase):
+    def test_database_creation_uses_utf8_even_with_sql_ascii_template(self):
+        with patch.object(installer, 'sql', side_effect=['', '', 'UTF8']) as sql:
+            installer.ensure_database_utf8(create=True)
+        creation = sql.call_args_list[1].args[0]
+        self.assertIn("TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'", creation)
+
+    def test_existing_incompatible_database_is_refused_without_mutation(self):
+        for encoding in ['SQL_ASCII', 'LATIN1', '']:
+            for create in [False, True] if encoding else [False]:
+                with self.subTest(encoding=encoding, create=create), patch.object(installer, 'sql', return_value=encoding) as sql:
+                    with self.assertRaisesRegex(ValueError, 'UTF8'):
+                        installer.ensure_database_utf8(create=create)
+                    self.assertEqual(1, sql.call_count)
+                    self.assertTrue(sql.call_args.args[0].startswith('SELECT '))
+
+    def test_existing_utf8_database_is_not_recreated(self):
+        with patch.object(installer, 'sql', return_value='UTF8\n') as sql:
+            installer.ensure_database_utf8(create=True)
+            self.assertEqual(1, sql.call_count)
+
+    def test_database_encoding_is_checked_after_creation(self):
+        with patch.object(installer, 'sql', side_effect=['', '', 'SQL_ASCII']):
+            with self.assertRaisesRegex(ValueError, 'SQL_ASCII'):
+                installer.ensure_database_utf8(create=True)
+
     def request(self, **fields):
         return dict(version='0.1.0-preview.5', address='https://192.168.10.120:7443/', name='Бухгалтерия', port=7443, **fields)
 

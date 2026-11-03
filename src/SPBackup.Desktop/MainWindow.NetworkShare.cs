@@ -22,7 +22,7 @@ public partial class MainWindow
         NetworkCredentialStatus.Text = NetworkUseCredentials.IsChecked != true
             ? "Используется сетевой вход пользователя агента или службы Windows."
             : string.IsNullOrEmpty(networkShareSettings?.CredentialKey) ? "Задайте логин и пароль NAS. Они будут сохранены в Windows."
-            : "Для этой сетевой папки задан отдельный вход. Сохраните задание и проверьте хранилища через службу.";
+            : "Вход задан. Для применения остановите автоматическое копирование, сохраните задание и включите копирование снова. Затем проверьте хранилища через службу.";
     }
     private void NetworkDestination_Changed(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
@@ -36,6 +36,7 @@ public partial class MainWindow
     }
     private void NetworkCredentials_Click(object sender, RoutedEventArgs e)
     {
+        if (!editorOpen || !NetworkCredentialsButton.IsEnabled) return;
         try
         {
             var root = NetworkShareSettings.Root(Destination.Text.Trim());
@@ -43,7 +44,7 @@ public partial class MainWindow
             var key = "smb-" + Guid.NewGuid().ToString("N");
             var dialog = new FtpCredentialsWindow(key, new WindowsNetworkShareCredentialStore().Save, "Логин и пароль NAS / сетевой папки") { Owner = this };
             dialog.BindingName.Text = "Укажите пользователя, которому на сетевом сервере разрешена запись в эту общую папку.";
-            dialog.CredentialExplanation.Text = "Это сетевой пароль, а не PIN Windows. После сохранения доступа завершите сохранение задания.";
+            dialog.CredentialExplanation.Text = "Это сетевой пароль, а не PIN Windows. Здесь сохраняется только черновик доступа. Для применения остановите автоматическое копирование, сохраните задание и включите копирование снова.";
             NetworkShareCredentialsDialogOpened?.Invoke(dialog);
             if (dialog.ShowDialog() != true) return;
             networkShareSettings = new() { ShareRoot = root, CredentialKey = key }; UpdateNetworkStatus();

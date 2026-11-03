@@ -556,7 +556,12 @@ public partial class MainWindow : Window
         ArchivePasswordButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         GoogleDriveConnectButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         FtpCredentialsButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
-        NetworkCredentialsButton.IsEnabled = FtpCredentialsButton.IsEnabled;
+        // NAS drafts use a new Vault key, leaving running jobs unchanged.
+        // JobStore still requires an idle executor to publish protected jobs.
+        NetworkCredentialsButton.IsEnabled = ready && canSave && idle && editorOpen;
+        NetworkCredentialsButton.ToolTip = !canSave ? "Настройки этого задания управляются сервером."
+            : !idle ? "Дождитесь завершения текущего действия в окне программы."
+            : "Логин и пароль можно задать при работающем агенте. Для сохранения задания остановите автоматическое копирование, затем включите его снова.";
         StopScheduleButton.IsEnabled = schedulingTask is not null && !schedulerStopping;
         RefreshCopiesButton.IsEnabled = ready && !copiesRefreshing;
         VerifyCopyButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null &&

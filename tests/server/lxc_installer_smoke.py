@@ -50,6 +50,10 @@ RUN --mount=type=secret,id=build-ca,required=true \\
 printf 'Acquire::https::CaInfo "/run/proxy-ca.pem";\n' >/etc/apt/apt.conf.d/99fixture-ca
 cp /setup/systemctl.py /usr/local/bin/systemctl
 chmod 755 /usr/local/bin/systemctl
+# Force the minimal-container failure case without preinstalling PostgreSQL:
+# the installer must still require a fresh CT, then create its own UTF8 DB.
+mkdir -p /etc/postgresql-common
+printf "initdb_options = '--encoding=SQL_ASCII --locale=C'\\nadd_include_dir = 'conf.d'\\n" >/etc/postgresql-common/createcluster.conf
 touch /tmp/reject-first-server-start
 cat >/tmp/request.json <<'JSON'
 {"version":"0.1.0-preview.5","address":"https://192.0.2.120:8443/","name":"Тестовый сервер","port":8443}

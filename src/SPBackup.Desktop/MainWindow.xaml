@@ -345,7 +345,7 @@
    <TextBlock Text="Копии лучше хранить на другом диске или компьютере, отдельно от исходных данных." TextWrapping="Wrap" Margin="0,0,0,10" />
    <StackPanel x:Name="NetworkSharePanel" Visibility="Collapsed" Margin="0,0,0,10">
     <CheckBox x:Name="NetworkUseCredentials" Content="Отдельный логин и пароль NAS / сетевой папки" Checked="NetworkMode_Changed" Unchecked="NetworkMode_Changed" />
-    <Button x:Name="NetworkCredentialsButton" Content="Задать сетевой логин и пароль…" Click="NetworkCredentials_Click" HorizontalAlignment="Left" Margin="0,6,0,0" Visibility="Collapsed" />
+    <Button x:Name="NetworkCredentialsButton" Content="Задать сетевой логин и пароль…" Click="NetworkCredentials_Click" HorizontalAlignment="Left" Margin="0,6,0,0" Visibility="Collapsed" ToolTipService.ShowOnDisabled="True" />
     <TextBlock x:Name="NetworkCredentialStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0" />
    </StackPanel>
    <StackPanel x:Name="GoogleDrivePanel" Visibility="Collapsed" Margin="0,4,0,10">
