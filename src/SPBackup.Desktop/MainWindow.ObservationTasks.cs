@@ -51,6 +51,13 @@ public partial class MainWindow
         finally { refreshingObservations = false; }
     }
 
+    private void NewTaskOptions_Click(object sender, RoutedEventArgs e)
+    {
+        if (!NewTaskOptionsButton.IsEnabled) return;
+        NewTaskOptionsButton.ContextMenu.PlacementTarget = NewTaskOptionsButton;
+        NewTaskOptionsButton.ContextMenu.IsOpen = true;
+    }
+
     private async void NewObservationTask_Click(object sender, RoutedEventArgs e)
     {
         if (NewObservationTaskButton.IsEnabled) await OpenObservationTaskAsync(null, createNew: true);

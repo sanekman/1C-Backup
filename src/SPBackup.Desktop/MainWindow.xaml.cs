@@ -513,7 +513,8 @@ public partial class MainWindow : Window
         FirstCopyGuideButton.Visibility = FirstJobButton.Visibility;
         JobActions.Visibility = jobs.Count + observationTasks.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         EditJobButton.IsEnabled = ready && idle && !editorOpen && (canSave && Jobs.SelectedItem is BackupJob || Jobs.SelectedItem is ExternalBackupTask);
-        NewObservationTaskButton.IsEnabled = ready && idle && !editorOpen;
+        NewObservationTaskButton.IsEnabled = NewTaskOptionsButton.IsEnabled = ready && idle && !editorOpen;
+        NewBackupTaskMenuItem.IsEnabled = NewJobButton.IsEnabled;
         DuplicateJobButton.IsEnabled = ready && canSave && idle && !editorOpen && Jobs.SelectedItem is BackupJob;
         var scheduledJob = Jobs.SelectedItem as BackupJob;
         JobScheduleButton.IsEnabled = ready && canSave && idle && !editorOpen && scheduledJob is { ScheduleKind: not ScheduleKind.Manual };
@@ -811,7 +812,7 @@ public partial class MainWindow : Window
             "history" => ("История запусков", "Результаты запусков и ошибки. Время — на этом компьютере."),
             "copies" => ("Резервные копии", "Зарегистрированные копии всех заданий, расположение файлов и проверка целостности."),
             "agent" => ("Настройки программы", "Основное, фоновая работа, обновления, подключения и помощь."),
-            _ => ("Задания резервного копирования", "Файлы и папки · WebDAV · 1С · MS SQL · PostgreSQL")
+            _ => ("Задания", "Резервное копирование и наблюдение за внешними SQL-копиями")
         };
         UpdateAutomationLayout();
     }

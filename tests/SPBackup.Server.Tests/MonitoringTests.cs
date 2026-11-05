@@ -141,6 +141,8 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
         var html = WebUtility.HtmlDecode(await page.Content.ReadAsStringAsync());
         Assert.Contains("Наблюдение · Отчёты PostgreSQL", html);
         Assert.DoesNotContain("хранилищ: 0", html);
+        Assert.DoesNotContain("Хранилище 1:", html);
+        Assert.Contains("Размер по внешнему отчёту: 4096 байт", html);
     }
     [ServerFact]
     public async Task RevokedAgentCanReconnectOnlyWithExplicitlyBoundInvitation()

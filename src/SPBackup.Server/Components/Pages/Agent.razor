@@ -60,8 +60,16 @@
             @if (run.Incomplete) { <p class="error">Копия неполная: часть файлов пропущена. Для непрочитанных файлов может требоваться прежняя версия из цепочки.</p> }
             @if (run.Evidence is { } evidence) { <p>Подтверждение внешней копии: @Evidence(evidence). Данные получены из внешнего источника; агент не выполнял доставку этой копии.</p> }
             <RunIssueDetails Run="run" />
-            @foreach (var destination in run.Destinations)
-            { <p>Хранилище @(destination.Index + 1): @(destination.Succeeded ? run.Evidence is not null ? "Зафиксировано во внешнем источнике" : "Доставлено и проверено" : run.Evidence is not null ? "Внешний источник сообщает ошибку" : "Ошибка доставки") · @destination.Bytes байт @(destination.Incomplete ? "· неполная копия" : "")</p> }
+            @if (run.Evidence is not null)
+            {
+                @if (run.Destinations.FirstOrDefault()?.Bytes is > 0 and var size)
+                { <p>Размер по внешнему отчёту: @size байт.</p> }
+            }
+            else
+            {
+                @foreach (var destination in run.Destinations)
+                { <p>Хранилище @(destination.Index + 1): @(destination.Succeeded ? "Доставлено и проверено" : "Ошибка доставки") · @destination.Bytes байт @(destination.Incomplete ? "· неполная копия" : "")</p> }
+            }
             </details>
         }
         <div class="pagination">@if (RunPage > 0) { <a href="@($"agents/{Id}?runPage={RunPage-1}")">← Новее</a> } @if (history.Runs.Count == history.PageSize) { <a href="@($"agents/{Id}?runPage={RunPage+1}")">Старее →</a> }</div>

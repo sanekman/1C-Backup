@@ -52,6 +52,12 @@ internal static partial class DesktopSmoke
 
     private static async Task VerifyNewObservationTaskAsync(MainWindow owner)
     {
+        var choices = (Button)owner.FindName("NewTaskOptionsButton");
+        choices.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (!choices.ContextMenu.IsOpen || !choices.ContextMenu.Items.OfType<MenuItem>()
+            .Any(item => Equals(item.Header, "Наблюдение SQL") && item.IsEnabled))
+            throw new InvalidOperationException("В выборе типа нового задания нет наблюдения SQL.");
+        choices.ContextMenu.IsOpen = false;
         var store = new ExternalBackupMonitorStore(Path.Combine(DesktopPaths.DataDirectory, "external-monitors.json"));
         var original = await store.LoadAsync();
         var settings = await new AgentSettingsStore(Path.Combine(DesktopPaths.DataDirectory, "agent.json")).LoadAsync();
