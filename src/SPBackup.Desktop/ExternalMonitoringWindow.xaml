@@ -9,7 +9,7 @@
   <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
    <ComboBox x:Name="Sources" Width="240" DisplayMemberPath="Label" SelectedValuePath="Monitor" SelectionChanged="Source_Changed" Margin="0,0,8,4" AutomationProperties.Name="Источник для настройки и ручного опроса" />
    <Button x:Name="CollectMonitorButton" Content="Проверить источник" Click="Collect_Click" IsEnabled="False" Margin="0,0,8,4" />
-   <Button x:Name="NewMonitorButton" Content="Новый источник" Click="New_Click" IsEnabled="False" Margin="0,0,0,4" />
+   <Button x:Name="NewMonitorButton" Content="Новое наблюдение" Click="New_Click" IsEnabled="False" Margin="0,0,0,4" />
    <Button x:Name="RefreshReportsButton" Content="Обновить историю" Click="Refresh_Click" Margin="8,0,0,4" />
    <Button x:Name="CancelCollectButton" Content="Отменить проверку" Click="CancelCollect_Click" IsEnabled="False" Visibility="Collapsed" Margin="8,0,0,4" />
   </WrapPanel>
@@ -20,7 +20,7 @@
     <StackPanel Width="300" Margin="0,0,16,0"><TextBlock Text="Название" /><TextBox x:Name="MonitorName" Margin="0,4,0,10" /></StackPanel>
     <StackPanel Width="300"><TextBlock Text="Источник сведений" /><ComboBox x:Name="SourceKind" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="Kind_Changed" Margin="0,4,0,10" /></StackPanel>
    </WrapPanel>
-   <TextBlock Text="Имя базы (пусто — все базы источника)" /><TextBox x:Name="Database" Margin="0,4,0,10" />
+   <TextBlock x:Name="DatabaseLabel" Text="Имя базы (пусто — все базы источника)" /><TextBox x:Name="Database" Margin="0,4,0,10" />
    <StackPanel x:Name="SqlPanel">
     <TextBlock Text="MS SQL (например SERVER\INSTANCE). Подключение с проверкой TLS-сертификата." TextWrapping="Wrap" />
     <TextBox x:Name="SqlServer" Margin="0,4,0,10" TextChanged="SqlServer_Changed" />
@@ -45,8 +45,8 @@
     <TextBlock Text="Интервал, секунд" VerticalAlignment="Center" /><TextBox x:Name="PollInterval" Text="60" Width="90" Margin="8,0,0,0" />
    </WrapPanel>
    <WrapPanel Margin="0,0,0,12">
-    <Button x:Name="SaveMonitorButton" Content="Сохранить источник" Padding="12,6" Click="Save_Click" />
-    <Button x:Name="DeleteMonitorButton" Content="Удалить источник" Padding="12,6" Margin="8,0,0,0" Click="Delete_Click" IsEnabled="False" />
+    <Button x:Name="SaveMonitorButton" Content="Сохранить задание" Padding="12,6" Click="Save_Click" />
+    <Button x:Name="DeleteMonitorButton" Content="Удалить задание" Padding="12,6" Margin="8,0,0,0" Click="Delete_Click" IsEnabled="False" />
    </WrapPanel>
    <TextBlock Text="История SQL подтверждает завершение команды, а не наличие файла или возможность восстановления. Внешние копии агент не изменяет и не удаляет. Отчёты сохраняются локально. При подключённом мониторинге агент или служба передают их на сервер."
     TextWrapping="Wrap" Margin="0,0,0,12" />

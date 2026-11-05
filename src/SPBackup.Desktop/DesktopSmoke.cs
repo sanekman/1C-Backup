@@ -1061,5 +1061,6 @@ internal static partial class DesktopSmoke
             await VerifySqlMonitorCredentialsAsync(monitorWindow, screenshot);
         }
         finally { monitorWindow.Close(); }
+        await VerifyObservationTasksAsync(owner, screenshot);
     }
 }

@@ -21,7 +21,10 @@ public static class MonitoredIssueCodes
         && issue.DestinationIndex is null or >= 0 and < 100 && issue.NativeCode is null or >= 0 and <= 65535;
 }
 public sealed record MonitoredJob(Guid JobId, string Name, string SourceKind, bool Enabled, string Schedule,
-    DateTimeOffset? NextRunUtc, int DestinationCount);
+    DateTimeOffset? NextRunUtc, int DestinationCount)
+{
+    public string TaskKind { get; init; } = "Backup";
+}
 public sealed record MonitoredDestination(int Index, bool Succeeded, long Bytes, bool Incomplete);
 public sealed record MonitoredRun(Guid RunId, Guid JobId, string JobName, DateTimeOffset StartedUtc,
     DateTimeOffset FinishedUtc, string Status, int WarningCount, bool Incomplete, string? CopyKind,
@@ -57,7 +60,8 @@ public static class MonitoringValidation
         && Text(s.AgentVersion,128) && s.PendingRuns >= 0 && s.CollectionWarnings >= 0 && s.Jobs is { Count: <= 1000 }
         && (s.ConfigurationCapabilities is null || AgentCapabilities.Valid(s.ConfigurationCapabilities))
         && s.Jobs.All(j => j is not null && j.JobId != Guid.Empty && Text(j.Name,256) && Text(j.SourceKind,64)
-            && Text(j.Schedule,512) && j.DestinationCount is >= 1 and <= 100)
+            && Text(j.Schedule,512) && (j.TaskKind == "Backup" && j.DestinationCount is >= 1 and <= 100
+                || j.TaskKind == "Observation" && j.DestinationCount == 0 && j.SourceKind is "SqlServerHistory" or "PostgreSqlReports"))
         && s.Jobs.Select(j=>j.JobId).Distinct().Count() == s.Jobs.Count
         && (s.Sources is null || s.Sources.Count <= 1000 && s.Sources.All(m=>m is not null && m.MonitorId != Guid.Empty && Text(m.Name,256) && Text(m.Kind,64))
             && s.Sources.Select(m=>m.MonitorId).Distinct().Count()==s.Sources.Count)

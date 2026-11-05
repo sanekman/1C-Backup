@@ -129,7 +129,18 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
         var run=Assert.Single(runs.Runs); Assert.Equal(monitor.Id,run.JobId); Assert.Equal(4096,run.Destinations[0].Bytes);
         Assert.Equal((await outbox.ReadAsync()).Single().ReportId,run.RunId);
         Assert.DoesNotContain("private-",JsonSerializer.Serialize(runs));
-        Assert.Single((await server.Store.MonitoringAsync(agent.AgentId,default))!.Snapshot.Sources!);
+        var snapshot = (await server.Store.MonitoringAsync(agent.AgentId,default))!.Snapshot;
+        Assert.Single(snapshot.Sources!);
+        var task = Assert.Single(snapshot.Jobs);
+        Assert.Equal(monitor.Id, task.JobId); Assert.Equal(monitor.Name, task.Name);
+        Assert.Equal("Observation", task.TaskKind); Assert.Equal(0, task.DestinationCount);
+        Assert.Equal("PostgreSqlReports", task.SourceKind); Assert.Null(task.NextRunUtc);
+        Assert.DoesNotContain("private-", JsonSerializer.Serialize(snapshot));
+        using var page = await server.Administrator.GetAsync($"agents/{agent.AgentId}");
+        page.EnsureSuccessStatusCode();
+        var html = WebUtility.HtmlDecode(await page.Content.ReadAsStringAsync());
+        Assert.Contains("Наблюдение · Отчёты PostgreSQL", html);
+        Assert.DoesNotContain("хранилищ: 0", html);
     }
     [ServerFact]
     public async Task RevokedAgentCanReconnectOnlyWithExplicitlyBoundInvitation()

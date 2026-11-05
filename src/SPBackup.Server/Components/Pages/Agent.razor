@@ -25,28 +25,24 @@
         { <p class="error">Нет свежих данных от агента. Показаны последние полученные сведения.</p> }
         @if (monitoring.Snapshot.Progress is { } progress)
         { <p class="badge pending">Выполняется: @Stage(progress.Stage) · @(progress.Percent?.ToString() ?? "—")% · @Clock.Time(progress.UpdatedUtc)</p> }
-        @if (monitoring.Snapshot.Sources is { Count: > 0 } sources)
-        {
-            <h2>Внешние SQL-копии</h2>
-            @foreach (var source in sources)
-            {
-                var latest = Latest.FirstOrDefault(r=>r.JobId==source.MonitorId);
-                <p><strong>@source.Name</strong> · @Source(source.Kind) · @(source.Enabled ? source.Failed ? "Ошибка чтения истории" : "Опрос включён" : "Отключён")
-                    <small>Последний опрос: @Clock.Time(source.PolledUtc). Последняя копия: @(latest is null ? "Нет данных" : Status(latest)) · @Clock.Time(latest?.FinishedUtc).</small></p>
-            }
-        }
         <div class="table-scroll"><table><thead><tr><th>Задание</th><th>Расписание</th><th>Последний результат</th><th>Последняя успешная копия без пропусков</th><th>Следующий запуск</th></tr></thead><tbody>
-        @foreach (var job in monitoring.Snapshot.Jobs)
+        @foreach (var job in Tasks(monitoring.Snapshot))
         {
             var last = Latest.FirstOrDefault(r=>r.JobId==job.JobId);
-            <tr><td>@job.Name<small>@Source(job.SourceKind) · хранилищ: @job.DestinationCount</small></td>
+            var observation = job.TaskKind == "Observation";
+            var poll = monitoring.Snapshot.Sources?.FirstOrDefault(source=>source.MonitorId==job.JobId);
+            <tr><td>@job.Name<small>@(observation ? "Наблюдение · " + Source(job.SourceKind) : Source(job.SourceKind) + " · хранилищ: " + job.DestinationCount)</small></td>
             <td>@(job.Enabled ? job.Schedule : "Отключено")</td>
-            <td>@(last is null ? "Результатов ещё нет" : Status(last))<small>@Clock.Time(last?.FinishedUtc)</small>
+            <td>@(poll?.Failed == true ? "Ошибка опроса" : last is null ? observation ? "Копии пока не обнаружены" : "Результатов ещё нет" : Status(last))<small>@Clock.Time(last?.FinishedUtc)</small>
+            @if (observation)
+            { <small>Последний опрос: @Clock.Time(poll?.PolledUtc). @(last?.Evidence is { } evidence ? Evidence(evidence) : "")</small> }
+            @if (poll?.Failed == true)
+            { <small class="error">Не удалось прочитать журнал внешних копий. Проверьте подключение и права исполнителя в настройках задания агента. Последний результат копии сохранён.</small> }
             @if (last is not null && (last.WarningCount > 0 || last.Incomplete || last.Status != "Succeeded" || last.Issues is { Count: > 0 }))
             { <details><summary>Причины и что делать</summary><RunIssueDetails Run="last" /></details> }
             </td>
             <td>@Clock.Time(Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.FinishedUtc)</td>
-            <td>@(job.NextRunUtc is null ? "По событию / вручную" : Clock.Time(job.NextRunUtc))</td></tr>
+            <td>@(job.NextRunUtc is null ? observation ? job.Enabled ? "Автоматический опрос" : "Опрос выключен" : "По событию / вручную" : Clock.Time(job.NextRunUtc))</td></tr>
         }
         </tbody></table></div>
     }
@@ -109,6 +105,10 @@ else { <h1>Агент не найден</h1> }
     private MonitoredRunPage? Runs;
     private IReadOnlyList<MonitoredRun> Latest = [];
     private IReadOnlyList<MonitoredRun> Successful = [];
+    private static IEnumerable<MonitoredJob> Tasks(MonitoringSnapshot snapshot) => snapshot.Jobs.Concat(
+        (snapshot.Sources ?? []).Where(source=>!snapshot.Jobs.Any(job=>job.JobId==source.MonitorId))
+            .Select(source=>new MonitoredJob(source.MonitorId,source.Name,source.Kind,source.Enabled,"Автоматический опрос",null,0)
+                { TaskKind = "Observation" }));
     private static string Source(string value) => value switch
     { "FilesAndFolders"=>"Файлы и папки", "OneCFile"=>"Файловая база 1С", "SqlServer"=>"MS SQL", "PostgreSql"=>"PostgreSQL", "WebDav"=>"WebDAV / Nextcloud", "SqlServerHistory"=>"История MS SQL", "PostgreSqlReports"=>"Отчёты PostgreSQL", _=>value };
     private static string Evidence(string value) => value switch

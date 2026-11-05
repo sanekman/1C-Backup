@@ -20,7 +20,11 @@ public sealed class JobRunOverviewConverter : IMultiValueConverter
 {
     public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
     {
-        if (values.Length != 2 || values[0] is not Guid id || values[1] is not JobRunOverview overview || overview.IsLoading)
+        if (values.Length == 2 && values[0] is ExternalBackupTask task)
+            return new JobRunBadge(task.ResultDescription, task.Poll?.Error is not null || task.Latest?.Observation.Outcome == ExternalBackupOutcome.Failed
+                ? "#B91C1C" : task.Latest is null ? "#64748B" : "#15803D", task.ResultDetails);
+        var identity = values.Length == 2 && values[0] is BackupJob job ? job.Id : values.FirstOrDefault();
+        if (values.Length != 2 || identity is not Guid id || values[1] is not JobRunOverview overview || overview.IsLoading)
             return new JobRunBadge("Загрузка…", "#64748B", "Загружается история запусков.");
         if (overview.Runs is null)
             return new JobRunBadge("Нет данных", "#B45309", "Не удалось прочитать историю. Обновите её в разделе «История запусков»; прежний результат не подтверждён.");

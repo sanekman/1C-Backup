@@ -285,7 +285,7 @@ public partial class MainWindow : Window
                 await new WindowsNetworkShareCredentialStore().ExportForServiceAsync(key);
             await store.SaveAsync(updated);
             jobs = updated;
-            Jobs.ItemsSource = jobs;
+            BindAgentTasks();
             ApplyJobFilter();
             await RefreshCopiesAsync();
             return true;
@@ -306,7 +306,7 @@ public partial class MainWindow : Window
         configurationReady = false;
         canSave = false;
         JobEditor.IsEnabled = SaveButton.IsEnabled = DeleteButton.IsEnabled = false;
-        jobs = []; Jobs.ItemsSource = jobs; editingId = null;
+        jobs = []; BindAgentTasks(); editingId = null;
         copyRows = []; Copies.ItemsSource = copyRows; Copies.SelectedItem = null;
         historyRuns = []; RunHistory.ItemsSource = historyRuns; LatestJobRuns = JobRunOverview.Unavailable;
         ApplyHistoryFilter();
@@ -325,7 +325,8 @@ public partial class MainWindow : Window
         else configuration = new AgentConfiguration(store, agentCache);
         var snapshot = await configuration.GetSnapshotAsync(agentSettings);
         jobs = snapshot.Jobs.ToList(); managedRevision = snapshot.Revision;
-        Jobs.ItemsSource = jobs;
+        await RefreshObservationTasksAsync();
+        BindAgentTasks();
         ApplyJobFilter();
         canSave = agentSettings!.Mode == AgentMode.Standalone;
         configurationReady = true;
@@ -508,10 +509,11 @@ public partial class MainWindow : Window
         NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle && !editorOpen;
         ImportJobSettingsMenuItem.IsEnabled = NewJobButton.IsEnabled && !editorOpen;
         ExportJobSettingsMenuItem.IsEnabled = ready && !jobFileTransfer && !persisting && !editorOpen && Jobs.SelectedItem is BackupJob;
-        FirstJobButton.Visibility = jobs.Count == 0 && JobSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        FirstJobButton.Visibility = jobs.Count + observationTasks.Count == 0 && JobSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         FirstCopyGuideButton.Visibility = FirstJobButton.Visibility;
-        JobActions.Visibility = jobs.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        EditJobButton.IsEnabled = ready && canSave && idle && !editorOpen && Jobs.SelectedItem is BackupJob;
+        JobActions.Visibility = jobs.Count + observationTasks.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        EditJobButton.IsEnabled = ready && idle && !editorOpen && (canSave && Jobs.SelectedItem is BackupJob || Jobs.SelectedItem is ExternalBackupTask);
+        NewObservationTaskButton.IsEnabled = ready && idle && !editorOpen;
         DuplicateJobButton.IsEnabled = ready && canSave && idle && !editorOpen && Jobs.SelectedItem is BackupJob;
         var scheduledJob = Jobs.SelectedItem as BackupJob;
         JobScheduleButton.IsEnabled = ready && canSave && idle && !editorOpen && scheduledJob is { ScheduleKind: not ScheduleKind.Manual };
@@ -521,9 +523,15 @@ public partial class MainWindow : Window
             : !canSave ? "Изменение настроек недоступно в текущем режиме агента."
             : scheduledJob.ScheduleKind == ScheduleKind.Manual ? "Это ручное задание. Задайте время на шаге «Расписание» через «Изменить»."
             : "Изменить расписание только выбранного задания. Планировщик учтёт изменение при следующем обновлении заданий. Копии, уже принятые к выполнению, не отменяются. Для выполнения расписания включите автоматическое копирование.";
+        if (Jobs.SelectedItem is ExternalBackupTask observation)
+        {
+            JobScheduleButton.IsEnabled = ready && idle && !editorOpen;
+            JobScheduleButton.Content = observation.Enabled ? "Выключить опрос" : "Включить опрос";
+            JobScheduleButton.ToolTip = "Изменить автоматический опрос выбранного задания наблюдения. Для опроса должен работать агент или служба.";
+        }
         PreviousStepButton.IsEnabled = ready && canSave && idle && wizardStep > 0;
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
-        JobsSummary.Text = $"Всего: {jobs.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}";
+        JobsSummary.Text = $"Всего: {jobs.Count + observationTasks.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}" + (observationTasks.Count == 0 ? "" : $" · Наблюдений: {observationTasks.Count}");
         UpdateManualRunControl();
         var canInspectLocally = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
         CheckStorageButton.IsEnabled = ready && idle && !editorOpen && Jobs.SelectedItem is BackupJob
@@ -545,10 +553,10 @@ public partial class MainWindow : Window
         CancelRunButton.Visibility = activeRun is null ? Visibility.Collapsed : Visibility.Visible;
         ShowLatestCopyButton.IsEnabled = ready && !copiesRefreshing && Jobs.SelectedItem is BackupJob copyJob
             && copyRows.Any(row => row.Record.JobId == copyJob.Id);
-        ShowLatestRunButton.IsEnabled = ready && !historyRefreshing && Jobs.SelectedItem is BackupJob runJob
-            && historyRuns.Any(run => run.JobId == runJob.Id);
+        ShowLatestRunButton.IsEnabled = ready && !historyRefreshing && (Jobs.SelectedItem is ExternalBackupTask || Jobs.SelectedItem is BackupJob runJob
+            && historyRuns.Any(run => run.JobId == runJob.Id));
         JobEditor.IsEnabled = SaveButton.IsEnabled = ready && canSave && idle;
-        DeleteButton.IsEnabled = ready && canSave && idle && Jobs.SelectedItem is BackupJob;
+        DeleteButton.IsEnabled = ready && idle && (canSave && Jobs.SelectedItem is BackupJob || Jobs.SelectedItem is ExternalBackupTask);
         AgentModePicker.IsEnabled = SaveAgentSettingsButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null && !editorOpen;
         SaveAgentSettingsButton.ToolTip = editorOpen ? "Сначала сохраните задание или закройте его редактор." : null;
         ExternalMonitoringButton.IsEnabled = ready && idle && schedulingTask is null;
@@ -637,7 +645,7 @@ public partial class MainWindow : Window
             {
                 lastBackgroundRefresh = DateTimeOffset.UtcNow;
                 if (agentSettings?.Mode == AgentMode.Managed) await RefreshManagedJobsAsync();
-                await RefreshHistoryAsync(); await RefreshCopiesAsync();
+                await RefreshHistoryAsync(); await RefreshCopiesAsync(); await RefreshObservationTasksAsync();
             }
         }
         catch (Exception ex) { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex); automationReadFailed = true; backgroundState = null; }
@@ -734,9 +742,12 @@ public partial class MainWindow : Window
         var view = CollectionViewSource.GetDefaultView(Jobs.ItemsSource);
         if (view is not null)
         {
-            view.Filter = item => item is BackupJob job && (query.Length == 0 ||
-                job.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
-                job.Source.Contains(query, StringComparison.CurrentCultureIgnoreCase));
+            view.Filter = item => item switch
+            {
+                BackupJob job => MatchesTask(job.Name, job.Source, query),
+                ExternalBackupTask task => MatchesTask(task.Name, task.Source + " · " + task.Kind, query),
+                _ => false
+            };
             view.Refresh();
         }
         JobsEmptyTitle.Text = query.Length == 0 ? "Добавьте первое задание" : "Задания не найдены";
@@ -1075,7 +1086,9 @@ public partial class MainWindow : Window
 
     private async void Run_Click(object sender, RoutedEventArgs e)
     {
-        if (!RunButton.IsEnabled || Jobs.SelectedItem is not BackupJob job) return;
+        if (!RunButton.IsEnabled) return;
+        if (Jobs.SelectedItem is ExternalBackupTask task) { await OpenObservationTaskAsync(task.Id, collect: true); return; }
+        if (Jobs.SelectedItem is not BackupJob job) return;
         if (job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.PlatformDump && job.OneC is null)
         { Status.Text = "Укажите путь к 1cv8.exe и сохраните задание перед запуском."; return; }
         await RunManualAsync(job);
@@ -1158,10 +1171,11 @@ public partial class MainWindow : Window
         Status.Text = "Останавливается операция. Дождитесь записи результата.";
     }
 
-    private void ExternalMonitoring_Click(object sender, RoutedEventArgs e)
+    private async void ExternalMonitoring_Click(object sender, RoutedEventArgs e)
     {
         if (agentSettings is null || activeRun is not null || copyVerification is not null || schedulingTask is not null || manualPending) return;
         new ExternalMonitoringWindow(agentSettings) { Owner = this }.ShowDialog();
+        await RefreshObservationTasksAsync();
     }
 
     private (CheckBox Box, WeekDays Day)[] DayControls =>
@@ -1297,6 +1311,7 @@ public partial class MainWindow : Window
 
     private async void Delete_Click(object sender, RoutedEventArgs e)
     {
+        if (Jobs.SelectedItem is ExternalBackupTask task) { await DeleteObservationTaskAsync(task); return; }
         if (!canSave || editingId is not Guid id) return;
         if (MessageBox.Show("Удалить настройки задания?", "SP Backup", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         if (await PersistAsync(jobs.Where(j => j.Id != id).ToList())) { Jobs.SelectedItem = null; editingId = null; CloseEditor(); Status.Text = "Задание удалено. Резервные копии и история сохранены."; }

@@ -77,8 +77,9 @@
     <Border x:Name="JobListCard" Style="{StaticResource Card}">
      <DockPanel>
       <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1">
-       <DockPanel>
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+       <StackPanel>
+        <WrapPanel Margin="0,0,0,6"><TextBlock Text="Мои задания" FontSize="17" FontWeight="SemiBold" /><TextBlock x:Name="JobsSummary" Text="Загрузка…" Foreground="{DynamicResource MutedBrush}" Margin="12,0,0,0" VerticalAlignment="Center" /></WrapPanel>
+        <WrapPanel>
          <Menu Background="Transparent" VerticalAlignment="Center" Margin="0,0,8,0" IsMainMenu="False" ToolTip="Перенос настроек задания через файл">
           <MenuItem Header="Файл" Padding="8,6">
            <MenuItem x:Name="ExportJobSettingsMenuItem" Header="Сохранить настройки выбранного задания…" Click="ExportJobSettings_Click" IsEnabled="False" />
@@ -86,10 +87,10 @@
           </MenuItem>
          </Menu>
          <Button x:Name="JobScheduleButton" Content="Включить расписание" Click="ToggleJobSchedule_Click" IsEnabled="False" Margin="0,0,8,0" ToolTipService.ShowOnDisabled="True" />
+         <Button x:Name="NewObservationTaskButton" Content="+ Наблюдение SQL" Click="NewObservationTask_Click" IsEnabled="False" Margin="0,0,8,0" ToolTip="Задание наблюдения за копиями выбранной базы, созданными другой программой" />
          <Button x:Name="NewJobButton" Content="+ Новое задание" Style="{StaticResource PrimaryButton}" Click="New_Click" IsEnabled="False" />
-        </StackPanel>
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="Мои задания" FontSize="17" FontWeight="SemiBold" /><TextBlock x:Name="JobsSummary" Text="Загрузка…" Foreground="{DynamicResource MutedBrush}" Margin="12,0,12,0" VerticalAlignment="Center" /></StackPanel>
-       </DockPanel>
+        </WrapPanel>
+       </StackPanel>
       </Border>
       <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0">
        <ScrollViewer x:Name="JobActionsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -137,7 +138,7 @@
     <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" MinWidth="160">
      <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding Name}" /></Style></DataGridTextColumn.ElementStyle>
     </DataGridTextColumn>
-    <DataGridTemplateColumn Header="Тип" Width="100">
+    <DataGridTemplateColumn Header="Тип" Width="125">
      <DataGridTemplateColumn.CellTemplate><DataTemplate>
       <ContentControl Content="{Binding Kind}" ContentTemplate="{StaticResource DatabaseKindLabel}" />
      </DataTemplate></DataGridTemplateColumn.CellTemplate>
@@ -149,7 +150,7 @@
      <DataGridTemplateColumn.CellTemplate><DataTemplate>
       <ContentControl>
        <ContentControl.Content><MultiBinding Converter="{StaticResource JobRunOverviewConverter}">
-        <Binding Path="Id" /><Binding Path="LatestJobRuns" RelativeSource="{RelativeSource AncestorType={x:Type local:MainWindow}}" />
+        <Binding /><Binding Path="LatestJobRuns" RelativeSource="{RelativeSource AncestorType={x:Type local:MainWindow}}" />
        </MultiBinding></ContentControl.Content>
        <ContentControl.ContentTemplate><DataTemplate>
         <TextBlock Text="{Binding Label}" Foreground="{Binding Color, Converter={StaticResource ThemeColorConverter}}" FontSize="12" TextTrimming="CharacterEllipsis">

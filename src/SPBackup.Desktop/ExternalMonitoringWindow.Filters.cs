@@ -68,6 +68,11 @@ public partial class ExternalMonitoringWindow
         finally { updatingReportFilters = false; }
     }
 
+    private void SelectTaskReports(Guid id)
+    {
+        ReportSourceFilter.SelectedItem = ReportSourceFilter.Items.OfType<ReportSourceChoice>().FirstOrDefault(choice => choice.Id == id);
+    }
+
     private void ReportFilter_Changed(object sender, RoutedEventArgs e) => ApplyReportFilter();
     private void ApplyReportFilter()
     {

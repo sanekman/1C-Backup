@@ -54,7 +54,9 @@ public partial class MainWindow
 
     private void EditJob_Click(object sender, RoutedEventArgs e)
     {
-        if (!EditJobButton.IsEnabled || Jobs.SelectedItem is not BackupJob job) return;
+        if (!EditJobButton.IsEnabled) return;
+        if (Jobs.SelectedItem is ExternalBackupTask task) { _ = OpenObservationTaskAsync(task.Id); return; }
+        if (Jobs.SelectedItem is not BackupJob job) return;
         selectionBeforeEdit = job;
         LoadJobEditor(job);
         OpenEditor();
@@ -106,7 +108,9 @@ public partial class MainWindow
 
     private async void ToggleJobSchedule_Click(object sender, RoutedEventArgs e)
     {
-        if (!canSave || persisting || !JobScheduleButton.IsEnabled || Jobs.SelectedItem is not BackupJob selected) return;
+        if (!JobScheduleButton.IsEnabled) return;
+        if (Jobs.SelectedItem is ExternalBackupTask task) { await ToggleObservationTaskAsync(task); return; }
+        if (!canSave || persisting || Jobs.SelectedItem is not BackupJob selected) return;
         var job = jobs.FirstOrDefault(candidate => candidate.Id == selected.Id);
         if (job is null || job.ScheduleKind == ScheduleKind.Manual) return;
         var updated = job with { Enabled = !job.Enabled };
@@ -382,6 +386,7 @@ public partial class MainWindow
             return;
         }
         SelectedJobSummary.Foreground = (System.Windows.Media.Brush)FindResource("MutedBrush");
+        if (Jobs.SelectedItem is ExternalBackupTask task) { SelectedJobSummary.Text = task.ResultDetails + (task.Enabled ? "\nАвтоматический опрос включён; должен работать агент или служба." : "\nАвтоматический опрос выключен."); return; }
         if (Jobs.SelectedItem is not BackupJob job) { SelectedJobSummary.Text = "Выберите задание, чтобы создать копию или изменить настройки."; return; }
         var latest = LatestJobRuns.Runs?.GetValueOrDefault(job.Id);
         var running = activeJobId == job.Id || latest?.Status == BackupRunStatus.Running;
@@ -445,7 +450,9 @@ public partial class MainWindow
 
     private async void ShowLatestRun_Click(object sender, RoutedEventArgs e)
     {
-        if (!ready || historyRefreshing || Jobs.SelectedItem is not BackupJob job) return;
+        if (!ready || historyRefreshing) return;
+        if (Jobs.SelectedItem is ExternalBackupTask task) { await OpenObservationTaskAsync(task.Id); return; }
+        if (Jobs.SelectedItem is not BackupJob job) return;
         try
         {
             ShowPage("history");

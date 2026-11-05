@@ -17,6 +17,15 @@ public sealed class ExternalBackupPollingStatusStore(string directory)
     }
     internal Task WriteAsync(IReadOnlyList<ExternalBackupPollResult> values, CancellationToken cancellationToken) =>
         file.WriteAsync(values.ToList(), cancellationToken);
+
+    // The caller holds the engine lease, just like the automatic poller.
+    public async Task RecordAsync(ExternalBackupPollResult result, CancellationToken cancellationToken = default)
+    {
+        if (result.MonitorId == Guid.Empty || string.IsNullOrWhiteSpace(result.MonitorName) || result.PolledUtc == default
+            || result.Observations < 0 || result.Added < 0) throw new InvalidDataException("Некорректный результат опроса.");
+        var previous = await ReadAsync(cancellationToken);
+        await WriteAsync(previous.Where(value => value.MonitorId != result.MonitorId).Append(result).ToList(), cancellationToken);
+    }
 }
 
 /// <summary>One loop per engine owner. A failed source does not prevent collecting other sources.</summary>

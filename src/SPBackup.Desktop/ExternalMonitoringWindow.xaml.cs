@@ -23,17 +23,26 @@ public partial class ExternalMonitoringWindow : Window
     private bool ready;
     private readonly CancellationTokenSource lifetime = new();
     private bool busy;
+    private readonly bool taskMode;
     private CancellationTokenSource? collectionCancellation;
 
-    public ExternalMonitoringWindow(AgentSettings settings)
+    public ExternalMonitoringWindow(AgentSettings settings, Guid? taskId = null, bool createNew = false, bool collect = false)
     {
         this.settings = settings;
+        taskMode = taskId is not null || createNew;
         var directory = DesktopPaths.DataDirectory;
         store = new ExternalBackupMonitorStore(Path.Combine(directory, "external-monitors.json"));
         outbox = new ExternalBackupOutbox(Path.Combine(directory, "external-backups.json"));
         pollingStatus = new ExternalBackupPollingStatusStore(directory);
         engine = new BackupEngineCoordinator(directory);
         InitializeComponent();
+        if (taskMode)
+        {
+            Title = createNew ? "Новое задание наблюдения SQL" : "Задание наблюдения SQL";
+            Sources.Visibility = NewMonitorButton.Visibility = Visibility.Collapsed;
+            SourceSettings.Header = "Параметры задания наблюдения";
+            DatabaseLabel.Text = "Имя базы, за копиями которой наблюдать";
+        }
         SqlAuthentication.ItemsSource = new Dictionary<SqlServerAuthentication, string>
         {
             [SqlServerAuthentication.Windows] = "Учётная запись Windows исполнителя",
@@ -53,13 +62,16 @@ public partial class ExternalMonitoringWindow : Window
             try
             {
                 monitors = (await store.LoadAsync(lifetime.Token)).ToList();
-                BindMonitorSources(monitors.FirstOrDefault()?.Id);
-                SourceSettings.IsExpanded = monitors.Count == 0;
+                BindMonitorSources(taskId ?? (createNew ? null : monitors.FirstOrDefault()?.Id));
+                if (createNew) ClearMonitorEditor();
+                SourceSettings.IsExpanded = taskMode || monitors.Count == 0;
                 await RefreshAsync();
                 ready = true; Editor.IsEnabled = true;
                 UpdateMonitorControls();
                 Status.Text = "Фоновый агент опрашивает включённые источники автоматически. Для ручной проверки остановите агент.";
                 timer.Start();
+                if (taskId is { } selectedTask) SelectTaskReports(selectedTask);
+                if (collect) Collect_Click(this, new RoutedEventArgs());
             }
             catch (Exception ex) { Status.Text = "Не удалось прочитать настройки или историю: " + ex.Message; }
         };
@@ -163,18 +175,23 @@ public partial class ExternalMonitoringWindow : Window
                 Kind = (ExternalBackupSourceKind)SourceKind.SelectedValue,
                 SqlAuthentication = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory ? SelectedSqlAuthentication : SqlServerAuthentication.Windows,
                 SqlCredentialKey = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory && SelectedSqlAuthentication == SqlServerAuthentication.SqlServer ? sqlCredentialKey : null,
-                SqlServer = SqlServer.Text.Trim(), DatabaseName = Database.Text.Trim(), TimeZoneId = TimeZoneInfo.Local.Id,
+                SqlServer = SqlServer.Text.Trim(), DatabaseName = Database.Text.Trim(),
+                TimeZoneId = monitors.FirstOrDefault(value => value.Id == editingId)?.TimeZoneId ?? TimeZoneInfo.Local.Id,
                 LookbackDays = int.TryParse(Days.Text, out var days) ? days : 0, ReportDirectory = ReportDirectory.Text.Trim(),
                 Enabled = MonitorEnabled.IsChecked == true, PollIntervalSeconds = int.TryParse(PollInterval.Text, out var interval) ? interval : 0
             };
             monitor.Validate();
+            if (taskMode && string.IsNullOrWhiteSpace(monitor.DatabaseName))
+                throw new InvalidDataException("Укажите конкретную базу, за копиями которой нужно наблюдать.");
             var updated = monitors.Where(m => m.Id != monitor.Id).Append(monitor).ToList();
             if (monitor.SqlAuthentication == SqlServerAuthentication.SqlServer && monitor.SqlCredentialKey is { } key)
                 await new WindowsSqlServerCredentialStore().ExportForServiceAsync(key, lifetime.Token);
             await store.SaveAsync(updated, lifetime.Token);
             monitors = updated; BindMonitorSources(monitor.Id);
-            UpdateReportSourceChoices(); ApplyReportFilter(); SourceSettings.IsExpanded = false;
-            Status.Text = "Источник сохранён. Проверка использует сохранённые настройки.";
+            UpdateReportSourceChoices();
+            if (taskMode) SelectTaskReports(monitor.Id);
+            ApplyReportFilter(); SourceSettings.IsExpanded = false;
+            Status.Text = "Задание наблюдения сохранено и появится в общем списке заданий. Проверка использует сохранённые настройки.";
         }
         catch (Exception ex) { Status.Text = "Не удалось сохранить: " + ex.Message; }
         finally { busy = false; Editor.IsEnabled = !lifetime.IsCancellationRequested; UpdateMonitorControls(); }
@@ -190,12 +207,21 @@ public partial class ExternalMonitoringWindow : Window
         try
         {
             using var lease = engine.Acquire();
-            IExternalBackupSource source = monitor.Kind == ExternalBackupSourceKind.SqlServerHistory
-                ? new SqlServerBackupHistorySource() : new PostgreSqlBackupReportSource();
-            var observations = await Task.Run(() => source.ReadAsync(monitor, cancellation.Token));
-            var added = await outbox.ObserveAsync(settings, monitor, observations, cancellation.Token);
-            await RefreshAsync();
-            Status.Text = $"Проверка завершена. Получено: {observations.Count}, новых: {added}. Это результат чтения истории, а не проверка восстановления.";
+            try
+            {
+                IExternalBackupSource source = monitor.Kind == ExternalBackupSourceKind.SqlServerHistory
+                    ? new SqlServerBackupHistorySource() : new PostgreSqlBackupReportSource();
+                var observations = await Task.Run(() => source.ReadAsync(monitor, cancellation.Token));
+                var added = await outbox.ObserveAsync(settings, monitor, observations, cancellation.Token);
+                await pollingStatus.RecordAsync(new(monitor.Id, monitor.Name, DateTimeOffset.UtcNow, observations.Count, added), cancellation.Token);
+                await RefreshAsync();
+                Status.Text = $"Проверка завершена. Получено: {observations.Count}, новых: {added}. Это результат чтения истории, а не проверка восстановления.";
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                await pollingStatus.RecordAsync(new(monitor.Id, monitor.Name, DateTimeOffset.UtcNow, 0, 0, error.Message));
+                throw;
+            }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { Status.Text = "Проверка отменена. Полученные ранее наблюдения сохранены."; }
         catch (Exception ex) { Status.Text = "Ошибка проверки. Прежняя история сохранена: " + ex.Message; }

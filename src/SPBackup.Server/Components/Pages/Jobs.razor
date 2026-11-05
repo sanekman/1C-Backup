@@ -3,6 +3,7 @@
 @inject ServerStore Store
 @inject IHttpContextAccessor Http
 @inject ServerOptions Settings
+@using SPBackup.Server.Monitoring
 <PageTitle>Задания агента — @Settings.DisplayName</PageTitle>
 <a href="@($"agents/{Id}")">← Карточка агента</a>
 <h1>Задания на сервере</h1>
@@ -39,6 +40,20 @@
             }
         </section>
     }
+    @if (ObservationTasks.Count > 0)
+    {
+        <section class="card">
+            <h2>Задания наблюдения SQL</h2>
+            <p>Эти задания читают журнал копий выбранной базы. Настройки меняются в Windows-программе агента, в общем списке заданий.
+                Результаты и история доступны в <a href="@($"agents/{Id}")">карточке агента</a>.</p>
+            @foreach (var task in ObservationTasks)
+            {
+                <article class="job-summary"><h3>@task.Name</h3>
+                    <p>@(task.SourceKind == "SqlServerHistory" ? "Наблюдение MS SQL" : "Наблюдение PostgreSQL") · @(task.Enabled ? task.Schedule : "Опрос выключен")</p>
+                </article>
+            }
+        </section>
+    }
 }
 else { <p>Агент не найден.</p> }
 @code {
@@ -46,10 +61,13 @@ else { <p>Агент не найден.</p> }
     private AgentRecord? Agent;
     private ManagedFileConfiguration? Configuration;
     private string? Error;
+    private IReadOnlyList<MonitoredJob> ObservationTasks = [];
     protected override async Task OnParametersSetAsync()
     {
         Agent = await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted);
         if (Agent is null) { Http.HttpContext.Response.StatusCode = 404; return; }
+        var monitoring = await Store.MonitoringAsync(Id, Http.HttpContext.RequestAborted);
+        ObservationTasks = monitoring?.Snapshot.Jobs.Where(job => job.TaskKind == "Observation").ToArray() ?? [];
         try { Configuration = await Store.ReadFileConfigurationAsync(Id, Http.HttpContext.RequestAborted); }
         catch (ServerRequestException) { Error = "Эта конфигурация содержит параметры, которые мастер пока не поддерживает. Она сохранена без изменений."; }
     }

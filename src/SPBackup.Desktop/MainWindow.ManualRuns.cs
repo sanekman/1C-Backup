@@ -22,6 +22,17 @@ public partial class MainWindow
 
     private void UpdateManualRunControl()
     {
+        RunButton.Content = Jobs.SelectedItem is ExternalBackupTask ? "Проверить сейчас" : "Создать копию";
+        if (Jobs.SelectedItem is ExternalBackupTask)
+        {
+            RunButton.IsEnabled = ready && !changingAgentConfiguration && !editorOpen && !serviceManaging && !installingUpdate
+                && !trayStopping && !persisting && !jobFileTransfer && !schedulerStopping && copyVerification is null
+                && activeRun is null && !manualPending && !backgroundStarting && !backgroundBusy && schedulingTask is null;
+            RunButton.ToolTip = backgroundBusy || schedulingTask is not null
+                ? "Наблюдение уже выполняется фоновым агентом. Откройте «Результат» для просмотра; для ручной проверки остановите агент."
+                : "Прочитать журнал внешних копий выбранной базы. Новая резервная копия не создаётся.";
+            return;
+        }
         var selected = Jobs.SelectedItem as BackupJob;
         var queued = selected is not null && (localManualRuns.ContainsKey(selected.Id)
             || backgroundManualRuns.Values.Any(r => r.JobId == selected.Id && r.SessionId == backgroundState?.SessionId));
