@@ -116,7 +116,8 @@ function Resume-Services($State) {
 }
 function Validate-RunningCluster {
     if ((Get-Service $database).Status -ne 'Running') { Start-Service $database; (Get-Service $database).WaitForStatus('Running',[TimeSpan]::FromSeconds(60)) }
-    $oldPassword=$env:PGPASSWORD
+    $oldPassword=$env:PGPASSWORD; $oldConnectTimeout=$env:PGCONNECT_TIMEOUT
+    $env:PGCONNECT_TIMEOUT='5'
     try {
         $env:PGPASSWORD=[IO.File]::ReadAllText((Join-Path $DataDirectory 'connection-string.txt')).Trim().Substring('Host=127.0.0.1;Port=15433;Database=postgres;Username=onecbackup;Password='.Length)
         foreach ($setting in @('data_directory','config_file','hba_file','ident_file')) {
@@ -130,7 +131,7 @@ function Validate-RunningCluster {
             if (!(Is-Within $path (Join-Path $DataDirectory 'postgresql'))) { throw 'Данные или файлы доступа PostgreSQL вынесены за пределы штатной папки. Нужна отдельная процедура.' }
             if ($setting -eq 'data_directory' -and $path -ine (Join-Path $DataDirectory 'postgresql')) { throw 'Работающая PostgreSQL использует другую папку данных. Копирование остановлено.' }
         }
-    } finally { $env:PGPASSWORD=$oldPassword }
+    } finally { $env:PGPASSWORD=$oldPassword; $env:PGCONNECT_TIMEOUT=$oldConnectTimeout }
 }
 function Check-Stopped {
     foreach ($name in @($server,$database)) { if ((Get-Service $name).Status -ne 'Stopped') { throw 'Во время обслуживания запустилась служба. Копия не считается готовой.' } }

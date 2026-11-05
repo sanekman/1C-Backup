@@ -73,15 +73,17 @@ try {
     [IO.File]::WriteAllText($manifest,($bad | ConvertTo-Json -Depth 6),(New-Object Text.UTF8Encoding($false)))
     Rejected { & $tool -Action Restore -BackupDirectory $snapshot }
     $null=Invoke-RestMethod -Uri ($Address+'api/v1/management/session') -WebSession $Session
-    $afterFailure=@(Invoke-RestMethod -Uri ($Address+'api/v1/management/folders') -WebSession $Session)
-    if ('После снимка' -notin @($afterFailure.name)) { throw 'Failed restore did not return to the live database.' }
+    $afterFailure=Invoke-RestMethod -Uri ($Address+'api/v1/management/folders') -WebSession $Session
+    $afterFailureNames=@(foreach ($entry in $afterFailure) { $entry.name })
+    if ('После снимка' -notin $afterFailureNames) { throw 'Failed restore did not return to the live database.' }
 } finally { [IO.File]::WriteAllBytes($cert,$certBytes); [IO.File]::WriteAllBytes($manifest,$manifestBytes) }
 $restored=& $tool -Action Restore -BackupDirectory $snapshot
 if (!$restored.Success -or !(Test-Path -LiteralPath $restored.PreviousData)) { throw 'Restore did not retain the previous data folder.' }
 # Existing panel cookie proves restored DPAPI keys; bearer request proves persisted database credentials.
 $null=Invoke-RestMethod -Uri ($Address+'api/v1/management/session') -WebSession $Session
-$folders=@(Invoke-RestMethod -Uri ($Address+'api/v1/management/folders') -WebSession $Session)
-if ('До снимка' -notin @($folders.name) -or 'После снимка' -in @($folders.name)) { throw 'Database did not return to its saved state.' }
+$folders=Invoke-RestMethod -Uri ($Address+'api/v1/management/folders') -WebSession $Session
+$folderNames=@(foreach ($entry in $folders) { $entry.name })
+if ('До снимка' -notin $folderNames -or 'После снимка' -in $folderNames) { throw 'Database did not return to its saved state.' }
 if ((Get-FileHash (Join-Path $Root 'data\panel-time-zone.json')).Hash -ne $timeHash) { throw 'Server settings did not return to their saved state.' }
 $null=Invoke-RestMethod -Uri ($Address+'api/v1/agents/'+$agentId+'/configuration') -Headers $agentHeaders
 & $tool -Action Verify -BackupDirectory $snapshot | Out-Null
