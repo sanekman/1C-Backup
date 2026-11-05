@@ -26,12 +26,16 @@ SolidCompression=yes
 WizardStyle=modern
 CloseApplications=no
 SetupLogging=yes
+SetupMutex=Global\SPBackupServerInstall
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 [Files]
 Source: "{#SourceFolder}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 [Icons]
 Name: "{commonprograms}\SP Backup Server\Открыть панель"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\windows\Open-Panel.ps1"""
+Name: "{commonprograms}\SP Backup Server\Создать резервную копию сервера"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -STA -ExecutionPolicy Bypass -File ""{app}\windows\Open-ServerSnapshot.ps1"" -Action Backup"
+Name: "{commonprograms}\SP Backup Server\Проверить резервную копию сервера"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -STA -ExecutionPolicy Bypass -File ""{app}\windows\Open-ServerSnapshot.ps1"" -Action Verify"
+Name: "{commonprograms}\SP Backup Server\Восстановить сервер из копии"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -STA -ExecutionPolicy Bypass -File ""{app}\windows\Open-ServerSnapshot.ps1"" -Action Restore"
 [Code]
 var
   Credentials, Network: TInputQueryWizardPage;

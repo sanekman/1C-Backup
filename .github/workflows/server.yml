@@ -81,6 +81,7 @@ jobs:
             artifacts/server-tests/*.trx
             artifacts/server-tests/compose-result.json
             artifacts/server-tests/windows-installer-result.json
+            artifacts/server-tests/windows-snapshot-result.json
             artifacts/server-tests/windows-installer-*.log
             artifacts/server-tests/windows-setup.log
           retention-days: 14

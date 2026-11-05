@@ -134,6 +134,10 @@ try {
     if (Get-NetFirewallRule -Name 'OneCBackupServer-Https' -ErrorAction SilentlyContinue) { throw 'Explicit firewall opt-out did not remove the owned rule.' }
 
     if ($connectionHash -ne (Get-FileHash (Join-Path $root 'connection-string.txt')).Hash -or $certificateHash -ne (Get-FileHash (Join-Path $root 'server.pfx')).Hash) { throw 'Migration changed persistent credentials/certificate.' }
+    [IO.File]::WriteAllText($secret,$password,(New-Object Text.UTF8Encoding($false)))
+    # Exercise the exact Windows PowerShell 5.1 runtime used by the Start menu.
+    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') '-NoProfile' '-NonInteractive' '-ExecutionPolicy' 'Bypass' '-File' (Join-Path $PSScriptRoot 'windows_snapshot_smoke.ps1') '-Root' $root '-Install' $install '-Address' $address '-Installer' $Installer '-PasswordFile' $secret
+    if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell snapshot roundtrip failed.' }
     # Reboot-equivalent SCM stop/start; both services must recover with their installed identity.
     & (Join-Path $install 'windows\Stop-Server.ps1')
     Start-Service OneCBackupServerDatabase
@@ -149,7 +153,7 @@ try {
     Health
     Login
     New-Item -ItemType Directory -Path 'artifacts/server-tests' -Force | Out-Null
-    @{ legacyServicePathMigrated=$true; separateHttpsPort=$true; firewallOptOutPreserved=$true; legacyFirewallChoicePreserved=$true; firewallRulePortAndProfiles=$true; firewallRemoteScopePreserved=$true; passwordChangePreservedAfterReinstall=$true; diagnosticZip=$true; administrationPages=$true; separateNameAndAddress=$true; customHttpsPortAndPath=$true; ipCertificateValidated=$true; legacyIdentityMigration=$true; installed=$true; https=$true; administratorLogin=$true; reinstallPreservesData=$true; serviceRestart=$true; uninstallPreservesDatabase=$true; reinstallAfterUninstall=$true } | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-installer-result.json'
+    @{ coldSnapshotRoundTrip=$true; legacyServicePathMigrated=$true; separateHttpsPort=$true; firewallOptOutPreserved=$true; legacyFirewallChoicePreserved=$true; firewallRulePortAndProfiles=$true; firewallRemoteScopePreserved=$true; passwordChangePreservedAfterReinstall=$true; diagnosticZip=$true; administrationPages=$true; separateNameAndAddress=$true; customHttpsPortAndPath=$true; ipCertificateValidated=$true; legacyIdentityMigration=$true; installed=$true; https=$true; administratorLogin=$true; reinstallPreservesData=$true; serviceRestart=$true; uninstallPreservesDatabase=$true; reinstallAfterUninstall=$true } | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-installer-result.json'
 } catch {
     if (Test-Path (Join-Path $root 'setup.log')) { Get-Content (Join-Path $root 'setup.log') }
     Get-Service OneCBackupServer,OneCBackupServerDatabase -ErrorAction SilentlyContinue | Select-Object Name,Status | Format-Table

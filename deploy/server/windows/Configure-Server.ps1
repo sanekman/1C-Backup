@@ -11,6 +11,14 @@ param(
     [ValidateSet('Preserve','Allow','None')][string]$FirewallMode = 'Preserve',
     [string]$AdministratorPasswordFile
 )
+$ErrorActionPreference='Stop'
+$maintenanceCreated=$false
+$maintenance=[Threading.Mutex]::new($false,'Global\SPBackupServerConfiguration',[ref]$maintenanceCreated)
+$maintenanceHeld=$false
+try {
+    if (!$maintenanceCreated) { throw 'Server backup, restore or configuration is already running.' }
+    try { $maintenanceHeld=$maintenance.WaitOne(0) } catch [Threading.AbandonedMutexException] { $maintenance.ReleaseMutex(); throw 'Previous server maintenance ended unexpectedly.' }
+    if (!$maintenanceHeld) { throw 'Server backup, restore or configuration is already running.' }
 $ErrorActionPreference = 'Stop'
 # A parent PowerShell 7 process may pass incompatible module paths to Windows PowerShell 5.1.
 if ($PSVersionTable.PSEdition -eq 'Desktop') { $env:PSModulePath=Join-Path $PSHOME 'Modules' }
@@ -200,3 +208,5 @@ try {
     # The supplied one-time password is no longer needed; installer also removes its temporary file.
     $adminPassword=$null; $databasePassword=$null; $certificatePassword=$null
 }
+
+} finally { if ($maintenanceHeld) { $maintenance.ReleaseMutex() }; $maintenance.Dispose() }
