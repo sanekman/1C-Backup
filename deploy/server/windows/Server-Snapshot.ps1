@@ -138,12 +138,24 @@ function Check-Stopped {
 }
 function Copy-Tree([string]$Source,[string]$Target) {
     $items=@(Tree $Source); $index=0
+    $drive=New-Object IO.DriveInfo([IO.Path]::GetPathRoot($Target))
+    $bytes=[long]0; $reserve=[long]1073741824
+    foreach ($item in $items) {
+        if (!$item.PSIsContainer) {
+            if ($item.Length -gt [long]::MaxValue-$bytes-$reserve) { throw 'Объём копии превышает поддерживаемый предел.' }
+            $bytes+=$item.Length
+        }
+    }
+    if ($drive.AvailableFreeSpace -lt $bytes+$reserve) { throw 'Недостаточно места: нужен объём всей копии и ещё 1 ГиБ свободного пространства.' }
     foreach ($item in $items) {
         if ($index % 100 -eq 0) { Write-Progress -Activity 'SP Backup Server: копирование' -Status ("Файлов и папок: $index / "+$items.Count) -PercentComplete ([int](100*$index/[Math]::Max(1,$items.Count))) }
         $index++
         $relative=$item.FullName.Substring($Source.Length+1); $to=Join-Path $Target $relative
         if ($item.PSIsContainer) { [void][IO.Directory]::CreateDirectory($to) }
-        else { [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($to)); [IO.File]::Copy($item.FullName,$to,$false) }
+        else {
+            if ($drive.AvailableFreeSpace -lt $item.Length+$reserve) { throw 'Свободное место уменьшилось. Копирование остановлено с резервом 1 ГиБ.' }
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($to)); [IO.File]::Copy($item.FullName,$to,$false)
+        }
     }
     Write-Progress -Activity 'SP Backup Server: копирование' -Completed
 }
