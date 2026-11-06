@@ -143,7 +143,11 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
                 polling.FirstOrDefault(p=>p.MonitorId==m.Id)?.Error is not null)
                 { MaximumBackupAgeHours = m.MaximumBackupAgeHours, LastSuccessfulUtc = observationTasks[m.Id].LastSuccessfulUtc,
                     FreshnessWarning = observationTasks[m.Id].FreshnessWarning,
-                    ObservationStatus = observationTasks[m.Id].ResultCode, LatestReportId = observationTasks[m.Id].Latest?.ReportId, LatestFinishedUtc = observationTasks[m.Id].LatestFinishedUtc }).ToArray(),collectionWarnings)
+                    ObservationStatus = observationTasks[m.Id].ResultCode, LatestReportId = observationTasks[m.Id].Latest?.ReportId, LatestFinishedUtc = observationTasks[m.Id].LatestFinishedUtc,
+                    PollErrorCode = observationTasks[m.Id].Poll?.Error is not null ? observationTasks[m.Id].Poll?.ErrorCode : null,
+                    SqlBackupTypesReported = m.Kind == ExternalBackupSourceKind.SqlServerHistory,
+                    LastFullUtc = observationTasks[m.Id].LastFullUtc, LastDifferentialUtc = observationTasks[m.Id].LastDifferentialUtc,
+                    LastLogUtc = observationTasks[m.Id].LastLogUtc }).ToArray(),collectionWarnings)
         { ExecutionMode = selected is null ? "Standalone" : "Managed", ConfigurationRevision = selected?.Revision,
             BackupExecutionAvailable = selected is null ? null : managedJobs is not null && fixedConnection is not null };
         var batch = pending.Where(r=>!acknowledged.RetryAfter!.TryGetValue(r.RunId,out var time) || time <= DateTimeOffset.UtcNow).Take(25).ToArray();

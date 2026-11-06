@@ -57,6 +57,13 @@ public sealed record ExternalBackupObservation(string SourceKey, string Instance
     string Evidence, string? Error = null)
 {
     [System.Text.Json.Serialization.JsonIgnore]
+    public string BackupTypeDescription => Evidence != "SqlServerMsdbHistory" ? BackupType : BackupType switch
+    {
+        "D" => "Полная", "I" => "Дифференциальная", "L" => "Журнал транзакций",
+        "F" => "Файлы / файловые группы", "G" => "Дифференциальная файлов",
+        "P" => "Частичная", "Q" => "Дифференциальная частичная", _ => BackupType
+    };
+    [System.Text.Json.Serialization.JsonIgnore]
     public string OutcomeDescription => Outcome == ExternalBackupOutcome.Completed ? "Завершено" : "Ошибка";
     [System.Text.Json.Serialization.JsonIgnore]
     public string LocationDescription => Locations is null ? "" : string.Join("; ", Locations);

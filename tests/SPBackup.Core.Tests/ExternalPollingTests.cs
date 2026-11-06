@@ -46,6 +46,8 @@ public sealed class ExternalPollingTests : IDisposable
         var results = await poller.PollAsync(now);
         Assert.Equal("Source unavailable", results[0].Error);
         Assert.Null(results[1].Error);
+        Assert.Equal("Read", results[0].ErrorCode);
+        Assert.Null(results[1].ErrorCode);
         Assert.Single(await Outbox.ReadAsync());
         Assert.Empty(await poller.PollAsync(now.AddSeconds(10)));
         Assert.Equal(2, (await Status.ReadAsync()).Count);

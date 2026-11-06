@@ -40,10 +40,18 @@
             { <small>Последний опрос: @Clock.Time(poll?.PolledUtc). @(matchingHistory && last?.Evidence is { } evidence ? Evidence(evidence) : "")</small> }
             @if (observation && poll?.MaximumBackupAgeHours is { } maximumAge)
             { <small>Допустимый возраст успешной копии: @maximumAge ч. Последняя успешная: @Clock.Time(poll.LastSuccessfulUtc).</small> }
+            @if (observation && poll?.SqlBackupTypesReported == true)
+            { <details><summary>Полная, дифференциальная и журнал</summary>
+                <div>Последние успешные копии из доступной истории:</div>
+                <div>Полная: @(poll.LastFullUtc is null ? "не обнаружена" : Clock.Time(poll.LastFullUtc))</div>
+                <div>Дифференциальная: @(poll.LastDifferentialUtc is null ? "не обнаружена" : Clock.Time(poll.LastDifferentialUtc))</div>
+                <div>Журнал транзакций: @(poll.LastLogUtc is null ? "не обнаружена" : Clock.Time(poll.LastLogUtc))</div>
+                <small>Отсутствие отдельного типа не означает ошибку. Набор типов зависит от плана копирования и модели восстановления базы.</small>
+              </details> }
             @if (poll?.FreshnessWarning == true)
             { <small class="error">Свежая успешная копия выбранной базы не обнаружена. Проверьте расписание и журнал программы, которая создаёт копии. Состояние на момент передачи данных агентом.</small> }
             @if (poll?.Failed == true)
-            { <small class="error">Не удалось прочитать журнал внешних копий. Проверьте подключение и права исполнителя в настройках задания агента. Последний результат копии сохранён.</small> }
+            { <small class="error">@MonitoredPollErrors.Describe(poll.PollErrorCode) Последний результат копии сохранён.</small> }
             @if (matchingHistory && last is not null && (last.WarningCount > 0 || last.Incomplete || last.Status != "Succeeded" || last.Issues is { Count: > 0 }))
             { <details><summary>Причины и что делать</summary><RunIssueDetails Run="last" /></details> }
             </td>

@@ -170,6 +170,56 @@ public sealed class ExternalBackupTaskTests
         Assert.True(task.FreshnessWarning);
     }
 
+    [Fact]
+    public void SqlCopyTypesKeepIndependentSuccessfulTimes()
+    {
+        var full = Report(minutes: -120);
+        var differential = Report(minutes: -60);
+        differential = differential with { Observation = differential.Observation with { BackupType = "I" } };
+        var log = Report(); log = log with { Observation = log.Observation with { BackupType = "L" } };
+        var failed = Report(minutes: 10); failed = failed with { Observation = failed.Observation with { Outcome = ExternalBackupOutcome.Failed } };
+        var task = Assert.Single(ExternalBackupTask.Create([monitor], [full, differential, log, failed, Report("Other", 20)], [], agentId, Now));
+        Assert.Equal(Now.AddMinutes(-120), task.LastFullUtc);
+        Assert.Equal(Now.AddMinutes(-60), task.LastDifferentialUtc);
+        Assert.Equal(Now, task.LastLogUtc);
+        Assert.Equal(Now, task.LastSuccessfulUtc);
+        Assert.Contains("Дифференциальная", task.ResultDetails);
+        var changed = Assert.Single(ExternalBackupTask.Create([monitor with { DatabaseName = "NewDatabase" }], [full, differential, log], [], agentId, Now));
+        Assert.Null(changed.LastFullUtc); Assert.Null(changed.LastDifferentialUtc); Assert.Null(changed.LastLogUtc);
+    }
+
+    [Fact]
+    public void TypeDescriptionsDoNotAlterImmutableObservationJson()
+    {
+        var observation = Report().Observation;
+        Assert.Equal("Полная", observation.BackupTypeDescription);
+        Assert.DoesNotContain("BackupTypeDescription", JsonSerializer.Serialize(observation));
+        Assert.Equal("L", (observation with { BackupType = "L", Evidence = "PgRestoreCatalogChecked" }).BackupTypeDescription);
+    }
+
+    [Fact]
+    public void SqlTypeSnapshotRejectsWrongKindAndNonUtcTimes()
+    {
+        var source = new MonitoredSource(monitor.Id, monitor.Name, "SqlServerHistory", true, Now, false)
+        { SqlBackupTypesReported = true, LastFullUtc = Now };
+        MonitoringSnapshot Snapshot(MonitoredSource value) => new(Now, "test", [], null, 0, [value]);
+        Assert.True(MonitoringValidation.Valid(Snapshot(source)));
+        Assert.False(MonitoringValidation.Valid(Snapshot(source with { Kind = "PostgreSqlReports" })));
+        Assert.False(MonitoringValidation.Valid(Snapshot(source with { SqlBackupTypesReported = false })));
+        Assert.False(MonitoringValidation.Valid(Snapshot(source with { LastFullUtc = Now.ToOffset(TimeSpan.FromHours(3)) })));
+    }
+
+    [Fact]
+    public void SnapshotRejectsExceptionTextInsteadOfPollErrorCode()
+    {
+        var source = new MonitoredSource(monitor.Id, monitor.Name, "SqlServerHistory", true, Now, true)
+        { PollErrorCode = "Login" };
+        MonitoringSnapshot Snapshot(MonitoredSource value) => new(Now, "test", [], null, 0, [value]);
+        Assert.True(MonitoringValidation.Valid(Snapshot(source)));
+        Assert.False(MonitoringValidation.Valid(Snapshot(source with { Failed = false })));
+        Assert.False(MonitoringValidation.Valid(Snapshot(source with { PollErrorCode = "Server=private;password=private" })));
+    }
+
     private sealed class LegacyServer : HttpMessageHandler
     {
         public List<MonitoringSnapshot> Snapshots { get; } = [];

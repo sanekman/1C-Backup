@@ -1,7 +1,10 @@
 namespace SPBackup.Core;
 
 public sealed record ExternalBackupPollResult(Guid MonitorId, string MonitorName, DateTimeOffset PolledUtc,
-    int Observations, int Added, string? Error = null);
+    int Observations, int Added, string? Error = null)
+{
+    public string? ErrorCode { get; init; }
+}
 
 public sealed class ExternalBackupPollingStatusStore(string directory)
 {
@@ -62,7 +65,7 @@ public sealed class ExternalBackupPoller(ExternalBackupMonitorStore store, Exter
                 {
                     DiagnosticLog.Current.Write(DiagnosticEvent.MonitoringFailed, DiagnosticLevel.Warning, ex,
                         sourceKind: monitor.Kind == ExternalBackupSourceKind.SqlServerHistory ? DatabaseKind.SqlServer : DatabaseKind.PostgreSql);
-                    results.Add(new ExternalBackupPollResult(monitor.Id, monitor.Name, now.ToUniversalTime(), 0, 0, ex.Message));
+                    results.Add(new ExternalBackupPollResult(monitor.Id, monitor.Name, now.ToUniversalTime(), 0, 0, ex.Message) { ErrorCode = ExternalBackupPollErrors.Classify(ex) });
                 }
             }
             var old = await status.ReadAsync(cancellationToken);

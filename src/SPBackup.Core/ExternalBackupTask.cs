@@ -6,6 +6,15 @@ public sealed record ExternalBackupTask(ExternalBackupMonitor Monitor, ExternalB
 {
     public DateTimeOffset EvaluatedUtc { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSuccessfulUtc { get; init; }
+    public DateTimeOffset? LastFullUtc { get; init; }
+    public DateTimeOffset? LastDifferentialUtc { get; init; }
+    public DateTimeOffset? LastLogUtc { get; init; }
+    private static string CopyTime(DateTimeOffset? value) => value?.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss") ?? "не обнаружена";
+    public string BackupTypesDetails => Monitor.Kind != ExternalBackupSourceKind.SqlServerHistory ? ""
+        : "\nПоследние успешные копии из доступной истории:"
+            + "\nПолная: " + CopyTime(LastFullUtc)
+            + "\nДифференциальная: " + CopyTime(LastDifferentialUtc)
+            + "\nЖурнал транзакций: " + CopyTime(LastLogUtc);
     public bool FreshnessWarning => Monitor.Enabled && Monitor.MaximumBackupAgeHours is { } hours
         && Poll is { Error: null } && (LastSuccessfulUtc is null || EvaluatedUtc - LastSuccessfulUtc > TimeSpan.FromHours(hours));
     public string FreshnessDetails => Monitor.MaximumBackupAgeHours is { } hours
@@ -35,9 +44,10 @@ public sealed record ExternalBackupTask(ExternalBackupMonitor Monitor, ExternalB
     public DateTimeOffset? LatestFinishedUtc => Latest is null ? null : FinishedUtc(Latest);
     public string ResultDetails => ResultDescription + (FreshnessDetails.Length == 0 ? "" : "\n" + FreshnessDetails)
         + (Poll is null ? "\nОпрос ещё не выполнялся." : "\nПоследний опрос: " + Poll.PolledUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss"))
-        + (Poll?.Error is { } error ? "\n" + error : "")
+        + (Poll?.Error is { } error ? "\n" + Monitoring.MonitoredPollErrors.Describe(Poll.ErrorCode) + "\n" + error : "")
         + (Latest is null ? "" : "\n" + Latest.Observation.DatabaseName + " · " + Latest.Observation.FinishedAt.ToString("dd.MM.yyyy HH:mm:ss")
             + " · " + Latest.Observation.TimeZoneId + "\n" + Latest.Observation.EvidenceDescription)
+        + BackupTypesDetails
         + "\nНаблюдение не создаёт копии. Результат чтения журнала не подтверждает возможность восстановления.";
 
     public static IReadOnlyList<ExternalBackupTask> Create(IEnumerable<ExternalBackupMonitor> monitors,
@@ -52,8 +62,16 @@ public sealed record ExternalBackupTask(ExternalBackupMonitor Monitor, ExternalB
                     monitor.Kind == ExternalBackupSourceKind.SqlServerHistory ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                 .OrderByDescending(report => FinishedUtc(report)).ThenByDescending(report => report.ObservedUtc).ToArray();
             var successful = matching.FirstOrDefault(report => report.Observation.Outcome == ExternalBackupOutcome.Completed);
+            DateTimeOffset? LatestType(string type)
+            {
+                if (monitor.Kind != ExternalBackupSourceKind.SqlServerHistory) return null;
+                var report = matching.FirstOrDefault(value => value.Observation.Outcome == ExternalBackupOutcome.Completed
+                    && value.Observation.BackupType == type);
+                return report is null ? null : FinishedUtc(report);
+            }
             return new ExternalBackupTask(monitor, matching.FirstOrDefault(), statuses.GetValueOrDefault(monitor.Id))
-            { EvaluatedUtc = now ?? DateTimeOffset.UtcNow, LastSuccessfulUtc = successful is null ? null : FinishedUtc(successful) };
+            { EvaluatedUtc = now ?? DateTimeOffset.UtcNow, LastSuccessfulUtc = successful is null ? null : FinishedUtc(successful),
+                LastFullUtc = LatestType("D"), LastDifferentialUtc = LatestType("I"), LastLogUtc = LatestType("L") };
         }).ToArray();
     }
 

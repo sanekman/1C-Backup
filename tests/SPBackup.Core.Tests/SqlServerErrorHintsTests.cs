@@ -47,6 +47,29 @@ public sealed class SqlServerErrorHintsTests
         Assert.DoesNotContain(PrivateText, hint); Assert.DoesNotContain("TrustServerCertificate=true", hint);
     }
 
+    [Theory]
+    [InlineData(18456, "Login")]
+    [InlineData(18488, "Login")]
+    [InlineData(229, "Access")]
+    [InlineData(4060, "Access")]
+    [InlineData(-2, "Timeout")]
+    [InlineData(10061, "Connection")]
+    [InlineData(99999, "Read")]
+    public void PollErrorClassificationUsesCodesThroughWrappers(int code, string expected)
+    {
+        var error = new IOException(PrivateText, SqlError(code));
+        Assert.Equal(expected, ExternalBackupPollErrors.Classify(error));
+        Assert.DoesNotContain(PrivateText, SPBackup.Core.Monitoring.MonitoredPollErrors.Describe(expected));
+    }
+
+    [Fact]
+    public void CertificateEvidenceOverridesGenericConnectionError()
+    {
+        var wrapped = new AggregateException(SqlError(53), new Win32Exception(unchecked((int)0x800B0109), PrivateText));
+        Assert.Equal("Certificate", ExternalBackupPollErrors.Classify(wrapped));
+        Assert.Equal("Read", ExternalBackupPollErrors.Classify(new IOException("login failed 18456 certificate")));
+    }
+
     [Fact]
     public void WrongPrincipalCanBeCertificateOrWindowsAuthenticationAndDoesNotGuessWhich()
     {
@@ -115,6 +138,8 @@ public sealed class SqlServerErrorHintsTests
             var poller = new ExternalBackupPoller(store, outbox, settings, status, _ => source);
             var result = Assert.Single(await poller.PollAsync(DateTimeOffset.UtcNow));
             Assert.Equal(failure.Message, result.Error); Assert.Equal(0, result.Added);
+            Assert.Equal("Access", result.ErrorCode);
+            Assert.Equal("Access", Assert.Single(await status.ReadAsync()).ErrorCode);
             Assert.Equal(prior.SourceKey, Assert.Single(await outbox.ReadAsync()).Observation.SourceKey);
             Assert.Equal(before, await File.ReadAllBytesAsync(Path.Combine(root, "history.json")));
             Assert.Equal(result.Error, Assert.Single(await status.ReadAsync()).Error);

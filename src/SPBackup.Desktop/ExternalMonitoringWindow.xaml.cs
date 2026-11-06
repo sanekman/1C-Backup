@@ -225,7 +225,7 @@ public partial class ExternalMonitoringWindow : Window
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
-                await pollingStatus.RecordAsync(new(monitor.Id, monitor.Name, DateTimeOffset.UtcNow, 0, 0, error.Message));
+                await pollingStatus.RecordAsync(new(monitor.Id, monitor.Name, DateTimeOffset.UtcNow, 0, 0, error.Message) { ErrorCode = ExternalBackupPollErrors.Classify(error) });
                 throw;
             }
         }
@@ -279,7 +279,7 @@ public partial class ExternalMonitoringWindow : Window
         { ReportDetails.Text = "Выберите наблюдение в таблице."; return; }
         var observation = report.Observation;
         ReportDetails.Text = $"Источник: {MonitorLabel(report.MonitorId)}\nБаза: {observation.DatabaseName}\nЭкземпляр: {observation.Instance}\nРезультат: {observation.OutcomeDescription}\n"
-            + $"Тип копии: {observation.BackupType}\nНачало: {new ObservationLocalTimeConverter().Convert(observation, typeof(string), "Start", System.Globalization.CultureInfo.CurrentCulture)}\n"
+            + $"Тип копии: {observation.BackupTypeDescription}\nНачало: {new ObservationLocalTimeConverter().Convert(observation, typeof(string), "Start", System.Globalization.CultureInfo.CurrentCulture)}\n"
             + $"Окончание: {new ObservationLocalTimeConverter().Convert(observation, typeof(string), "Finish", System.Globalization.CultureInfo.CurrentCulture)}\n"
             + $"Размер: {observation.SizeBytes?.ToString() ?? "не указан"} байт\nПути: {observation.LocationDescription}\n"
             + $"Основание результата: {observation.EvidenceDescription}\nОтправка: {report.DeliveryDescription}\n"

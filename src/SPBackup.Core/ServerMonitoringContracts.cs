@@ -44,7 +44,27 @@ public sealed record MonitoredSource(Guid MonitorId, string Name, string Kind, b
     public string? ObservationStatus { get; init; }
     public Guid? LatestReportId { get; init; }
     public DateTimeOffset? LatestFinishedUtc { get; init; }
+    public string? PollErrorCode { get; init; }
+    public bool SqlBackupTypesReported { get; init; }
+    public DateTimeOffset? LastFullUtc { get; init; }
+    public DateTimeOffset? LastDifferentialUtc { get; init; }
+    public DateTimeOffset? LastLogUtc { get; init; }
 }
+public static class MonitoredPollErrors
+{
+    public static bool Known(string code) => code is "Certificate" or "Login" or "Access" or "Timeout" or "Connection" or "Authentication" or "Read";
+    public static string Describe(string? code) => code switch
+    {
+        "Certificate" => "Не подтверждён сертификат MS SQL. Проверьте имя сервера, срок действия и доверие к сертификату на компьютере агента.",
+        "Login" => "MS SQL отклонил вход. Проверьте способ входа и сохранённый пароль. При Windows-входе проверьте учётную запись службы агента.",
+        "Access" => "Недостаточно доступа к базе или журналу копий. Для MS SQL проверьте доступ к msdb и права чтения истории; для файловых отчётов — права на папку.",
+        "Timeout" => "Истекло время ожидания ответа. Проверьте доступность и нагрузку сервера.",
+        "Connection" => "Не удалось установить или сохранить соединение. Проверьте адрес, экземпляр, порт, сеть и брандмауэр.",
+        "Authentication" => "Не подтверждена подлинность подключения. Проверьте настройки входа и TLS; подробности доступны в агенте.",
+        _ => "Не удалось прочитать журнал внешних копий. Проверьте настройки задания и подробности ошибки в агенте."
+    };
+}
+
 public sealed record MonitoringSnapshot(DateTimeOffset SentUtc, string AgentVersion, IReadOnlyList<MonitoredJob> Jobs,
     MonitoredProgress? Progress, int PendingRuns, IReadOnlyList<MonitoredSource>? Sources = null, int CollectionWarnings = 0)
 {
@@ -74,6 +94,12 @@ public static class MonitoringValidation
         && (s.Sources is null || s.Sources.Count <= 1000 && s.Sources.All(m=>m is not null && m.MonitorId != Guid.Empty && Text(m.Name,256) && Text(m.Kind,64)
                 && m.MaximumBackupAgeHours is null or >= 1 and <= 87600
                 && m.ObservationStatus is null or "PollFailed" or "BackupFailed" or "Overdue" or "NoCopies" or "CopyFound"
+                && (m.PollErrorCode is null || m.Failed && MonitoredPollErrors.Known(m.PollErrorCode))
+                && (!m.SqlBackupTypesReported || m.Kind == "SqlServerHistory")
+                && (m.LastFullUtc is null || m.LastFullUtc.Value.Offset == TimeSpan.Zero)
+                && (m.LastDifferentialUtc is null || m.LastDifferentialUtc.Value.Offset == TimeSpan.Zero)
+                && (m.LastLogUtc is null || m.LastLogUtc.Value.Offset == TimeSpan.Zero)
+                && (m.SqlBackupTypesReported || m.LastFullUtc is null && m.LastDifferentialUtc is null && m.LastLogUtc is null)
                 && (m.LatestReportId is null || m.LatestReportId != Guid.Empty)
                 && (m.LatestFinishedUtc is null || m.LatestFinishedUtc.Value.Offset == TimeSpan.Zero)
                 && (m.LastSuccessfulUtc is null || m.LastSuccessfulUtc.Value.Offset == TimeSpan.Zero)
