@@ -1,0 +1,10 @@
+.git
+.tools
+**/bin
+**/obj
+artifacts
+**/secrets
+**/*.pfx
+**/*.pem
+**/server.env
+**/__pycache__

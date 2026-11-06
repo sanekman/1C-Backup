@@ -1,0 +1,19 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject ServerOptions Settings
+<PageTitle>Вход — @Settings.DisplayName</PageTitle>
+<section class="card login">
+    <h1>Вход на сервер</h1>
+    <p><strong>@Settings.DisplayName</strong></p>
+    <p class="muted">Войдите под учётной записью администратора сервера.</p>
+    @if (Failed == "1") { <p class="error" role="alert">Не удалось войти. Проверьте имя и пароль.</p> }
+    @if (Changed == "1") { <p role="status">Пароль изменён. Войдите с новым паролем. Остальные сеансы панели завершены.</p> }
+    <form action="session/login" method="post">
+        <AntiforgeryToken />
+        <label>Имя пользователя<input name="name" autocomplete="username" maxlength="80" required /></label>
+        <label>Пароль<input name="password" type="password" autocomplete="current-password" maxlength="256" required /></label>
+        <button type="submit">Войти</button>
+    </form>
+</section>
+@code { [SupplyParameterFromQuery(Name = "failed")] public string? Failed { get; set; }
+[SupplyParameterFromQuery(Name = "changed")] public string? Changed { get; set; } }

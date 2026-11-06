@@ -1,0 +1,78 @@
+@page "/"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject ServerOptions Settings
+@inject ServerHealth Health
+@inject IHttpContextAccessor Http
+<PageTitle>Агенты — @Settings.DisplayName</PageTitle>
+<div class="heading"><div><h1>Агенты</h1><p class="muted">Компьютеры, подключённые к этому серверу.</p></div><a class="button" href="@ConnectLink">Подключить агент</a></div>
+@if (HealthStatus is { } healthStatus) { <ServerHealthNotices Snapshot="healthStatus" Compact="true" /> }
+@if (Overview is { } overview)
+{
+    <section class="card"><div class="summary"><strong>Мониторинг всех агентов</strong><span>Нет связи: @overview.Offline</span><span>Нет отчётов: @overview.Unreported</span><span>Проблемных заданий: @overview.Failed</span><span>Неполных копий: @overview.Incomplete</span><span>С предупреждениями: @overview.Warning</span><span>В очереди: @overview.Pending</span></div></section>
+}
+<div class="agents-layout">
+<aside class="card folder-sidebar" aria-label="Папки агентов">
+<h2>Папки</h2>
+<p><a href="./" aria-current="@(Folder is null ? "page" : null)">Все агенты</a></p>
+<p><a href="?folder=root" aria-current="@(Folder == "root" ? "page" : null)">Без папки</a></p>
+<FolderTree Folders="Folders" SelectedId="SelectedFolder" />
+<p><a href="folders">Управление папками</a></p>
+</aside>
+<div class="agents-main">
+@if (Data is { } data)
+{
+    <section class="card">
+        <h2>@FolderTitle</h2>
+        @if (SelectedFolder is not null) { <p class="muted">Включая агентов всех подпапок.</p> }
+        <div class="summary"><strong>Всего: @data.Total</strong><span>Страница @(data.Page + 1)</span><a href="@PageLink(data.Page)">Обновить</a></div>
+        @if (data.Total == 0)
+        {
+            <div class="empty"><h2>В этом разделе агентов пока нет</h2><p>Создайте приглашение или перенесите сюда существующего агента через его карточку.</p><a href="@ConnectLink">Создать приглашение</a></div>
+        }
+        else
+        {
+            <div class="table-scroll"><table><thead><tr><th>Агент</th><th>Связь</th><th>Последняя связь</th><th>Настройки</th></tr></thead><tbody>
+            @foreach (var agent in data.Agents)
+            {
+                <tr><td><a href="@("agents/" + agent.AgentId)">@agent.Name</a><small>Компьютер: @(agent.ComputerName ?? agent.Name)</small>
+                    <small>Папка: @(Folders.FirstOrDefault(f => f.Id == agent.FolderId)?.Path ?? "Без папки")</small><small>@(Versions.GetValueOrDefault(agent.AgentId) ?? agent.AgentVersion ?? "Версия ещё не получена")</small></td>
+                    <td><span class="badge @(agent.Revoked ? "bad" : Online(agent) ? "good" : "pending")">@State(agent)</span></td>
+                    <td>@Clock.Time(LastSeen(agent))</td>
+                    <td><small>На сервере: @agent.DesiredRevision</small><small>Сообщено агентом: @(agent.ReportedRevision?.ToString() ?? "—")</small></td></tr>
+            }
+            </tbody></table></div>
+            <div class="pagination">@if (data.Page > 0) { <a href="@PageLink(data.Page - 1)">← Назад</a> } @if ((data.Page + 1) * data.PageSize < data.Total) { <a href="@PageLink(data.Page + 1)">Далее →</a> }</div>
+        }
+    </section>
+    <p class="muted note">«На связи» означает недавний ответ агента. Успех копирования определяется отдельным отчётом о запуске. Задания, прогресс, история и результаты доставки доступны в карточке компьютера.</p>
+}
+</div></div>
+@code {
+    [SupplyParameterFromQuery(Name = "page")] public int Page { get; set; }
+    [SupplyParameterFromQuery(Name = "folder")] public string? Folder { get; set; }
+    private Guid? SelectedFolder;
+    private IReadOnlyList<AgentFolderOption> Folders = [];
+    private string FolderTitle => Folder == "root" ? "Без папки" : SelectedFolder is { } id ? Folders.First(f => f.Id == id).Path : "Все агенты";
+    private string ConnectLink => SelectedFolder is { } id ? $"connect?folderId={id}" : "connect";
+    private string PageLink(int page) => SelectedFolder is { } id ? $"?folder={id}&page={page}" : Folder == "root" ? $"?folder=root&page={page}" : $"?page={page}";
+    private ServerHealthSnapshot? HealthStatus;
+    private AgentPage? Data;
+    private ServerStore.Overview? Overview;
+    protected override async Task OnParametersSetAsync()
+    {
+        HealthStatus = Health.Read();
+        Overview = await Store.OverviewAsync(Settings.OfflineAfterSeconds,Http.HttpContext!.RequestAborted);
+        Folders = await Store.FoldersAsync(Http.HttpContext!.RequestAborted);
+        SelectedFolder = Folder is null or "root" ? null : OrganizationText.FolderId(Folder);
+        Data = await Store.AgentsAsync(Page, Http.HttpContext!.RequestAborted, SelectedFolder, Folder == "root");
+        MonitoringTimes.Clear(); Versions.Clear();
+        foreach (var agent in Data.Agents)
+            if (await Store.MonitoringAsync(agent.AgentId,Http.HttpContext.RequestAborted) is { } m) { MonitoringTimes[agent.AgentId]=m.ReceivedUtc; Versions[agent.AgentId]=m.Snapshot.AgentVersion; }
+    }
+    private readonly Dictionary<Guid, DateTimeOffset> MonitoringTimes = [];
+    private readonly Dictionary<Guid, string> Versions = [];
+    private DateTimeOffset? LastSeen(AgentRecord agent) => MonitoringTimes.TryGetValue(agent.AgentId,out var time) && (agent.ReceivedUtc is null || time > agent.ReceivedUtc) ? time : agent.ReceivedUtc;
+    private bool Online(AgentRecord agent) => LastSeen(agent) is { } time && DateTimeOffset.UtcNow - time < TimeSpan.FromSeconds(Settings.OfflineAfterSeconds);
+    private string State(AgentRecord agent) => agent.Revoked ? "Доступ отозван" : LastSeen(agent) is null ? "Ожидает первого сигнала" : Online(agent) ? "На связи" : "Нет связи";
+}

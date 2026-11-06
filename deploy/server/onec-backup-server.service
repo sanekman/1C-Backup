@@ -1,0 +1,25 @@
+[Unit]
+Description=SP Backup management server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=onec-backup-server
+Group=onec-backup-server
+WorkingDirectory=/opt/onec-backup-server
+ExecStart=/opt/onec-backup-server/SPBackup.Server
+EnvironmentFile=/etc/onec-backup-server/server.env
+StateDirectory=onec-backup-server
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/onec-backup-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
