@@ -140,8 +140,10 @@ public partial class ExternalMonitoringWindow : Window
             UpdateSqlCredentialStatus();
         }
         finally { loadingSqlSource = false; }
+        SqlTrustServerCertificate.IsChecked = monitor.TrustServerCertificate;
         Database.Text = monitor.DatabaseName;
         Days.Text = monitor.LookbackDays.ToString(); ReportDirectory.Text = monitor.ReportDirectory;
+        FreshnessEnabled.IsChecked = monitor.MaximumBackupAgeHours is not null; FreshnessHours.Text = (monitor.MaximumBackupAgeHours ?? 26).ToString();
         MonitorEnabled.IsChecked = monitor.Enabled; PollInterval.Text = monitor.PollIntervalSeconds.ToString();
     }
 
@@ -156,9 +158,11 @@ public partial class ExternalMonitoringWindow : Window
     private void ClearMonitorEditor()
     {
         editingId = null; Sources.SelectedItem = null; MonitorName.Clear(); SqlServer.Clear(); Database.Clear();
+        SqlTrustServerCertificate.IsChecked = false;
         sqlCredentialKey = null; sqlCredentialServer = null;
         SqlAuthentication.SelectedValue = SqlServerAuthentication.Windows; UpdateSqlCredentialStatus();
         ReportDirectory.Clear(); Days.Text = "30";
+        FreshnessEnabled.IsChecked = false; FreshnessHours.Text = "26";
         MonitorEnabled.IsChecked = true; PollInterval.Text = "60";
     }
 
@@ -175,9 +179,11 @@ public partial class ExternalMonitoringWindow : Window
                 Kind = (ExternalBackupSourceKind)SourceKind.SelectedValue,
                 SqlAuthentication = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory ? SelectedSqlAuthentication : SqlServerAuthentication.Windows,
                 SqlCredentialKey = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory && SelectedSqlAuthentication == SqlServerAuthentication.SqlServer ? sqlCredentialKey : null,
+                TrustServerCertificate = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory && SqlTrustServerCertificate.IsChecked == true,
                 SqlServer = SqlServer.Text.Trim(), DatabaseName = Database.Text.Trim(),
                 TimeZoneId = monitors.FirstOrDefault(value => value.Id == editingId)?.TimeZoneId ?? TimeZoneInfo.Local.Id,
                 LookbackDays = int.TryParse(Days.Text, out var days) ? days : 0, ReportDirectory = ReportDirectory.Text.Trim(),
+                MaximumBackupAgeHours = FreshnessEnabled.IsChecked == true ? int.TryParse(FreshnessHours.Text, out var hours) ? hours : 0 : null,
                 Enabled = MonitorEnabled.IsChecked == true, PollIntervalSeconds = int.TryParse(PollInterval.Text, out var interval) ? interval : 0
             };
             monitor.Validate();

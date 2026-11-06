@@ -88,7 +88,7 @@ public partial class ExternalMonitoringWindow
                 || (report.Observation.Error?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
         if (Reports.SelectedItem is ExternalBackupReport selected && !Matches(selected)) Reports.SelectedItem = null;
         CollectionViewSource.GetDefaultView(Reports.ItemsSource).Filter = item => item is ExternalBackupReport report && Matches(report);
-        ReportsSummary.Text = reports.Count == 0 ? "Наблюдений пока нет. Сохраните источник и нажмите «Проверить источник»."
+        ReportsSummary.Text = reports.Count == 0 ? "Наблюдений пока нет. Сохраните задание и нажмите «Прочитать журнал копий»."
             : Reports.Items.Count == 0 ? $"По выбранным условиям наблюдений нет · Всего: {reports.Count}"
             : $"Показано наблюдений: {Reports.Items.Count} из {reports.Count}";
     }

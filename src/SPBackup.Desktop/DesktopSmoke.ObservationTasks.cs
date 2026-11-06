@@ -75,11 +75,24 @@ internal static partial class DesktopSmoke
             if (!Control<TextBlock>("Status").Text.Contains("конкретную базу"))
                 throw new InvalidOperationException("Новое наблюдение разрешает незаданный выбор базы.");
             Control<TextBox>("Database").Text = "Accounting";
+            Control<CheckBox>("FreshnessEnabled").IsChecked = true;
+            Control<TextBox>("FreshnessHours").Text = "0";
+            Control<Button>("SaveMonitorButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitUntil(() => editor.SmokeReady, "Проверка срока копии не завершилась.");
+            if (!Control<TextBlock>("Status").Text.Contains("часов") || (await store.LoadAsync()).Count != original.Count)
+                throw new InvalidOperationException("Редактор сохранил неверный срок ожидания копии.");
+            Control<TextBox>("FreshnessHours").Text = "26";
             Control<Button>("SaveMonitorButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitUntil(() => editor.SmokeReady, "Задание наблюдения не сохранилось.");
             var saved = (await store.LoadAsync()).Single(task => task.Name == "Наблюдение выбранной базы");
-            if (saved.DatabaseName != "Accounting" || saved.Enabled)
+            if (saved.DatabaseName != "Accounting" || saved.Enabled || saved.MaximumBackupAgeHours != 26)
                 throw new InvalidOperationException("Новое наблюдение потеряло выбранную базу или включилось само.");
+            Control<ComboBox>("Sources").SelectedValue = saved;
+            if (Control<CheckBox>("FreshnessEnabled").IsChecked != true || Control<TextBox>("FreshnessHours").Text != "26")
+                throw new InvalidOperationException("Редактор не восстановил сохранённый срок копии.");
+            Control<Button>("NewMonitorButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            if (Control<CheckBox>("FreshnessEnabled").IsChecked == true || Control<CheckBox>("SqlTrustServerCertificate").IsChecked == true)
+                throw new InvalidOperationException("Новое наблюдение унаследовало настройки прежнего задания.");
             editor.Close();
             await owner.SmokeRefreshObservationTasksAsync();
             var grid = (DataGrid)owner.FindName("Jobs");

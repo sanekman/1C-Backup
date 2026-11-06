@@ -22,7 +22,7 @@ public sealed class JobRunOverviewConverter : IMultiValueConverter
     {
         if (values.Length == 2 && values[0] is ExternalBackupTask task)
             return new JobRunBadge(task.ResultDescription, task.Poll?.Error is not null || task.Latest?.Observation.Outcome == ExternalBackupOutcome.Failed
-                ? "#B91C1C" : task.Latest is null ? "#64748B" : "#15803D", task.ResultDetails);
+                ? "#B91C1C" : task.FreshnessWarning ? "#B45309" : task.Latest is null ? "#64748B" : "#15803D", task.ResultDetails);
         var identity = values.Length == 2 && values[0] is BackupJob job ? job.Id : values.FirstOrDefault();
         if (values.Length != 2 || identity is not Guid id || values[1] is not JobRunOverview overview || overview.IsLoading)
             return new JobRunBadge("Загрузка…", "#64748B", "Загружается история запусков.");

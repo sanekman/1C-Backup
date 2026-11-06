@@ -204,7 +204,10 @@ public partial class MainWindow
             WizardSummary.Text += "\n\n" + NextRun.Text;
             if (Kind.SelectedItem is DatabaseKind.SqlServer)
                 WizardSummary.Text += "\nВход в MS SQL: " + (SelectedSqlAuthentication == SqlServerAuthentication.Windows
-                    ? "учётная запись Windows исполнителя" : "сохранённый логин MS SQL");
+                    ? "учётная запись Windows исполнителя" : "сохранённый логин MS SQL")
+                    + "\nСертификат MS SQL: " + (SqlTrustServerCertificate.IsChecked == true ? "проверка отключена (соединение зашифровано)" : "проверка включена")
+                    + "\nПапка на MS SQL: " + SqlServerDirectory.Text.Trim()
+                    + "\nТа же папка для агента: " + SqlAgentDirectory.Text.Trim();
             if (Kind.SelectedItem is DatabaseKind.PostgreSql)
                 WizardSummary.Text += "\nВход в PostgreSQL: " + (UseSavedPostgreSqlPassword ? "пароль, сохранённый в Windows" : "существующие настройки PostgreSQL исполнителя");
             if (Storage.SelectedValue is StorageKind.NetworkShare)

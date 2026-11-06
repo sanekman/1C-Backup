@@ -15,6 +15,39 @@ public sealed class SqlAuthenticationTests
         SqlServer = new() { Server = "sql.example", ServerBackupDirectory = "/stage", AgentReadDirectory = Path.GetTempPath() }
     };
 
+    [Theory]
+    [InlineData("https://sql.example")]
+    [InlineData("Server=sql.example;Database=Accounting")]
+    [InlineData("sql.example\n")]
+    public async Task IncorrectServerFormatIsRejectedBeforeCredentials(string server)
+    {
+        var credentials = new Credentials();
+        var job = Job with { SqlServer = Job.SqlServer! with { Server = server } };
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => SqlServerBackupExecutor.CreateConnectionAsync(job, credentials));
+        Assert.Contains("адрес MS SQL", error.Message);
+        Assert.Equal(0, credentials.Reads);
+    }
+
+    [Theory]
+    [InlineData("SQL-SERVER")]
+    [InlineData(@"SQL-SERVER\SQLEXPRESS")]
+    [InlineData("192.168.1.10,1433")]
+    [InlineData("tcp:sql.example,1444")]
+    public void ServerExamplesAreAccepted(string server) => Assert.Null(SqlServerConnectionFactory.ValidateServer(server));
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CertificateChoicePersistsAndKeepsEncryption(bool trust)
+    {
+        var configured = Job with { SqlServer = Job.SqlServer! with { TrustServerCertificate = trust } };
+        var saved = JsonSerializer.Deserialize<BackupJob>(JsonSerializer.Serialize(configured))!;
+        await using var connection = (SqlConnection)await SqlServerBackupExecutor.CreateConnectionAsync(saved);
+        var builder = new SqlConnectionStringBuilder(connection.ConnectionString);
+        Assert.Equal(trust, builder.TrustServerCertificate);
+        Assert.Equal(SqlConnectionEncryptOption.Mandatory, builder.Encrypt);
+    }
+
     [Fact]
     public async Task LegacySettingsKeepWindowsAuthenticationAndNeverReadSqlPasswords()
     {

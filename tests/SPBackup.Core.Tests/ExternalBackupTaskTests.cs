@@ -35,6 +35,9 @@ public sealed class ExternalBackupTaskTests
         Assert.Equal("Копия обнаружена", task.ResultDescription);
         var changed = Assert.Single(ExternalBackupTask.Create([monitor with { DatabaseName = "NewDatabase" }], [latest], [], agentId));
         Assert.Null(changed.Latest);
+        Assert.Null(changed.LatestFinishedUtc);
+        Assert.Null(changed.LastSuccessfulUtc);
+        Assert.Equal("NoCopies", changed.ResultCode);
     }
 
     [Fact]
@@ -80,6 +83,91 @@ public sealed class ExternalBackupTaskTests
         Assert.Empty(transport.Snapshots[1].Jobs);
         Assert.Single(transport.Snapshots[1].Sources!);
         Assert.Equal(1, transport.Runs);
+    }
+
+    [Fact]
+    public void FreshnessUsesSuccessfulCompletionAndExactDeadline()
+    {
+        var configured = monitor with { MaximumBackupAgeHours = 26 };
+        var copy = Report();
+        ExternalBackupTask Evaluate(DateTimeOffset now) => Assert.Single(ExternalBackupTask.Create([configured], [copy],
+            [new(monitor.Id, monitor.Name, now, 1, 0)], agentId, now));
+        Assert.False(Evaluate(Now.AddHours(26)).FreshnessWarning);
+        var overdue = Evaluate(Now.AddHours(26).AddSeconds(1));
+        Assert.True(overdue.FreshnessWarning);
+        Assert.Equal("Нет свежей копии", overdue.ResultDescription);
+        Assert.Equal(Now, overdue.LastSuccessfulUtc);
+    }
+
+    [Fact]
+    public void EmptyHistoryWarnsOnlyAfterPollAndWhenEnabled()
+    {
+        var configured = monitor with { MaximumBackupAgeHours = 26 };
+        var unpolled = Assert.Single(ExternalBackupTask.Create([configured], [], [], agentId, Now));
+        Assert.False(unpolled.FreshnessWarning);
+        var polled = unpolled with { Poll = new(monitor.Id, monitor.Name, Now, 0, 0) };
+        Assert.True(polled.FreshnessWarning);
+        Assert.False((polled with { Monitor = configured with { Enabled = false } }).FreshnessWarning);
+        Assert.False((polled with { Monitor = monitor }).FreshnessWarning);
+        var error = polled with { Poll = polled.Poll! with { Error = "Connection failed" } };
+        Assert.False(error.FreshnessWarning);
+        Assert.Equal("Ошибка опроса", error.ResultDescription);
+    }
+
+    [Fact]
+    public void FailureAndOtherDatabaseDoNotRefreshSuccessfulCopy()
+    {
+        var configured = monitor with { MaximumBackupAgeHours = 1 };
+        var failed = Report(minutes: 120) with { Observation = Report(minutes: 120).Observation with { Outcome = ExternalBackupOutcome.Failed } };
+        var task = Assert.Single(ExternalBackupTask.Create([configured], [Report(), failed, Report("Other", 180)],
+            [new(monitor.Id, monitor.Name, Now.AddHours(3), 3, 0)], agentId, Now.AddHours(3)));
+        Assert.True(task.FreshnessWarning);
+        Assert.Equal(Now, task.LastSuccessfulUtc);
+        Assert.Equal(failed, task.Latest);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(87601)]
+    public void RejectsInvalidFreshnessThreshold(int hours) =>
+        Assert.Throws<InvalidDataException>(() => (monitor with { MaximumBackupAgeHours = hours }).Validate());
+
+    [Fact]
+    public void FreshnessRequiresSpecificDatabaseAndSufficientHistory()
+    {
+        Assert.Throws<InvalidDataException>(() => (monitor with { MaximumBackupAgeHours = 26, DatabaseName = "" }).Validate());
+        Assert.Throws<InvalidDataException>(() => (monitor with { MaximumBackupAgeHours = 26, LookbackDays = 1 }).Validate());
+        (monitor with { MaximumBackupAgeHours = 26 }).Validate();
+    }
+
+    [Fact]
+    public void FreshnessSnapshotRejectsContradictoryWarningAndRoundTrips()
+    {
+        var source = new MonitoredSource(monitor.Id, monitor.Name, "SqlServerHistory", true, Now, false)
+        { MaximumBackupAgeHours = 26, LastSuccessfulUtc = Now.AddHours(-27), FreshnessWarning = true };
+        MonitoringSnapshot Snapshot(MonitoredSource value) => new(Now, "test", [], null, 0, [value]);
+        Assert.True(MonitoringValidation.Valid(Snapshot(source)));
+        Assert.False(MonitoringValidation.Valid(Snapshot(source with { ObservationStatus = "Invented" })));
+        Assert.True(MonitoringValidation.Valid(Snapshot(source with { ObservationStatus = "Overdue" })));
+        Assert.False(MonitoringValidation.Valid(Snapshot(source with { Failed = true })));
+        Assert.False(MonitoringValidation.Valid(Snapshot(source with { Enabled = false })));
+        Assert.False(MonitoringValidation.Valid(Snapshot(source with { MaximumBackupAgeHours = null })));
+        Assert.False(MonitoringValidation.Valid(Snapshot(source with { PolledUtc = null })));
+        Assert.Equal(source, JsonSerializer.Deserialize<MonitoredSource>(JsonSerializer.Serialize(source)));
+        Assert.True(MonitoringValidation.Valid(Snapshot(new(monitor.Id, monitor.Name, "SqlServerHistory", true, Now, false))));
+    }
+
+    [Fact]
+    public void FreshnessUsesSourceTimeZoneRatherThanObservationArrival()
+    {
+        var report = Report() with { ObservedUtc = Now.AddDays(1) };
+        report = report with { Observation = report.Observation with
+            { StartedAt = Now.AddHours(3).AddMinutes(-1).DateTime, FinishedAt = Now.AddHours(3).DateTime, TimeZoneId = "Europe/Moscow" } };
+        var task = Assert.Single(ExternalBackupTask.Create([monitor with { MaximumBackupAgeHours = 1 }], [report],
+            [new(monitor.Id, monitor.Name, Now.AddHours(2), 1, 0)], agentId, Now.AddHours(2)));
+        Assert.Equal(Now, task.LastSuccessfulUtc);
+        Assert.True(task.FreshnessWarning);
     }
 
     private sealed class LegacyServer : HttpMessageHandler

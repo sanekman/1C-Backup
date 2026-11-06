@@ -15,10 +15,12 @@ public sealed record SqlServerBackupSettings
     public SqlServerAuthentication Authentication { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? CredentialKey { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TrustServerCertificate { get; init; }
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(Server)) errors.Add("Укажите MS SQL.");
+        if (SqlServerConnectionFactory.ValidateServer(Server) is { } serverError) errors.Add(serverError);
         errors.AddRange(SqlServerConnectionFactory.ValidateAuthentication(Authentication, CredentialKey));
         var path = ServerBackupDirectory ?? "";
         if (!(path.StartsWith('/') || path.StartsWith(@"\\") ||
@@ -93,7 +95,7 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
         var errors = settings.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         return await SqlServerConnectionFactory.CreateAsync(settings.Server, settings.Authentication,
-            settings.CredentialKey, "master", "SP Backup", credentials, token);
+            settings.CredentialKey, "master", "SP Backup", credentials, token, settings.TrustServerCertificate);
     }
 
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)

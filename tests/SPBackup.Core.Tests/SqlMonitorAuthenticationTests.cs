@@ -10,6 +10,19 @@ public sealed class SqlMonitorAuthenticationTests
 {
     private static ExternalBackupMonitor Monitor => new() { Name = "SQL history", SqlServer = "sql.example" };
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CertificateChoicePersistsAndKeepsEncryption(bool trust)
+    {
+        var configured = Monitor with { TrustServerCertificate = trust };
+        var saved = JsonSerializer.Deserialize<ExternalBackupMonitor>(JsonSerializer.Serialize(configured))!;
+        await using var connection = (SqlConnection)await SqlServerBackupHistorySource.CreateConnectionAsync(saved);
+        var builder = new SqlConnectionStringBuilder(connection.ConnectionString);
+        Assert.Equal(trust, builder.TrustServerCertificate);
+        Assert.Equal(SqlConnectionEncryptOption.Mandatory, builder.Encrypt);
+    }
+
     [Fact]
     public async Task OldMonitorKeepsWindowsAuthenticationWithoutLoadingSecrets()
     {

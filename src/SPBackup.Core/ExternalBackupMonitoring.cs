@@ -21,15 +21,22 @@ public sealed record ExternalBackupMonitor
     public string ReportDirectory { get; init; } = "";
     public bool Enabled { get; init; } = true;
     public int PollIntervalSeconds { get; init; } = 60;
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TrustServerCertificate { get; init; }
+    public int? MaximumBackupAgeHours { get; init; }
 
     public void Validate()
     {
         if (Id == Guid.Empty || string.IsNullOrWhiteSpace(Name) || !Enum.IsDefined(Kind) || LookbackDays is < 1 or > 3650)
             throw new InvalidDataException("Укажите имя источника и период истории от 1 до 3650 дней.");
+        if (MaximumBackupAgeHours is < 1 or > 87600 || MaximumBackupAgeHours is not null && string.IsNullOrWhiteSpace(DatabaseName))
+            throw new InvalidDataException("Для контроля свежести выберите конкретную базу и срок от 1 до 87600 часов.");
+        if (MaximumBackupAgeHours > LookbackDays * 24 && Kind == ExternalBackupSourceKind.SqlServerHistory)
+            throw new InvalidDataException("Период чтения истории должен быть не меньше срока ожидания копии.");
         if (PollIntervalSeconds is < 15 or > 86400)
             throw new InvalidDataException("Интервал опроса источника должен быть от 15 до 86400 секунд.");
-        if (Kind == ExternalBackupSourceKind.SqlServerHistory && string.IsNullOrWhiteSpace(SqlServer))
-            throw new InvalidDataException("Укажите экземпляр MS SQL.");
+        if (Kind == ExternalBackupSourceKind.SqlServerHistory && SqlServerConnectionFactory.ValidateServer(SqlServer) is { } serverError)
+            throw new InvalidDataException(serverError);
         if (Kind == ExternalBackupSourceKind.SqlServerHistory)
         {
             var errors = SqlServerConnectionFactory.ValidateAuthentication(SqlAuthentication, SqlCredentialKey);

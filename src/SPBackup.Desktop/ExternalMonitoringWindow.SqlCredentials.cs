@@ -12,15 +12,25 @@ public partial class ExternalMonitoringWindow
     private SqlServerAuthentication SelectedSqlAuthentication => SqlAuthentication.SelectedValue is SqlServerAuthentication value
         ? value : SqlServerAuthentication.Windows;
 
+    private void SqlTrustServerCertificate_Click(object sender, RoutedEventArgs e)
+    {
+        if (SqlTrustServerCertificate.IsChecked == true && !SqlCertificateWarning.Confirm(this))
+            SqlTrustServerCertificate.IsChecked = false;
+    }
+
     private void SqlAuthentication_Changed(object sender, RoutedEventArgs e)
     {
         if (SqlCredentialsPanel is null) return;
         SqlCredentialsPanel.Visibility = SelectedSqlAuthentication == SqlServerAuthentication.SqlServer ? Visibility.Visible : Visibility.Collapsed;
+        if (SqlAuthenticationHelp is not null)
+            SqlAuthenticationHelp.Text = SelectedSqlAuthentication == SqlServerAuthentication.SqlServer
+                ? "Укажите отдельный логин MS SQL кнопкой ниже. Это не пароль Windows и не пароль пользователя 1С. Данные сохраняются в защищённом хранилище Windows."
+                : "Вход от имени пользователя, который запускает агент. При работе службой — от имени учётной записи службы. Этой записи нужен доступ к MS SQL.";
         UpdateSqlCredentialStatus();
     }
     private void UpdateSqlCredentialStatus() => SqlCredentialStatus.Text = sqlCredentialKey is null
         ? "Логин и пароль не сохранены. Задайте их кнопкой выше."
-        : "Данные входа сохранены в Windows. После сохранения источника нажмите «Проверить источник».";
+        : "Данные входа сохранены в Windows. После сохранения источника нажмите «Прочитать журнал копий».";
 
     private void SqlServer_Changed(object sender, RoutedEventArgs e)
     {
@@ -36,7 +46,7 @@ public partial class ExternalMonitoringWindow
         if (dialog.ShowDialog() == true)
         {
             sqlCredentialKey = key; sqlCredentialServer = SqlServer.Text.Trim(); UpdateSqlCredentialStatus();
-            Status.Text = "Данные входа сохранены в Windows. Нажмите «Сохранить источник», затем «Проверить источник».";
+            Status.Text = "Данные входа сохранены в Windows. Нажмите «Сохранить задание», затем «Прочитать журнал копий».";
         }
     }
 }

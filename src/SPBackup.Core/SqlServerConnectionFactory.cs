@@ -6,6 +6,14 @@ namespace SPBackup.Core;
 // Both backup execution and read-only monitoring use the same authentication and TLS policy.
 internal static class SqlServerConnectionFactory
 {
+    internal static string? ValidateServer(string? server)
+    {
+        if (string.IsNullOrWhiteSpace(server)) return "Укажите адрес MS SQL: например SQL-SERVER, SQL-SERVER\\SQLEXPRESS или 192.168.1.10,1433.";
+        if (server.Contains("://", StringComparison.Ordinal) || server.Contains(';') || server.Any(char.IsControl))
+            return "Укажите только адрес MS SQL, без https:// и строки подключения. Например SQL-SERVER\\SQLEXPRESS или 192.168.1.10,1433 (порт через запятую).";
+        return null;
+    }
+
     internal static IReadOnlyList<string> ValidateAuthentication(SqlServerAuthentication authentication, string? key)
     {
         var errors = new List<string>();
@@ -17,16 +25,17 @@ internal static class SqlServerConnectionFactory
     }
 
     internal static async Task<DbConnection> CreateAsync(string server, SqlServerAuthentication authentication,
-        string? key, string database, string application, ISqlServerCredentialStore? credentials, CancellationToken token)
+        string? key, string database, string application, ISqlServerCredentialStore? credentials, CancellationToken token, bool trustServerCertificate = false)
     {
         var errors = ValidateAuthentication(authentication, key);
+        if (ValidateServer(server) is { } serverError) throw new InvalidDataException(serverError);
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         token.ThrowIfCancellationRequested();
         var sqlLogin = authentication == SqlServerAuthentication.SqlServer;
         var builder = new SqlConnectionStringBuilder
         {
             DataSource = server, InitialCatalog = database, IntegratedSecurity = !sqlLogin,
-            Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = false, ConnectTimeout = 15,
+            Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = trustServerCertificate, ConnectTimeout = 15,
             ApplicationName = application, Pooling = !sqlLogin
         };
         if (!sqlLogin) return new SqlConnection(builder.ConnectionString);

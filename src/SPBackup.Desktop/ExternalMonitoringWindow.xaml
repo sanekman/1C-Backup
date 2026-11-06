@@ -8,7 +8,7 @@
   <TextBlock x:Name="Status" DockPanel.Dock="Bottom" TextWrapping="Wrap" Margin="0,12,0,0" />
   <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
    <ComboBox x:Name="Sources" Width="240" DisplayMemberPath="Label" SelectedValuePath="Monitor" SelectionChanged="Source_Changed" Margin="0,0,8,4" AutomationProperties.Name="Источник для настройки и ручного опроса" />
-   <Button x:Name="CollectMonitorButton" Content="Проверить источник" Click="Collect_Click" IsEnabled="False" Margin="0,0,8,4" />
+   <Button x:Name="CollectMonitorButton" Content="Прочитать журнал копий" Click="Collect_Click" IsEnabled="False" Margin="0,0,8,4" />
    <Button x:Name="NewMonitorButton" Content="Новое наблюдение" Click="New_Click" IsEnabled="False" Margin="0,0,0,4" />
    <Button x:Name="RefreshReportsButton" Content="Обновить историю" Click="Refresh_Click" Margin="8,0,0,4" />
    <Button x:Name="CancelCollectButton" Content="Отменить проверку" Click="CancelCollect_Click" IsEnabled="False" Visibility="Collapsed" Margin="8,0,0,4" />
@@ -22,16 +22,27 @@
    </WrapPanel>
    <TextBlock x:Name="DatabaseLabel" Text="Имя базы (пусто — все базы источника)" /><TextBox x:Name="Database" Margin="0,4,0,10" />
    <StackPanel x:Name="SqlPanel">
-    <TextBlock Text="MS SQL (например SERVER\INSTANCE). Подключение с проверкой TLS-сертификата." TextWrapping="Wrap" />
+    <TextBlock Text="Подключение к MS SQL" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,10" />
+    <TextBlock Text="Адрес сервера или имя экземпляра" />
     <TextBox x:Name="SqlServer" Margin="0,4,0,10" TextChanged="SqlServer_Changed" />
-    <TextBlock Text="Как подключаться" />
+    <Expander Header="Как указать сервер и имя базы?" Margin="0,0,0,12"><StackPanel Margin="12,8,0,0">
+     <TextBlock Text="Укажите адрес, который используете в SQL Server Management Studio (SSMS):" TextWrapping="Wrap" />
+     <TextBlock Text="• SQL-SERVER — обычный экземпляр на другом компьютере;&#xA;• SQL-SERVER\SQLEXPRESS — именованный экземпляр;&#xA;• 192.168.1.10,1433 — IP-адрес и порт через запятую;&#xA;• localhost — MS SQL на компьютере агента." TextWrapping="Wrap" Margin="0,8,0,8" />
+     <TextBlock Text="Не добавляйте https://. В поле имени базы укажите её точное имя из раздела «Базы данных» в SSMS, например Accounting. Это не название задания и не путь к файлу .bak." TextWrapping="Wrap" />
+    </StackPanel></Expander>
+    <TextBlock Text="Способ входа на сервер" />
     <ComboBox x:Name="SqlAuthentication" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="SqlAuthentication_Changed" Margin="0,4,0,10" />
+    <TextBlock x:Name="SqlAuthenticationHelp" Text="Windows: вход от имени пользователя, который запускает агент. При работе службой — от имени учётной записи службы." TextWrapping="Wrap" Margin="0,0,0,12" />
     <StackPanel x:Name="SqlCredentialsPanel" Visibility="Collapsed" Margin="0,0,0,10">
      <Button x:Name="SqlCredentialsButton" Content="Задать логин и пароль MS SQL…" Click="SqlCredentials_Click" HorizontalAlignment="Left" />
      <TextBlock x:Name="SqlCredentialStatus" TextWrapping="Wrap" Margin="0,6,0,0" />
     </StackPanel>
+    <Expander Header="Сертификат и защита подключения" Margin="0,0,0,12"><StackPanel Margin="12,8,0,0">
+     <TextBlock Text="Обычно здесь ничего менять не нужно: соединение шифруется, сертификат сервера проверяется. Если сервер использует самоподписанный сертификат, можно разрешить подключение без его проверки." TextWrapping="Wrap" Margin="0,0,0,8" />
+    <CheckBox x:Name="SqlTrustServerCertificate" Content="Подключаться без проверки сертификата MS SQL" Click="SqlTrustServerCertificate_Click" Margin="0,0,0,10" />
+    </StackPanel></Expander>
     <WrapPanel>
-     <StackPanel Width="200"><TextBlock Text="История за дней" /><TextBox x:Name="Days" Text="30" Margin="0,4,0,10" /></StackPanel>
+     <StackPanel Width="300"><TextBlock Text="Читать историю за последние (дней)" /><TextBox x:Name="Days" Text="30" Margin="0,4,0,10" /></StackPanel>
     </WrapPanel>
    </StackPanel>
    <StackPanel x:Name="PostgresPanel" Visibility="Collapsed">
@@ -43,6 +54,11 @@
    <WrapPanel Margin="0,0,0,12">
     <CheckBox x:Name="MonitorEnabled" Content="Автоматический опрос" IsChecked="True" VerticalAlignment="Center" Margin="0,0,16,0" />
     <TextBlock Text="Интервал, секунд" VerticalAlignment="Center" /><TextBox x:Name="PollInterval" Text="60" Width="90" Margin="8,0,0,0" />
+   </WrapPanel>
+   <WrapPanel Margin="0,0,0,12">
+    <CheckBox x:Name="FreshnessEnabled" Content="Предупреждать, если успешной копии нет больше" VerticalAlignment="Center" />
+    <TextBox x:Name="FreshnessHours" Text="26" Width="70" Margin="8,0" AutomationProperties.Name="Допустимый возраст копии в часах" />
+    <TextBlock Text="часов" VerticalAlignment="Center" />
    </WrapPanel>
    <WrapPanel Margin="0,0,0,12">
     <Button x:Name="SaveMonitorButton" Content="Сохранить задание" Padding="12,6" Click="Save_Click" />

@@ -373,6 +373,7 @@ public partial class MainWindow : Window
         SqlServerDirectory.Text = job.SqlServer?.ServerBackupDirectory ?? "";
         SqlAgentDirectory.Text = job.SqlServer?.AgentReadDirectory ?? "";
         SqlBackupTimeout.Text = (job.SqlServer?.TimeoutMinutes ?? 120).ToString();
+        SqlTrustServerCertificate.IsChecked = job.SqlServer?.TrustServerCertificate == true;
         sqlCredentialKey = job.SqlServer?.CredentialKey;
         SqlAuthenticationPicker.SelectedValue = job.SqlServer?.Authentication ?? SqlServerAuthentication.Windows;
         UpdateSqlCredentialStatus();
@@ -436,6 +437,7 @@ public partial class MainWindow : Window
         OneCExecutable.Clear(); OneCTimeout.Text = "120";
         _ = RefreshOneCBasesAsync();
         SqlBackupServer.Clear(); SqlServerDirectory.Clear(); SqlAgentDirectory.Clear(); SqlBackupTimeout.Text = "120";
+        SqlTrustServerCertificate.IsChecked = false;
         sqlCredentialKey = null; SqlAuthenticationPicker.SelectedValue = SqlServerAuthentication.Windows; UpdateSqlCredentialStatus();
         PgTlsRequired.IsChecked = false; PgTlsRootCertificate.Text = "";
         PgHost.Text = "localhost"; PgPort.Text = "5432"; PgUsername.Text = "postgres";

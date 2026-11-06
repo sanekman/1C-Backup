@@ -66,7 +66,7 @@ public sealed class SqlServerBackupHistorySource(Func<ExternalBackupMonitor, DbC
         monitor.Validate();
         if (monitor.Kind != ExternalBackupSourceKind.SqlServerHistory) throw new ArgumentException("Нужен источник MS SQL.");
         return SqlServerConnectionFactory.CreateAsync(monitor.SqlServer, monitor.SqlAuthentication,
-            monitor.SqlCredentialKey, "msdb", "SP Backup monitor", credentials, token);
+            monitor.SqlCredentialKey, "msdb", "SP Backup monitor", credentials, token, monitor.TrustServerCertificate);
     }
 
     private static void AddParameter(DbCommand command, string name, System.Data.DbType type, object value)

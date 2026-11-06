@@ -36,7 +36,15 @@ public sealed record MonitoredRun(Guid RunId, Guid JobId, string JobName, DateTi
     public IReadOnlyList<MonitoredIssue>? Issues { get; init; }
 }
 public sealed record MonitoredProgress(Guid RunId, Guid JobId, string Stage, int? Percent, DateTimeOffset UpdatedUtc);
-public sealed record MonitoredSource(Guid MonitorId, string Name, string Kind, bool Enabled, DateTimeOffset? PolledUtc, bool Failed);
+public sealed record MonitoredSource(Guid MonitorId, string Name, string Kind, bool Enabled, DateTimeOffset? PolledUtc, bool Failed)
+{
+    public int? MaximumBackupAgeHours { get; init; }
+    public DateTimeOffset? LastSuccessfulUtc { get; init; }
+    public bool FreshnessWarning { get; init; }
+    public string? ObservationStatus { get; init; }
+    public Guid? LatestReportId { get; init; }
+    public DateTimeOffset? LatestFinishedUtc { get; init; }
+}
 public sealed record MonitoringSnapshot(DateTimeOffset SentUtc, string AgentVersion, IReadOnlyList<MonitoredJob> Jobs,
     MonitoredProgress? Progress, int PendingRuns, IReadOnlyList<MonitoredSource>? Sources = null, int CollectionWarnings = 0)
 {
@@ -63,7 +71,13 @@ public static class MonitoringValidation
             && Text(j.Schedule,512) && (j.TaskKind == "Backup" && j.DestinationCount is >= 1 and <= 100
                 || j.TaskKind == "Observation" && j.DestinationCount == 0 && j.SourceKind is "SqlServerHistory" or "PostgreSqlReports"))
         && s.Jobs.Select(j=>j.JobId).Distinct().Count() == s.Jobs.Count
-        && (s.Sources is null || s.Sources.Count <= 1000 && s.Sources.All(m=>m is not null && m.MonitorId != Guid.Empty && Text(m.Name,256) && Text(m.Kind,64))
+        && (s.Sources is null || s.Sources.Count <= 1000 && s.Sources.All(m=>m is not null && m.MonitorId != Guid.Empty && Text(m.Name,256) && Text(m.Kind,64)
+                && m.MaximumBackupAgeHours is null or >= 1 and <= 87600
+                && m.ObservationStatus is null or "PollFailed" or "BackupFailed" or "Overdue" or "NoCopies" or "CopyFound"
+                && (m.LatestReportId is null || m.LatestReportId != Guid.Empty)
+                && (m.LatestFinishedUtc is null || m.LatestFinishedUtc.Value.Offset == TimeSpan.Zero)
+                && (m.LastSuccessfulUtc is null || m.LastSuccessfulUtc.Value.Offset == TimeSpan.Zero)
+                && (!m.FreshnessWarning || m.Enabled && !m.Failed && m.PolledUtc is not null && m.MaximumBackupAgeHours is not null))
             && s.Sources.Select(m=>m.MonitorId).Distinct().Count()==s.Sources.Count)
         && (s.Progress is null || s.Progress.RunId != Guid.Empty && s.Progress.JobId != Guid.Empty
             && Text(s.Progress.Stage,64) && s.Progress.Percent is null or >= 0 and <= 100 && s.Progress.UpdatedUtc != default);

@@ -31,17 +31,23 @@
             var last = Latest.FirstOrDefault(r=>r.JobId==job.JobId);
             var observation = job.TaskKind == "Observation";
             var poll = monitoring.Snapshot.Sources?.FirstOrDefault(source=>source.MonitorId==job.JobId);
+            var matchingHistory = !observation || poll?.ObservationStatus is null ||
+                poll.LatestReportId is not null && last?.RunId == poll.LatestReportId;
             <tr><td>@job.Name<small>@(observation ? "Наблюдение · " + Source(job.SourceKind) : Source(job.SourceKind) + " · хранилищ: " + job.DestinationCount)</small></td>
             <td>@(job.Enabled ? job.Schedule : "Отключено")</td>
-            <td>@(poll?.Failed == true ? "Ошибка опроса" : last is null ? observation ? "Копии пока не обнаружены" : "Результатов ещё нет" : Status(last))<small>@Clock.Time(last?.FinishedUtc)</small>
+            <td>@(observation && poll?.ObservationStatus is { } currentStatus ? ObservationStatus(currentStatus) : poll?.Failed == true ? "Ошибка опроса" : observation && last?.Status == "Failed" ? "Ошибка внешней копии" : poll?.FreshnessWarning == true ? "Нет свежей копии" : last is null ? observation ? "Копии пока не обнаружены" : "Результатов ещё нет" : Status(last))<small>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LatestFinishedUtc : last?.FinishedUtc)</small>
             @if (observation)
-            { <small>Последний опрос: @Clock.Time(poll?.PolledUtc). @(last?.Evidence is { } evidence ? Evidence(evidence) : "")</small> }
+            { <small>Последний опрос: @Clock.Time(poll?.PolledUtc). @(matchingHistory && last?.Evidence is { } evidence ? Evidence(evidence) : "")</small> }
+            @if (observation && poll?.MaximumBackupAgeHours is { } maximumAge)
+            { <small>Допустимый возраст успешной копии: @maximumAge ч. Последняя успешная: @Clock.Time(poll.LastSuccessfulUtc).</small> }
+            @if (poll?.FreshnessWarning == true)
+            { <small class="error">Свежая успешная копия выбранной базы не обнаружена. Проверьте расписание и журнал программы, которая создаёт копии. Состояние на момент передачи данных агентом.</small> }
             @if (poll?.Failed == true)
             { <small class="error">Не удалось прочитать журнал внешних копий. Проверьте подключение и права исполнителя в настройках задания агента. Последний результат копии сохранён.</small> }
-            @if (last is not null && (last.WarningCount > 0 || last.Incomplete || last.Status != "Succeeded" || last.Issues is { Count: > 0 }))
+            @if (matchingHistory && last is not null && (last.WarningCount > 0 || last.Incomplete || last.Status != "Succeeded" || last.Issues is { Count: > 0 }))
             { <details><summary>Причины и что делать</summary><RunIssueDetails Run="last" /></details> }
             </td>
-            <td>@Clock.Time(Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.FinishedUtc)</td>
+            <td>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LastSuccessfulUtc : Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.FinishedUtc)</td>
             <td>@(job.NextRunUtc is null ? observation ? job.Enabled ? "Автоматический опрос" : "Опрос выключен" : "По событию / вручную" : Clock.Time(job.NextRunUtc))</td></tr>
         }
         </tbody></table></div>
@@ -104,6 +110,13 @@
 }
 else { <h1>Агент не найден</h1> }
 @code {
+    private static string ObservationStatus(string status) => status switch
+    {
+        "PollFailed" => "Ошибка опроса", "BackupFailed" => "Ошибка внешней копии",
+        "Overdue" => "Нет свежей копии", "NoCopies" => "Копии пока не обнаружены",
+        "CopyFound" => "Копия обнаружена", _ => "Нет данных"
+    };
+
     [Parameter] public Guid Id { get; set; }
     [SupplyParameterFromQuery] public int RunPage { get; set; }
     private AgentRecord? Data;
