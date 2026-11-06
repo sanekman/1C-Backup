@@ -76,7 +76,9 @@ public partial class MainWindow
             if (report.TemporaryError is not null)
                 details.Add("Ошибка временной папки: " + report.TemporaryDirectory + "\n" + report.TemporaryError);
             details.AddRange(report.Destinations.Where(result => !result.Succeeded)
-                .Select(result => result.Destination + "\nОшибка: " + result.Error));
+                .Select(result => result.Destination + "\nЭтап: " + result.FailureStageDescription
+                    + "\nОшибка: " + result.Error
+                    + (result.CleanupFailed ? "\nПроверьте указанный тестовый файл: автоматическая очистка не завершилась. Не удаляйте резервные копии ради повторной проверки." : "")));
             if (report.TemporaryError is null)
                 details.Add("Временная папка: " + report.TemporaryDirectory + "\nЗапись и чтение временного файла проверены.\nСвободное место: " + report.TemporaryAvailableSpaceDescription);
             details.AddRange(report.Destinations.Where(result => result.Succeeded)

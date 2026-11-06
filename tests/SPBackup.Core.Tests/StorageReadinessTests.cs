@@ -125,6 +125,51 @@ public sealed class StorageReadinessTests : IDisposable
         Assert.Empty(Directory.GetFileSystemEntries(root));
     }
 
+    [Theory]
+    [InlineData(StorageCheckStage.Connecting)]
+    [InlineData(StorageCheckStage.Writing)]
+    [InlineData(StorageCheckStage.Reading)]
+    [InlineData(StorageCheckStage.Deleting)]
+    public async Task FailureStageSurvivesReportRoundTripAndOtherDestinationStillRuns(StorageCheckStage stage)
+    {
+        var report = await Checker(new StageFailureStorage(stage, Job.DestinationDirectory)).CheckAsync(Job);
+        var failed = report.Destinations[0];
+        Assert.False(failed.Succeeded); Assert.Equal(stage, failed.FailedStage);
+        Assert.Equal(stage == StorageCheckStage.Deleting, failed.CleanupFailed);
+        Assert.True(report.Destinations[1].Succeeded);
+        var copy = System.Text.Json.JsonSerializer.Deserialize<StorageCheckReport>(System.Text.Json.JsonSerializer.Serialize(report))!;
+        Assert.Equal(failed.FailedStage, copy.Destinations[0].FailedStage);
+        Assert.Equal(failed.CleanupFailed, copy.Destinations[0].CleanupFailed);
+    }
+
+    [Fact]
+    public async Task CleanupFailureDoesNotHideReadFailure()
+    {
+        var report = await Checker(new StageFailureStorage(StorageCheckStage.Reading, Job.DestinationDirectory, true)).CheckAsync(Job);
+        Assert.Equal(StorageCheckStage.Reading, report.Destinations[0].FailedStage);
+        Assert.True(report.Destinations[0].CleanupFailed);
+        Assert.Contains("Не удалось удалить тестовый файл", report.Destinations[0].Error);
+        Assert.True(report.Destinations[1].Succeeded);
+    }
+
+    private sealed class StageFailureStorage(StorageCheckStage stage, string target, bool alsoFailCleanup = false) : IBackupStorage
+    {
+        private readonly FileBackupStorage files = new();
+        private void Fail(BackupJob job, StorageCheckStage operation)
+        {
+            if (job.DestinationDirectory == target && (operation == stage || alsoFailCleanup && operation == StorageCheckStage.Deleting))
+                throw new IOException("Controlled probe failure");
+        }
+        public Task PrepareAsync(BackupJob job, CancellationToken token = default)
+        { Fail(job, StorageCheckStage.Connecting); return Task.CompletedTask; }
+        public Task<StoredBackup> StoreAsync(string path, BackupJob job, CancellationToken token)
+        { Fail(job, StorageCheckStage.Writing); return files.StoreAsync(path, job, token); }
+        public Task VerifyAsync(StoredBackup backup, BackupJob job, CancellationToken token)
+        { Fail(job, StorageCheckStage.Reading); return files.VerifyAsync(backup, job, token); }
+        public Task DeleteAsync(StoredBackup backup, BackupJob job, CancellationToken token)
+        { Fail(job, StorageCheckStage.Deleting); return files.DeleteAsync(backup, job, token); }
+    }
+
     private sealed class TrackingStorage : IBackupStorage
     {
         private readonly FileBackupStorage files = new();

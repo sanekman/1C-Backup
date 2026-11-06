@@ -2,8 +2,21 @@ using System.Security.Cryptography;
 
 namespace SPBackup.Core;
 
+public enum StorageCheckStage { Connecting, Writing, Reading, Deleting }
+
 public sealed record StorageCheckResult(string Destination, bool Succeeded, string? Error)
 {
+    public StorageCheckStage? FailedStage { get; init; }
+    public bool CleanupFailed { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string FailureStageDescription => FailedStage switch
+    {
+        StorageCheckStage.Connecting => "Подготовка и подключение к хранилищу",
+        StorageCheckStage.Writing => "Запись тестового файла",
+        StorageCheckStage.Reading => "Чтение и проверка тестового файла",
+        StorageCheckStage.Deleting => "Удаление тестового файла",
+        _ => "Этап не определён"
+    };
     public long? AvailableBytes { get; init; }
     public string AvailableSpaceDescription => AvailableBytes is { } bytes ? BackupDiskSpace.Format(bytes) : "Не удалось определить";
 }
@@ -56,19 +69,25 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
                 { cancelled = true; results.Add(new(label, false, "Проверка отменена.")); continue; }
                 StoredBackup? stored = null;
                 string? error = null;
+                var stage = StorageCheckStage.Connecting;
+                StorageCheckStage? failedStage = null;
+                var cleanupFailed = false;
                 try
                 {
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                     timeout.CancelAfter(TimeSpan.FromSeconds(30));
                     await storage.PrepareAsync(target, timeout.Token);
+                    stage = StorageCheckStage.Writing;
                     stored = await storage.StoreAsync(probe, target, timeout.Token);
+                    stage = StorageCheckStage.Reading;
                     await storage.VerifyAsync(stored, target, timeout.Token);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                { cancelled = true; error = "Проверка отменена."; }
-                catch (OperationCanceledException) { error = "Превышено время проверки хранилища (30 секунд)."; }
+                { cancelled = true; failedStage = stage; error = "Проверка отменена."; }
+                catch (OperationCanceledException) { failedStage = stage; error = "Превышено время проверки хранилища (30 секунд)."; }
                 catch (Exception ex)
                 {
+                    failedStage = stage;
                     error = ex is IOException && (target.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare) && File.Exists(target.DestinationDirectory)
                         ? "Вместо папки хранилища указан файл. Выберите другую папку." : ex.Message;
                 }
@@ -81,12 +100,15 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
                         try { await storage.DeleteAsync(stored, target, cleanup.Token); }
                         catch (Exception ex)
                         {
+                            cleanupFailed = true;
+                            failedStage ??= StorageCheckStage.Deleting;
                             error = (error is null ? "" : error + " ")
                                 + "Не удалось удалить тестовый файл: " + stored.Location + ". " + ex.Message;
                         }
                     }
                 }
                 results.Add(new(label, error is null, error) {
+                    FailedStage = failedStage, CleanupFailed = cleanupFailed,
                     AvailableBytes = error is null && !cancellationToken.IsCancellationRequested
                         && target.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare
                         ? BackupDiskSpace.AvailableBytes(target.DestinationDirectory) : null });
