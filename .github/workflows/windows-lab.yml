@@ -14,12 +14,39 @@ on:
       - 'src/SPBackup.Agent/**'
       - 'src/SPBackup.Remote/**'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Lab bundle or accelerated VM capability probe
+        type: choice
+        options: [bundle, probe-vm]
+        default: bundle
 
 permissions:
   contents: read
 
 jobs:
+  probe-vm:
+    if: github.event_name == 'push' || inputs.mode == 'probe-vm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Grant this disposable runner access to KVM
+        run: |
+          if [ -c /dev/kvm ]; then
+            sudo chgrp "$(id -gn)" /dev/kvm
+            sudo chmod 660 /dev/kvm
+          fi
+      - run: python3 tools/probe_windows_vm_host.py --output artifacts/windows-vm-capabilities.json
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-vm-capabilities
+          path: artifacts/windows-vm-capabilities.json
+          retention-days: 14
+
   bundle:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'bundle'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
