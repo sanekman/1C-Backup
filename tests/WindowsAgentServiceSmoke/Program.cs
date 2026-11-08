@@ -86,6 +86,7 @@ internal static partial class Program
     {
         if (Environment.GetEnvironmentVariable("ONECBACKUP_NATIVE_SERVICE_TEST") != "1" || args.Length is < 2 or > 3)
             throw new InvalidOperationException("Explicit isolated Windows CI opt-in, agent path and output folder are required.");
+        if (args.Length == 3 && args[2] == "--verify-volumes") return await VerifyVolumesAsync(args[1]);
         if (args.Length == 3 && args[2] == "--verify-service-switch") return await VerifyServiceSwitchAsync(args[0], args[1]);
         if (args.Length == 3 && args[2] == "--prepare-user-startup") return await PrepareUserStartupAsync(args[0], args[1]);
         if (args.Length == 3 && args[2] == "--verify-user-startup") return await VerifyUserStartupAsync(args[0], args[1]);

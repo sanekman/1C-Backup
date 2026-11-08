@@ -69,6 +69,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-lab-${{ github.sha }}
+          include-hidden-files: true
           path: artifacts/windows-lab/
           retention-days: 14
 
