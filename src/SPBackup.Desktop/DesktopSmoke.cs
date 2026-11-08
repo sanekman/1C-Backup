@@ -309,6 +309,7 @@ internal static partial class DesktopSmoke
             Screenshot("jobs-first-copy-guide-compact");
             window.Width = firstGuideWidth; window.Height = firstGuideHeight;
             Click("FirstJobButton");
+            VerifySetupSourceExamples(window);
             VerifyGuideLink(window, "WizardHelpButton", 7, "Создать задание для файловой базы 1С");
             foreach (var kind in new[] { DatabaseKind.SqlServer, DatabaseKind.PostgreSql })
             {
@@ -496,6 +497,7 @@ internal static partial class DesktopSmoke
             await WaitUntil(() => Control<DataGrid>("Jobs").Items.Count == 1 && Control<Button>("RunButton").IsEnabled, "Расписание не сохранено.");
             if (!Control<WrapPanel>("JobActions").IsVisible || Control<Button>("FirstCopyGuideButton").Visibility != Visibility.Collapsed)
                 throw new InvalidOperationException("После создания задания действия копирования не появились или осталась стартовая подсказка.");
+            VerifyFirstRunGuide(window, (name, target) => Screenshot(name, target));
             var configured = (BackupJob)Control<DataGrid>("Jobs").Items[0];
             if (configured.KeepLast != 7 || configured.AdditionalDestinations![0].KeepLast != 2
                 || !Control<TextBox>("WizardSummary").Text.Contains("копий: 2"))

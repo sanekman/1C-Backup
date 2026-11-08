@@ -15,8 +15,8 @@ public partial class DestinationWindow
     private void UpdateNetworkStatus()
     {
         if (NetworkCredentialStatus is null) return;
-        NetworkCredentialStatus.Text = NetworkUseCredentials.IsChecked != true ? "Вход от пользователя агента или службы Windows."
-            : string.IsNullOrEmpty(networkShareSettings?.CredentialKey) ? "Задайте логин и пароль NAS. Они будут сохранены в Windows."
+        NetworkCredentialStatus.Text = NetworkUseCredentials.IsChecked != true ? "Вход от пользователя исполнителя. Доступ из Проводника не подтверждает доступ службы; после сохранения проверьте хранилища через нужного исполнителя."
+            : string.IsNullOrEmpty(networkShareSettings?.CredentialKey) ? "Задайте отдельный логин NAS и пароль для этой папки назначения. Они не меняют вход к сетевому источнику и будут сохранены в Windows."
             : "Для этой сетевой папки задан отдельный вход.";
     }
     private void NetworkDestination_Changed(object sender, System.Windows.Controls.TextChangedEventArgs e)

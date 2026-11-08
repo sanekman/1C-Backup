@@ -81,6 +81,8 @@
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
          <Menu Background="Transparent" VerticalAlignment="Center" Margin="0,0,8,0" IsMainMenu="False" ToolTip="Перенос настроек задания через файл">
           <MenuItem Header="Файл" Padding="8,6">
+           <MenuItem x:Name="FirstRunGuideMenuItem" Header="Первый запуск задания…" Click="FirstRunGuide_Click" />
+           <Separator />
            <MenuItem x:Name="ExportJobSettingsMenuItem" Header="Сохранить настройки выбранного задания…" Click="ExportJobSettings_Click" IsEnabled="False" />
            <MenuItem x:Name="ImportJobSettingsMenuItem" Header="Загрузить настройки из файла…" Click="ImportJobSettings_Click" IsEnabled="False" />
           </MenuItem>
@@ -228,7 +230,7 @@
     <TextBlock x:Name="FileArchiveHint" Visibility="Collapsed" Text="Копируется файл базы в ZIP. Перед запуском закройте эту базу у всех пользователей 1С."
      TextWrapping="Wrap" Margin="0,0,0,12" Background="{DynamicResource WarningSurfaceBrush}" Foreground="{DynamicResource WarningBrush}" Padding="8" />
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="14" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-    <StackPanel><TextBlock Text="Название" /><TextBox x:Name="JobName" Margin="0,4,0,10" /></StackPanel>
+    <StackPanel><TextBlock Text="Название задания (понятное вам имя)" TextWrapping="Wrap" /><TextBox x:Name="JobName" Margin="0,4,0,10" /></StackPanel>
     <StackPanel Grid.Column="2"><TextBlock Text="Что копировать" /><ComboBox x:Name="Kind" Margin="0,4,0,10" ItemTemplate="{StaticResource DatabaseKindLabel}" SelectionChanged="Kind_Changed" /></StackPanel>
    </Grid>
    <StackPanel x:Name="OneCBasePickerPanel" Margin="0,0,0,8">
@@ -247,6 +249,7 @@
     <Button DockPanel.Dock="Right" x:Name="WebDavCredentialsButton" Content="Логин и пароль…" Click="WebDavCredentials_Click" Padding="10,5" Margin="6,0,0,0" Visibility="Collapsed" />
     <TextBox x:Name="Source" TextChanged="OneCSource_Changed" />
    </DockPanel>
+   <TextBlock x:Name="SourceExampleHint" TextWrapping="Wrap" Margin="0,0,0,12" />
    <StackPanel x:Name="WebDavPanel" Visibility="Collapsed">
     <TextBlock x:Name="WebDavCredentialStatus" Text="Подключение ещё не настроено" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6" />
 
@@ -339,6 +342,8 @@
     </StackPanel></Expander>
    </StackPanel>
    <StackPanel x:Name="PostgresBackupPanel" Visibility="Collapsed">
+    <TextBlock Text="Подключение к PostgreSQL" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,10" />
+    <TextBlock Text="Сервер: имя компьютера или IP, например DB-SERVER или 192.168.1.20. Без https://, имени базы и порта; порт задаётся отдельно." TextWrapping="Wrap" Margin="0,0,0,10" />
     <TextBlock Text="Сервер PostgreSQL" /><TextBox x:Name="PgHost" Text="localhost" TextChanged="PgConnection_Changed" Margin="0,4,0,10" />
     <TextBlock Text="Порт" /><TextBox x:Name="PgPort" Text="5432" TextChanged="PgConnection_Changed" Margin="0,4,0,10" />
     <TextBlock Text="Пользователь" /><TextBox x:Name="PgUsername" Text="postgres" TextChanged="PgConnection_Changed" Margin="0,4,0,10" />
@@ -351,7 +356,7 @@
      <Button x:Name="PgCredentialsButton" Content="Задать пароль PostgreSQL…" Click="PgCredentials_Click" HorizontalAlignment="Left" />
      <TextBlock x:Name="PgCredentialStatus" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" />
     </StackPanel>
-    <TextBlock x:Name="PgExternalAuthenticationHint" Text="Используется существующая настройка PostgreSQL: например, pgpass.conf, сертификат или вход Windows. Для обычного входа по паролю выберите вариант выше."
+    <TextBlock x:Name="PgExternalAuthenticationHint" Text="Используются настройки пользователя исполнителя: pgpass.conf, сертификат или вход Windows. У службы это другой пользователь. Для обычного пароля выберите «Пароль, сохранённый в программе»."
      TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
     <TextBlock Text="Для шифрования с проверкой сертификата включите защищённое подключение ниже. Сохранение пароля само по себе не защищает соединение."
      TextWrapping="Wrap" Margin="0,0,0,10" />
@@ -386,6 +391,7 @@
    </DockPanel>
    <TextBlock Text="Копии лучше хранить на другом диске или компьютере, отдельно от исходных данных." TextWrapping="Wrap" Margin="0,0,0,10" />
    <StackPanel x:Name="NetworkSharePanel" Visibility="Collapsed" Margin="0,0,0,10">
+    <TextBlock Text="Укажите полный сетевой путь, например \\NAS\Backups\Accounting. Буква подключённого диска Z: может быть недоступна службе. Логин ниже относится к папке назначения; чтение сетевого источника проверяется отдельно." TextWrapping="Wrap" Margin="0,0,0,8" />
     <CheckBox x:Name="NetworkUseCredentials" Content="Отдельный логин и пароль NAS / сетевой папки" Checked="NetworkMode_Changed" Unchecked="NetworkMode_Changed" />
     <Button x:Name="NetworkCredentialsButton" Content="Задать сетевой логин и пароль…" Click="NetworkCredentials_Click" HorizontalAlignment="Left" Margin="0,6,0,0" Visibility="Collapsed" ToolTipService.ShowOnDisabled="True" />
     <TextBlock x:Name="NetworkCredentialStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0" />
@@ -481,7 +487,7 @@
          <Expander x:Name="ReviewTechnicalDetails" Header="Полные пути и параметры" Margin="0,6,0,0">
           <TextBox x:Name="WizardSummary" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="{DynamicResource PanelBrush}" Padding="10" />
          </Expander>
-         <TextBlock Text="После сохранения проверьте хранилища и создайте первую копию вручную." TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
+         <TextBlock Text="После сохранения: проверьте источник и хранилища → создайте пробную копию → найдите результат → проверьте восстановление. Инструкция доступна в меню «Файл» списка заданий." TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" FontSize="12" />
         </StackPanel>
        </StackPanel>
       </ScrollViewer>

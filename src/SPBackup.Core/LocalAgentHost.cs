@@ -146,6 +146,14 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                 .RunAsync(state.SessionId, error => warnings.Set("Проверка хранилищ", error), lifetime.Token);
         }
         var storageChecksTask = manual is null ? StorageCheckLoop() : Task.CompletedTask;
+        async Task SourceCheckLoop()
+        {
+            await initialized;
+            lock (stateGate) Volatile.Write(ref state, state with { CanCheckSources = true });
+            await new LocalSourceCheckProcessor(directory, source, new(new BackupProcessRunner(), workRoot))
+                .RunAsync(state.SessionId, error => warnings.Set("Проверка источника", error), lifetime.Token);
+        }
+        var sourceChecksTask = manual is null ? SourceCheckLoop() : Task.CompletedTask;
         async Task MonitorLoop()
         {
             await initialized;
@@ -347,7 +355,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         try
         {
             var completed = manual is null
-                ? await Task.WhenAny(executionTask, controlTask, monitoringTask, manualRequestsTask, storageChecksTask)
+                ? await Task.WhenAny(executionTask, controlTask, monitoringTask, manualRequestsTask, storageChecksTask, sourceChecksTask)
                 : await Task.WhenAny(executionTask, controlTask);
             await completed;
         }
@@ -356,7 +364,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         finally
         {
             lifetime.Cancel();
-            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask, serverMonitoringTask, manualRequestsTask, storageChecksTask, connectionTask); }
+            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask, serverMonitoringTask, manualRequestsTask, storageChecksTask, sourceChecksTask, connectionTask); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) { failure ??= ex; }
             var error = failure?.Message ?? (manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? lastRun.Error : null);

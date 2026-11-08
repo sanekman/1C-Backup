@@ -253,7 +253,7 @@ public partial class MainWindow : Window
         if (await PersistAsync(updated))
         {
             JobSearch.Clear(); Jobs.SelectedItem = job; CloseEditor();
-            Status.Text = "Задание сохранено. Нажмите «Создать копию», чтобы проверить его. Для расписания включите автоматическое копирование.";
+            Status.Text = "Задание сохранено. Проверьте источник и хранилища, затем создайте пробную копию. Пошаговая инструкция: меню «Файл → Первый запуск задания…».";
             return true;
         }
         return false;
@@ -497,6 +497,8 @@ public partial class MainWindow : Window
         WebDavPanel.Visibility = WebDavOptionsPanel.Visibility = WebDavCredentialsButton.Visibility = isWebDav ? Visibility.Visible : Visibility.Collapsed;
         FileSourceConsistencyHint.Text = isWebDav ? "Копируются файлы выбранной папки, без единого снимка сервера. Избегайте изменений во время копирования." : "Перед копированием закройте программы, изменяющие эти файлы.";
         UpdateFileBackupControls();
+        if (SourceExampleHint is not null && Kind.SelectedItem is DatabaseKind sourceKind)
+            SourceExampleHint.Text = BackupSetupGuidance.SourceExample(sourceKind);
         if (SourceLabel is not null) SourceLabel.Text = isWebDav ? "HTTPS-адрес папки WebDAV" : isFiles ? "Исходный файл или папка" : isOneC ? fileArchive ? "Папка или файл базы" : "Папка базы" : "Имя базы данных";
     }
 
@@ -508,6 +510,7 @@ public partial class MainWindow : Window
         var engineAvailable = !backgroundBusy && !backgroundStarting;
         NewJobButton.IsEnabled = FirstJobButton.IsEnabled = ready && canSave && idle && !editorOpen;
         ImportJobSettingsMenuItem.IsEnabled = NewJobButton.IsEnabled && !editorOpen;
+        FirstRunGuideMenuItem.IsEnabled = ready && !editorOpen && Jobs.SelectedItem is BackupJob;
         ExportJobSettingsMenuItem.IsEnabled = ready && !jobFileTransfer && !persisting && !editorOpen && Jobs.SelectedItem is BackupJob;
         FirstJobButton.Visibility = jobs.Count + observationTasks.Count == 0 && JobSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         FirstCopyGuideButton.Visibility = FirstJobButton.Visibility;
@@ -537,10 +540,14 @@ public partial class MainWindow : Window
         var canInspectLocally = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
         CheckStorageButton.IsEnabled = ready && idle && !editorOpen && Jobs.SelectedItem is BackupJob
             && (engineAvailable || BackgroundAcceptsStorageChecks);
-        CheckSourceButton.IsEnabled = canInspectLocally;
+        CheckSourceButton.IsEnabled = canInspectLocally || ready && idle && !editorOpen && Jobs.SelectedItem is BackupJob && BackgroundAcceptsSourceChecks;
         var readinessUnavailable = ReadinessUnavailableReason(idle);
-        CheckSourceButton.ToolTip = readinessUnavailable ?? (!engineAvailable || schedulingTask is not null
-            ? "Остановите автоматическое копирование, чтобы проверить источник."
+        CheckSourceButton.ToolTip = readinessUnavailable ?? (backgroundBusy && !BackgroundExecutionMatchesMode
+            ? "Работает агент другого режима. Остановите его и включите исполнителя выбранного режима."
+            : BackgroundAcceptsSourceChecks
+            ? "Проверить источник через работающего агента, под его пользователем. Копия не создаётся; расписание продолжит работать."
+            : !engineAvailable ? "Этот исполнитель пока не поддерживает проверку источника. Обновите и перезапустите агент/службу; результат окна не заменяет доступ службы."
+            : schedulingTask is not null ? "Остановите расписание окна, чтобы проверить источник, или используйте работающую службу."
             : "Проверка из окна программы, от его пользователя. Доступ службы этим не подтверждается. Проверить файл базы или SQL-подключение без создания резервной копии. Для PostgreSQL нужен psql рядом с pg_dump.");
         CheckStorageButton.ToolTip = readinessUnavailable ?? (BackgroundAcceptsStorageChecks
             ? "Проверить хранилища через работающего агента, под его пользователем. Расписание продолжит работать; резервная копия не создаётся."

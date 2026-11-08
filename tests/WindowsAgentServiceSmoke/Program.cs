@@ -175,7 +175,19 @@ internal static partial class Program
                 nasWrongJob = nasJob with { Id = Guid.NewGuid(), Name = "wrong NAS password probe fixture",
                     NetworkShare = nasJob.NetworkShare! with { CredentialKey = nasWrongKey } };
             }
-            var jobs = new[] { manual, startup, pgJob, network, deniedNetwork }.Concat(nasJob is null ? [] : new[] { nasJob, nasWrongJob! }).ToArray();
+            var sourceProbeJobs = new List<BackupJob>();
+            if (smb is not null)
+            {
+                foreach (var (backing, unc, label) in new[] { (smb.BackingDirectory, smb.UncPath, "allowed"), (smb.DeniedBackingDirectory, smb.DeniedUncPath, "denied") })
+                {
+                    var fileName = "source-probe-" + Guid.NewGuid().ToString("N") + ".txt";
+                    await using (var fixtureFile = new FileStream(Path.Combine(backing, fileName), FileMode.CreateNew, FileAccess.Write))
+                        await fixtureFile.WriteAsync("read-only service probe"u8.ToArray());
+                    sourceProbeJobs.Add(manual with { Id = Guid.NewGuid(), Name = label + " UNC source probe", Kind = DatabaseKind.FilesAndFolders,
+                        Source = unc + "\\" + fileName, DestinationDirectory = Path.Combine(directory, "unused-source-probe-destination") });
+                }
+            }
+            var jobs = new[] { manual, startup, pgJob, network, deniedNetwork }.Concat(sourceProbeJobs).Concat(nasJob is null ? [] : new[] { nasJob, nasWrongJob! }).ToArray();
             var jobStore = new JobStore(Path.Combine(directory, "jobs.json")); await jobStore.SaveAsync(jobs);
             var originalJobs = await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json"));
             WindowsFtpCredentialStore.SetServiceCache(new(directory, sid, selected.Sid));
@@ -226,6 +238,35 @@ internal static partial class Program
             Require((await control.ReadAsync()) is { SessionId: var probeSession, Phase: LocalAgentPhase.Running, RunsSchedules: true }
                 && probeSession == firstSession, "Storage probe stopped or restarted the scheduler host.");
             checks.Add("storage-probe-under-service-identity-without-backup-or-schedule-stop");
+            await Wait(async () => (await control.ReadAsync()) is { CanCheckSources: true }, "The service did not advertise source checks.");
+            var sourceChecks = new LocalSourceCheckQueue(directory);
+            var sourceProbe = await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession, manual));
+            Require(sourceProbe.Succeeded && sourceProbe.ExecutionIdentity?.WindowsSid == selected.Sid
+                && sourceProbe.StartedUtc is not null && sourceProbe.FinishedUtc >= sourceProbe.StartedUtc,
+                "Source probe did not use the distinct service identity and actual execution times.");
+            await using (var heldSource = new FileStream(Path.Combine(source, "1Cv8.1CD"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var busySource = await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession, manual));
+                Require(!busySource.Succeeded && !busySource.Cancelled && busySource.ExecutionIdentity?.WindowsSid == selected.Sid,
+                    "An inaccessible source was falsely reported as available to the service.");
+            }
+            var pgSourceProbe = await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession, pgJob));
+            Require(pgSourceProbe.Succeeded && pgSourceProbe.ExecutionIdentity?.WindowsSid == selected.Sid,
+                "PostgreSQL source check failed under the service identity with its delegated password and TLS.");
+            var sourceProbeHistory = await File.ReadAllBytesAsync(Path.Combine(directory, "runs.json"));
+            var sourceProbeCatalog = await File.ReadAllBytesAsync(Path.Combine(directory, "copies.json"));
+            Require(beforeProbeHistory.SequenceEqual(sourceProbeHistory)
+                && beforeProbeCatalog.SequenceEqual(sourceProbeCatalog)
+                && (await control.ReadAsync()) is { SessionId: var sourceSession, Phase: LocalAgentPhase.Running, RunsSchedules: true }
+                && sourceSession == firstSession, "Source probes changed backup data or stopped the scheduler.");
+            foreach (var sourceJob in sourceProbeJobs)
+            {
+                var uncSource = await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession, sourceJob));
+                Require(uncSource.Succeeded == sourceJob.Name.StartsWith("allowed", StringComparison.Ordinal)
+                    && uncSource.ExecutionIdentity?.WindowsSid == selected.Sid,
+                    "Source UNC allowed/denied access did not reflect the actual service account permissions.");
+            }
+            checks.Add("source-probes-service-identity-busy-source-and-delegated-postgresql-without-backup");
             var deniedRequest = await storageChecks.EnqueueAsync(firstSession, deniedNetwork);
             var denied = await storageChecks.WaitAsync(deniedRequest);
             Require(denied.ExecutionIdentity?.WindowsSid == selected.Sid && denied.TemporaryError is null

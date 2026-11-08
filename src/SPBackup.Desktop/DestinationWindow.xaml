@@ -12,6 +12,7 @@
    <TextBlock x:Name="DestinationLabel" Text="Папка копий" /><DockPanel x:Name="DestinationPanel" Margin="0,4,0,10"><Button x:Name="BrowseButton" Content="Выбрать…" DockPanel.Dock="Right" Click="Browse_Click" Margin="6,0,0,0" /><TextBox x:Name="Destination" TextChanged="NetworkDestination_Changed" /></DockPanel>
    <TextBlock x:Name="PathHint" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
    <StackPanel x:Name="NetworkPanel" Visibility="Collapsed" Margin="0,0,0,10">
+    <TextBlock Text="Укажите полный сетевой путь, например \\NAS\Backups\Accounting. Буква подключённого диска Z: может быть недоступна службе. Логин ниже относится к папке назначения; чтение сетевого источника проверяется отдельно." TextWrapping="Wrap" Margin="0,0,0,8" />
     <CheckBox x:Name="NetworkUseCredentials" Content="Отдельный логин и пароль NAS / сетевой папки" Checked="NetworkMode_Changed" Unchecked="NetworkMode_Changed" />
     <Button x:Name="NetworkCredentialsButton" Content="Задать сетевой логин и пароль…" Click="NetworkCredentials_Click" HorizontalAlignment="Left" Margin="0,6,0,0" Visibility="Collapsed" />
     <TextBlock x:Name="NetworkCredentialStatus" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" />

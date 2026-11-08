@@ -95,6 +95,18 @@ internal static partial class DesktopSmoke
                 }
             }
             finally { await queue.WriteReceiptAsync(acceptedReceipt); }
+            grid.SelectedItem = grid.Items.OfType<BackupJob>().Single(j => j.Id == job.Id);
+            await WaitUntil(() => reopened.SmokeBackgroundSourceReady, "Агент не объявил поддержку проверки источника.");
+            var checkSource = (Button)reopened.FindName("CheckSourceButton");
+            if (!checkSource.IsEnabled) throw new InvalidOperationException("Работающий агент блокирует проверку источника без копирования.");
+            checkSource.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitUntil(() => reopened.SmokeReady, "Проверка источника через агента не завершилась.");
+            var sourceDetails = ((TextBox)reopened.FindName("StorageCheckDetails")).Text;
+            if (!sourceDetails.Contains("Проверка через агента. Пользователь исполнителя:")
+                || !sourceDetails.Contains("Доступ проверен от указанного пользователя агента")
+                || sourceDetails.Contains("Доступ службы Windows этим результатом не подтверждён"))
+                throw new InvalidOperationException("Результат агента перепутан с локальной проверкой из окна.");
+            screenshot("source-check-through-agent", reopened);
         }
         finally
         {

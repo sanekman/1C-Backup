@@ -20,8 +20,8 @@ public partial class MainWindow
     {
         if (NetworkCredentialStatus is null) return;
         NetworkCredentialStatus.Text = NetworkUseCredentials.IsChecked != true
-            ? "Используется сетевой вход пользователя агента или службы Windows."
-            : string.IsNullOrEmpty(networkShareSettings?.CredentialKey) ? "Задайте логин и пароль NAS. Они будут сохранены в Windows."
+            ? "Используется сетевой вход пользователя исполнителя. Доступ из Проводника не подтверждает доступ службы; после сохранения выполните «Проверить хранилища» через работающую службу."
+            : string.IsNullOrEmpty(networkShareSettings?.CredentialKey) ? "Задайте отдельный логин NAS и пароль. Они применяются только к этой сетевой папке назначения, а не к источнику. Секрет будет сохранён в Windows."
             : "Вход задан. Для применения остановите автоматическое копирование, сохраните задание и включите копирование снова. Затем проверьте хранилища через службу.";
     }
     private void NetworkDestination_Changed(object sender, System.Windows.Controls.TextChangedEventArgs e)

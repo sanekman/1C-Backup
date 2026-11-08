@@ -273,6 +273,11 @@ public partial class MainWindow
     {
         if (step == 0)
         {
+            if (Kind.SelectedItem is DatabaseKind databaseKind
+                && BackupSetupGuidance.DatabaseServerError(databaseKind, databaseKind == DatabaseKind.SqlServer ? SqlBackupServer.Text : PgHost.Text) is { } serverError)
+                return RejectWizard(serverError, 0, databaseKind == DatabaseKind.SqlServer ? SqlBackupServer : PgHost);
+            if (Kind.SelectedItem is DatabaseKind selectedKind && BackupSetupGuidance.DatabaseNameError(selectedKind, Source.Text) is { } sourceError)
+                return RejectWizard(sourceError, 0, Source);
             if (string.IsNullOrWhiteSpace(JobName.Text)) return RejectWizard("Введите название, например «Бухгалтерия».", 0, JobName);
             if (string.IsNullOrWhiteSpace(Source.Text)) return RejectWizard(Kind.SelectedItem is DatabaseKind.FilesAndFolders
                 ? "Выберите исходный файл или папку." : Kind.SelectedItem is DatabaseKind.WebDav ? "Укажите HTTPS-адрес папки WebDAV." : "Выберите папку базы 1С или введите имя базы SQL.", 0, Source);
