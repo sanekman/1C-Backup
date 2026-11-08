@@ -122,6 +122,7 @@ public sealed class SourceReadinessCheckerTests : IDisposable
             await File.WriteAllTextAsync(command.ErrorLogPath!, "fixture", token); return exitCode;
         });
         var result = await Checker(process).CheckAsync(job); Assert.Equal(success, result.Succeeded);
+        Assert.Contains("Пользователь PostgreSQL (параметр подключения): backup-user", result.Details);
         if (!success)
         {
             Assert.Contains("Код выхода не определяет точную причину", result.Details);
@@ -161,5 +162,16 @@ public sealed class SourceReadinessCheckerTests : IDisposable
         var process = NoProcess(); await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Checker(process).CheckAsync(FileJob, cancellation.Token));
         Assert.Empty(process.Calls); Assert.Equal("fixture", await File.ReadAllTextAsync(Database)); Assert.False(Directory.Exists(Work));
     }
+    [Fact]
+    public void SqlLoginReportShowsOnlyDatabaseLoginAndNeverConnectionSecrets()
+    {
+        var text = SourceReadinessChecker.SqlLoginDescription(SqlServerAuthentication.SqlServer,
+            "Server=db;User ID=backup_login;Password=super_secret_source_pwd;Database=master");
+        Assert.Contains("backup_login", text); Assert.Contains("Пользователь Windows", text);
+        Assert.DoesNotContain("super_secret_source_pwd", text); Assert.DoesNotContain("Server=db", text);
+        Assert.Contains("Windows исполнителя", SourceReadinessChecker.SqlLoginDescription(SqlServerAuthentication.Windows, null));
+        Assert.Contains("Имя логина не передано", SourceReadinessChecker.SqlLoginDescription(SqlServerAuthentication.SqlServer, null));
+    }
+
     public void Dispose() => Directory.Delete(root, recursive: true);
 }

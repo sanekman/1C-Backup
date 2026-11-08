@@ -17,8 +17,10 @@ public partial class MainWindow
         var close = new Button { Content = "Понятно", IsCancel = true, IsDefault = true,
             HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(12), Padding = new Thickness(18, 7, 18, 7) };
         DockPanel.SetDock(close, Dock.Bottom); panel.Children.Add(close); panel.Children.Add(text);
+        var width = Math.Min(680, Math.Max(240, ActualWidth));
+        var height = Math.Min(620, Math.Max(240, ActualHeight));
         var guide = new Window { Owner = this, Title = "Первый запуск — " + job.Name, Content = panel,
-            Width = 680, Height = 620, MinWidth = 440, MinHeight = 380, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            Width = width, Height = height, MinWidth = Math.Min(440, width), MinHeight = Math.Min(380, height), WindowStartupLocation = WindowStartupLocation.CenterOwner };
         guide.SetResourceReference(BackgroundProperty, "CanvasBrush");
         close.Click += (_, _) => guide.Close();
         guide.Loaded += (_, _) => FirstRunGuideOpened?.Invoke(guide, text);

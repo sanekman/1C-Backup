@@ -104,10 +104,26 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
             : "Файл базы и программа 1С найдены; доступ на чтение проверен. Платформа не запускалась. Выгрузка .dt и эксклюзивное подключение проверяются первой копией.");
     }
 
+    internal static string SqlLoginDescription(SqlServerAuthentication authentication, string? connectionString)
+    {
+        if (authentication == SqlServerAuthentication.Windows)
+            return "Вход MS SQL: учётная запись Windows исполнителя, указанная в отчёте.";
+        try
+        {
+            var login = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString ?? "").UserID;
+            if (!string.IsNullOrWhiteSpace(login) && login.Length <= 128 && !login.Any(char.IsControl))
+                return "Логин MS SQL (параметр подключения): " + login + ". Пользователь Windows в отчёте относится к исполнителю программы.";
+        }
+        catch (ArgumentException) { }
+        return "Вход MS SQL: сохранённый SQL-логин. Имя логина не передано поставщиком; пользователь Windows в отчёте относится к исполнителю программы.";
+    }
+
     private async Task<SourceCheckReport> CheckSqlAsync(BackupJob job, CancellationToken token)
     {
         await using var connection = sqlConnectionFactory?.Invoke(job) ?? await SqlServerBackupExecutor.CreateConnectionAsync(job, sqlCredentials, token);
         await connection.OpenAsync(token);
+        var login = SqlLoginDescription(job.SqlServer!.Authentication,
+            job.SqlServer.Authentication == SqlServerAuthentication.SqlServer ? connection.ConnectionString : null) + "\n";
         await using var command = connection.CreateCommand();
         command.CommandTimeout = 20;
         command.CommandText = "SELECT CASE WHEN DB_ID(@database) IS NOT NULL AND HAS_DBACCESS(@database) = 1 "
@@ -117,13 +133,14 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         var value = await command.ExecuteScalarAsync(token);
         token.ThrowIfCancellationRequested();
         if (value is not int result || result != 1)
-            return new(false, "Подключение к MS SQL установлено, но база недоступна или нет права BACKUP DATABASE. Проверьте имя базы в задании и попросите администратора проверить доступ и права выбранного пользователя. При Windows-входе служба использует свою учётную запись.");
-        return new(true, "Подключение к MS SQL, доступ к базе и право BACKUP DATABASE проверены. Копия не создавалась. Права службы на серверную папку, сопоставление путей, VERIFYONLY и восстановление проверяются отдельно.");
+            return new(false, login + "Подключение к MS SQL установлено, но база недоступна или нет права BACKUP DATABASE. Проверьте имя базы в задании и попросите администратора проверить доступ и права выбранного пользователя. При Windows-входе служба использует свою учётную запись.");
+        return new(true, login + "Подключение к MS SQL, доступ к базе и право BACKUP DATABASE проверены. Копия не создавалась. Права службы на серверную папку, сопоставление путей, VERIFYONLY и восстановление проверяются отдельно.");
     }
 
     private async Task<SourceCheckReport> CheckPostgreSqlAsync(BackupJob job, CancellationToken token)
     {
         var settings = job.PostgreSql!;
+        var login = "Пользователь PostgreSQL (параметр подключения): " + settings.Username + ".\n";
         if (!File.Exists(settings.PgDumpPath) || !File.Exists(settings.PgRestorePath))
             throw new FileNotFoundException("Не найдены pg_dump или pg_restore. Выберите установленные утилиты PostgreSQL.");
         var psql = Path.Combine(Path.GetDirectoryName(settings.PgDumpPath)!, OperatingSystem.IsWindows() ? "psql.exe" : "psql");
@@ -142,8 +159,8 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
                 { DiscardStandardOutput = true, ErrorLogPath = Path.Combine(work, "psql.log"), Environment = connection.Environment }, token);
             token.ThrowIfCancellationRequested();
             return code == 0
-                ? new(true, (settings.Tls is not null ? "TLS: сертификат и имя сервера проверены. " : "") + "Подключение к базе PostgreSQL проверено через psql и SELECT 1. Дамп не создавался. Доступ к данным всех таблиц, совместимость pg_dump и восстановление проверяются первой копией и тестовым восстановлением.")
-                : new(false, $"Не удалось проверить подключение к PostgreSQL (psql, код {code}). Проверьте сервер, порт, имя базы и пользователя. В редакторе задания проверьте выбранный способ входа и при необходимости задайте пароль заново. Если сервер требует TLS, попросите администратора проверить настройки и сертификаты. Код выхода не определяет точную причину; дамп при этой проверке не создавался.");
+                ? new(true, login + (settings.Tls is not null ? "TLS: сертификат и имя сервера проверены. " : "") + "Подключение к базе PostgreSQL проверено через psql и SELECT 1. Дамп не создавался. Доступ к данным всех таблиц, совместимость pg_dump и восстановление проверяются первой копией и тестовым восстановлением.")
+                : new(false, login + $"Не удалось проверить подключение к PostgreSQL (psql, код {code}). Проверьте сервер, порт, имя базы и пользователя. В редакторе задания проверьте выбранный способ входа и при необходимости задайте пароль заново. Если сервер требует TLS, попросите администратора проверить настройки и сертификаты. Код выхода не определяет точную причину; дамп при этой проверке не создавался.");
         }
         finally
         {

@@ -34,22 +34,31 @@ internal static partial class DesktopSmoke
 
     private static void VerifyFirstRunGuide(MainWindow window, Action<string, Window> screenshot)
     {
-        var opened = false;
+        var originalWidth = window.Width; var originalHeight = window.Height;
         try
         {
-            window.FirstRunGuideOpened = (guide, text) => guide.Dispatcher.BeginInvoke(new Action(() =>
+            foreach (var compact in new[] { false, true })
             {
-                try
+                window.Width = compact ? 900 : originalWidth; window.Height = compact ? 580 : originalHeight;
+                window.UpdateLayout(); var opened = false;
+                window.FirstRunGuideOpened = (guide, text) => guide.Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    opened = text.IsReadOnly && text.Text.Contains("5.") && text.Text.Contains("Проводника")
-                        && text.Text.Contains("тестовую базу");
-                    screenshot("first-run-guide", guide);
-                }
-                finally { guide.Close(); }
-            }));
-            ((MenuItem)window.FindName("FirstRunGuideMenuItem")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            if (!opened) throw new InvalidOperationException("Инструкция первого запуска не объясняет проверку и восстановление.");
+                    try
+                    {
+                        opened = text.IsReadOnly && text.Text.Contains("5.") && text.Text.Contains("Проводника")
+                            && text.Text.Contains("тестовую базу") && guide.ActualHeight <= window.ActualHeight + 1
+                            && guide.ActualWidth <= window.ActualWidth + 1;
+                        screenshot(compact ? "first-run-guide-compact" : "first-run-guide", guide);
+                    }
+                    finally { guide.Close(); }
+                }));
+                ((MenuItem)window.FindName("FirstRunGuideMenuItem")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                if (!opened) throw new InvalidOperationException("Инструкция первого запуска не объясняет проверку/восстановление или не помещается в окно владельца.");
+            }
         }
-        finally { window.FirstRunGuideOpened = null; }
+        finally
+        {
+            window.FirstRunGuideOpened = null; window.Width = originalWidth; window.Height = originalHeight; window.UpdateLayout();
+        }
     }
 }
