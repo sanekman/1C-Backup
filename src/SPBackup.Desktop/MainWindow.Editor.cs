@@ -400,14 +400,17 @@ public partial class MainWindow
         try { next = BackupSchedule.NextRun(job, DateTimeOffset.UtcNow); }
         catch (ArgumentException) { SelectedJobSummary.Text = "Проверьте расписание задания."; return; }
         catch (InvalidOperationException) { SelectedJobSummary.Text = "Проверьте расписание задания."; return; }
-        var scheduleRunning = CurrentScheduleExecution() is AutomationExecution.Service or AutomationExecution.Background or AutomationExecution.Window;
+        var scheduleExecution = CurrentScheduleExecution();
+        var scheduleRunning = scheduleExecution is AutomationExecution.Service or AutomationExecution.Background or AutomationExecution.Window;
+        var executorHint = scheduleRunning ? "" : scheduleExecution == AutomationExecution.Off
+            ? " · включите автоматическое копирование" : " · работа исполнителя пока не подтверждена; проверьте его состояние";
         var nextText = job.ScheduleKind == ScheduleKind.Manual ? "Запуск только вручную · кнопка «Создать копию» доступна независимо от расписания"
             : !job.Enabled ? "Расписание задания выключено · ручной запуск доступен"
             : job.ScheduleKind == ScheduleKind.SystemStartup ? "При загрузке системы: одна попытка после запуска агента"
-                + (scheduleRunning ? "" : " · работа исполнителя пока не подтверждена")
+                + executorHint
             : next is null ? "Ближайший запуск не определён. Проверьте расписание."
             : "По расписанию: " + next.Value.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.InvariantCulture)
-                + (scheduleRunning ? "" : " · работа исполнителя пока не подтверждена");
+                + executorHint;
         var resultText = running ? "Создаётся копия. Дождитесь результата; отмена доступна в программе, которая запустила копирование."
             : LatestJobRuns.IsLoading ? "Загружается история запусков."
             : LatestJobRuns.Runs is null ? "История запусков недоступна. Откройте «История запусков» и нажмите «Обновить»."
