@@ -1,0 +1,2 @@
+pywinrm==0.5.0
+Pillow==11.3.0

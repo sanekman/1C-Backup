@@ -41,9 +41,9 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 var fileSnapshots = new FileBackupSnapshotStore(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(workRoot))!, "file-snapshots"));
                 IBackupExecutor selectedExecutor = job.Kind switch
                 {
-                    DatabaseKind.FilesAndFolders => fileAccessWrapper?.Invoke(new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, timeProvider: timeProvider))
-                        ?? new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, timeProvider: timeProvider),
-                    DatabaseKind.WebDav => new WebDavBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, webDavClientFactory, timeProvider),
+                    DatabaseKind.FilesAndFolders => fileAccessWrapper?.Invoke(new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, timeProvider: timeProvider, recoveryStorage: completion.Storage))
+                        ?? new FileFolderBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, timeProvider: timeProvider, recoveryStorage: completion.Storage),
+                    DatabaseKind.WebDav => new WebDavBackupExecutor(completion.Catalog, fileSnapshots, completion.Passwords, webDavClientFactory, timeProvider, completion.Storage),
                     _ => executor
                 };
                 log.Write(DiagnosticEvent.BackupCreationStarted);

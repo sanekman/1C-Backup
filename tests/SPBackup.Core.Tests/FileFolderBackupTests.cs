@@ -132,12 +132,14 @@ public sealed class FileFolderBackupTests : IDisposable
     }
 
     [Fact]
-    public async Task NewDestinationAndPasswordChangeForceAFullBasisForEveryStore()
+    public async Task NewDestinationBackfillsTheChainAndPasswordChangeStartsANewFullBasis()
     {
         await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "content"); await Run();
         var job = Job with { AdditionalDestinations = [new() { DestinationDirectory = Path.Combine(root, "extra"), KeepLast = 2 }] };
         var run = await Runner().RunAsync(job); Assert.True(run.Status == BackupRunStatus.Succeeded, run.Error);
-        Assert.All(run.Destinations!, result => Assert.True(result.Record!.Backup.FileSnapshot!.IsFull));
+        Assert.All(run.Destinations!, result => Assert.False(result.Record!.Backup.FileSnapshot!.IsFull));
+        foreach (var destination in run.Destinations!)
+            Assert.Equal("content", await File.ReadAllTextAsync(Path.Combine((await Restorer().RestoreAsync(destination.Record!, job, RestoreParent)).Directory, "a.txt")));
         var protectedJob = job with { ArchivePasswordKey = "new-password-key" };
         var protectedRun = await Runner(new Passwords()).RunAsync(protectedJob); Assert.True(protectedRun.Status == BackupRunStatus.Succeeded, protectedRun.Error);
         Assert.All(protectedRun.Destinations!, result => Assert.True(result.Record!.Backup.FileSnapshot!.IsFull));
@@ -199,7 +201,9 @@ public sealed class FileFolderBackupTests : IDisposable
         var full = await Run(job); var increment = await Run(job);
         if (missing) File.Delete(full.Backup.Location); else await File.AppendAllTextAsync(full.Backup.Location, "changed");
         File.Delete(Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"));
-        var next = await Run(job); Assert.True(next.Backup.FileSnapshot!.IsFull);
+        var next = await Runner().RunAsync(job);
+        Assert.Equal(BackupRunStatus.Failed, next.Status); Assert.Null(next.Backup);
+        Assert.Contains("автоматически она не создаётся", next.Error);
         Assert.True(File.Exists(increment.Backup.Location));
         Assert.Equal(!missing, File.Exists(full.Backup.Location));
     }
@@ -259,7 +263,7 @@ public sealed class FileFolderBackupTests : IDisposable
     }
 
     [Fact]
-    public async Task RecoveryVerifiesEveryLocalDestinationAndRejectsDivergingTips()
+    public async Task RecoveryUsesHealthyMirrorAndRepairsALaggingDestination()
     {
         var job = Job with { FullBackupEvery = 7, KeepLast = 10,
             AdditionalDestinations = [new() { DestinationDirectory = Path.Combine(root, "extra"), KeepLast = 10 }] };
@@ -271,7 +275,10 @@ public sealed class FileFolderBackupTests : IDisposable
         var secondTip = records.Single(record => record.Backup.FileSnapshot?.SnapshotId == inc.Backup.FileSnapshot.SnapshotId
             && record.Backup.Location.StartsWith(Path.Combine(root, "extra")));
         await catalog.RemoveAsync(secondTip.Id); File.Delete(state);
-        Assert.True((await Run(job)).Backup.FileSnapshot!.IsFull);
+        var continued = await Run(job);
+        Assert.False(continued.Backup.FileSnapshot!.IsFull);
+        foreach (var delivered in (await catalog.ReadAsync()).Where(record => record.Backup.FileSnapshot?.SnapshotId == continued.Backup.FileSnapshot.SnapshotId))
+            Assert.Equal("data", await File.ReadAllTextAsync(Path.Combine((await Restorer().RestoreAsync(delivered, job, RestoreParent)).Directory, "a.txt")));
     }
 
     [Fact]
@@ -282,7 +289,8 @@ public sealed class FileFolderBackupTests : IDisposable
         var edited = full with { Backup = full.Backup with { Location = outside } };
         await File.WriteAllTextAsync(Path.Combine(root, "copies.json"), JsonSerializer.Serialize(new[] { edited }));
         File.Delete(Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"));
-        Assert.True((await Run(job)).Backup.FileSnapshot!.IsFull);
+        var next = await Runner().RunAsync(job);
+        Assert.Equal(BackupRunStatus.Failed, next.Status); Assert.Null(next.Backup);
         Assert.True(File.Exists(outside));
     }
 
@@ -374,6 +382,46 @@ public sealed class FileFolderBackupTests : IDisposable
             ? Task.FromException(new IOException("fixture delete denied")) : inner.DeleteAsync(backup, job, token);
     }
 
+    [Fact]
+    public async Task CatchingUpAMirrorPreservesOriginalFullTimeAndTheWeeklyFullDay()
+    {
+        var extra = Path.Combine(root, "weekly-extra");
+        var clock = new BackupTestClock("2026-11-02T10:00:00Z");
+        var job = Job with { FullBackupDayOfWeek = DayOfWeek.Friday, TimeZoneId = "UTC", KeepLast = 10,
+            AdditionalDestinations = [new() { DestinationDirectory = extra, KeepLast = 10 }] };
+        var routed = new FailOneTarget(extra);
+        var runner = new LocalBackupRunner(new NoDatabase(), new BackupCompletion(routed, catalog), history,
+            Path.Combine(root, "default-work"), timeProvider: clock);
+        var file = Path.Combine(Source, "a.txt"); await File.WriteAllTextAsync(file, "before");
+        var first = await runner.RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, first.Status);
+        var rootId = first.Backup!.FileSnapshot!.FullSnapshotId;
+        clock.Set("2026-11-03T10:00:00Z"); routed.Failing = true; await File.WriteAllTextAsync(file, "after");
+        Assert.Equal(BackupRunStatus.PartiallySucceeded, (await runner.RunAsync(job)).Status);
+        clock.Set("2026-11-04T10:00:00Z"); routed.Failing = false;
+        var continued = await runner.RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, continued.Status);
+        Assert.False(continued.Backup!.FileSnapshot!.IsFull); Assert.Equal(rootId, continued.Backup.FileSnapshot.FullSnapshotId);
+        Assert.All((await catalog.ReadAsync()).Where(record => record.Backup.FileSnapshot?.SnapshotId == rootId),
+            record => Assert.Equal(DateTimeOffset.Parse("2026-11-02T10:00:00Z"), record.CompletedUtc));
+        foreach (var destination in continued.Destinations!)
+            Assert.Equal("after", await File.ReadAllTextAsync(Path.Combine((await Restorer().RestoreAsync(destination.Record!, job, RestoreParent)).Directory, "a.txt")));
+        clock.Set("2026-11-06T10:00:00Z");
+        var planned = await runner.RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, planned.Status);
+        Assert.True(planned.Backup!.FileSnapshot!.IsFull); Assert.NotEqual(rootId, planned.Backup.FileSnapshot.FullSnapshotId);
+    }
+
+    [Fact]
+    public async Task MissingCatalogWithExistingSnapshotCacheCannotSilentlyStartANewFullCopy()
+    {
+        await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "data");
+        var full = await Run(Job with { FullBackupEvery = 7 });
+        var before = await File.ReadAllBytesAsync(full.Backup.Location);
+        await catalog.RemoveAsync(full.Id);
+        var run = await Runner().RunAsync(Job with { FullBackupEvery = 7 });
+        Assert.Equal(BackupRunStatus.Failed, run.Status); Assert.Null(run.Backup);
+        Assert.Equal(before, await File.ReadAllBytesAsync(full.Backup.Location));
+        Assert.Single(Directory.GetFiles(Job.DestinationDirectory));
+    }
+
     private sealed class FailOneTarget(string target) : IBackupStorage
     {
         private readonly FileBackupStorage inner = new();
@@ -386,7 +434,7 @@ public sealed class FileFolderBackupTests : IDisposable
     }
 
     [Fact]
-    public async Task PartialIncrementDeliveryForcesFreshFullBasisWhenTargetReturns()
+    public async Task PartialIncrementDeliveryBackfillsAncestorsAndKeepsThePlannedChain()
     {
         var extra = Path.Combine(root, "extra"); var file = Path.Combine(Source, "a.txt"); await File.WriteAllTextAsync(file, "before");
         var job = Job with { FullBackupEvery = 7, AdditionalDestinations = [new() { DestinationDirectory = extra, KeepLast = 2 }] };
@@ -400,11 +448,13 @@ public sealed class FileFolderBackupTests : IDisposable
         Assert.False(partial.Backup!.FileSnapshot!.IsFull); Assert.True(File.Exists(extraBasis.Backup.Location));
         Assert.True(Directory.Exists(partial.WorkDirectory));
         routed.Failing = false; var recovered = await runner.RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, recovered.Status);
-        Assert.All(recovered.Destinations!, destination => Assert.True(destination.Record!.Backup.FileSnapshot!.IsFull));
+        Assert.All(recovered.Destinations!, destination => Assert.False(destination.Record!.Backup.FileSnapshot!.IsFull));
+        Assert.Equal(partial.Backup.FileSnapshot.FullSnapshotId, recovered.Backup!.FileSnapshot!.FullSnapshotId);
+        Assert.Contains(recovered.Warnings!, warning => warning.Contains("Доставлены пропущенные"));
         foreach (var destination in recovered.Destinations!)
         {
             var restored = await Restorer().RestoreAsync(destination.Record!, job, RestoreParent);
-            Assert.Equal(1, restored.Archives); Assert.Equal("after", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "a.txt")));
+            Assert.Equal(3, restored.Archives); Assert.Equal("after", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "a.txt")));
         }
     }
 
@@ -429,7 +479,10 @@ public sealed class FileFolderBackupTests : IDisposable
         await Assert.ThrowsAsync<InvalidDataException>(() => new BackupRetention(catalog, storage).ApplyAsync(Job, increment));
         Assert.True(File.Exists(full.Backup.Location)); Assert.True(File.Exists(increment.Backup.Location));
         Assert.Empty(Directory.GetFileSystemEntries(RestoreParent));
-        var replacement = await Run(); Assert.True(replacement.Backup.FileSnapshot!.IsFull);
+        var blocked = await Runner().RunAsync(Job);
+        Assert.Equal(BackupRunStatus.Failed, blocked.Status); Assert.Null(blocked.Backup);
+        var replacement = await Run(Job with { FileBackupMode = FileBackupMode.Full });
+        Assert.True(replacement.Backup.FileSnapshot!.IsFull);
     }
 
     [Fact]

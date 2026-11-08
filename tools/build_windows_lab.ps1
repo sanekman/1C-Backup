@@ -18,12 +18,14 @@ Push-Location $repo
 try {
     foreach ($item in @(
         @{ Project = 'src/SPBackup.Agent'; Directory = 'agent' },
-        @{ Project = 'tests/WindowsAgentServiceSmoke'; Directory = 'probe' }
+        @{ Project = 'tests/WindowsAgentServiceSmoke'; Directory = 'probe' },
+        @{ Project = 'src/SPBackup.Desktop'; Directory = 'desktop' }
     )) {
         & dotnet publish $item.Project -c Release -r win-x64 --self-contained true -m:1 -nr:false `
             "-p:SourceRevisionId=$revision" -o (Join-Path $Output $item.Directory)
         if ($LASTEXITCODE -ne 0) { throw "Could not publish $($item.Project)" }
     }
+    Copy-Item -Path (Join-Path $Output 'agent\*') -Destination (Join-Path $Output 'desktop') -Recurse -Force
     & dotnet build tests/SPBackup.Core.Tests -c Release -m:1 -nr:false -o (Join-Path $Output 'tests')
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the actual SMB delivery tests.' }
     foreach ($part in @('bin', 'lib', 'share')) {

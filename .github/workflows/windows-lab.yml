@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/windows-lab.yml'
       - 'tools/*windows_lab*.ps1'
+      - 'tools/windows_vm/**'
+      - 'tools/probe_windows_vm_host.py'
       - 'tests/WindowsAgentServiceSmoke/**'
       - 'tests/SPBackup.Core.Tests/**'
       - 'tests/shared/**'
@@ -18,11 +20,15 @@ on:
       mode:
         description: Lab bundle or accelerated VM capability probe
         type: choice
-        options: [bundle, probe-vm]
+        options: [bundle, probe-vm, vm]
         default: bundle
 
 permissions:
   contents: read
+
+concurrency:
+  group: windows-lab-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   probe-vm:
@@ -46,7 +52,7 @@ jobs:
           retention-days: 14
 
   bundle:
-    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'bundle'
+    if: github.event_name != 'workflow_dispatch' || (inputs.mode == 'bundle' || inputs.mode == 'vm')
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -64,4 +70,35 @@ jobs:
         with:
           name: windows-lab-${{ github.sha }}
           path: artifacts/windows-lab/
+          retention-days: 14
+
+  windows-vm:
+    needs: bundle
+    if: contains(github.event.head_commit.message, '[windows-vm]') || inputs.mode == 'vm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-lab-${{ github.sha }}
+          path: artifacts/vm-bundle
+      - name: Install isolated VM tools
+        run: |
+          sudo chgrp "$(id -gn)" /dev/kvm
+          sudo chmod 660 /dev/kvm
+          python3 tools/probe_windows_vm_host.py --output artifacts/vm-host.json
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils ovmf genisoimage python3-venv
+          python3 -m venv .vm-venv
+          .vm-venv/bin/pip install -q -r tools/windows_vm/requirements.txt
+      - name: Real Windows reset during a blocked database dump
+        run: .vm-venv/bin/python -u tools/windows_vm/run.py --bundle artifacts/vm-bundle --output artifacts/windows-vm
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-reboot-verification
+          path: |
+            artifacts/windows-vm/
+            artifacts/vm-host.json
           retention-days: 14

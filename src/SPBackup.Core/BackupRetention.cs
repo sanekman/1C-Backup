@@ -81,6 +81,7 @@ public sealed record MultipleBackupCompletion(IReadOnlyList<DestinationResult> D
 public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catalog, IArchivePasswordStore? passwords = null)
 {
     internal BackupCatalog Catalog => catalog;
+    internal IBackupStorage Storage => storage;
     internal IArchivePasswordStore? Passwords => passwords;
     private readonly SemaphoreSlim gate = new(1, 1);
     public async Task PrepareAsync(BackupJob job, CancellationToken cancellationToken = default)
@@ -144,6 +145,8 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationDeliveryStarted, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
                     BackupProgressContext.Report(BackupStage.ConnectingStorage);
                     await storage.PrepareAsync(target, cancellationToken);
+                    var repaired = await new FileBackupChainRepair(storage, catalog, passwords).EnsureAsync(job, target, prepared.FileSnapshot,
+                        Path.GetDirectoryName(Path.GetFullPath(stagingDirectory))!, cancellationToken);
                     var stored = (await storage.StoreAsync(prepared.Path, target, cancellationToken))
                         with { ArchivePasswordKey = job.ArchivePasswordKey, FileSnapshot = prepared.FileSnapshot };
                     // A delivered file must enter the ledger even if cancellation was requested meanwhile.
@@ -153,7 +156,8 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                     var retention = await new BackupRetention(catalog, storage).ApplyAsync(target, record, cancellationToken, destinationIndex: index - 1);
                     BackupProgressContext.Report(BackupStage.Completed);
                     return (new DestinationResult(destination, record, null,
-                        retention.Failures.Select(f => "Очистка: " + f.Error.Message).Concat(retention.Warnings).ToArray()), false);
+                        retention.Failures.Select(f => "Очистка: " + f.Error.Message).Concat(retention.Warnings)
+                            .Concat(repaired > 0 ? new[] { "Доставлены пропущенные предшествующие архивы цепочки: " + repaired + ". План полных копий сохранён." } : []).ToArray()), false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
