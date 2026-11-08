@@ -610,6 +610,7 @@ public partial class MainWindow : Window
         OpenRunDirectoryButton.IsEnabled = ready && RunHistory.SelectedItem is BackupRun;
         UpdateSelectedJobSummary();
         UpdateSelectedSchedule();
+        UpdateJobActionsLayout();
         UpdateRunGuidance();
         UpdateAutomationOverview();
     }

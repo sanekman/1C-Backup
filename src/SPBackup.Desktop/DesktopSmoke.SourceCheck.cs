@@ -48,6 +48,13 @@ internal static partial class DesktopSmoke
             if (Control<Button>("CheckSourceButton").IsEnabled
                 || !(Control<Button>("CheckSourceButton").ToolTip?.ToString()?.Contains("Выберите задание") ?? false))
                 throw new InvalidOperationException("Нет понятной причины недоступности проверки без задания.");
+            var other = job with { Id = Guid.NewGuid(), Name = "Другое задание" };
+            grid.ItemsSource = new object[] { job, other };
+            grid.SelectedItem = job;
+            Control<Expander>("StorageCheckResults").IsExpanded = true;
+            grid.SelectedItem = other;
+            if (Control<Expander>("StorageCheckResults").Visibility != Visibility.Collapsed)
+                throw new InvalidOperationException("Отчёт одного задания показан для другого.");
             var changed = job with { Source = job.Source + "-changed" };
             grid.ItemsSource = ((IEnumerable<object>)originalItems).Select(item => item is BackupJob value && value.Id == job.Id ? changed : item).ToArray();
             grid.SelectedItem = changed;

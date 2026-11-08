@@ -45,7 +45,9 @@ public partial class MainWindow
         if (JobActionsContainer is null || JobActions is null || JobsView is null) return;
         var viewHeight = JobsView.ActualHeight;
         var buttons = Math.Max(0, JobActions.ActualHeight);
-        var expanded = StorageCheckResults.IsExpanded || SelectedSchedulePanel.IsExpanded || ManualQueuePanel.IsExpanded;
+        var expanded = StorageCheckResults.Visibility == Visibility.Visible && StorageCheckResults.IsExpanded
+            || SelectedSchedulePanel.Visibility == Visibility.Visible && SelectedSchedulePanel.IsExpanded
+            || ManualQueuePanel.Visibility == Visibility.Visible && ManualQueuePanel.IsExpanded;
         if (ActualHeight < 650)
         {
             // Collapsed details leave space for the header and two job rows. Expanded
