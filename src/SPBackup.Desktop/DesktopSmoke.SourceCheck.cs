@@ -53,6 +53,30 @@ internal static partial class DesktopSmoke
         await WaitUntil(() => window.SmokeReady, "Повторная проверка не завершилась.");
         if (Control<TextBox>("StorageCheckDetails").Text.Contains("Настройки задания изменились после проверки"))
             throw new InvalidOperationException("Новая проверка не сбросила предупреждение об устаревании.");
+        var reportPath = Path.Combine(Path.GetDirectoryName(DesktopPaths.DataDirectory)!, "check-report-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            window.ReadinessReportExportDialogOverride = dialog => { dialog.FileName = reportPath; return true; };
+            Click("SaveReadinessReportButton");
+            await WaitUntil(() => window.SmokeReady, "Сохранение отчёта не завершилось.");
+            var exported = await File.ReadAllTextAsync(reportPath);
+            if (!exported.Contains("Пользователь:") || !exported.Contains("эксклюзивный доступ"))
+                throw new InvalidOperationException("Сохранённый отчёт потерял результат или контекст проверки.");
+            Click("SaveReadinessReportButton");
+            await WaitUntil(() => window.SmokeReady, "Проверка существующего отчёта не завершилась.");
+            if (await File.ReadAllTextAsync(reportPath) != exported
+                || !Control<TextBlock>("ReadinessReportActionStatus").Text.Contains("уже существует"))
+                throw new InvalidOperationException("Существующий отчёт был заменён или ошибка не объяснена.");
+            Click("CopyReadinessReportButton");
+            if (Clipboard.GetText() != exported)
+                throw new InvalidOperationException("Скопированный и сохранённый отчёты не совпали.");
+            Click("ClearReadinessReportButton");
+            if (Control<Expander>("StorageCheckResults").IsVisible || Control<TextBox>("StorageCheckDetails").Text.Length != 0)
+                throw new InvalidOperationException("Очистка отчёта не скрыла прежний результат.");
+        }
+        finally { window.ReadinessReportExportDialogOverride = null; if (File.Exists(reportPath)) File.Delete(reportPath); }
+        Click("CheckSourceButton");
+        await WaitUntil(() => window.SmokeReady, "Проверка после очистки отчёта не завершилась.");
         window.Width = 900; window.Height = 580; window.UpdateLayout();
         screenshot("source-check-success-compact");
         await using (var held = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
