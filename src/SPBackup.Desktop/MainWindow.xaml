@@ -230,7 +230,7 @@
     <TextBlock x:Name="FileArchiveHint" Visibility="Collapsed" Text="Копируется файл базы в ZIP. Перед запуском закройте эту базу у всех пользователей 1С."
      TextWrapping="Wrap" Margin="0,0,0,12" Background="{DynamicResource WarningSurfaceBrush}" Foreground="{DynamicResource WarningBrush}" Padding="8" />
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="14" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-    <StackPanel><TextBlock Text="Название задания (понятное вам имя)" TextWrapping="Wrap" /><TextBox x:Name="JobName" Margin="0,4,0,10" /></StackPanel>
+    <StackPanel><TextBlock Text="Название задания" /><TextBox x:Name="JobName" ToolTip="Понятное вам имя задания. Имя базы и адрес источника задаются отдельно ниже." Margin="0,4,0,10" /></StackPanel>
     <StackPanel Grid.Column="2"><TextBlock Text="Что копировать" /><ComboBox x:Name="Kind" Margin="0,4,0,10" ItemTemplate="{StaticResource DatabaseKindLabel}" SelectionChanged="Kind_Changed" /></StackPanel>
    </Grid>
    <StackPanel x:Name="OneCBasePickerPanel" Margin="0,0,0,8">
