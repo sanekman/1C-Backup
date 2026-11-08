@@ -36,8 +36,8 @@ public partial class MainWindow
         if (StorageCheckDetails is not null) StorageCheckDetails.MaxHeight = ActualHeight < 650 ? 60 : 130;
         // Keep room for the table header and at least two job rows in the
         // compact window, even when delivery progress has many destinations.
-        if (JobActionsScroll is not null)
-            JobActionsScroll.MaxHeight = Math.Max(80, Math.Min(JobsView.ActualHeight * 0.4, JobsView.ActualHeight - 200));
+        if (JobActionsContainer is not null)
+            JobActionsContainer.MaxHeight = Math.Max(120, Math.Min(JobsView.ActualHeight * 0.55, JobsView.ActualHeight - 180));
     }
 
     private async void CheckStorage_Click(object sender, RoutedEventArgs e)
