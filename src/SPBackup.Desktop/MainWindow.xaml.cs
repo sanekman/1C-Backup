@@ -609,6 +609,7 @@ public partial class MainWindow : Window
         ExportHistoryButton.IsEnabled = ready && !historyRefreshing && RunHistory.Items.Count != 0;
         OpenRunDirectoryButton.IsEnabled = ready && RunHistory.SelectedItem is BackupRun;
         UpdateSelectedJobSummary();
+        UpdateSelectedSchedule();
         UpdateRunGuidance();
         UpdateAutomationOverview();
     }

@@ -112,6 +112,11 @@
         <Button x:Name="CheckLatestCopiesButton" Content="Проверить последние копии" Margin="0,0,8,6" IsEnabled="False" Click="CheckLatestCopies_Click" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="CancelStorageCheckButton" Content="Отменить проверку" Margin="0,0,8,6" Visibility="Collapsed" Click="CancelCopyVerification_Click" />
        </WrapPanel>
+       <Expander x:Name="SelectedSchedulePanel" Header="Расписание выбранного задания" Visibility="Collapsed" Margin="0,4,0,0" Expanded="SelectedSchedule_Expanded">
+        <StackPanel><TextBox x:Name="SelectedScheduleDetails" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="130" VerticalScrollBarVisibility="Auto" BorderThickness="0" AutomationProperties.Name="Прогноз расписания и состояние исполнителя" />
+         <Button x:Name="EditSelectedScheduleButton" Content="Изменить параметры задания…" Click="EditSelectedSchedule_Click" HorizontalAlignment="Left" IsEnabled="False" />
+        </StackPanel>
+       </Expander>
        <Expander x:Name="ManualQueuePanel" Header="Ручные запуски" Visibility="Collapsed" Margin="0,4,0,0">
         <TextBox x:Name="ManualQueueDetails" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="100" VerticalScrollBarVisibility="Auto" BorderThickness="0" AutomationProperties.Name="Принятые ручные запуски и ожидание результата" />
        </Expander>

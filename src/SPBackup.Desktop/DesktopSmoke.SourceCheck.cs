@@ -16,6 +16,13 @@ internal static partial class DesktopSmoke
         var grid = Control<DataGrid>("Jobs");
         var job = grid.Items.OfType<BackupJob>().First(target => target.Kind == DatabaseKind.OneCFile && target.OneCMethod == OneCBackupMethod.FileArchive);
         grid.SelectedItem = job;
+        var selectedSchedule = Control<Expander>("SelectedSchedulePanel");
+        selectedSchedule.IsExpanded = true;
+        if (selectedSchedule.Visibility != Visibility.Visible
+            || !Control<TextBox>("SelectedScheduleDetails").Text.Contains("Задание: " + job.Name)
+            || !Control<TextBox>("SelectedScheduleDetails").Text.Contains("Результат проверяйте в истории"))
+            throw new InvalidOperationException("Прогноз выбранного задания не объясняет условия запуска.");
+        selectedSchedule.IsExpanded = false;
         var source = Path.GetFullPath(job.Source);
         var file = string.Equals(Path.GetFileName(source), "1Cv8.1CD", StringComparison.OrdinalIgnoreCase) ? source : Path.Combine(source, "1Cv8.1CD");
         var sourceBytes = await File.ReadAllBytesAsync(file);

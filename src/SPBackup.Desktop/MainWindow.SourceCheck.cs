@@ -6,6 +6,7 @@ namespace SPBackup.Desktop;
 
 public partial class MainWindow
 {
+    private bool checkingSource;
     private async void CheckSource_Click(object sender, RoutedEventArgs e)
     {
         if (!CheckSourceButton.IsEnabled || Jobs.SelectedItem is not BackupJob job) return;
@@ -13,7 +14,7 @@ public partial class MainWindow
         if (lease is null) return;
         using var cancellation = new CancellationTokenSource();
         copyVerification = cancellation;
-        checkingStorages = true;
+        checkingSource = checkingStorages = true;
         BeginReadinessReport(job, ReadinessKind.Source);
         StorageCheckResults.Visibility = Visibility.Visible;
         StorageCheckResults.IsExpanded = false;
@@ -53,7 +54,7 @@ public partial class MainWindow
         }
         finally
         {
-            checkingStorages = false; copyVerification = null;
+            checkingSource = checkingStorages = false; copyVerification = null;
             StorageCheckResults.Visibility = Jobs.SelectedItem is BackupJob selected && selected.Id == job.Id
                 ? Visibility.Visible : Visibility.Collapsed;
             UpdateRunControls();

@@ -378,12 +378,14 @@ public partial class MainWindow
     {
         if (SelectedJobSummary is null) return;
         JobProgress.Visibility = Visibility.Collapsed;
-        System.Windows.Automation.AutomationProperties.SetName(JobProgress, checkingLatestCopies ? "Проверка последних копий" : checkingStorages ? "Проверка хранилищ" : "Создание резервной копии");
+        System.Windows.Automation.AutomationProperties.SetName(JobProgress, checkingLatestCopies ? "Проверка последних копий" : checkingSource ? "Проверка источника" : checkingStorages ? "Проверка хранилищ" : "Создание резервной копии");
         if (checkingStorages)
         {
             SelectedJobSummary.Foreground = (System.Windows.Media.Brush)FindResource("MutedBrush");
             JobProgress.Visibility = Visibility.Visible;
-            SelectedJobSummary.Text = checkingLatestCopies
+            SelectedJobSummary.Text = checkingSource
+                ? "Проверяется источник из окна программы. Резервная копия не создаётся; дождитесь результата или отмените проверку."
+                : checkingLatestCopies
                 ? "Проверяются последние копии во всех хранилищах. База не копируется; дождитесь результата или отмените проверку."
                 : "Проверяются временная папка и хранилища. Дождитесь результата или отмените проверку.";
             return;
@@ -398,10 +400,14 @@ public partial class MainWindow
         try { next = BackupSchedule.NextRun(job, DateTimeOffset.UtcNow); }
         catch (ArgumentException) { SelectedJobSummary.Text = "Проверьте расписание задания."; return; }
         catch (InvalidOperationException) { SelectedJobSummary.Text = "Проверьте расписание задания."; return; }
-        var nextText = job.Enabled && job.ScheduleKind == ScheduleKind.SystemStartup ? "При загрузке системы: одна попытка после запуска агента"
-            : !job.Enabled || job.ScheduleKind == ScheduleKind.Manual || next is null ? "Автозапуск для задания выключен"
+        var scheduleRunning = CurrentScheduleExecution() is AutomationExecution.Service or AutomationExecution.Background or AutomationExecution.Window;
+        var nextText = job.ScheduleKind == ScheduleKind.Manual ? "Запуск только вручную · кнопка «Создать копию» доступна независимо от расписания"
+            : !job.Enabled ? "Расписание задания выключено · ручной запуск доступен"
+            : job.ScheduleKind == ScheduleKind.SystemStartup ? "При загрузке системы: одна попытка после запуска агента"
+                + (scheduleRunning ? "" : " · работа исполнителя пока не подтверждена")
+            : next is null ? "Ближайший запуск не определён. Проверьте расписание."
             : "По расписанию: " + next.Value.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.InvariantCulture)
-                + (backgroundBusy && backgroundState?.Phase == LocalAgentPhase.Running || schedulingTask is not null ? "" : " · включите автоматическое копирование");
+                + (scheduleRunning ? "" : " · работа исполнителя пока не подтверждена");
         var resultText = running ? "Создаётся копия. Дождитесь результата; отмена доступна в программе, которая запустила копирование."
             : LatestJobRuns.IsLoading ? "Загружается история запусков."
             : LatestJobRuns.Runs is null ? "История запусков недоступна. Откройте «История запусков» и нажмите «Обновить»."
