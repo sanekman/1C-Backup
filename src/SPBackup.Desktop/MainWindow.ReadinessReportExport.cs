@@ -54,6 +54,7 @@ public partial class MainWindow
     private void ClearReadinessReport_Click(object sender, RoutedEventArgs e)
     {
         if (!ClearReadinessReportButton.IsEnabled) return;
+        readinessKind = null; readinessOutcome = null;
         storageCheckJobId = null; readinessJobFingerprint = null; readinessReportStale = false;
         StorageCheckDetails.Clear(); StorageCheckResults.IsExpanded = false;
         ReadinessReportState.Text = ReadinessReportActionStatus.Text = "";

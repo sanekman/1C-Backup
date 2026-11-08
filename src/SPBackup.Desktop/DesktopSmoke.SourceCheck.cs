@@ -49,10 +49,14 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Результат прежних настроек показан как актуальный.");
         }
         finally { grid.ItemsSource = originalItems; grid.SelectedItem = job; }
-        Click("CheckSourceButton");
+        if (!Control<Button>("RetryReadinessReportButton").IsEnabled || !Control<Button>("EditReadinessJobButton").IsEnabled)
+            throw new InvalidOperationException("Отчёт не предлагает повторную проверку или исправление задания.");
+        Click("RetryReadinessReportButton");
         await WaitUntil(() => window.SmokeReady, "Повторная проверка не завершилась.");
         if (Control<TextBox>("StorageCheckDetails").Text.Contains("Настройки задания изменились после проверки"))
             throw new InvalidOperationException("Новая проверка не сбросила предупреждение об устаревании.");
+        if (!Control<TextBlock>("ReadinessReportState").Text.Contains("успешно"))
+            throw new InvalidOperationException("Успешная повторная проверка не получила итоговый статус.");
         var reportPath = Path.Combine(Path.GetDirectoryName(DesktopPaths.DataDirectory)!, "check-report-" + Guid.NewGuid().ToString("N") + ".txt");
         try
         {
@@ -71,7 +75,8 @@ internal static partial class DesktopSmoke
             if (Clipboard.GetText() != exported)
                 throw new InvalidOperationException("Скопированный и сохранённый отчёты не совпали.");
             Click("ClearReadinessReportButton");
-            if (Control<Expander>("StorageCheckResults").IsVisible || Control<TextBox>("StorageCheckDetails").Text.Length != 0)
+            if (Control<Expander>("StorageCheckResults").IsVisible || Control<TextBox>("StorageCheckDetails").Text.Length != 0
+                || Control<Button>("RetryReadinessReportButton").IsEnabled)
                 throw new InvalidOperationException("Очистка отчёта не скрыла прежний результат.");
         }
         finally { window.ReadinessReportExportDialogOverride = null; if (File.Exists(reportPath)) File.Delete(reportPath); }

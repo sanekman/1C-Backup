@@ -14,7 +14,7 @@ public partial class MainWindow
         using var cancellation = new CancellationTokenSource();
         copyVerification = cancellation;
         checkingStorages = true;
-        BeginReadinessReport(job);
+        BeginReadinessReport(job, ReadinessKind.Source);
         StorageCheckResults.Visibility = Visibility.Visible;
         StorageCheckResults.IsExpanded = false;
         StorageCheckResults.Header = "Проверяется источник: " + job.Name;
@@ -25,6 +25,7 @@ public partial class MainWindow
         {
             var checker = new SourceReadinessChecker(new BackupProcessRunner(), Path.Combine(DesktopPaths.DataDirectory, "work"));
             var report = await Task.Run(() => checker.CheckAsync(job, cancellation.Token));
+            readinessOutcome = report.Cancelled ? ReadinessOutcome.Cancelled : report.Succeeded ? ReadinessOutcome.Success : ReadinessOutcome.Failed;
             StorageCheckResults.Header = report.Cancelled ? "Проверка источника отменена: " + job.Name
                 : report.Succeeded ? "Источник доступен: " + job.Name : "Источник не прошёл проверку: " + job.Name;
             StorageCheckDetails.Text = "Задание: " + job.Name + "\nИсточник: " + job.Source
@@ -38,13 +39,16 @@ public partial class MainWindow
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
+            readinessOutcome = ReadinessOutcome.Cancelled;
+            StorageCheckResults.IsExpanded = true;
             StorageCheckResults.Header = Status.Text = "Проверка источника отменена: " + job.Name;
-            StorageCheckDetails.Text = "Проверка отменена. Часть источника могла быть проверена; доступ ко всему источнику не подтверждён.";
+            StorageCheckDetails.Text = ReadinessFailureDetails(job, "Проверка отменена. Часть источника могла быть проверена; доступ ко всему источнику не подтверждён.");
         }
         catch (Exception ex)
         { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
             StorageCheckResults.Header = Status.Text = "Проверка источника не выполнена: " + job.Name;
-            StorageCheckDetails.Text = ex.Message;
+            readinessOutcome = ReadinessOutcome.Failed;
+            StorageCheckDetails.Text = ReadinessFailureDetails(job, ex.Message);
             StorageCheckResults.IsExpanded = true;
         }
         finally

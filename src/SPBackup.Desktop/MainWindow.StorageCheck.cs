@@ -49,7 +49,7 @@ public partial class MainWindow
         using var cancellation = new CancellationTokenSource();
         copyVerification = cancellation;
         checkingStorages = true;
-        BeginReadinessReport(job);
+        BeginReadinessReport(job, ReadinessKind.Storages, throughAgent);
         StorageCheckResults.Visibility = Visibility.Visible;
         StorageCheckResults.IsExpanded = false;
         StorageCheckResults.Header = "Проверяются хранилища: " + job.Name;
@@ -74,6 +74,7 @@ public partial class MainWindow
             var passed = report.Destinations.Count(result => result.Succeeded);
             var all = report.TemporaryError is null && report.Destinations.Count == job.StorageJobs.Count
                 && passed == job.StorageJobs.Count && !report.Cancelled;
+            readinessOutcome = report.Cancelled ? ReadinessOutcome.Cancelled : all ? ReadinessOutcome.Success : ReadinessOutcome.Failed;
             StorageCheckResults.Header = report.Cancelled ? "Проверка отменена: " + job.Name
                 : all ? "Все хранилища доступны (" + (throughAgent ? "агент" : "окно") + "): " + job.Name
                     : $"Проверено хранилищ: {passed} из {job.StorageJobs.Count} — {job.Name}";
@@ -101,14 +102,17 @@ public partial class MainWindow
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
+            readinessOutcome = ReadinessOutcome.Cancelled;
+            StorageCheckResults.IsExpanded = true;
             StorageCheckResults.Header = Status.Text = (throughAgent ? "Ожидание проверки отменено: " : "Проверка отменена: ") + job.Name;
-            StorageCheckDetails.Text = throughAgent ? "Ожидание отменено. Исполнитель может ещё убирать свои тестовые файлы. Проверьте его состояние перед повтором; расписание продолжает работать."
-                : "Проверка отменена. Часть операций могла быть выполнена; полный доступ к хранилищам не подтверждён.";
+            StorageCheckDetails.Text = ReadinessFailureDetails(job, throughAgent ? "Ожидание отменено. Исполнитель может ещё убирать свои тестовые файлы. Проверьте его состояние перед повтором; расписание продолжает работать."
+                : "Проверка отменена. Часть операций могла быть выполнена; полный доступ к хранилищам не подтверждён.");
         }
         catch (Exception ex)
         { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
             StorageCheckResults.Header = Status.Text = "Проверка не выполнена: " + job.Name;
-            StorageCheckDetails.Text = ex.Message;
+            readinessOutcome = ReadinessOutcome.Failed;
+            StorageCheckDetails.Text = ReadinessFailureDetails(job, ex.Message);
             StorageCheckResults.IsExpanded = true;
         }
         finally

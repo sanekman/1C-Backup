@@ -14,22 +14,24 @@ public partial class MainWindow
         using var cancellation = new CancellationTokenSource();
         copyVerification = cancellation;
         checkingLatestCopies = checkingStorages = true;
-        BeginReadinessReport(job);
+        BeginReadinessReport(job, ReadinessKind.Copies);
         StorageCheckResults.Visibility = Visibility.Visible;
         StorageCheckResults.IsExpanded = false;
         StorageCheckResults.Header = Status.Text = "Проверяются последние копии: " + job.Name;
         StorageCheckDetails.Text = "Для каждого хранилища проверяется размер и SHA-256 последней зарегистрированной копии. База не копируется.";
         UpdateRunControls();
         var started = DateTimeOffset.UtcNow;
-        var identity = StorageCheckIdentity.Current();
+        var identity = readinessWindowIdentity;
         try
         {
             var checker = new LatestBackupAudit(backupStorage, EffectiveCatalog);
             var report = await Task.Run(() => checker.CheckAsync(job, cancellation.Token));
             var passed = report.Destinations.Count(result => result.Status == BackupAuditStatus.Verified);
             var incomplete = report.Destinations.Count(result => result.Record?.Backup.FileSnapshot?.IsIncomplete == true);
-            var all = !report.Cancelled && passed == report.Destinations.Count;
+            var all = !report.Cancelled && report.Destinations.Count > 0 && report.Destinations.Count == job.StorageJobs.Count && passed == report.Destinations.Count;
+            readinessOutcome = report.Cancelled ? ReadinessOutcome.Cancelled : all ? incomplete > 0 ? ReadinessOutcome.Warning : ReadinessOutcome.Success : ReadinessOutcome.Failed;
             StorageCheckResults.Header = Status.Text = report.Cancelled ? "Проверка копий отменена: " + job.Name
+                : report.Destinations.Count == 0 ? "Результаты проверки копий не получены: " + job.Name
                 : all ? $"Все последние копии проверены: {passed} — {job.Name}"
                 : $"Проверено последних копий: {passed} из {report.Destinations.Count} — {job.Name}";
             if (incomplete > 0)
@@ -37,7 +39,8 @@ public partial class MainWindow
                 Status.Text += $" · Неполных копий: {incomplete}";
                 StorageCheckResults.Header = Status.Text;
             }
-            var details = new List<string> { "Задание: " + job.Name, "Проверка из окна программы. Пользователь: " + identity.Account, ReadinessTime(started, DateTimeOffset.UtcNow) };
+            var details = new List<string> { "Задание: " + job.Name, "Проверка из окна программы. Пользователь: " + (identity?.Account ?? "не определён"), ReadinessTime(started, DateTimeOffset.UtcNow) };
+            details.Add($"Хранилищ в задании: {job.StorageJobs.Count}. Проверено: {passed}. Нет копии: {report.Destinations.Count(result => result.Status == BackupAuditStatus.Missing)}. Ошибок: {report.Destinations.Count(result => result.Status == BackupAuditStatus.Failed)}. Отменено: {report.Destinations.Count(result => result.Status == BackupAuditStatus.Cancelled)}.");
             details.AddRange(report.Destinations.OrderBy(result => result.Status == BackupAuditStatus.Verified).Select(result =>
                 result.Destination + "\n" + (result.Status == BackupAuditStatus.Verified ? result.Record?.Backup.FileSnapshot is { } snapshot
                     ? $"Проверены все архивы файловой цепочки: {snapshot.Depth + 1}. Размер и SHA-256 совпадают."
@@ -59,18 +62,21 @@ public partial class MainWindow
             if (attempted.Length > 0)
             {
                 var warning = await RememberChecksAsync(attempted);
-                if (warning.Length > 0) { StorageCheckDetails.Text += "\n\n" + warning; StorageCheckResults.IsExpanded = true; }
+                if (warning.Length > 0) { readinessOutcome = readinessOutcome == ReadinessOutcome.Success ? ReadinessOutcome.Warning : readinessOutcome; StorageCheckDetails.Text += "\n\n" + warning; StorageCheckResults.IsExpanded = true; }
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
+            readinessOutcome = ReadinessOutcome.Cancelled;
+            StorageCheckResults.IsExpanded = true;
             StorageCheckResults.Header = Status.Text = "Проверка копий отменена: " + job.Name;
-            StorageCheckDetails.Text = "Проверка отменена. Часть копий могла быть прочитана; целостность остальных не подтверждена.";
+            StorageCheckDetails.Text = ReadinessFailureDetails(job, "Проверка отменена. Часть копий могла быть прочитана; целостность остальных не подтверждена.");
         }
         catch (Exception ex)
         { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
             StorageCheckResults.Header = Status.Text = "Проверка копий не выполнена: " + job.Name;
-            StorageCheckDetails.Text = ex.Message;
+            readinessOutcome = ReadinessOutcome.Failed;
+            StorageCheckDetails.Text = ReadinessFailureDetails(job, ex.Message);
             StorageCheckResults.IsExpanded = true;
         }
         finally

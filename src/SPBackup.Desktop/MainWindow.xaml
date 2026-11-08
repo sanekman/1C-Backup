@@ -133,6 +133,8 @@
          <TextBlock x:Name="ReadinessReportState" TextWrapping="Wrap" Margin="6,4" />
          <TextBox x:Name="StorageCheckDetails" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="130" VerticalScrollBarVisibility="Auto" BorderThickness="0" Padding="6" />
          <WrapPanel Margin="6,4">
+          <Button x:Name="RetryReadinessReportButton" Content="Повторить проверку" Click="RetryReadinessReport_Click" Margin="0,0,8,4" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+          <Button x:Name="EditReadinessJobButton" Content="Изменить задание" Click="EditReadinessJob_Click" Margin="0,0,8,4" IsEnabled="False" />
           <Button x:Name="CopyReadinessReportButton" Content="Копировать отчёт" Click="CopyReadinessReport_Click" Margin="0,0,8,4" IsEnabled="False" />
           <Button x:Name="SaveReadinessReportButton" Content="Сохранить отчёт…" Click="SaveReadinessReport_Click" Margin="0,0,8,4" IsEnabled="False" />
           <Button x:Name="ClearReadinessReportButton" Content="Скрыть и очистить" Click="ClearReadinessReport_Click" Margin="0,0,0,4" IsEnabled="False" />
