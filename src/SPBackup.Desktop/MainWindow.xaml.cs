@@ -542,7 +542,7 @@ public partial class MainWindow : Window
         CheckSourceButton.IsEnabled = canInspectLocally;
         CheckSourceButton.ToolTip = !engineAvailable || schedulingTask is not null
             ? "Остановите автоматическое копирование, чтобы проверить источник."
-            : "Проверить файл базы или SQL-подключение без создания резервной копии. Для PostgreSQL нужен psql рядом с pg_dump.";
+            : "Проверка из окна программы, от его пользователя. Доступ службы этим не подтверждается. Проверить файл базы или SQL-подключение без создания резервной копии. Для PostgreSQL нужен psql рядом с pg_dump.";
         CheckStorageButton.ToolTip = BackgroundAcceptsStorageChecks
             ? "Проверить хранилища через работающего агента, под его пользователем. Расписание продолжит работать; резервная копия не создаётся."
             : !engineAvailable ? "Дождитесь готовности исполнителя. Если он не поддерживает проверку без остановки расписания, обновите и перезапустите агент/службу."

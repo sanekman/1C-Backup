@@ -18,7 +18,7 @@ public partial class MainWindow
         StorageCheckResults.Visibility = Visibility.Visible;
         StorageCheckResults.IsExpanded = false;
         StorageCheckResults.Header = "Проверяется источник: " + job.Name;
-        StorageCheckDetails.Text = "Проверка доступа без создания копии. Платформа 1С не запускается.";
+        StorageCheckDetails.Text = "Проверка выполняется из окна программы, от его пользователя. Копия не создаётся, платформа 1С не запускается.";
         Status.Text = StorageCheckResults.Header.ToString();
         UpdateRunControls();
         try
@@ -27,7 +27,11 @@ public partial class MainWindow
             var report = await Task.Run(() => checker.CheckAsync(job, cancellation.Token));
             StorageCheckResults.Header = report.Cancelled ? "Проверка источника отменена: " + job.Name
                 : report.Succeeded ? "Источник доступен: " + job.Name : "Источник не прошёл проверку: " + job.Name;
-            StorageCheckDetails.Text = "Задание: " + job.Name + "\nИсточник: " + job.Source + "\n\n" + report.Details
+            StorageCheckDetails.Text = "Задание: " + job.Name + "\nИсточник: " + job.Source
+                + "\nПроверка из окна программы. Пользователь: " + (report.ExecutionIdentity?.Account ?? "не определён")
+                + "\n" + ReadinessTime(report.StartedUtc, report.FinishedUtc)
+                + "\n\n" + report.Details
+                + "\n\nДоступ службы Windows этим результатом не подтверждён. Первую копию выполните через того исполнителя, который будет работать автоматически."
                 + "\n\nРезультат на " + DateTimeOffset.Now.ToString("dd.MM.yyyy HH:mm:ss") + ". Копии, история и правила хранения не изменялись.";
             StorageCheckResults.IsExpanded = !report.Succeeded;
             Status.Text = StorageCheckResults.Header.ToString();
@@ -35,7 +39,7 @@ public partial class MainWindow
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             StorageCheckResults.Header = Status.Text = "Проверка источника отменена: " + job.Name;
-            StorageCheckDetails.Text = "Проверка отменена до обращения к источнику.";
+            StorageCheckDetails.Text = "Проверка отменена. Часть источника могла быть проверена; доступ ко всему источнику не подтверждён.";
         }
         catch (Exception ex)
         { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
@@ -46,6 +50,8 @@ public partial class MainWindow
         finally
         {
             checkingStorages = false; copyVerification = null;
+            StorageCheckResults.Visibility = Jobs.SelectedItem is BackupJob selected && selected.Id == job.Id
+                ? Visibility.Visible : Visibility.Collapsed;
             UpdateRunControls();
         }
     }

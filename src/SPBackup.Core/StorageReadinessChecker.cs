@@ -24,6 +24,8 @@ public sealed record StorageCheckReport(string TemporaryDirectory, string? Tempo
     IReadOnlyList<StorageCheckResult> Destinations, bool Cancelled)
 {
     public StorageCheckIdentity? ExecutionIdentity { get; init; }
+    public DateTimeOffset? StartedUtc { get; init; }
+    public DateTimeOffset? FinishedUtc { get; init; }
     public long? TemporaryAvailableBytes { get; init; }
     public string TemporaryAvailableSpaceDescription => TemporaryAvailableBytes is { } bytes ? BackupDiskSpace.Format(bytes) : "Не удалось определить";
 }
@@ -33,6 +35,7 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
 {
     public async Task<StorageCheckReport> CheckAsync(BackupJob job, CancellationToken cancellationToken = default)
     {
+        var started = DateTimeOffset.UtcNow;
         var errors = job.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         cancellationToken.ThrowIfCancellationRequested();
@@ -127,7 +130,7 @@ public sealed class StorageReadinessChecker(IBackupStorage storage, string defau
             }
         }
         return new(root, temporaryError, results, cancelled || cancellationToken.IsCancellationRequested)
-        { ExecutionIdentity = identity, TemporaryAvailableBytes = temporaryError is null && !cancelled && !cancellationToken.IsCancellationRequested
+        { ExecutionIdentity = identity, StartedUtc = started, FinishedUtc = DateTimeOffset.UtcNow, TemporaryAvailableBytes = temporaryError is null && !cancelled && !cancellationToken.IsCancellationRequested
             ? BackupDiskSpace.AvailableBytes(root) : null };
     }
 }

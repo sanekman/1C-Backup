@@ -3,7 +3,12 @@ using System.Data.Common;
 
 namespace SPBackup.Core;
 
-public sealed record SourceCheckReport(bool Succeeded, string Details, bool Cancelled = false);
+public sealed record SourceCheckReport(bool Succeeded, string Details, bool Cancelled = false)
+{
+    public StorageCheckIdentity? ExecutionIdentity { get; init; }
+    public DateTimeOffset? StartedUtc { get; init; }
+    public DateTimeOffset? FinishedUtc { get; init; }
+}
 
 /// <summary>Reads source availability without creating a database backup or running the 1C platform.</summary>
 public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, string defaultWorkRoot,
@@ -12,6 +17,10 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
 {
     public async Task<SourceCheckReport> CheckAsync(BackupJob job, CancellationToken cancellationToken = default)
     {
+        var started = DateTimeOffset.UtcNow;
+        var identity = StorageCheckIdentity.Current();
+        SourceCheckReport Complete(SourceCheckReport result) => result with
+        { ExecutionIdentity = identity, StartedUtc = started, FinishedUtc = DateTimeOffset.UtcNow };
         var errors = job.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         cancellationToken.ThrowIfCancellationRequested();
@@ -31,14 +40,14 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
             };
             DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckCompleted, result.Succeeded ? DiagnosticLevel.Info : DiagnosticLevel.Warning,
                 jobId: job.Id, sourceKind: job.Kind, values: new(Code: result.Succeeded ? 0 : 1));
-            return result;
+            return Complete(result);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckCompleted, DiagnosticLevel.Warning, jobId: job.Id, sourceKind: job.Kind, values: new(Code: 2)); return new(false, "Проверка источника отменена.", true); }
+        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckCompleted, DiagnosticLevel.Warning, jobId: job.Id, sourceKind: job.Kind, values: new(Code: 2)); return Complete(new(false, "Проверка источника отменена.", true)); }
         catch (OperationCanceledException)
-        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Warning, jobId: job.Id, sourceKind: job.Kind, values: new(Code: 3)); return new(false, "Время проверки источника превысило 30 секунд. Проверьте подключение и доступ."); }
+        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Warning, jobId: job.Id, sourceKind: job.Kind, values: new(Code: 3)); return Complete(new(false, "Время проверки источника превысило 30 секунд. Проверьте подключение и доступ.")); }
         catch (Exception ex)
-        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Error, ex, jobId: job.Id, sourceKind: job.Kind); return new(false, job.Kind == DatabaseKind.SqlServer ? SqlServerErrorHints.Describe(ex) ?? ex.Message : ex.Message); }
+        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Error, ex, jobId: job.Id, sourceKind: job.Kind); return Complete(new(false, job.Kind == DatabaseKind.SqlServer ? SqlServerErrorHints.Describe(ex) ?? ex.Message : ex.Message)); }
     }
 
     private async Task<SourceCheckReport> CheckWebDavAsync(BackupJob job, CancellationToken token)

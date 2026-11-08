@@ -23,6 +23,9 @@ public sealed class StorageReadinessTests : IDisposable
         var source = Path.Combine(root, "database");
         await File.WriteAllTextAsync(source, "source bytes");
         var report = await Checker().CheckAsync(Job with { Source = source });
+        Assert.NotNull(report.StartedUtc); Assert.NotNull(report.FinishedUtc);
+        Assert.True(report.FinishedUtc >= report.StartedUtc);
+        Assert.NotNull(report.ExecutionIdentity);
         Assert.Null(report.TemporaryError);
         Assert.False(report.Cancelled);
         Assert.Equal(Job.TemporaryDirectory, report.TemporaryDirectory);

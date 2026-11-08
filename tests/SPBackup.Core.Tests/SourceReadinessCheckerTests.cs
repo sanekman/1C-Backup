@@ -28,6 +28,24 @@ public sealed class SourceReadinessCheckerTests : IDisposable
     private void Psql() => File.WriteAllText(Path.Combine(root, OperatingSystem.IsWindows() ? "psql.exe" : "psql"), "fixture");
     private static Process NoProcess() => new((_, _) => throw new InvalidOperationException("A file check must not start any process"));
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SuccessfulAndFailedChecksIncludeActualIdentityAndTime(bool exists)
+    {
+        if (exists) await File.WriteAllTextAsync(Database, "fixture");
+        var before = DateTimeOffset.UtcNow;
+        var result = await Checker(NoProcess()).CheckAsync(FileJob);
+        Assert.Equal(exists, result.Succeeded);
+        Assert.NotNull(result.ExecutionIdentity);
+        Assert.False(string.IsNullOrWhiteSpace(result.ExecutionIdentity.Account));
+        Assert.NotNull(result.StartedUtc); Assert.NotNull(result.FinishedUtc);
+        Assert.InRange(result.StartedUtc.Value, before, DateTimeOffset.UtcNow);
+        Assert.InRange(result.FinishedUtc.Value, result.StartedUtc.Value, DateTimeOffset.UtcNow);
+        var saved = System.Text.Json.JsonSerializer.Deserialize<SourceCheckReport>(System.Text.Json.JsonSerializer.Serialize(result));
+        Assert.Equal(result, saved);
+    }
+
     [Fact]
     public async Task ExclusiveFileCheckLeavesBytesUnchangedReleasesHandleAndCreatesNoWork()
     {

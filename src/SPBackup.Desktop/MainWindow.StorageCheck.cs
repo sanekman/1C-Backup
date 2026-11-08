@@ -6,6 +6,14 @@ namespace SPBackup.Desktop;
 
 public partial class MainWindow
 {
+    private static string ReadinessTime(DateTimeOffset? started, DateTimeOffset? finished)
+    {
+        if (started is null || finished is null) return "Время проверки не получено от исполнителя.";
+        return "Начало: " + started.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")
+            + " · окончание: " + finished.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")
+            + " · длительность: " + Math.Max(0, (finished.Value - started.Value).TotalSeconds).ToString("0.0") + " с";
+    }
+
     private bool BackgroundAcceptsStorageChecks => backgroundBusy && !backgroundStarting
         && LocalStorageCheckQueue.IsAvailable(backgroundState, DateTimeOffset.UtcNow);
     internal bool SmokeBackgroundStorageReady => BackgroundAcceptsStorageChecks;
@@ -72,6 +80,8 @@ public partial class MainWindow
             var details = new List<string> { "Задание: " + job.Name,
                 (throughAgent ? "Проверка через работающего агента." : "Проверка из окна программы.")
                     + " Пользователь: " + (report.ExecutionIdentity?.Account ?? "не определён") };
+            details.Add(ReadinessTime(report.StartedUtc, report.FinishedUtc));
+            if (report.Cancelled) details.Add("Проверка отменена. Успешные результаты относятся только к перечисленным хранилищам; остальные не подтверждены.");
             if (!throughAgent) details.Add("Доступ службы Windows может отличаться. Для проверки её доступа запустите службу и нажмите эту кнопку ещё раз.");
             if (report.TemporaryError is not null)
                 details.Add("Ошибка временной папки: " + report.TemporaryDirectory + "\n" + report.TemporaryError);
@@ -93,7 +103,7 @@ public partial class MainWindow
         {
             StorageCheckResults.Header = Status.Text = (throughAgent ? "Ожидание проверки отменено: " : "Проверка отменена: ") + job.Name;
             StorageCheckDetails.Text = throughAgent ? "Ожидание отменено. Исполнитель может ещё убирать свои тестовые файлы. Проверьте его состояние перед повтором; расписание продолжает работать."
-                : "Проверка отменена до обращения к хранилищам.";
+                : "Проверка отменена. Часть операций могла быть выполнена; полный доступ к хранилищам не подтверждён.";
         }
         catch (Exception ex)
         { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);
