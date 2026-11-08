@@ -10,7 +10,8 @@ public partial class MainWindow
     private AgentMode? selectedScheduleMode;
     private JobSchedulePreview? selectedSchedulePreview;
 
-    private void SelectedSchedule_Expanded(object sender, RoutedEventArgs e) => UpdateSelectedSchedule();
+    private void SelectedSchedule_Expanded(object sender, RoutedEventArgs e)
+    { UpdateJobActionsLayout(); UpdateSelectedSchedule(); }
 
     private void UpdateSelectedSchedule()
     {

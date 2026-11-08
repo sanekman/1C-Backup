@@ -20,7 +20,8 @@ public partial class MainWindow
 
     private void StorageCheckResults_Expanded(object sender, RoutedEventArgs e)
     {
-        // The actions panel has its own scrollbar; wait for the new report height before revealing it.
+        UpdateJobActionsLayout();
+        // Keep primary buttons fixed and reveal the bounded report below them.
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
         {
             if (StorageCheckResults.IsExpanded)
@@ -34,10 +35,26 @@ public partial class MainWindow
     private void JobsView_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (StorageCheckDetails is not null) StorageCheckDetails.MaxHeight = ActualHeight < 650 ? 60 : 130;
-        // Keep room for the table header and at least two job rows in the
-        // compact window, even when delivery progress has many destinations.
-        if (JobActionsContainer is not null)
-            JobActionsContainer.MaxHeight = Math.Max(120, Math.Min(JobsView.ActualHeight * 0.55, JobsView.ActualHeight - 180));
+        UpdateJobActionsLayout();
+    }
+
+    private void JobDetailsExpansion_Changed(object sender, RoutedEventArgs e) => UpdateJobActionsLayout();
+
+    private void UpdateJobActionsLayout()
+    {
+        if (JobActionsContainer is null || JobActions is null || JobsView is null) return;
+        var viewHeight = JobsView.ActualHeight;
+        var buttons = Math.Max(0, JobActions.ActualHeight);
+        var expanded = StorageCheckResults.IsExpanded || SelectedSchedulePanel.IsExpanded || ManualQueuePanel.IsExpanded;
+        if (ActualHeight < 650)
+        {
+            // Collapsed details leave space for the header and two job rows. Expanded
+            // details temporarily receive more room, with primary actions still fixed.
+            JobActionsContainer.MaxHeight = expanded
+                ? Math.Max(buttons + 100, Math.Min(viewHeight * 0.65, viewHeight - 150))
+                : Math.Max(buttons + 32, Math.Min(viewHeight * 0.35, viewHeight - 210));
+        }
+        else JobActionsContainer.MaxHeight = Math.Max(buttons + 100, Math.Min(viewHeight * 0.55, viewHeight - 180));
     }
 
     private async void CheckStorage_Click(object sender, RoutedEventArgs e)
