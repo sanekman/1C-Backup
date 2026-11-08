@@ -249,7 +249,6 @@
     <Button DockPanel.Dock="Right" x:Name="WebDavCredentialsButton" Content="Логин и пароль…" Click="WebDavCredentials_Click" Padding="10,5" Margin="6,0,0,0" Visibility="Collapsed" />
     <TextBox x:Name="Source" TextChanged="OneCSource_Changed" />
    </DockPanel>
-   <TextBlock x:Name="SourceExampleHint" TextWrapping="Wrap" Margin="0,0,0,12" />
    <StackPanel x:Name="WebDavPanel" Visibility="Collapsed">
     <TextBlock x:Name="WebDavCredentialStatus" Text="Подключение ещё не настроено" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6" />
 

@@ -144,6 +144,14 @@ public partial class MainWindow
         SetWizardStep(Math.Min(3, wizardStep + 1));
     }
 
+    private void UpdateEditorSpacing()
+    {
+        if (JobEditor is null || WizardHint is null) return;
+        var compact = ActualHeight < 650;
+        JobEditor.Margin = compact || wizardStep == 3 ? new Thickness(20, 8, 20, 8) : new Thickness(20, 16, 20, 16);
+        WizardHint.Margin = new Thickness(0, 6, 0, compact ? 6 : wizardStep == 3 ? 8 : 16);
+    }
+
     private void SetWizardStep(int step, bool keepError = false)
     {
         wizardStep = step;
@@ -154,13 +162,12 @@ public partial class MainWindow
         PreviousStepButton.IsEnabled = step > 0;
         NextStepButton.Visibility = step < 3 ? Visibility.Visible : Visibility.Collapsed;
         SaveButton.Visibility = step == 3 ? Visibility.Visible : Visibility.Collapsed;
-        JobEditor.Margin = step == 3 ? new Thickness(20, 8, 20, 8) : new Thickness(20, 16, 20, 16);
-        WizardHint.Margin = new Thickness(0, 6, 0, step == 3 ? 8 : 16);
+        UpdateEditorSpacing();
         var labels = new[] { "Источник", "Хранилище", "Расписание", "Проверка" };
         WizardProgress.Text = $"Шаг {step + 1} из 4 · " + string.Join("  →  ", labels.Select((label, index) => index == step ? "[" + label + "]" : label));
         (WizardHeading.Text, WizardHint.Text) = step switch
         {
-            0 => ("Что будем копировать?", "Название поможет найти задание. Выберите источник и способ копирования."),
+            0 => ("Что будем копировать?", BackupSetupGuidance.SourceExample(Kind.SelectedItem is DatabaseKind kind ? kind : DatabaseKind.OneCFile)),
             1 => ("Куда сохранять копии?", "Выберите отдельное место хранения. При необходимости включите ZIP и защиту паролем."),
             2 => ("Когда запускать и сколько хранить?", "Сначала можно выбрать «Только вручную» и проверить копию. Расписание включается отдельно от фоновой работы агента."),
             _ => ("Всё верно?", "Проверьте итог. Полные пути и параметры можно раскрыть ниже.")

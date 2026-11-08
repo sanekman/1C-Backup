@@ -34,6 +34,7 @@ public partial class MainWindow
 
     private void JobsView_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        UpdateEditorSpacing();
         if (StorageCheckDetails is not null) StorageCheckDetails.MaxHeight = ActualHeight < 650 ? 60 : 130;
         UpdateJobActionsLayout();
     }

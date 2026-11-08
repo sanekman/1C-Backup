@@ -460,6 +460,8 @@ public partial class MainWindow : Window
     private void Kind_Changed(object sender, SelectionChangedEventArgs e)
     {
         UpdateOneCControls();
+        if (editorOpen && wizardStep == 0 && Kind.SelectedItem is DatabaseKind sourceKind)
+            WizardHint.Text = BackupSetupGuidance.SourceExample(sourceKind);
     }
 
     private void OneCMethod_Changed(object sender, SelectionChangedEventArgs e) => UpdateOneCControls();
@@ -497,8 +499,6 @@ public partial class MainWindow : Window
         WebDavPanel.Visibility = WebDavOptionsPanel.Visibility = WebDavCredentialsButton.Visibility = isWebDav ? Visibility.Visible : Visibility.Collapsed;
         FileSourceConsistencyHint.Text = isWebDav ? "Копируются файлы выбранной папки, без единого снимка сервера. Избегайте изменений во время копирования." : "Перед копированием закройте программы, изменяющие эти файлы.";
         UpdateFileBackupControls();
-        if (SourceExampleHint is not null && Kind.SelectedItem is DatabaseKind sourceKind)
-            SourceExampleHint.Text = BackupSetupGuidance.SourceExample(sourceKind);
         if (SourceLabel is not null) SourceLabel.Text = isWebDav ? "HTTPS-адрес папки WebDAV" : isFiles ? "Исходный файл или папка" : isOneC ? fileArchive ? "Папка или файл базы" : "Папка базы" : "Имя базы данных";
     }
 

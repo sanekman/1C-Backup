@@ -5,8 +5,8 @@ public static class BackupSetupGuidance
 {
     public static string SourceExample(DatabaseKind kind) => kind switch
     {
-        DatabaseKind.OneCFile => @"Например: C:\Bases\Accounting или \\SERVER\Bases\Accounting. Выберите папку с 1Cv8.1CD. Название задания выше может быть любым.",
-        DatabaseKind.FilesAndFolders => @"Например: D:\Documents или \\NAS\Documents. Укажите исходные данные; папку для готовых архивов выберите на следующем шаге.",
+        DatabaseKind.OneCFile => @"Например: C:\Bases\Accounting или \\SERVER\Bases\Accounting. Нужна папка с 1Cv8.1CD.",
+        DatabaseKind.FilesAndFolders => @"Пример: D:\Documents или \\NAS\Documents. Папку архивов выберите на следующем шаге.",
         DatabaseKind.SqlServer => "Например: Accounting — точное имя базы из SSMS. Адрес MS SQL укажите ниже; сюда не нужны путь .bak или строка подключения.",
         DatabaseKind.PostgreSql => "Например: accounting — точное имя базы из pgAdmin. Сервер, порт и пользователь задаются отдельно ниже; сюда не нужен адрес postgresql:// или путь дампа.",
         DatabaseKind.WebDav => "Например: https://cloud.example.ru/remote.php/dav/files/user/Documents/. Нужен конечный WebDAV-адрес папки, а не ссылка на страницу облака в браузере.",

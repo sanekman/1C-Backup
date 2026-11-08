@@ -17,7 +17,7 @@ internal static partial class DesktopSmoke
             foreach (var value in Enum.GetValues<DatabaseKind>())
             {
                 kind.SelectedItem = value;
-                if (((TextBlock)window.FindName("SourceExampleHint")).Text != BackupSetupGuidance.SourceExample(value))
+                if (((TextBlock)window.FindName("WizardHint")).Text != BackupSetupGuidance.SourceExample(value))
                     throw new InvalidOperationException("Пример источника не соответствует типу задания.");
             }
             foreach (var value in new[] { DatabaseKind.SqlServer, DatabaseKind.PostgreSql })
