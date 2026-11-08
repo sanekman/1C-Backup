@@ -31,6 +31,28 @@ internal static partial class DesktopSmoke
             || !Control<TextBox>("StorageCheckDetails").Text.Contains("эксклюзивный доступ")
             || Control<Expander>("StorageCheckResults").IsExpanded)
             throw new InvalidOperationException("Проверка источника не показывает доступ и ограничения.");
+        var details = Control<TextBox>("StorageCheckDetails").Text;
+        if (!details.Contains("Пользователь:") || !details.Contains("длительность:") || !details.Contains("Доступ службы Windows этим результатом не подтверждён"))
+            throw new InvalidOperationException("Отчёт источника не объясняет пользователя, время или ограничения службы.");
+        var originalItems = grid.ItemsSource;
+        try
+        {
+            grid.SelectedItem = null;
+            if (Control<Button>("CheckSourceButton").IsEnabled
+                || !(Control<Button>("CheckSourceButton").ToolTip?.ToString()?.Contains("Выберите задание") ?? false))
+                throw new InvalidOperationException("Нет понятной причины недоступности проверки без задания.");
+            var changed = job with { Source = job.Source + "-changed" };
+            grid.ItemsSource = ((IEnumerable<object>)originalItems).Select(item => item is BackupJob value && value.Id == job.Id ? changed : item).ToArray();
+            grid.SelectedItem = changed;
+            if (!Control<Expander>("StorageCheckResults").IsExpanded
+                || !Control<TextBox>("StorageCheckDetails").Text.Contains("Настройки задания изменились после проверки"))
+                throw new InvalidOperationException("Результат прежних настроек показан как актуальный.");
+        }
+        finally { grid.ItemsSource = originalItems; grid.SelectedItem = job; }
+        Click("CheckSourceButton");
+        await WaitUntil(() => window.SmokeReady, "Повторная проверка не завершилась.");
+        if (Control<TextBox>("StorageCheckDetails").Text.Contains("Настройки задания изменились после проверки"))
+            throw new InvalidOperationException("Новая проверка не сбросила предупреждение об устаревании.");
         window.Width = 900; window.Height = 580; window.UpdateLayout();
         screenshot("source-check-success-compact");
         await using (var held = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))

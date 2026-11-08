@@ -14,7 +14,7 @@ public partial class MainWindow
         using var cancellation = new CancellationTokenSource();
         copyVerification = cancellation;
         checkingStorages = true;
-        storageCheckJobId = job.Id;
+        BeginReadinessReport(job);
         StorageCheckResults.Visibility = Visibility.Visible;
         StorageCheckResults.IsExpanded = false;
         StorageCheckResults.Header = "Проверяется источник: " + job.Name;

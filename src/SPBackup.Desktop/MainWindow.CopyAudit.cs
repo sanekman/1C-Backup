@@ -14,12 +14,14 @@ public partial class MainWindow
         using var cancellation = new CancellationTokenSource();
         copyVerification = cancellation;
         checkingLatestCopies = checkingStorages = true;
-        storageCheckJobId = job.Id;
+        BeginReadinessReport(job);
         StorageCheckResults.Visibility = Visibility.Visible;
         StorageCheckResults.IsExpanded = false;
         StorageCheckResults.Header = Status.Text = "Проверяются последние копии: " + job.Name;
         StorageCheckDetails.Text = "Для каждого хранилища проверяется размер и SHA-256 последней зарегистрированной копии. База не копируется.";
         UpdateRunControls();
+        var started = DateTimeOffset.UtcNow;
+        var identity = StorageCheckIdentity.Current();
         try
         {
             var checker = new LatestBackupAudit(backupStorage, EffectiveCatalog);
@@ -35,7 +37,7 @@ public partial class MainWindow
                 Status.Text += $" · Неполных копий: {incomplete}";
                 StorageCheckResults.Header = Status.Text;
             }
-            var details = new List<string> { "Задание: " + job.Name };
+            var details = new List<string> { "Задание: " + job.Name, "Проверка из окна программы. Пользователь: " + identity.Account, ReadinessTime(started, DateTimeOffset.UtcNow) };
             details.AddRange(report.Destinations.OrderBy(result => result.Status == BackupAuditStatus.Verified).Select(result =>
                 result.Destination + "\n" + (result.Status == BackupAuditStatus.Verified ? result.Record?.Backup.FileSnapshot is { } snapshot
                     ? $"Проверены все архивы файловой цепочки: {snapshot.Depth + 1}. Размер и SHA-256 совпадают."
@@ -63,7 +65,7 @@ public partial class MainWindow
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             StorageCheckResults.Header = Status.Text = "Проверка копий отменена: " + job.Name;
-            StorageCheckDetails.Text = "Проверка отменена до чтения каталога копий.";
+            StorageCheckDetails.Text = "Проверка отменена. Часть копий могла быть прочитана; целостность остальных не подтверждена.";
         }
         catch (Exception ex)
         { DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, ex);

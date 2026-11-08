@@ -350,9 +350,7 @@ public partial class MainWindow : Window
     private void Jobs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (editorOpen) { UpdateRunControls(); return; }
-        if (!checkingStorages && StorageCheckResults is not null)
-            StorageCheckResults.Visibility = Jobs.SelectedItem is BackupJob selected && selected.Id == storageCheckJobId
-                ? Visibility.Visible : Visibility.Collapsed;
+        UpdateReadinessReportVisibility();
         if (Jobs.SelectedItem is not BackupJob job) { UpdateRunControls(); return; }
         LoadJobEditor(job);
     }
@@ -540,17 +538,19 @@ public partial class MainWindow : Window
         CheckStorageButton.IsEnabled = ready && idle && !editorOpen && Jobs.SelectedItem is BackupJob
             && (engineAvailable || BackgroundAcceptsStorageChecks);
         CheckSourceButton.IsEnabled = canInspectLocally;
-        CheckSourceButton.ToolTip = !engineAvailable || schedulingTask is not null
+        var readinessUnavailable = ReadinessUnavailableReason(idle);
+        CheckSourceButton.ToolTip = readinessUnavailable ?? (!engineAvailable || schedulingTask is not null
             ? "Остановите автоматическое копирование, чтобы проверить источник."
-            : "Проверка из окна программы, от его пользователя. Доступ службы этим не подтверждается. Проверить файл базы или SQL-подключение без создания резервной копии. Для PostgreSQL нужен psql рядом с pg_dump.";
-        CheckStorageButton.ToolTip = BackgroundAcceptsStorageChecks
+            : "Проверка из окна программы, от его пользователя. Доступ службы этим не подтверждается. Проверить файл базы или SQL-подключение без создания резервной копии. Для PostgreSQL нужен psql рядом с pg_dump.");
+        CheckStorageButton.ToolTip = readinessUnavailable ?? (BackgroundAcceptsStorageChecks
             ? "Проверить хранилища через работающего агента, под его пользователем. Расписание продолжит работать; резервная копия не создаётся."
             : !engineAvailable ? "Дождитесь готовности исполнителя. Если он не поддерживает проверку без остановки расписания, обновите и перезапустите агент/службу."
-            : "Проверить хранилища от пользователя окна программы. Доступ службы проверяется через работающего агента.";
+            : "Проверить хранилища от пользователя окна программы. Доступ службы проверяется через работающего агента.");
         CheckLatestCopiesButton.IsEnabled = canInspectLocally;
-        CheckLatestCopiesButton.ToolTip = !engineAvailable || schedulingTask is not null
+        CheckLatestCopiesButton.ToolTip = readinessUnavailable ?? (!engineAvailable || schedulingTask is not null
             ? "Остановите автоматическое копирование, чтобы проверить последние копии."
-            : "Проверить размер и SHA-256 последней зарегистрированной копии в каждом хранилище задания. База и сохранённые копии не изменяются.";
+            : "Проверить размер и SHA-256 последней зарегистрированной копии в каждом хранилище задания. База и сохранённые копии не изменяются.");
+        UpdateReadinessReportVisibility();
         CancelStorageCheckButton.Visibility = checkingStorages ? Visibility.Visible : Visibility.Collapsed;
         CancelStorageCheckButton.IsEnabled = checkingStorages && copyVerification is { IsCancellationRequested: false };
         CancelRunButton.Visibility = activeRun is null ? Visibility.Collapsed : Visibility.Visible;
