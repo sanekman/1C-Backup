@@ -64,6 +64,11 @@ internal static partial class DesktopSmoke
             await WaitUntil(() => reopened.SmokeReady && reopened.SmokeBackgroundManualReady, "Повторно открытое окно не загрузило состояние агента.");
             if (runButton.IsEnabled || !runButton.ToolTip.ToString()!.Contains("уже принят"))
                 throw new InvalidOperationException("Повторно открытое окно допускает дублирование принятого ручного запуска.");
+            var queuePanel = (Expander)reopened.FindName("ManualQueuePanel");
+            var queueDetails = (TextBox)reopened.FindName("ManualQueueDetails");
+            if (queuePanel.Visibility != Visibility.Visible || !queueDetails.Text.Contains(job.Name)
+                || !queueDetails.Text.Contains("не показана полная очередь расписания"))
+                throw new InvalidOperationException("Восстановленная ручная очередь не объяснена пользователю.");
             screenshot("manual-queue-reopened-window", reopened);
             var otherJob = grid.Items.OfType<BackupJob>().First(j => j.Id != job.Id);
             var status = (TextBlock)reopened.FindName("Status");

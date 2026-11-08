@@ -60,11 +60,19 @@ public partial class MainWindow
             automationAutostart, automationAutostartUnknown);
     }
 
+    private string ObservationAutomationNote()
+    {
+        var enabled = observationTasks.Count(task => task.Enabled);
+        return enabled == 0 ? "" : $"Наблюдений включено: {enabled}. Для опроса нужен работающий агент или служба.";
+    }
+
     private void ShowAutomationNotice(string message, string detail)
     {
         BackgroundStatus.Text = message; NextAutomaticRun.Text = detail;
         BackgroundStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
-        BackgroundStatus.ToolTip = NextAutomaticRun.ToolTip = message + "\n" + detail;
+        var observations = ObservationAutomationNote();
+        if (observations.Length > 0) NextAutomaticRun.Text += (detail.Length > 0 ? " · " : "") + observations;
+        BackgroundStatus.ToolTip = NextAutomaticRun.ToolTip = message + "\n" + detail + "\n" + observations;
     }
 
     internal void RenderAutomationOverview(IReadOnlyList<BackupJob> source, AutomationObservation observation, bool autostart, bool autostartUnknown = false)
@@ -120,6 +128,12 @@ public partial class MainWindow
             detail += "\nПоследнее сообщение агента: " + warning;
             NextAutomaticRun.Text = "Сообщение агента: " + warning;
             if (state.ScheduleRunning) BackgroundStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningBrush");
+        }
+        var observations = ObservationAutomationNote();
+        if (observations.Length > 0)
+        {
+            NextAutomaticRun.Text += " · " + observations;
+            detail += "\n" + observations;
         }
         BackgroundStatus.ToolTip = detail;
         NextAutomaticRun.ToolTip = detail;

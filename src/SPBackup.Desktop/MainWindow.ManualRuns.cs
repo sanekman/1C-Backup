@@ -22,6 +22,7 @@ public partial class MainWindow
 
     private void UpdateManualRunControl()
     {
+        UpdateManualQueueOverview();
         RunButton.Content = Jobs.SelectedItem is ExternalBackupTask ? "Проверить сейчас" : "Создать копию";
         if (Jobs.SelectedItem is ExternalBackupTask)
         {
@@ -40,8 +41,17 @@ public partial class MainWindow
             && !trayStopping && !persisting && !jobFileTransfer && !schedulerStopping && copyVerification is null
             && !submittingManualRun && !backgroundStarting && (!backgroundBusy || BackgroundAcceptsManualRuns)
             && selected is not null && !queued;
-        RunButton.ToolTip = queued ? "Ручной запуск этого задания уже принят. Другие задания можно добавить в очередь."
+        RunButton.ToolTip = !ready ? "Дождитесь загрузки настроек агента."
+            : editorOpen ? "Сохраните или закройте мастер задания, затем выберите задание в списке."
+            : selected is null ? "Выберите задание резервного копирования в таблице."
+            : !configurationReady ? "Настройки агента требуют внимания. Откройте «Настройки → Подключения»."
+            : queued ? "Ручной запуск этого задания уже принят. Другие задания можно добавить в очередь."
             : BackgroundManualSessionLive && !BackgroundAcceptsManualRuns ? "Проверяется очередь ручных запусков. До завершения проверки запуск недоступен."
+            : copyVerification is not null ? "Дождитесь проверки или отмените её, затем создайте копию."
+            : backgroundStarting ? "Дождитесь запуска фонового исполнителя."
+            : serviceManaging || installingUpdate || changingAgentConfiguration || trayStopping || persisting || jobFileTransfer || schedulerStopping
+                ? "Дождитесь завершения текущей операции управления агентом."
+            : submittingManualRun ? "Запрос ручного запуска передаётся агенту. Дождитесь подтверждения."
             : backgroundBusy && !BackgroundAcceptsManualRuns ? "Дождитесь готовности агента. Если используется старая версия, обновите и перезапустите агент."
             : agentSettings?.Mode == AgentMode.Managed && !BackgroundAcceptsManualRuns ? "Нажмите «Включить автоматически», чтобы запускать серверные задания через агента."
             : "Выполнить сохранённое задание вручную. Если копирование уже идёт, задание дождётся своей очереди. Расписание продолжит работать.";
@@ -103,12 +113,14 @@ public partial class MainWindow
             }
             catch(Exception error) when(error is System.IO.IOException or UnauthorizedAccessException or System.Text.Json.JsonException or System.IO.InvalidDataException)
             {
+                manualReceiptWarnings.Add(request.RequestId);
                 // Keep this job guarded against a duplicate click, but still refresh all other requests.
                 Status.Text="Не удалось прочитать подтверждение ручного запуска. Проверьте историю перед повторным запуском.";
                 if(backgroundState?.SessionId!=request.SessionId || !backgroundBusy
                     || backgroundState.Phase is LocalAgentPhase.Stopped or LocalAgentPhase.Faulted) backgroundManualRuns.Remove(request.RequestId);
                 continue;
             }
+            manualReceiptWarnings.Remove(request.RequestId);
             if (receipt is { Phase: not LocalManualRunPhase.Accepted })
             {
                 backgroundManualRuns.Remove(request.RequestId);
@@ -124,6 +136,8 @@ public partial class MainWindow
                 Status.Text = "Сеанс агента завершён. Проверьте историю перед повторным ручным запуском.";
             }
         }
+        manualReceiptWarnings.IntersectWith(backgroundManualRuns.Keys);
+        UpdateManualQueueOverview();
     }
 
     private void CancelQueuedManualRuns()
