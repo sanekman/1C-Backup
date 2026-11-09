@@ -6,6 +6,12 @@ using Xunit;
 
 namespace SPBackup.Core.Tests;
 
+// Creating 100001 files and a large manifest saturates hosted Windows filesystem I/O.
+// Run this workload outside timed host/receipt tests; their deadlines stay unchanged.
+[CollectionDefinition("Large backup workload", DisableParallelization = true)]
+public sealed class LargeBackupWorkloadCollection { }
+
+[Collection("Large backup workload")]
 public sealed class LargeFileBackupTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "large-backup-" + Guid.NewGuid());

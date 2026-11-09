@@ -215,7 +215,9 @@ def main():
                     time.sleep(5)
             raise TimeoutError('Windows did not complete setup and private hypervisor control: ' + last_error)
         print('Waiting for Windows setup.', flush=True)
-        wait_guest(1200)
+        # Fresh evaluation setup and Defender scanning may exceed 20 minutes on hosted KVM.
+        # This budget applies only to OS provisioning; backup and reboot assertions stay bounded.
+        wait_guest(2700)
         vm.command('eject', {'device': 'seed', 'force': True})
         def launch(phase):
             name = 'SPBackupOwnedVM-' + phase

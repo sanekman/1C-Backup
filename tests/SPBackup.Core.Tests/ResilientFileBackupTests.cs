@@ -5,6 +5,7 @@ using Xunit;
 
 namespace SPBackup.Core.Tests;
 
+[Collection("Large backup workload")]
 public sealed class ResilientFileBackupTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "resilient-files-" + Guid.NewGuid());
