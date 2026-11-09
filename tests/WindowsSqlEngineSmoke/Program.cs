@@ -91,9 +91,16 @@ try
     Require(new[] { "D", "I", "L" }.All(type => observed.Any(item => item.BackupType == type && item.SizeBytes > 0 && item.Outcome == ExternalBackupOutcome.Completed)),
         "Real full/differential/log history was not observed.");
     var agentId = Guid.NewGuid(); var evaluated = DateTimeOffset.UtcNow;
-    var reports = observed.Select(item => new ExternalBackupReport(Guid.NewGuid(), agentId, monitor.Id, null, evaluated, item)).ToArray();
     var tracked = monitor with { MaximumBackupAgeHours = 1 };
-    var poll = new ExternalBackupPollResult(monitor.Id, monitor.Name, evaluated, observed.Count, observed.Count);
+    var monitorStore = new ExternalBackupMonitorStore(Path.Combine(root, "monitors.json"));
+    var outbox = new ExternalBackupOutbox(Path.Combine(root, "external-reports.json"));
+    var pollingStatus = new ExternalBackupPollingStatusStore(root);
+    var poller = new ExternalBackupPoller(monitorStore, outbox, new AgentSettings { AgentId = agentId }, pollingStatus,
+        _ => new SqlServerBackupHistorySource(credentials: credentials));
+    await monitorStore.SaveAsync([tracked]);
+    var poll = (await poller.PollAsync(evaluated)).Single();
+    Require(poll.Error is null && poll.Observations == observed.Count && poll.Added == observed.Count, "The actual SQL poller did not persist the discovered history.");
+    var reports = await outbox.ReadAsync();
     var task = ExternalBackupTask.Create([tracked], reports, [poll], agentId, evaluated).Single();
     Require(task.ResultCode == "CopyFound" && task.LastFullUtc is not null && task.LastDifferentialUtc is not null && task.LastLogUtc is not null,
         "Monitoring did not expose the real full/differential/log backup dates.");
@@ -108,10 +115,24 @@ try
     var deniedCorrectly = false;
     try { await source.ReadAsync(denied); } catch (Exception error) when (error is SqlException or IOException) { deniedCorrectly = true; }
     Require(deniedCorrectly, "A SQL user without msdb read permissions was reported as a successful poll.");
-    var failedPoll = poll with { Error = "Owned SQL stand permission denial", ErrorCode = "AccessDenied" };
+    await monitorStore.SaveAsync([denied with { MaximumBackupAgeHours = 1 }]);
+    var failedPoll = (await poller.PollAsync(evaluated.AddSeconds(1))).Single();
+    Require(failedPoll.Error is not null && failedPoll.ErrorCode is not null && failedPoll.Observations == 0 && failedPoll.Added == 0,
+        "The actual SQL poller did not retain a classified query failure.");
     Require(ExternalBackupTask.Create([tracked], reports, [failedPoll], agentId, evaluated).Single().ResultCode == "PollFailed",
         "Previous successful history masked a later failed poll.");
     Require((await source.ReadAsync(monitor)).Count == observed.Count, "Failed monitoring affected the next healthy read.");
+    await monitorStore.SaveAsync([tracked]);
+    var recoveredPoll = (await poller.PollAsync(evaluated.AddSeconds(2))).Single();
+    Require(recoveredPoll.Error is null && recoveredPoll.Observations == observed.Count && recoveredPoll.Added == 0,
+        "The recovered SQL poller duplicated evidence or retained the old failure.");
+    Require((await pollingStatus.ReadAsync()).Single().Error is null && (await outbox.ReadAsync()).Count == reports.Count,
+        "Recovery did not clear polling status or preserved duplicate reports.");
+    await monitorStore.SaveAsync([tracked with { DatabaseName = prefix + "_empty" }]);
+    var emptyPoll = (await poller.PollAsync(evaluated.AddSeconds(3))).Single();
+    var emptyTask = ExternalBackupTask.Create([tracked with { DatabaseName = prefix + "_empty" }], await outbox.ReadAsync(), [emptyPoll], agentId, evaluated).Single();
+    Require(emptyPoll.Error is null && emptyPoll.Observations == 0 && emptyTask.Latest is null && emptyTask.FreshnessWarning,
+        "The actual poller reused old evidence after switching to an empty database.");
     Require(beforeCopies == JsonSerializer.Serialize(await catalog.ReadAsync()), "Monitoring changed the agent backup catalog.");
     checks.Add("real-msdb-full-differential-log-empty-source-and-permission-error-without-owning-external-copies");
     checks.Add("actual-history-type-dates-freshness-new-database-and-failed-poll-precedence");

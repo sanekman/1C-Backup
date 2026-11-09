@@ -69,11 +69,25 @@ try {
         -Provider 'Microsoft RSA SChannel Cryptographic Provider' -KeySpec KeyExchange -KeyLength 2048 -HashAlgorithm SHA256 `
         -Type SSLServerAuthentication -NotAfter (Get-Date).AddDays(2)
     $key = [Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($certificate)
-    try { $keyFile = Join-Path $env:ProgramData ('Microsoft\Crypto\RSA\MachineKeys\' + $key.CspKeyContainerInfo.UniqueKeyContainerName) }
+    try {
+        if ($key -is [Security.Cryptography.RSACryptoServiceProvider]) {
+            if (-not $key.CspKeyContainerInfo.MachineKeyStore) { throw 'SQL requires a machine CSP key.' }
+            $uniqueKeyName = $key.CspKeyContainerInfo.UniqueKeyContainerName
+            $keyDirectory = Join-Path $env:ProgramData 'Microsoft\Crypto\RSA\MachineKeys'
+        } elseif ($key -is [Security.Cryptography.RSACng]) {
+            if (-not $key.Key.IsMachineKey) { throw 'SQL requires a machine CNG key.' }
+            $uniqueKeyName = $key.Key.UniqueName
+            $keyDirectory = Join-Path $env:ProgramData 'Microsoft\Crypto\Keys'
+        } else { throw 'The SQL certificate has no supported persisted RSA private key.' }
+        if ([string]::IsNullOrWhiteSpace($uniqueKeyName)) { throw 'The SQL private key has no persisted filename.' }
+        $keyFile = Join-Path $keyDirectory $uniqueKeyName
+        if (-not (Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'The SQL private key file is missing; directory ACLs must not be changed.' }
+    }
     finally { $key.Dispose() }
     $serviceAccount = (Get-CimInstance Win32_Service -Filter "Name='$serviceName'").StartName
+    $serviceSid = (New-Object Security.Principal.NTAccount $serviceAccount).Translate([Security.Principal.SecurityIdentifier])
     $fileAcl = Get-Acl -LiteralPath $keyFile
-    $fileAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule ($serviceAccount,'Read','Allow')))
+    $fileAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule ($serviceSid,'Read','Allow')))
     Set-Acl -LiteralPath $keyFile -AclObject $fileAcl
     $public = Join-Path $private 'server.cer'; Export-Certificate -Cert $certificate -FilePath $public | Out-Null
     Import-Certificate -FilePath $public -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
