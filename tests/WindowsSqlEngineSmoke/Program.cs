@@ -7,12 +7,15 @@ if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("SPBACKUP
 var root = Path.GetFullPath(args.Single());
 var server = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_SERVER") ?? throw new InvalidOperationException("Missing owned server.");
 var password = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_PASSWORD") ?? throw new InvalidOperationException("Missing owned login.");
+var expectedInstance = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_INSTANCE") ?? throw new InvalidOperationException("Missing owned instance.");
+var mismatchServer = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_MISMATCH_SERVER") ?? throw new InvalidOperationException("Missing owned certificate-negative endpoint.");
 var prefix = "SPB_" + Guid.NewGuid().ToString("N");
 var database = prefix + "_source"; var login = prefix + "_login";
 var key = Guid.NewGuid().ToString("N"); var wrongKey = Guid.NewGuid().ToString("N");
 var credentials = new WindowsSqlServerCredentialStore();
 var checks = new List<string>(); string? failure = null; string? engine = null;
 var restored = new List<string>();
+var instanceVerified = false;
 string Literal(string value) => "N'" + value.Replace("'", "''") + "'";
 void Require(bool condition, string message) { if (!condition) throw new InvalidDataException(message); }
 SqlConnection Owner(string name = "master") => new(new SqlConnectionStringBuilder
@@ -30,6 +33,9 @@ async Task<object?> Execute(string sql, string name = "master")
 try
 {
     Require(Directory.Exists(root) && File.Exists(Path.Combine(root, "owned-stand.marker")), "Missing owned stand marker.");
+    Require(string.Equals(Convert.ToString(await Execute("SELECT CONVERT(nvarchar(128),SERVERPROPERTY('InstanceName'))")), expectedInstance, StringComparison.OrdinalIgnoreCase),
+        "Refusing to create databases on a different SQL instance.");
+    instanceVerified = true;
     Require(Convert.ToInt32(await Execute("SELECT CONVERT(int,SERVERPROPERTY('IsLocalDB'))")) == 0, "LocalDB cannot satisfy the full-engine stand.");
     Require(Convert.ToInt32(await Execute("SELECT CONVERT(int,SERVERPROPERTY('IsIntegratedSecurityOnly'))")) == 0, "The stand must use mixed authentication.");
     engine = Convert.ToString(await Execute("SELECT CONVERT(nvarchar(256),SERVERPROPERTY('ProductVersion'))+' '+CONVERT(nvarchar(256),SERVERPROPERTY('Edition'))"));
@@ -53,8 +59,9 @@ try
     var sqlProbe = await checker.CheckAsync(sqlJob); Require(sqlProbe.Succeeded, "SQL login source check failed: " + sqlProbe.Details);
     var wrong = await checker.CheckAsync(sqlJob with { SqlServer = sqlJob.SqlServer! with { CredentialKey = wrongKey } });
     Require(!wrong.Succeeded && !wrong.Cancelled, "Wrong SQL password was accepted.");
-    // The stand certificate names the computer only, never its loopback IP.
-    var mismatch = job with { SqlServer = job.SqlServer with { Server = "127.0.0.1," + server.Split(',').Last() } };
+    // This IPv4-only DNS alias reaches the same listener but is absent from SAN.
+    // SQL authentication keeps the TLS test independent of Windows SPN aliases.
+    var mismatch = sqlJob with { SqlServer = sqlJob.SqlServer! with { Server = mismatchServer } };
     Require(!(await checker.CheckAsync(mismatch)).Succeeded, "A mismatched server certificate was accepted by default.");
     Require((await checker.CheckAsync(mismatch with { SqlServer = mismatch.SqlServer! with { TrustServerCertificate = true } })).Succeeded,
         "Explicit untrusted-certificate opt-in did not connect.");
@@ -74,7 +81,8 @@ try
         await Execute($"RESTORE VERIFYONLY FROM DISK={Literal(record.Backup.Location)} WITH CHECKSUM;");
         // SQL generates the logical names from the uniquely owned database name.
         await Execute($"RESTORE DATABASE [{target}] FROM DISK={Literal(record.Backup.Location)} WITH CHECKSUM, MOVE {Literal(database)} TO {Literal(Path.Combine(root, target + ".mdf"))}, MOVE {Literal(database + "_log")} TO {Literal(Path.Combine(root, target + ".ldf"))};");
-        Require(Convert.ToInt32(await Execute("SELECT COUNT(*) FROM dbo.Fixture WHERE (Id=1 AND Value=N'Проверка копии') OR (Id=2 AND Value=N'fixture two')", target)) == 2,
+        Require(Convert.ToInt32(await Execute("SELECT COUNT(*) FROM dbo.Fixture", target)) == 2
+            && Convert.ToInt32(await Execute("SELECT COUNT(*) FROM dbo.Fixture WHERE (Id=1 AND Value=N'Проверка копии') OR (Id=2 AND Value=N'fixture two')", target)) == 2,
             "Restored SQL data differs.");
     }
     checks.Add("windows-and-sql-auth-backups-delivered-sha256-verifyonly-checksum-and-restored-unicode-data");
@@ -143,15 +151,18 @@ finally
     credentials.Delete(key); credentials.Delete(wrongKey);
     try
     {
-        foreach (var name in restored.Append(database))
+        foreach (var name in instanceVerified ? restored.Append(database) : [])
             await Execute($"IF DB_ID({Literal(name)}) IS NOT NULL BEGIN ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{name}]; END;");
-        await Execute($"IF USER_ID({Literal(login)}) IS NOT NULL DROP USER [{login}];", "msdb");
-        await Execute($"IF SUSER_ID({Literal(login)}) IS NOT NULL DROP LOGIN [{login}];");
+        if (instanceVerified)
+        {
+            await Execute($"IF USER_ID({Literal(login)}) IS NOT NULL DROP USER [{login}];", "msdb");
+            await Execute($"IF SUSER_ID({Literal(login)}) IS NOT NULL DROP LOGIN [{login}];");
+        }
     }
     catch (Exception error) { failure = (failure ?? "") + " Cleanup: " + error.GetType().Name; }
     var result = new { success = failure is null, source = Environment.GetEnvironmentVariable("GITHUB_SHA"),
         scope = "full-engine-local-tcp-current-user", remoteHostVerified = false, serviceIdentityVerified = false,
-        engine, checks, error = failure };
+        endpoint = server, engine, checks, error = failure };
     Directory.CreateDirectory(Path.Combine(root, "report"));
     await File.WriteAllTextAsync(Path.Combine(root, "report", "sql-engine-result.json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
 }

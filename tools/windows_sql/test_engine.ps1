@@ -15,6 +15,8 @@ $serviceName = 'MSSQL$' + $instance
 $password = 'SpB!9-' + [Guid]::NewGuid().ToString('N')
 Write-Host "::add-mask::$password"
 $certificate = $null; $serviceInstalled = $false; $provenance = $null
+$hostsPath = Join-Path $env:WINDIR 'System32\drivers\etc\hosts'
+$hostEntry = $null
 $phase = 'download-bootstrap'
 function Invoke-OwnedTool([string]$Executable, [string[]]$Arguments, [int]$TimeoutSeconds) {
     $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -PassThru -NoNewWindow `
@@ -76,8 +78,9 @@ try {
         $keySecurity.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule ((New-Object Security.Principal.SecurityIdentifier $sid),'FullControl','Allow')))
     }
     $keySecurity.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule ($serviceSid,'Read','Allow')))
-    $certificate = New-SelfSignedCertificate -DnsName @($env:COMPUTERNAME,'localhost') -CertStoreLocation 'Cert:\LocalMachine\My' `
+    $certificate = New-SelfSignedCertificate -Subject ("CN=" + $env:COMPUTERNAME) -CertStoreLocation 'Cert:\LocalMachine\My' `
         -Provider 'Microsoft RSA SChannel Cryptographic Provider' -KeySpec KeyExchange -KeyLength 2048 -HashAlgorithm SHA256 `
+        -TextExtension @("2.5.29.17={text}DNS=$env:COMPUTERNAME&DNS=localhost&IPAddress=127.0.0.1") `
         -SecurityDescriptor $keySecurity -Type SSLServerAuthentication -NotAfter (Get-Date).AddDays(2)
     if (-not $certificate.HasPrivateKey) { throw 'The owned SQL certificate has no private key.' }
     $public = Join-Path $private 'server.cer'; Export-Certificate -Cert $certificate -FilePath $public | Out-Null
@@ -99,6 +102,9 @@ try {
         }
     }
     if (-not $loopbackFound) { throw 'No loopback SQL listener is available; public listeners are not enabled.' }
+    $mismatchedHost = 'spb-' + [Guid]::NewGuid().ToString('N') + '.invalid'
+    $hostEntry = "`r`n127.0.0.1 $mismatchedHost # SPBackup-owned-SQL-test`r`n"
+    [IO.File]::AppendAllText($hostsPath, $hostEntry, (New-Object Text.UTF8Encoding $false))
     Restart-Service -Name $serviceName
     $listenDeadline = (Get-Date).AddSeconds(60)
     do {
@@ -124,7 +130,9 @@ try {
     $phase = 'build-probe'
     & dotnet publish (Join-Path $repo 'tests/WindowsSqlEngineSmoke') -c Release -r win-x64 --self-contained true -m:1 -nr:false -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the SQL engine probe.' }
-    $env:SPBACKUP_NATIVE_SQL_ENGINE_TEST = '1'; $env:SPBACKUP_SQL_TEST_SERVER = "tcp:localhost,$port"; $env:SPBACKUP_SQL_TEST_PASSWORD = $password
+    $env:SPBACKUP_NATIVE_SQL_ENGINE_TEST = '1'; $env:SPBACKUP_SQL_TEST_SERVER = "tcp:127.0.0.1,$port"; $env:SPBACKUP_SQL_TEST_PASSWORD = $password
+    $env:SPBACKUP_SQL_TEST_MISMATCH_SERVER = "tcp:$mismatchedHost,$port"
+    $env:SPBACKUP_SQL_TEST_INSTANCE = $instance
     $phase = 'verify-engine'
     & (Join-Path $binary 'WindowsSqlEngineSmoke.exe') $workspace
     $probeExit = $LASTEXITCODE
@@ -151,13 +159,24 @@ try {
     if ($provenance) { $provenance | ConvertTo-Json | Set-Content (Join-Path $Output 'sql-media-provenance.json') -Encoding UTF8 }
     @{ success = $false; source = $env:GITHUB_SHA; phase = $phase;
         errorType = $setupError.Exception.GetType().FullName; error = $setupError.Exception.Message.Replace($password,'[redacted]');
-        startupErrors = $startupErrors } |
+        configuredEndpoint = $env:SPBACKUP_SQL_TEST_SERVER; startupErrors = $startupErrors } |
         ConvertTo-Json | Set-Content (Join-Path $Output 'sql-setup-result.json') -Encoding UTF8
     throw $setupError
 } finally {
     Remove-Item Env:SPBACKUP_SQL_TEST_PASSWORD -ErrorAction SilentlyContinue
     Remove-Item Env:SPBACKUP_NATIVE_SQL_ENGINE_TEST -ErrorAction SilentlyContinue
     Remove-Item Env:SPBACKUP_SQL_TEST_SERVER -ErrorAction SilentlyContinue
+    Remove-Item Env:SPBACKUP_SQL_TEST_MISMATCH_SERVER -ErrorAction SilentlyContinue
+    Remove-Item Env:SPBACKUP_SQL_TEST_INSTANCE -ErrorAction SilentlyContinue
+    if ($hostEntry) {
+        $hosts = [IO.File]::ReadAllText($hostsPath)
+        if ($hosts.EndsWith($hostEntry, [StringComparison]::Ordinal)) {
+            # Remove only our appended bytes; preserve the previous file exactly.
+            $stream = [IO.File]::Open($hostsPath, 'Open', 'Write', 'Read')
+            try { $stream.SetLength($stream.Length - [Text.Encoding]::UTF8.GetByteCount($hostEntry)) }
+            finally { $stream.Dispose() }
+        } else { Write-Warning 'The owned hosts entry was not removed because the disposable hosts file changed concurrently.' }
+    }
     if ($serviceInstalled) { Stop-Service -Name $serviceName -ErrorAction Continue }
     if ($certificate) {
         Remove-Item -LiteralPath ('Cert:\LocalMachine\Root\' + $certificate.Thumbprint) -ErrorAction Continue
