@@ -17,7 +17,7 @@ $checks = New-Object 'Collections.Generic.List[object]'
 $report = [ordered]@{
     format = 1; scenario = 'real-windows-onec'; startedUtc = [DateTime]::UtcNow.ToString('o')
     success = $false; platformVersion = ''; agentVersion = ''; actor = 'current-interactive-user'
-    checks = $checks; errorType = $null
+    checks = $checks; errorType = $null; errorCode = $null; phase = 'preflight'; diskSpace = $null
 }
 function Write-Utf8([string]$Path, [string]$Text) { [IO.File]::WriteAllText($Path, $Text, $utf8) }
 function Add-Check([string]$Name, [string]$Status, [string]$Note) {
@@ -188,6 +188,7 @@ try {
     $report.agentVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($AgentExecutable).ProductVersion
     $root = [IO.Path]::GetFullPath((Join-Path $WorkParent ('onec-' + [Guid]::NewGuid().ToString('N'))))
     if ($root.StartsWith($SourcePath + '\', [StringComparison]::OrdinalIgnoreCase) -or $SourcePath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Тестовый и исходный каталоги должны быть отдельными.' }
+    $report.phase = 'workspace'
     New-Item -ItemType Directory -Path $root | Out-Null
     $ownsRoot = $true
     $owner = [Security.Principal.WindowsIdentity]::GetCurrent().User
@@ -198,8 +199,17 @@ try {
     }
     Set-Acl -LiteralPath $root -AclObject $acl
     Write-Utf8 (Join-Path $root 'owned-test.json') '{"format":1,"owner":"SPBackup-OneC-acceptance"}'
-    $needed = (Get-Item -LiteralPath $sourceFile).Length * 22 + 2GB
-    if ((New-Object IO.DriveInfo ([IO.Path]::GetPathRoot($root))).AvailableFreeSpace -lt $needed) { throw 'Недостаточно места. Выберите другой -WorkParent для тестовых копий и восстановления.' }
+    $report.phase = 'disk-space'
+    $sourceBytes = (Get-Item -LiteralPath $sourceFile).Length
+    $needed = $sourceBytes * 22 + 2GB
+    $available = (New-Object IO.DriveInfo ([IO.Path]::GetPathRoot($root))).AvailableFreeSpace
+    $report.diskSpace = [ordered]@{ sourceBytes = $sourceBytes; requiredBytes = $needed; availableBytes = $available }
+    Write-Host ('Для полного набора проверок нужно {0:N1} ГиБ, свободно {1:N1} ГиБ.' -f ($needed / 1GB), ($available / 1GB))
+    if ($available -lt $needed) {
+        $report.errorCode = 'InsufficientDiskSpace'
+        throw ('Недостаточно места: нужно {0:N1} ГиБ, свободно {1:N1} ГиБ. Добавьте -WorkParent с каталогом на другом диске. Копирование исходной базы ещё не начиналось.' -f ($needed / 1GB), ($available / 1GB))
+    }
+    $report.phase = 'isolated-source-copy'
     Write-Host 'Исходная база должна быть закрыта. Она откроется только для чтения на время создания отдельной копии.'
     $clone = Join-Path $root 'base'
     New-Item -ItemType Directory -Path $clone | Out-Null
@@ -217,17 +227,21 @@ try {
         } finally { $targetStream.Dispose() }
     } finally { $sourceLease.Dispose() }
     Add-Check 'isolated-source-copy' 'passed' 'Тестовая база создана при эксклюзивном чтении исходника; запись в исходник не выполнялась.'
+    $report.phase = 'local-file-cases'
     Test-FileCases $clone (Join-Path $root 'copies-local') 'local'
     $principal = New-Object Security.Principal.WindowsPrincipal ([Security.Principal.WindowsIdentity]::GetCurrent())
     if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        $report.phase = 'unc-file-cases'
         $shareName = 'SPB1CTest_' + [Guid]::NewGuid().ToString('N') + '$'
         New-SmbShare -Name $shareName -Path $root -FullAccess ([Security.Principal.WindowsIdentity]::GetCurrent().Name) | Out-Null
         $unc = '\\' + $env:COMPUTERNAME + '\' + $shareName
         Test-FileCases ($unc + '\base') ($unc + '\copies-unc') 'unc'
     } else { Add-Check 'unc' 'not-exercised' 'Для отдельной временной UNC-папки запустите сценарий от администратора.' }
+    $report.phase = 'platform-dump'
     $dump = Invoke-Job (New-Job $clone (Join-Path $root 'dumps') $false $true) 'platform-dump'
     if (-not (Is-Succeeded $dump.Run) -or -not $dump.Run.Backup -or (Get-Item -LiteralPath $dump.Run.Backup.Location).Length -le 0) { throw 'Платформа не создала успешную непустую выгрузку. Подробности остались локально.' }
     Add-Check 'platform-dump' 'passed' 'Настоящая платформа создала непустой DT через агент.'
+    $report.phase = 'platform-restore'
     $restore = Join-Path $root 'restored-dt'
     New-Item -ItemType Directory -Path $restore | Out-Null
     Copy-Item -LiteralPath (Join-Path $clone '1Cv8.1CD') -Destination (Join-Path $restore '1Cv8.1CD')
@@ -242,6 +256,7 @@ try {
     Add-Check 'restored-data-human-check' $(if ($answer -in @('ДА','да','yes','YES')) { 'passed' } else { 'not-confirmed' }) 'Проверка данных DT пользователем: отдельный результат, не автоматическая проверка ZIP.'
     Read-Host 'Закройте окно восстановленной ТЕСТОВОЙ базы и нажмите Enter' | Out-Null
     Wait-Closed $restore
+    $report.phase = 'platform-cancel'
     $cancel = Invoke-Job (New-Job $clone (Join-Path $root 'cancelled-dumps') $false $true) 'platform-cancel' $true
     if ($cancel.CancelSent) {
         if ([string]$cancel.Run.Status -notin @('Cancelled','3') -or $cancel.Run.Backup) { throw 'Отмена не дала ожидаемого результата.' }
@@ -249,6 +264,7 @@ try {
         Add-Check 'platform-cancel' 'passed' 'Отменена настоящая выгрузка: агент завершился, копия не зарегистрирована, база освобождена.'
     } else { Add-Check 'platform-cancel' 'not-exercised' 'Выгрузка завершилась до отправки отмены; этот сценарий ещё не подтверждён.' }
     $report.success = @($checks | Where-Object { $_.status -ne 'passed' }).Count -eq 0
+    $report.phase = 'completed'
 } catch {
     $report.errorType = $_.Exception.GetType().FullName
     Write-Warning $_.Exception.Message
