@@ -14,6 +14,12 @@ $instance = 'SPB' + [Guid]::NewGuid().ToString('N').Substring(0,8)
 $serviceName = 'MSSQL$' + $instance
 $password = 'SpB!9-' + [Guid]::NewGuid().ToString('N')
 Write-Host "::add-mask::$password"
+$actorName = 'spbsql_' + [Guid]::NewGuid().ToString('N').Substring(0,8)
+$actorAccount = $env:COMPUTERNAME + '\' + $actorName
+$actorPassword = 'SpBw!9-' + [Guid]::NewGuid().ToString('N')
+Write-Host "::add-mask::$actorPassword"
+$actorCreated = $false; $taskRegistered = $false
+$taskName = 'SPBackupSQL-' + [Guid]::NewGuid().ToString('N')
 $certificate = $null; $serviceInstalled = $false; $provenance = $null
 $hostsPath = Join-Path $env:WINDIR 'System32\drivers\etc\hosts'
 $hostEntry = $null
@@ -41,6 +47,11 @@ try {
         $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule ((New-Object Security.Principal.SecurityIdentifier $sid), 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
     }
     Set-Acl -LiteralPath $private -AclObject $acl
+    $actor = New-LocalUser -Name $actorName -Password (ConvertTo-SecureString $actorPassword -AsPlainText -Force) `
+        -AccountNeverExpires -PasswordNeverExpires -Description 'Owned disposable SP Backup SQL stand'
+    $actorCreated = $true
+    try { Add-LocalGroupMember -SID (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545') -Member $actorAccount }
+    catch { if ($_.FullyQualifiedErrorId -notlike 'MemberExists,*') { throw } }
     $url = 'https://go.microsoft.com/fwlink/p/?linkid=2216019&clcid=0x409&culture=en-us&country=us'
     $bootstrap = Join-Path $private 'sql-bootstrap.exe'
     Invoke-WebRequest -Uri $url -OutFile $bootstrap
@@ -60,7 +71,7 @@ try {
     if (-not (Test-Path -LiteralPath $setup)) { throw 'Full SQL setup executable is missing.' }
     $phase = 'install-full-engine'
     Invoke-OwnedTool $setup @('/Q','/ACTION=Install','/FEATURES=SQLENGINE',('/INSTANCENAME=' + $instance),
-        '/SECURITYMODE=SQL',('/SAPWD=' + $password),('/SQLSYSADMINACCOUNTS="' + $owner.Name + '"'),
+        '/SECURITYMODE=SQL',('/SAPWD=' + $password),('/SQLSYSADMINACCOUNTS="' + $actorAccount + '"'),
         '/SQLSVCSTARTUPTYPE=Automatic','/TCPENABLED=1','/NPENABLED=0','/UPDATEENABLED=False','/IACCEPTSQLSERVERLICENSETERMS') 1200
     $serviceInstalled = $true
     $phase = 'configure-tls-and-loopback'
@@ -130,12 +141,52 @@ try {
     $phase = 'build-probe'
     & dotnet publish (Join-Path $repo 'tests/WindowsSqlEngineSmoke') -c Release -r win-x64 --self-contained true -m:1 -nr:false -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the SQL engine probe.' }
-    $env:SPBACKUP_NATIVE_SQL_ENGINE_TEST = '1'; $env:SPBACKUP_SQL_TEST_SERVER = "tcp:127.0.0.1,$port"; $env:SPBACKUP_SQL_TEST_PASSWORD = $password
-    $env:SPBACKUP_SQL_TEST_MISMATCH_SERVER = "tcp:$mismatchedHost,$port"
-    $env:SPBACKUP_SQL_TEST_INSTANCE = $instance
+    & icacls.exe $private /grant ("*" + $actor.SID.Value + ':(RX)') | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not grant the selected test user traversal.' }
+    & icacls.exe $binary /grant ("*" + $actor.SID.Value + ':(OI)(CI)(RX)') /T /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not grant the selected user access to the probe.' }
+    & icacls.exe $workspace /grant ("*" + $actor.SID.Value + ':(OI)(CI)(M)') /T /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not grant the selected user its workspace.' }
+    $configPath = Join-Path $private 'task-config.json'
+    $exitPath = Join-Path $workspace 'probe-exit.txt'
+    $taskScript = Join-Path $private 'run-probe.ps1'
+    @{ Executable = (Join-Path $binary 'WindowsSqlEngineSmoke.exe'); Workspace = $workspace;
+        Environment = @{ SPBACKUP_NATIVE_SQL_ENGINE_TEST = '1'; SPBACKUP_SQL_TEST_SERVER = "tcp:127.0.0.1,$port";
+            SPBACKUP_SQL_TEST_PASSWORD = $password; SPBACKUP_SQL_TEST_MISMATCH_SERVER = "tcp:$mismatchedHost,$port";
+            SPBACKUP_SQL_TEST_INSTANCE = $instance; SPBACKUP_SQL_TEST_ACTOR_SID = $actor.SID.Value; GITHUB_SHA = $env:GITHUB_SHA } } |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configPath -Encoding UTF8
+    @'
+param([string]$ConfigPath,[string]$ExitPath)
+$ErrorActionPreference='Stop'
+$code=1
+try {
+    $config=Get-Content -LiteralPath $ConfigPath -Raw|ConvertFrom-Json
+    foreach($entry in $config.Environment.PSObject.Properties){[Environment]::SetEnvironmentVariable($entry.Name,[string]$entry.Value,'Process')}
+    & $config.Executable $config.Workspace *> (Join-Path $config.Workspace 'probe-console.txt')
+    $code=$LASTEXITCODE
+} finally {
+    [Environment]::SetEnvironmentVariable('SPBACKUP_SQL_TEST_PASSWORD',$null,'Process')
+    [IO.File]::WriteAllText($ExitPath,[string]$code)
+}
+exit $code
+'@ | Set-Content -LiteralPath $taskScript -Encoding UTF8
+    foreach ($file in @($configPath,$taskScript)) {
+        & icacls.exe $file /grant ("*" + $actor.SID.Value + ':(R)') | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not protect the selected-user task configuration.' }
+    }
+    $action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" `
+        -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $taskScript + '" -ConfigPath "' + $configPath + '" -ExitPath "' + $exitPath + '"')
+    $taskSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName $taskName -Action $action -Settings $taskSettings -User $actorAccount -Password $actorPassword -RunLevel Limited | Out-Null
+    $taskRegistered = $true
     $phase = 'verify-engine'
-    & (Join-Path $binary 'WindowsSqlEngineSmoke.exe') $workspace
-    $probeExit = $LASTEXITCODE
+    Start-ScheduledTask -TaskName $taskName
+    $taskDeadline = (Get-Date).AddSeconds(300)
+    while (-not (Test-Path -LiteralPath $exitPath)) {
+        if ((Get-Date) -ge $taskDeadline) { throw 'The selected-user SQL probe did not finish.' }
+        Start-Sleep -Milliseconds 300
+    }
+    $probeExit = [int](Get-Content -LiteralPath $exitPath -Raw)
     New-Item -ItemType Directory -Path $Output | Out-Null
     Copy-Item -LiteralPath (Join-Path $workspace 'report\sql-engine-result.json') -Destination $Output
     $provenance | ConvertTo-Json | Set-Content (Join-Path $Output 'sql-media-provenance.json') -Encoding UTF8
@@ -163,6 +214,10 @@ try {
         ConvertTo-Json | Set-Content (Join-Path $Output 'sql-setup-result.json') -Encoding UTF8
     throw $setupError
 } finally {
+    if ($taskRegistered) {
+        Stop-ScheduledTask -TaskName $taskName -ErrorAction Continue
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Continue
+    }
     Remove-Item Env:SPBACKUP_SQL_TEST_PASSWORD -ErrorAction SilentlyContinue
     Remove-Item Env:SPBACKUP_NATIVE_SQL_ENGINE_TEST -ErrorAction SilentlyContinue
     Remove-Item Env:SPBACKUP_SQL_TEST_SERVER -ErrorAction SilentlyContinue
@@ -182,6 +237,7 @@ try {
         Remove-Item -LiteralPath ('Cert:\LocalMachine\Root\' + $certificate.Thumbprint) -ErrorAction Continue
         Remove-Item -LiteralPath ('Cert:\LocalMachine\My\' + $certificate.Thumbprint) -DeleteKey -ErrorAction Continue
     }
+    if ($actorCreated -and (Get-LocalUser -Name $actorName).SID.Value -eq $actor.SID.Value) { Remove-LocalUser -Name $actorName }
     # Media, databases, installer logs and credentials are never uploaded.
     # The entire host is discarded by GitHub after this owned job.
 }

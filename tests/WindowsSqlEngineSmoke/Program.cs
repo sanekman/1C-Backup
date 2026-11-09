@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using SPBackup.Core;
+using System.Security.Principal;
 
 if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("SPBACKUP_NATIVE_SQL_ENGINE_TEST") != "1")
     throw new InvalidOperationException("Run only on the owned Windows SQL engine stand.");
@@ -9,6 +10,7 @@ var server = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_SERVER") ?? t
 var password = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_PASSWORD") ?? throw new InvalidOperationException("Missing owned login.");
 var expectedInstance = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_INSTANCE") ?? throw new InvalidOperationException("Missing owned instance.");
 var mismatchServer = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_MISMATCH_SERVER") ?? throw new InvalidOperationException("Missing owned certificate-negative endpoint.");
+var actorSid = WindowsIdentity.GetCurrent().User?.Value;
 var prefix = "SPB_" + Guid.NewGuid().ToString("N");
 var database = prefix + "_source"; var login = prefix + "_login";
 var key = Guid.NewGuid().ToString("N"); var wrongKey = Guid.NewGuid().ToString("N");
@@ -33,6 +35,7 @@ async Task<object?> Execute(string sql, string name = "master")
 try
 {
     Require(Directory.Exists(root) && File.Exists(Path.Combine(root, "owned-stand.marker")), "Missing owned stand marker.");
+    Require(actorSid is not null && actorSid == Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_ACTOR_SID"), "The probe did not run under its selected Windows user.");
     Require(string.Equals(Convert.ToString(await Execute("SELECT CONVERT(nvarchar(128),SERVERPROPERTY('InstanceName'))")), expectedInstance, StringComparison.OrdinalIgnoreCase),
         "Refusing to create databases on a different SQL instance.");
     instanceVerified = true;
@@ -161,8 +164,8 @@ finally
     }
     catch (Exception error) { failure = (failure ?? "") + " Cleanup: " + error.GetType().Name; }
     var result = new { success = failure is null, source = Environment.GetEnvironmentVariable("GITHUB_SHA"),
-        scope = "full-engine-local-tcp-current-user", remoteHostVerified = false, serviceIdentityVerified = false,
-        endpoint = server, engine, checks, error = failure };
+        scope = "full-engine-local-tcp-selected-task-user", remoteHostVerified = false, serviceIdentityVerified = false,
+        actorSid, endpoint = server, engine, checks, error = failure };
     Directory.CreateDirectory(Path.Combine(root, "report"));
     await File.WriteAllTextAsync(Path.Combine(root, "report", "sql-engine-result.json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
 }
