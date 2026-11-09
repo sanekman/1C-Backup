@@ -62,7 +62,7 @@ public sealed class BackupCopyExporter(IBackupStorage storage)
             }
             cancellationToken.ThrowIfCancellationRequested();
             reporter.Report(BackupExportPhase.Publishing, length, force: true);
-            File.Move(temporary, destination, overwrite: false);
+            AtomicNewFile.Publish(temporary, destination);
             reporter.Report(BackupExportPhase.Completed, length, force: true);
             return new(destination, length, hash);
         }

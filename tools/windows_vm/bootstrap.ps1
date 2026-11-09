@@ -22,13 +22,17 @@ Write-Step 'Protecting the owned VM credential'
 $root = 'C:\SPBLab'
 New-Item -ItemType Directory -Path $root -Force | Out-Null
 Copy-Item "$drive\owner.secret" "$root\owner.secret"
+Copy-Item "$drive\control.secret" "$root\control.secret"
 & icacls.exe "$root\owner.secret" /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not protect the disposable owner credential.' }
+& icacls.exe "$root\control.secret" /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Could not protect the private hypervisor control credential.' }
 Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Type DWord -Value 1
 Write-Step 'Extracting the verified application and PostgreSQL binaries'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::ExtractToDirectory("$drive\bundle.zip", "$root\bundle")
 Copy-Item "$drive\owner-task.ps1" "$root\owner-task.ps1"
+Copy-Item "$drive\control-agent.ps1" "$root\control-agent.ps1"
 Write-Step 'Installing the PostgreSQL VC runtime'
 $vc = Start-Process "$drive\vc_redist.x64.exe" -ArgumentList '/install','/quiet','/norestart' -PassThru
 if (-not $vc.WaitForExit(180000)) { $vc.Kill(); throw 'Owned VC runtime installation timed out.' }
@@ -37,11 +41,18 @@ Write-Step 'Granting binary execution access'
 & icacls.exe "$root\bundle" /grant '*S-1-5-32-545:(OI)(CI)(RX)' /T /Q | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not grant access to the owned bundle.' }
 & powercfg.exe /hibernate off
-Write-Step 'Enabling private WinRM'
+Write-Step 'Registering private hypervisor control'
 Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private
-Enable-PSRemoting -SkipNetworkProfileCheck -Force
-Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name LocalAccountTokenFilterPolicy -Type DWord -Value 1
-Set-Service WinRM -StartupType Automatic
+$controlAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\SPBLab\control-agent.ps1'
+$controlSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName 'SPBackupOwnedVM-Control' -Action $controlAction -Trigger (New-ScheduledTaskTrigger -AtStartup) `
+    -Settings $controlSettings -User SYSTEM -RunLevel Highest | Out-Null
+Start-ScheduledTask -TaskName 'SPBackupOwnedVM-Control'
+$controlDeadline = (Get-Date).AddSeconds(60)
+while (-not (Test-Path "$root\control-ready.txt")) {
+    if ((Get-Date) -gt $controlDeadline) { throw 'The owned COM2 control task did not become ready.' }
+    Start-Sleep -Milliseconds 200
+}
 New-Item -ItemType Directory -Path "$root\results" -Force | Out-Null
 # Remove only this generated answer after Windows has consumed it. The seed DVD is ejected by the host.
 $answer = 'C:\Windows\Panther\unattend.xml'

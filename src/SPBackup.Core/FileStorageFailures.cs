@@ -26,7 +26,7 @@ internal sealed record FileStorageOperations
 {
     internal Func<string, FileStream> OpenTemporary { get; init; } = path => new(path, FileMode.CreateNew,
         FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous);
-    internal Action<string, string> Publish { get; init; } = (source, destination) => File.Move(source, destination, overwrite: false);
+    internal Action<string, string> Publish { get; init; } = AtomicNewFile.Publish;
     internal Action<string> DeleteTemporary { get; init; } = File.Delete;
     internal Func<int, CancellationToken, Task> Delay { get; init; } = (retry, token) =>
         Task.Delay(TimeSpan.FromSeconds(retry == 1 ? 2 : 5), token);

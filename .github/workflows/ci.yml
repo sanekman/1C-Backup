@@ -148,8 +148,30 @@ jobs:
             artifacts/native-agent/failure-context.json
           retention-days: 14
 
+  native-volume:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      ONECBACKUP_NATIVE_SERVICE_TEST: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - name: Verify real NTFS quota and a full owned VHD without affecting the system volume
+        shell: pwsh
+        run: |
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- --verify-volumes (Join-Path $PWD 'artifacts/native-volumes')
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows volume verification failed' }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-volume-verification
+          path: artifacts/native-volumes/volume-result.json
+          retention-days: 14
+
   package:
-    needs: [verify, native-sql, native-smb, native-agent-service]
+    needs: [verify, native-sql, native-smb, native-agent-service, native-volume]
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:

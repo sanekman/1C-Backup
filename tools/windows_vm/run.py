@@ -1,8 +1,9 @@
 """Provision an owned, private Windows evaluation VM and prove an actual interrupted-backup reboot.
 
-Only localhost WinRM is forwarded. VM disks, seed credentials and the downloaded OS are never artifacts.
+Control uses an authenticated private hypervisor serial socket. VM disks, seed credentials and the downloaded OS are never artifacts.
 """
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -17,7 +18,6 @@ import uuid
 import zipfile
 from xml.sax.saxutils import escape
 
-import winrm
 
 ISO_URL = ('https://software-static.download.prss.microsoft.com/dbazure/'
            '998969d5-f34g-4e03-ac9d-1f9786c66749/'
@@ -41,13 +41,16 @@ class VM:
         self.root, self.iso, self.seed = root, iso, seed
         self.process = None
         self.qmp_path = root / 'qmp.sock'
-        self.port = 55985
+        self.control_path = root / 'control.sock'
         self.log = (root / 'qemu.log').open('ab')
         subprocess.run(['qemu-img', 'create', '-f', 'qcow2', str(root / 'windows.qcow2'), '80G'], check=True)
         shutil.copyfile('/usr/share/OVMF/OVMF_VARS_4M.fd', root / 'uefi-vars.fd')
 
     def start(self, install=False):
+        setup_log = self.root / 'setup.log'
+        self.serial_offset = setup_log.stat().st_size if setup_log.exists() else 0
         self.qmp_path.unlink(missing_ok=True)
+        self.control_path.unlink(missing_ok=True)
         args = ['qemu-system-x86_64', '-enable-kvm', '-machine', 'q35', '-cpu', 'host,hv_relaxed,hv_vapic,hv_spinlocks=0x1fff',
                 '-m', '6144', '-smp', '4', '-display', 'none', '-rtc', 'base=utc',
                 '-drive', 'if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd',
@@ -55,11 +58,13 @@ class VM:
                 '-device', 'ich9-ahci,id=sata',
                 '-drive', f'if=none,id=osdisk,format=qcow2,file={self.root / "windows.qcow2"}',
                 '-device', 'ide-hd,drive=osdisk,bus=sata.0',
-                '-netdev', f'user,id=private,restrict=on,hostfwd=tcp:127.0.0.1:{self.port}-:5985',
+                '-netdev', 'user,id=private,restrict=on',
                 '-device', 'e1000e,netdev=private',
                 '-qmp', f'unix:{self.qmp_path},server=on,wait=off',
                 '-chardev', f'file,id=setup,path={self.root / "setup.log"},append=on',
-                '-device', 'isa-serial,chardev=setup', '-boot', 'order=c,once=d' if install else 'order=c']
+                '-device', 'isa-serial,chardev=setup,index=0',
+                '-chardev', f'socket,id=control,path={self.control_path},server=on,wait=off',
+                '-device', 'isa-serial,chardev=control,index=1', '-boot', 'order=c,once=d' if install else 'order=c']
         if install:
             args += ['-drive', f'if=none,id=install,media=cdrom,format=raw,readonly=on,file={self.iso}',
                      '-device', 'ide-cd,drive=install,bus=sata.1',
@@ -122,8 +127,10 @@ def main():
     root = output.parent / ('private-vm-' + uuid.uuid4().hex)
     root.mkdir(mode=0o700)
     password = 'SpB!9-' + secrets.token_urlsafe(24)
+    control_secret = secrets.token_urlsafe(32)
     print('::add-mask::' + password, flush=True)
-    provenance = {'source': os.environ['GITHUB_SHA'], 'iso_url': ISO_URL, 'success': False}
+    print('::add-mask::' + control_secret, flush=True)
+    provenance = {'source': os.environ['GITHUB_SHA'], 'iso_url': ISO_URL, 'success': False, 'control_transport': 'private-hypervisor-serial'}
     vm = None
     try:
         bundle = args.bundle.resolve()
@@ -140,8 +147,9 @@ def main():
         seed.mkdir()
         (seed / 'SPBLAB.marker').write_text('owned VM seed')
         (seed / 'owner.secret').write_text(password)
+        (seed / 'control.secret').write_text(control_secret)
         (seed / 'Autounattend.xml').write_text(answer(password), encoding='utf-8')
-        for name in ('bootstrap.ps1', 'owner-task.ps1'):
+        for name in ('bootstrap.ps1', 'owner-task.ps1', 'control-agent.ps1'):
             shutil.copyfile(HERE / name, seed / name)
         download('https://aka.ms/vs/17/release/vc_redist.x64.exe', seed / 'vc_redist.x64.exe')
         with zipfile.ZipFile(seed / 'bundle.zip', 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
@@ -156,32 +164,56 @@ def main():
         for _ in range(12):
             vm.command('send-key', {'keys': [{'type': 'qcode', 'data': 'ret'}]})
             time.sleep(1)
-        session = winrm.Session(f'http://127.0.0.1:{vm.port}/wsman', auth=('Administrator', password), transport='ntlm',
-                                message_encryption='always', operation_timeout_sec=30, read_timeout_sec=40)
         def ps(script):
-            result = session.run_ps("$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';" + script)
-            if result.status_code:
-                raise RuntimeError(result.std_err.decode('utf-8', 'replace').replace(password, '[redacted]')[-5000:])
-            return result.std_out.decode('utf-8-sig').strip()
+            request_id = uuid.uuid4().hex
+            script = "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';" + script
+            request = {'protocol': 1, 'id': request_id, 'token': control_secret,
+                       'script': base64.b64encode(script.encode()).decode()}
+            with socket.socket(socket.AF_UNIX) as connection:
+                connection.settimeout(40)
+                connection.connect(str(vm.control_path))
+                connection.sendall((json.dumps(request) + '\n').encode())
+                with connection.makefile('rb') as stream:
+                    while True:
+                        line = stream.readline(4 * 1024 * 1024 + 1)
+                        if not line: raise ConnectionError('The private guest control channel closed.')
+                        if len(line) > 4 * 1024 * 1024: raise ValueError('Oversized private guest response.')
+                        try: result = json.loads(line)
+                        except (ValueError, UnicodeError): continue  # Firmware text is never a protocol response.
+                        if result.get('protocol') != 1 or result.get('id') != request_id: continue
+                        if result['code']:
+                            raise RuntimeError(str(result['error']).replace(password, '[redacted]').replace(control_secret, '[redacted]')[-5000:])
+                        return result['output'].strip()
         def wait_guest(seconds):
             deadline = time.monotonic() + seconds
             last_setup_line = ''
+            last_error = ''
             while time.monotonic() < deadline:
                 if vm.process.poll() is not None: raise RuntimeError('The owned VM exited before readiness.')
                 setup_log = root / 'setup.log'
+                channel_ready = False
                 if setup_log.exists():
-                    lines = setup_log.read_text(errors='replace').splitlines()
+                    lines = setup_log.read_bytes()[vm.serial_offset:].decode(errors='replace').splitlines()
                     line = lines[-1] if lines else ''
                     if line and line != last_setup_line:
                         print('Windows setup: ' + line.replace(password, '[redacted]'), flush=True)
                         last_setup_line = line
                     if any('FAILED:' in line for line in lines): raise RuntimeError('Windows bootstrap failed: ' + line)
+                    channel_ready = any('Ready; waiting for Windows Setup' in line or 'SPBackup control channel ready' in line for line in lines)
+                if not channel_ready:
+                    time.sleep(5)
+                    continue
                 try:
                     value = ps("if((Get-ItemProperty HKLM:\\SYSTEM\\Setup).SystemSetupInProgress -ne 0){throw 'setup'};Get-Content C:\\SPBLab\\ready.json -Raw")
                     if json.loads(value)['ready']: return
-                except Exception:
+                except Exception as error:
+                    message = (type(error).__name__ + ': ' + str(error)).replace(password, '[redacted]').replace(control_secret, '[redacted]')[-1500:]
+                    provenance['last_control_error'] = message
+                    if message != last_error:
+                        print('Guest readiness: ' + message, flush=True)
+                        last_error = message
                     time.sleep(5)
-            raise TimeoutError('Windows did not complete setup and enable private WinRM.')
+            raise TimeoutError('Windows did not complete setup and private hypervisor control: ' + last_error)
         print('Waiting for Windows setup.', flush=True)
         wait_guest(1200)
         vm.command('eject', {'device': 'seed', 'force': True})
@@ -264,7 +296,7 @@ def main():
         provenance['success'] = True
         print('Actual Windows boot changed; backups, identity, queue and restored bytes verified.', flush=True)
     except Exception as error:
-        provenance['error'] = str(error).replace(password, '[redacted]')
+        provenance['error'] = str(error).replace(password, '[redacted]').replace(control_secret, '[redacted]')
         if vm and vm.process and vm.process.poll() is None:
             try:
                 from PIL import Image

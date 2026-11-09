@@ -20,7 +20,7 @@ public static class ReadinessReportFile
                 await file.FlushAsync(token); file.Flush(flushToDisk: true);
             }
             token.ThrowIfCancellationRequested();
-            File.Move(temporary, target, overwrite: false);
+            AtomicNewFile.Publish(temporary, target);
         }
         finally { if (owned && File.Exists(temporary)) File.Delete(temporary); }
     }

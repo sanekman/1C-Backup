@@ -15,6 +15,7 @@ internal static partial class Program
         var accounts = new[] { "spba" + Guid.NewGuid().ToString("N")[..10], "spbb" + Guid.NewGuid().ToString("N")[..10] };
         var passwords = new[] { "Sw!8a-" + Guid.NewGuid().ToString("N"), "Sw!8b-" + Guid.NewGuid().ToString("N") };
         var created = new List<string>(); var checks = new List<string>(); string? failure = null;
+        var accountSids = new List<string>(); var completedCopies = 0;
         var archiveStore = new WindowsArchivePasswordStore(); string? archiveKey = null;
         try
         {
@@ -53,6 +54,7 @@ internal static partial class Program
                 var report = await new LocalSourceCheckQueue(DefaultOwnerProfile).WaitAsync(await new LocalSourceCheckQueue(DefaultOwnerProfile).EnqueueAsync(state!.SessionId, job));
                 Require(report.Succeeded && report.ExecutionIdentity?.WindowsSid == selected.Sid && selected.Sid != owner,
                     "The source probe did not identify the newly selected service account.");
+                accountSids.Add(selected.Sid);
                 if (index == 0)
                 {
                     await Wait(async () => (await history.ReadAsync()).Count(run => run.Status == BackupRunStatus.Succeeded) == 1, "Initial startup backup failed.");
@@ -67,8 +69,13 @@ internal static partial class Program
                     var queue = new LocalManualRunQueue(DefaultOwnerProfile);
                     var command = await queue.EnqueueAsync(state.SessionId, job.Id);
                     await Wait(async () => (await queue.ReadReceiptAsync(command.RequestId)) is { Phase: LocalManualRunPhase.Finished }, "Explicit switched-account backup did not finish.");
-                    Require((await history.ReadAsync()).Count == 2 && firstHash == await HashAsync(first!.Backup.Location), "The account switch lost or repeated an old backup.");
-                    foreach (var copy in await catalog.ReadAsync())
+                    var completedRuns = await history.ReadAsync();
+                    Require(completedRuns.Count == 2 && completedRuns.All(run => run.Status == BackupRunStatus.Succeeded)
+                        && firstHash == await HashAsync(first!.Backup.Location), "The switched-account backup failed, lost or repeated an old backup.");
+                    var copies = await catalog.ReadAsync();
+                    Require(copies.Count == 2, "Both the original and switched-account copies must be registered.");
+                    completedCopies = copies.Count;
+                    foreach (var copy in copies)
                     {
                         using var zip = new ZipFile(copy.Backup.Location) { Password = archivePassword };
                         using var reader = new StreamReader(zip.GetInputStream(0));
@@ -81,6 +88,7 @@ internal static partial class Program
                 WindowsAgentService.Remove(agent, DefaultOwnerProfile);
                 await Wait(() => Task.FromResult(WindowsAgentService.QueryInfo() is null), "Account-switch service removal failed.");
             }
+            Require(accountSids.Distinct(StringComparer.Ordinal).Count() == 2, "The account switch did not use two distinct verified SIDs.");
             checks.Add("two-distinct-service-identities-reported-and-protected-password-reexported");
             checks.Add("account-switch-preserves-startup-slot-plan-history-and-old-and-new-encrypted-copies");
         }
@@ -103,7 +111,7 @@ internal static partial class Program
             catch (Exception error) { failure = (failure ?? "") + " Cleanup: " + error.Message; }
         }
         await File.WriteAllTextAsync(Path.Combine(output, "service-switch-result.json"), JsonSerializer.Serialize(new {
-            success = failure is null, revision = Environment.GetEnvironmentVariable("GITHUB_SHA"), checks, error = failure }));
+            success = failure is null, revision = Environment.GetEnvironmentVariable("GITHUB_SHA"), accountSids, completedCopies, checks, error = failure }));
         return failure is null ? 0 : 1;
     }
 }
