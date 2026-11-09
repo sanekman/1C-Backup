@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Win32;
 using SPBackup.Core;
@@ -21,12 +22,31 @@ internal static partial class Program
         }
     }
     private static Task WaitService(uint state) => Wait(() => Task.FromResult(WindowsAgentService.QueryInfo()?.State == state), "SCM did not reach state " + state);
+    private static string FixtureExecutablePath(Process process)
+    {
+        // Reading MainModule traverses a remote PEB, which disappears during service
+        // shutdown and can fail with ERROR_PARTIAL_COPY even after SCM reports stopped.
+        var path = new StringBuilder(32768); var length = path.Capacity;
+        if (!QueryFixtureImageName(process.Handle, 0, path, ref length))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        return path.ToString();
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool QueryFixtureImageName(IntPtr process, uint flags, StringBuilder path, ref int length);
+
     private static async Task WaitProcessExit(int id, string executable)
     {
         try
         {
             using var process = Process.GetProcessById(id);
-            if (!string.Equals(process.MainModule?.FileName, executable, StringComparison.OrdinalIgnoreCase)) return;
+            if (process.HasExited) return;
+            try
+            {
+                if (!string.Equals(FixtureExecutablePath(process), executable, StringComparison.OrdinalIgnoreCase)) return;
+            }
+            catch (Win32Exception) when (process.HasExited) { return; }
+            catch (InvalidOperationException) when (process.HasExited) { return; }
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
         }
         catch (ArgumentException) { /* Process has already exited. */ }
@@ -35,7 +55,7 @@ internal static partial class Program
     private static async Task TerminateAgent(int id, string executable)
     {
         using var process = Process.GetProcessById(id);
-        Require(string.Equals(process.MainModule?.FileName, executable, StringComparison.OrdinalIgnoreCase),
+        Require(string.Equals(FixtureExecutablePath(process), executable, StringComparison.OrdinalIgnoreCase),
             "Refusing to terminate a process other than the isolated published agent.");
         // Terminate only the parent: killing the tree here would hide orphaned dump processes.
         process.Kill();
@@ -445,7 +465,7 @@ internal static partial class Program
                 var childId = Native.ChildProcessIds(state.ProcessId).Single(id =>
                 {
                     using var child = Process.GetProcessById(id);
-                    return string.Equals(child.MainModule?.FileName, postgres.DumpExecutablePath, StringComparison.OrdinalIgnoreCase);
+                    return string.Equals(FixtureExecutablePath(child), postgres.DumpExecutablePath, StringComparison.OrdinalIgnoreCase);
                 });
                 using var dumpProcess = Process.GetProcessById(childId);
                 Require(!dumpProcess.HasExited && Directory.Exists(interrupted.WorkDirectory),

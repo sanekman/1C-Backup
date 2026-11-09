@@ -92,7 +92,7 @@ internal static partial class Program
             checks.Add("two-distinct-service-identities-reported-and-protected-password-reexported");
             checks.Add("account-switch-preserves-startup-slot-plan-history-and-old-and-new-encrypted-copies");
         }
-        catch (Exception error) { failure = error.GetType().Name + ": " + error.Message; }
+        catch (Exception error) { failure = error.ToString(); }
         finally
         {
             try

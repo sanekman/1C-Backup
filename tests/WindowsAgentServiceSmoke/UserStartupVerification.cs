@@ -54,7 +54,7 @@ internal static partial class Program
             await Wait(async () => (state = await control.ReadAsync()) is { Phase: LocalAgentPhase.Running, CanRunManually: true, RunsSchedules: true },
                 "The registry startup command did not start the real background agent after user login.");
             using var process = Process.GetProcessById(state!.ProcessId);
-            Require(process.SessionId > 0 && string.Equals(process.MainModule?.FileName, saved.Agent, StringComparison.OrdinalIgnoreCase),
+            Require(process.SessionId > 0 && string.Equals(FixtureExecutablePath(process), saved.Agent, StringComparison.OrdinalIgnoreCase),
                 "The background agent did not start in an interactive user session from the bundled executable.");
             if (!OpenStartupProcessToken(process.Handle, 8, out var token)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
             using (token) using (var identity = new WindowsIdentity(token.DangerousGetHandle()))
