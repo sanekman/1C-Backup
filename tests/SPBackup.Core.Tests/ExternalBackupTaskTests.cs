@@ -14,12 +14,15 @@ public sealed class ExternalBackupTaskTests
     private ExternalBackupReport Report(string database = "Accounting", int minutes = 0, Guid? agent = null) =>
         new(Guid.NewGuid(), agent ?? agentId, monitor.Id, null, Now, new("key-" + Guid.NewGuid(), "sql-host", database, "D",
             Now.AddMinutes(minutes - 1).UtcDateTime, Now.AddMinutes(minutes).UtcDateTime, "UTC", ExternalBackupOutcome.Completed,
-            100, ["private-backup-path"], "SqlServerMsdbHistory"));
+            100, ["private-backup-path"], "SqlServerMsdbHistory")) { SourceFingerprint = ExternalBackupSourceIdentity.Fingerprint(monitor) };
+
+    private ExternalBackupPollResult Poll(DateTimeOffset time, int observations, int added, string? error = null) =>
+        new(monitor.Id, monitor.Name, time, observations, added, error) { SourceFingerprint = ExternalBackupSourceIdentity.Fingerprint(monitor) };
 
     [Fact]
     public void EmptySuccessfulPollDoesNotBecomeSuccessfulBackup()
     {
-        var task = Assert.Single(ExternalBackupTask.Create([monitor], [], [new(monitor.Id, monitor.Name, Now, 0, 0)], agentId));
+        var task = Assert.Single(ExternalBackupTask.Create([monitor], [], [Poll(Now, 0, 0)], agentId));
         Assert.Equal(monitor.Id, task.Id); Assert.Equal(monitor.Name, task.Name);
         Assert.Null(task.Latest); Assert.Equal("Копии пока не обнаружены", task.ResultDescription);
         Assert.Contains("Accounting", task.Source); Assert.Contains("60", task.ScheduleDescription);
@@ -41,10 +44,43 @@ public sealed class ExternalBackupTaskTests
     }
 
     [Fact]
+    public void SourceServerChangeDoesNotReusePreviousDatabaseSuccess()
+    {
+        var previous = Report();
+        var changed = monitor with { SqlServer = "another-sql-host" };
+        var task = Assert.Single(ExternalBackupTask.Create([changed], [previous], [], agentId));
+        Assert.Null(task.Latest);
+        Assert.Null(task.LastSuccessfulUtc);
+        Assert.Equal("NoCopies", task.ResultCode);
+    }
+
+    [Fact]
+    public void SourceChangeAlsoHidesOldPollAndLegacyUnboundEvidence()
+    {
+        var old = Report();
+        var current = monitor with { SqlServer = "another-sql-host", MaximumBackupAgeHours = 1 };
+        var task = Assert.Single(ExternalBackupTask.Create([current], [old], [Poll(Now, 1, 0, "old endpoint error")], agentId));
+        Assert.Null(task.Poll); Assert.Null(task.Latest); Assert.Equal("NoCopies", task.ResultCode);
+        var legacy = Assert.Single(ExternalBackupTask.Create([monitor], [old with { SourceFingerprint = null }], [], agentId));
+        Assert.Null(legacy.Latest);
+    }
+
+    [Fact]
+    public void SourceIdentityIgnoresPresentationAndFreshnessButIncludesEndpointDirectoryAndTimezone()
+    {
+        var fingerprint = ExternalBackupSourceIdentity.Fingerprint(monitor);
+        Assert.Equal(fingerprint, ExternalBackupSourceIdentity.Fingerprint(monitor with
+            { Name = "renamed", SqlServer = " SQL-HOST ", DatabaseName = "ACCOUNTING", MaximumBackupAgeHours = 10, PollIntervalSeconds = 120 }));
+        Assert.NotEqual(fingerprint, ExternalBackupSourceIdentity.Fingerprint(monitor with { TimeZoneId = "Europe/Moscow" }));
+        var pg = monitor with { Kind = ExternalBackupSourceKind.PostgreSqlReports, ReportDirectory = Path.GetTempPath() };
+        Assert.NotEqual(ExternalBackupSourceIdentity.Fingerprint(pg), ExternalBackupSourceIdentity.Fingerprint(pg with { ReportDirectory = Path.Combine(Path.GetTempPath(), "other") }));
+    }
+
+    [Fact]
     public void PollFailureOverridesBadgeWithoutLosingPreviousCopy()
     {
         var report = Report();
-        var poll = new ExternalBackupPollResult(monitor.Id, monitor.Name, Now, 0, 0, "Нет доступа к msdb");
+        var poll = Poll(Now, 0, 0, "Нет доступа к msdb");
         var task = Assert.Single(ExternalBackupTask.Create([monitor], [report], [poll], agentId));
         Assert.Equal(report, task.Latest); Assert.Equal("Ошибка опроса", task.ResultDescription);
         Assert.Contains(poll.Error!, task.ResultDetails);
@@ -91,7 +127,7 @@ public sealed class ExternalBackupTaskTests
         var configured = monitor with { MaximumBackupAgeHours = 26 };
         var copy = Report();
         ExternalBackupTask Evaluate(DateTimeOffset now) => Assert.Single(ExternalBackupTask.Create([configured], [copy],
-            [new(monitor.Id, monitor.Name, now, 1, 0)], agentId, now));
+            [Poll(now, 1, 0)], agentId, now));
         Assert.False(Evaluate(Now.AddHours(26)).FreshnessWarning);
         var overdue = Evaluate(Now.AddHours(26).AddSeconds(1));
         Assert.True(overdue.FreshnessWarning);
@@ -105,7 +141,7 @@ public sealed class ExternalBackupTaskTests
         var configured = monitor with { MaximumBackupAgeHours = 26 };
         var unpolled = Assert.Single(ExternalBackupTask.Create([configured], [], [], agentId, Now));
         Assert.False(unpolled.FreshnessWarning);
-        var polled = unpolled with { Poll = new(monitor.Id, monitor.Name, Now, 0, 0) };
+        var polled = unpolled with { Poll = Poll(Now, 0, 0) };
         Assert.True(polled.FreshnessWarning);
         Assert.False((polled with { Monitor = configured with { Enabled = false } }).FreshnessWarning);
         Assert.False((polled with { Monitor = monitor }).FreshnessWarning);
@@ -120,7 +156,7 @@ public sealed class ExternalBackupTaskTests
         var configured = monitor with { MaximumBackupAgeHours = 1 };
         var failed = Report(minutes: 120) with { Observation = Report(minutes: 120).Observation with { Outcome = ExternalBackupOutcome.Failed } };
         var task = Assert.Single(ExternalBackupTask.Create([configured], [Report(), failed, Report("Other", 180)],
-            [new(monitor.Id, monitor.Name, Now.AddHours(3), 3, 0)], agentId, Now.AddHours(3)));
+            [Poll(Now.AddHours(3), 3, 0)], agentId, Now.AddHours(3)));
         Assert.True(task.FreshnessWarning);
         Assert.Equal(Now, task.LastSuccessfulUtc);
         Assert.Equal(failed, task.Latest);
@@ -165,7 +201,7 @@ public sealed class ExternalBackupTaskTests
         report = report with { Observation = report.Observation with
             { StartedAt = Now.AddHours(3).AddMinutes(-1).DateTime, FinishedAt = Now.AddHours(3).DateTime, TimeZoneId = "Europe/Moscow" } };
         var task = Assert.Single(ExternalBackupTask.Create([monitor with { MaximumBackupAgeHours = 1 }], [report],
-            [new(monitor.Id, monitor.Name, Now.AddHours(2), 1, 0)], agentId, Now.AddHours(2)));
+            [Poll(Now.AddHours(2), 1, 0)], agentId, Now.AddHours(2)));
         Assert.Equal(Now, task.LastSuccessfulUtc);
         Assert.True(task.FreshnessWarning);
     }

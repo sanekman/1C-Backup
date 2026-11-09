@@ -23,6 +23,34 @@ public sealed class ExternalMonitoringTests : IDisposable
     public ExternalMonitoringTests() => Directory.CreateDirectory(root);
 
     [Fact]
+    public async Task ReconfirmedSourceRebindsExistingEvidenceWithoutDuplicatingHistory()
+    {
+        await Queue.ObserveAsync(settings, Monitor, [Observation]);
+        var previous = Assert.Single(await Queue.ReadAsync());
+        var changed = Monitor with { ReportDirectory = Path.Combine(root, "new-reports") };
+        Assert.Null(Assert.Single(ExternalBackupTask.Create([changed], [previous], [], settings.AgentId)).Latest);
+        Assert.Equal(0, await Queue.ObserveAsync(settings, changed, [Observation]));
+        var current = Assert.Single(await Queue.ReadAsync());
+        Assert.Equal(previous.ReportId, current.ReportId);
+        Assert.Equal(JsonSerializer.Serialize(previous.Observation), JsonSerializer.Serialize(current.Observation));
+        Assert.Equal(ExternalBackupSourceIdentity.Fingerprint(changed), current.SourceFingerprint);
+        Assert.Equal(current, Assert.Single(ExternalBackupTask.Create([changed], [current], [], settings.AgentId)).Latest);
+    }
+
+    [Fact]
+    public async Task LegacyHistoryRemainsUnverifiedUntilReadAgainAndKeepsItsReportId()
+    {
+        await Queue.ObserveAsync(settings, Monitor, [Observation]);
+        var previous = Assert.Single(await Queue.ReadAsync());
+        var legacy = previous with { SourceFingerprint = null };
+        await File.WriteAllTextAsync(Path.Combine(root, "outbox", "reports.json"), JsonSerializer.Serialize(new[] { legacy }));
+        Assert.Null(Assert.Single(ExternalBackupTask.Create([Monitor], await Queue.ReadAsync(), [], settings.AgentId)).Latest);
+        Assert.Equal(0, await Queue.ObserveAsync(settings, Monitor, [Observation]));
+        Assert.Equal(previous.ReportId, Assert.Single(await Queue.ReadAsync()).ReportId);
+        Assert.NotNull(Assert.Single(ExternalBackupTask.Create([Monitor], await Queue.ReadAsync(), [], settings.AgentId)).Latest);
+    }
+
+    [Fact]
     public async Task RepeatedPollsAndRestartDoNotDuplicateReports()
     {
         Assert.Equal(1, await Queue.ObserveAsync(settings, Monitor, [Observation, Observation]));

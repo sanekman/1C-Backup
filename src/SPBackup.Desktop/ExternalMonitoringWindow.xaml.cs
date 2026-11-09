@@ -219,13 +219,15 @@ public partial class ExternalMonitoringWindow : Window
                     ? new SqlServerBackupHistorySource() : new PostgreSqlBackupReportSource();
                 var observations = await Task.Run(() => source.ReadAsync(monitor, cancellation.Token));
                 var added = await outbox.ObserveAsync(settings, monitor, observations, cancellation.Token);
-                await pollingStatus.RecordAsync(new(monitor.Id, monitor.Name, DateTimeOffset.UtcNow, observations.Count, added), cancellation.Token);
+                await pollingStatus.RecordAsync(new(monitor.Id, monitor.Name, DateTimeOffset.UtcNow, observations.Count, added)
+                    { SourceFingerprint = ExternalBackupSourceIdentity.Fingerprint(monitor) }, cancellation.Token);
                 await RefreshAsync();
                 Status.Text = $"Проверка завершена. Получено: {observations.Count}, новых: {added}. Это результат чтения истории, а не проверка восстановления.";
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
-                await pollingStatus.RecordAsync(new(monitor.Id, monitor.Name, DateTimeOffset.UtcNow, 0, 0, error.Message) { ErrorCode = ExternalBackupPollErrors.Classify(error) });
+                await pollingStatus.RecordAsync(new(monitor.Id, monitor.Name, DateTimeOffset.UtcNow, 0, 0, error.Message)
+                    { ErrorCode = ExternalBackupPollErrors.Classify(error), SourceFingerprint = ExternalBackupSourceIdentity.Fingerprint(monitor) });
                 throw;
             }
         }

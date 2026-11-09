@@ -120,6 +120,10 @@ public sealed record ExternalBackupReport(Guid ReportId, Guid AgentId, Guid Moni
     string? TargetServer, DateTimeOffset ObservedUtc, ExternalBackupObservation Observation,
     DateTimeOffset? DeliveredUtc = null)
 {
+    // Last source configuration under which this immutable evidence was read.
+    // Kept locally; AgentApiClient omits it from the wire for stable idempotency.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceFingerprint { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public string DeliveryDescription => DeliveredUtc is not null ? "Отправлено" :
         TargetServer is null ? "Локальная история" : "Ожидает отправки";
@@ -155,7 +159,8 @@ public sealed class ExternalBackupOutbox(string path)
         try
         {
             var reports = await ReadCoreAsync(cancellationToken);
-            var count = 0;
+            var count = 0; var changed = false;
+            var fingerprint = ExternalBackupSourceIdentity.Fingerprint(monitor);
             foreach (var observation in observations)
             {
                 var existing = reports.SingleOrDefault(r => r.AgentId == settings.AgentId && r.MonitorId == monitor.Id &&
@@ -164,14 +169,19 @@ public sealed class ExternalBackupOutbox(string path)
                 {
                     if (JsonSerializer.Serialize(existing.Observation) != JsonSerializer.Serialize(observation))
                         throw new InvalidDataException("Содержимое ранее полученного отчёта изменилось: " + observation.SourceKey);
+                    if (existing.SourceFingerprint != fingerprint)
+                    {
+                        reports[reports.IndexOf(existing)] = existing with { SourceFingerprint = fingerprint };
+                        changed = true;
+                    }
                     continue;
                 }
                 reports.Add(new ExternalBackupReport(Guid.NewGuid(), settings.AgentId, monitor.Id,
                     settings.Mode == AgentMode.Managed ? settings.NormalizedServerAddress : null,
-                    DateTimeOffset.UtcNow, observation));
+                    DateTimeOffset.UtcNow, observation) { SourceFingerprint = fingerprint });
                 count++;
             }
-            if (count != 0) await file.WriteAsync(reports, cancellationToken);
+            if (count != 0 || changed) await file.WriteAsync(reports, cancellationToken);
             return count;
         }
         finally { gate.Release(); }
@@ -212,7 +222,7 @@ public sealed class ExternalBackupOutbox(string path)
     {
         var reports = await file.ReadAsync(cancellationToken) ?? [];
         if (reports.Any(r => r is null || r.ReportId == Guid.Empty || r.AgentId == Guid.Empty || r.MonitorId == Guid.Empty ||
-            r.Observation is null) || reports.Select(r => r.ReportId).Distinct().Count() != reports.Count ||
+            r.Observation is null || !ExternalBackupSourceIdentity.Valid(r.SourceFingerprint)) || reports.Select(r => r.ReportId).Distinct().Count() != reports.Count ||
             reports.Select(r => (r.AgentId, r.MonitorId, r.Observation.SourceKey)).Distinct().Count() != reports.Count)
             throw new InvalidDataException("Повреждена история внешних копий.");
         foreach (var report in reports) report.Observation.Validate();

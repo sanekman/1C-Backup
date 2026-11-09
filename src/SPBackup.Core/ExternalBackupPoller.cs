@@ -4,6 +4,7 @@ public sealed record ExternalBackupPollResult(Guid MonitorId, string MonitorName
     int Observations, int Added, string? Error = null)
 {
     public string? ErrorCode { get; init; }
+    public string? SourceFingerprint { get; init; }
 }
 
 public sealed class ExternalBackupPollingStatusStore(string directory)
@@ -13,7 +14,7 @@ public sealed class ExternalBackupPollingStatusStore(string directory)
     {
         var values = await file.ReadAsync(cancellationToken) ?? [];
         if (values.Any(value => value is null || value.MonitorId == Guid.Empty || string.IsNullOrWhiteSpace(value.MonitorName) ||
-            value.PolledUtc == default || value.Observations < 0 || value.Added < 0) ||
+            value.PolledUtc == default || value.Observations < 0 || value.Added < 0 || !ExternalBackupSourceIdentity.Valid(value.SourceFingerprint)) ||
             values.Select(value => value.MonitorId).Distinct().Count() != values.Count)
             throw new InvalidDataException("Некорректный журнал опроса источников.");
         return values;
@@ -25,7 +26,7 @@ public sealed class ExternalBackupPollingStatusStore(string directory)
     public async Task RecordAsync(ExternalBackupPollResult result, CancellationToken cancellationToken = default)
     {
         if (result.MonitorId == Guid.Empty || string.IsNullOrWhiteSpace(result.MonitorName) || result.PolledUtc == default
-            || result.Observations < 0 || result.Added < 0) throw new InvalidDataException("Некорректный результат опроса.");
+            || result.Observations < 0 || result.Added < 0 || !ExternalBackupSourceIdentity.Valid(result.SourceFingerprint)) throw new InvalidDataException("Некорректный результат опроса.");
         var previous = await ReadAsync(cancellationToken);
         await WriteAsync(previous.Where(value => value.MonitorId != result.MonitorId).Append(result).ToList(), cancellationToken);
     }
@@ -58,14 +59,16 @@ public sealed class ExternalBackupPoller(ExternalBackupMonitorStore store, Exter
                         ? (IExternalBackupSource)new SqlServerBackupHistorySource() : new PostgreSqlBackupReportSource());
                     var observations = await source.ReadAsync(monitor, cancellationToken);
                     var added = await outbox.ObserveAsync(settings, monitor, observations, cancellationToken);
-                    results.Add(new ExternalBackupPollResult(monitor.Id, monitor.Name, now.ToUniversalTime(), observations.Count, added));
+                    results.Add(new ExternalBackupPollResult(monitor.Id, monitor.Name, now.ToUniversalTime(), observations.Count, added)
+                        { SourceFingerprint = ExternalBackupSourceIdentity.Fingerprint(monitor) });
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
                     DiagnosticLog.Current.Write(DiagnosticEvent.MonitoringFailed, DiagnosticLevel.Warning, ex,
                         sourceKind: monitor.Kind == ExternalBackupSourceKind.SqlServerHistory ? DatabaseKind.SqlServer : DatabaseKind.PostgreSql);
-                    results.Add(new ExternalBackupPollResult(monitor.Id, monitor.Name, now.ToUniversalTime(), 0, 0, ex.Message) { ErrorCode = ExternalBackupPollErrors.Classify(ex) });
+                    results.Add(new ExternalBackupPollResult(monitor.Id, monitor.Name, now.ToUniversalTime(), 0, 0, ex.Message)
+                        { ErrorCode = ExternalBackupPollErrors.Classify(ex), SourceFingerprint = ExternalBackupSourceIdentity.Fingerprint(monitor) });
                 }
             }
             var old = await status.ReadAsync(cancellationToken);

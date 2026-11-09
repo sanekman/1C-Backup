@@ -156,6 +156,7 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgent
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
         using var request = await RequestAsync(settings, HttpMethod.Post, "external-backups", timeout.Token);
+        report = report with { SourceFingerprint = null };
         request.Headers.Add("Idempotency-Key", report.ReportId.ToString("D"));
         request.Content = JsonContent.Create(report with { DeliveredUtc = null }, options: JsonOptions);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);

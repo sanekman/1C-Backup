@@ -139,8 +139,8 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
                     "Опрос каждые "+m.PollIntervalSeconds+" с",null,0) { TaskKind = "Observation" })).ToArray(),
             progress is { Finished:false } && history.Any(r=>r.RunId==progress.RunId && r.Status==BackupRunStatus.Running) ? new(progress.RunId,progress.JobId,
                 progress.Progress.Stage == BackupStage.RetryingStorage ? "ConnectingStorage" : progress.Progress.Stage.ToString(),progress.Progress.Percent,progress.UpdatedUtc) : null,pending.Length,
-            monitors.Select(m=>new MonitoredSource(m.Id,Label(m.Name),m.Kind.ToString(),m.Enabled,polling.FirstOrDefault(p=>p.MonitorId==m.Id)?.PolledUtc,
-                polling.FirstOrDefault(p=>p.MonitorId==m.Id)?.Error is not null)
+            monitors.Select(m=>new MonitoredSource(m.Id,Label(m.Name),m.Kind.ToString(),m.Enabled,observationTasks[m.Id].Poll?.PolledUtc,
+                observationTasks[m.Id].Poll?.Error is not null)
                 { MaximumBackupAgeHours = m.MaximumBackupAgeHours, LastSuccessfulUtc = observationTasks[m.Id].LastSuccessfulUtc,
                     FreshnessWarning = observationTasks[m.Id].FreshnessWarning,
                     ObservationStatus = observationTasks[m.Id].ResultCode, LatestReportId = observationTasks[m.Id].Latest?.ReportId, LatestFinishedUtc = observationTasks[m.Id].LatestFinishedUtc,

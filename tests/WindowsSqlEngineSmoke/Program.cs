@@ -96,8 +96,10 @@ try
     await Execute("INSERT dbo.Fixture VALUES(3,N'external history');", database);
     await Execute($"BACKUP DATABASE [{database}] TO DISK={Literal(Path.Combine(external, "diff.bak"))} WITH DIFFERENTIAL,CHECKSUM;");
     await Execute($"BACKUP LOG [{database}] TO DISK={Literal(Path.Combine(external, "log.trn"))} WITH CHECKSUM;");
+    await Execute($"CREATE USER [{login}] FOR LOGIN [{login}]; GRANT SELECT ON dbo.backupset TO [{login}]; GRANT SELECT ON dbo.backupmediafamily TO [{login}];", "msdb");
     var monitor = new ExternalBackupMonitor { Name = "Owned SQL history", Kind = ExternalBackupSourceKind.SqlServerHistory,
-        SqlServer = windowsServer, DatabaseName = database, TimeZoneId = TimeZoneInfo.Local.Id };
+        SqlServer = server, SqlAuthentication = SqlServerAuthentication.SqlServer, SqlCredentialKey = key,
+        DatabaseName = database, TimeZoneId = TimeZoneInfo.Local.Id };
     var source = new SqlServerBackupHistorySource(credentials: credentials);
     var observed = await source.ReadAsync(monitor);
     Require(new[] { "D", "I", "L" }.All(type => observed.Any(item => item.BackupType == type && item.SizeBytes > 0 && item.Outcome == ExternalBackupOutcome.Completed)),
@@ -119,29 +121,30 @@ try
     Require(ExternalBackupTask.Create([tracked], reports, [poll], agentId, evaluated.AddHours(2)).Single().ResultCode == "Overdue",
         "Actual backup evidence did not become overdue at a future evaluation time.");
     var changed = ExternalBackupTask.Create([tracked with { DatabaseName = prefix + "_empty" }], reports, [poll], agentId, evaluated).Single();
-    Require(changed.Latest is null && changed.LastSuccessfulUtc is null && changed.FreshnessWarning,
+    Require(changed.Latest is null && changed.LastSuccessfulUtc is null && changed.Poll is null && !changed.FreshnessWarning,
         "Old backup evidence masked a newly selected database with no copies.");
     Require((await source.ReadAsync(monitor with { DatabaseName = prefix + "_empty" })).Count == 0, "A new source reused previous database history.");
     var denied = monitor with { SqlServer = server, SqlAuthentication = SqlServerAuthentication.SqlServer, SqlCredentialKey = key };
-    await Execute($"CREATE USER [{login}] FOR LOGIN [{login}]; DENY SELECT ON dbo.backupset TO [{login}]; DENY SELECT ON dbo.backupmediafamily TO [{login}];", "msdb");
+    await Execute($"DENY SELECT ON dbo.backupset TO [{login}]; DENY SELECT ON dbo.backupmediafamily TO [{login}];", "msdb");
     var deniedCorrectly = false;
     try { await source.ReadAsync(denied); } catch (Exception error) when (error is SqlException or IOException) { deniedCorrectly = true; }
     Require(deniedCorrectly, "A SQL user without msdb read permissions was reported as a successful poll.");
     await monitorStore.SaveAsync([denied with { MaximumBackupAgeHours = 1 }]);
-    var failedPoll = (await poller.PollAsync(evaluated.AddSeconds(1))).Single();
+    var failedPoll = (await poller.PollAsync(evaluated.AddSeconds(monitor.PollIntervalSeconds + 1))).Single();
     Require(failedPoll.Error is not null && failedPoll.ErrorCode is not null && failedPoll.Observations == 0 && failedPoll.Added == 0,
         "The actual SQL poller did not retain a classified query failure.");
     Require(ExternalBackupTask.Create([tracked], reports, [failedPoll], agentId, evaluated).Single().ResultCode == "PollFailed",
         "Previous successful history masked a later failed poll.");
+    await Execute($"GRANT SELECT ON dbo.backupset TO [{login}]; GRANT SELECT ON dbo.backupmediafamily TO [{login}];", "msdb");
     Require((await source.ReadAsync(monitor)).Count == observed.Count, "Failed monitoring affected the next healthy read.");
     await monitorStore.SaveAsync([tracked]);
-    var recoveredPoll = (await poller.PollAsync(evaluated.AddSeconds(2))).Single();
+    var recoveredPoll = (await poller.PollAsync(evaluated.AddSeconds(2 * monitor.PollIntervalSeconds + 2))).Single();
     Require(recoveredPoll.Error is null && recoveredPoll.Observations == observed.Count && recoveredPoll.Added == 0,
         "The recovered SQL poller duplicated evidence or retained the old failure.");
     Require((await pollingStatus.ReadAsync()).Single().Error is null && (await outbox.ReadAsync()).Count == reports.Count,
         "Recovery did not clear polling status or preserved duplicate reports.");
     await monitorStore.SaveAsync([tracked with { DatabaseName = prefix + "_empty" }]);
-    var emptyPoll = (await poller.PollAsync(evaluated.AddSeconds(3))).Single();
+    var emptyPoll = (await poller.PollAsync(evaluated.AddSeconds(2 * monitor.PollIntervalSeconds + 3))).Single();
     var emptyTask = ExternalBackupTask.Create([tracked with { DatabaseName = prefix + "_empty" }], await outbox.ReadAsync(), [emptyPoll], agentId, evaluated).Single();
     Require(emptyPoll.Error is null && emptyPoll.Observations == 0 && emptyTask.Latest is null && emptyTask.FreshnessWarning,
         "The actual poller reused old evidence after switching to an empty database.");

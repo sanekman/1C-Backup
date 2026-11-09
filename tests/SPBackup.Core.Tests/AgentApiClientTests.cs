@@ -10,6 +10,26 @@ namespace SPBackup.Core.Tests;
 
 public sealed class AgentApiClientTests
 {
+    [Fact]
+    public async Task LocalSourceRebindingKeepsExternalReportWireAndIdempotencyStable()
+    {
+        var bodies = new List<string>(); var keys = new List<string>();
+        using var client = new AgentApiClient(new FixtureCredentials(), new Handler(request =>
+        {
+            bodies.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            keys.Add(Assert.Single(request.Headers.GetValues("Idempotency-Key")));
+            return new(HttpStatusCode.NoContent);
+        }));
+        var observation = new ExternalBackupObservation("fixture-key", "fixture-instance", "db", "D", DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow,
+            "UTC", ExternalBackupOutcome.Completed, 100, [], "SqlServerMsdbHistory");
+        var report = new ExternalBackupReport(Guid.NewGuid(), settings.AgentId, Guid.NewGuid(), settings.NormalizedServerAddress,
+            DateTimeOffset.UtcNow, observation) { SourceFingerprint = new string('A',64) };
+        await client.SendExternalBackupAsync(settings, report);
+        await client.SendExternalBackupAsync(settings, report with { SourceFingerprint = new string('B',64) });
+        Assert.Equal(bodies[0], bodies[1]); Assert.Equal(keys[0], keys[1]);
+        Assert.DoesNotContain("sourceFingerprint", bodies[0]);
+    }
+
     private readonly AgentSettings settings = new() { Mode = AgentMode.Managed,
         ServerAddress = "https://backup.example.com/prefix/", CredentialKey = "fixture-binding" };
     private static readonly JsonSerializerOptions WireOptions = new(JsonSerializerDefaults.Web)

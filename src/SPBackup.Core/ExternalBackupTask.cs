@@ -43,7 +43,7 @@ public sealed record ExternalBackupTask(ExternalBackupMonitor Monitor, ExternalB
     };
     public DateTimeOffset? LatestFinishedUtc => Latest is null ? null : FinishedUtc(Latest);
     public string ResultDetails => ResultDescription + (FreshnessDetails.Length == 0 ? "" : "\n" + FreshnessDetails)
-        + (Poll is null ? "\nОпрос ещё не выполнялся." : "\nПоследний опрос: " + Poll.PolledUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss"))
+        + (Poll is null ? "\nОпрос с текущими настройками ещё не выполнялся." : "\nПоследний опрос: " + Poll.PolledUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss"))
         + (Poll?.Error is { } error ? "\n" + Monitoring.MonitoredPollErrors.Describe(Poll.ErrorCode) + "\n" + error : "")
         + (Latest is null ? "" : "\n" + Latest.Observation.DatabaseName + " · " + Latest.Observation.FinishedAt.ToString("dd.MM.yyyy HH:mm:ss")
             + " · " + Latest.Observation.TimeZoneId + "\n" + Latest.Observation.EvidenceDescription)
@@ -57,7 +57,9 @@ public sealed record ExternalBackupTask(ExternalBackupMonitor Monitor, ExternalB
         var statuses = polls.ToDictionary(poll => poll.MonitorId);
         return monitors.Select(monitor =>
         {
-            var matching = ownReports[monitor.Id].Where(report => monitor.DatabaseName.Length == 0 ||
+            var fingerprint = ExternalBackupSourceIdentity.Fingerprint(monitor);
+            var matching = ownReports[monitor.Id].Where(report => string.Equals(report.SourceFingerprint, fingerprint, StringComparison.Ordinal))
+                .Where(report => monitor.DatabaseName.Length == 0 ||
                 string.Equals(report.Observation.DatabaseName, monitor.DatabaseName,
                     monitor.Kind == ExternalBackupSourceKind.SqlServerHistory ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                 .OrderByDescending(report => FinishedUtc(report)).ThenByDescending(report => report.ObservedUtc).ToArray();
@@ -69,7 +71,9 @@ public sealed record ExternalBackupTask(ExternalBackupMonitor Monitor, ExternalB
                     && value.Observation.BackupType == type);
                 return report is null ? null : FinishedUtc(report);
             }
-            return new ExternalBackupTask(monitor, matching.FirstOrDefault(), statuses.GetValueOrDefault(monitor.Id))
+            var poll = statuses.GetValueOrDefault(monitor.Id);
+            if (poll is not null && !string.Equals(poll.SourceFingerprint, fingerprint, StringComparison.Ordinal)) poll = null;
+            return new ExternalBackupTask(monitor, matching.FirstOrDefault(), poll)
             { EvaluatedUtc = now ?? DateTimeOffset.UtcNow, LastSuccessfulUtc = successful is null ? null : FinishedUtc(successful),
                 LastFullUtc = LatestType("D"), LastDifferentialUtc = LatestType("I"), LastLogUtc = LatestType("L") };
         }).ToArray();
