@@ -100,6 +100,19 @@ try {
     }
     if (-not $loopbackFound) { throw 'No loopback SQL listener is available; public listeners are not enabled.' }
     Restart-Service -Name $serviceName
+    $listenDeadline = (Get-Date).AddSeconds(60)
+    do {
+        $socket = New-Object Net.Sockets.TcpClient
+        try {
+            $connect = $socket.ConnectAsync([Net.IPAddress]::Loopback, $port)
+            $listening = $connect.Wait(1000) -and $socket.Connected
+        } catch { $listening = $false }
+        finally { $socket.Dispose() }
+        if (-not $listening) {
+            if ((Get-Date) -ge $listenDeadline) { throw 'The owned SQL engine did not open its configured loopback TCP port.' }
+            Start-Sleep -Milliseconds 300
+        }
+    } while (-not $listening)
     $workspace = Join-Path $private 'fixture'; New-Item -ItemType Directory -Path $workspace | Out-Null
     & icacls.exe $workspace /grant "${serviceAccount}:(OI)(CI)(M)" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not grant the owned SQL service access to its fixture.' }
@@ -111,7 +124,7 @@ try {
     $phase = 'build-probe'
     & dotnet publish (Join-Path $repo 'tests/WindowsSqlEngineSmoke') -c Release -r win-x64 --self-contained true -m:1 -nr:false -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the SQL engine probe.' }
-    $env:SPBACKUP_NATIVE_SQL_ENGINE_TEST = '1'; $env:SPBACKUP_SQL_TEST_SERVER = "localhost,$port"; $env:SPBACKUP_SQL_TEST_PASSWORD = $password
+    $env:SPBACKUP_NATIVE_SQL_ENGINE_TEST = '1'; $env:SPBACKUP_SQL_TEST_SERVER = "tcp:localhost,$port"; $env:SPBACKUP_SQL_TEST_PASSWORD = $password
     $phase = 'verify-engine'
     & (Join-Path $binary 'WindowsSqlEngineSmoke.exe') $workspace
     $probeExit = $LASTEXITCODE
@@ -122,14 +135,14 @@ try {
 } catch {
     $setupError = $_
     $startupErrors = @()
-    if ($phase -eq 'configure-tls-and-loopback' -and $instanceId) {
+    if ($phase -in @('configure-tls-and-loopback','verify-engine') -and $instanceId) {
         try {
             $parameters = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceId\MSSQLServer\Parameters"
             $errorArgument = @($parameters.PSObject.Properties | Where-Object { $_.Name -like 'SQLArg*' -and [string]$_.Value -like '-e*' } | Select-Object -First 1)
             if ($errorArgument.Count -eq 1) {
                 $logPath = ([string]$errorArgument[0].Value).Substring(2)
                 $startupErrors = @(Get-Content -LiteralPath $logPath -Tail 100 |
-                    Where-Object { $_ -match '(?i)error|certificate|encryption|TDSSNI|TLS|SSL|failed' } |
+                    Where-Object { $_ -match '(?i)error|certificate|encryption|TDSSNI|TLS|SSL|failed|server is listening' } |
                     ForEach-Object { $_.Replace($password,'[redacted]') })
             }
         } catch { $startupErrors = @('SQL startup diagnostics were unavailable.') }
