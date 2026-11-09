@@ -5,6 +5,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
+foreach ($script in Get-ChildItem (Join-Path $PSScriptRoot 'windows_vm') -Filter '*.ps1') {
+    $parseErrors = $null; $tokens = $null
+    $null = [Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors) { throw ($parseErrors | Out-String) }
+}
 $Output = [IO.Path]::GetFullPath($Output)
 if (Test-Path -LiteralPath $Output) { throw 'Use a new output directory; an existing bundle is never replaced.' }
 if ((& dotnet --version).Trim() -ne '10.0.402') { throw 'Build the lab bundle with .NET SDK 10.0.402.' }

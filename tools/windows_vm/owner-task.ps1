@@ -6,8 +6,8 @@ New-Item -ItemType Directory -Path $out -Force | Out-Null
 $env:ONECBACKUP_NATIVE_SERVICE_TEST = '1'
 $env:GITHUB_SHA = (Get-Content "$root\bundle\bundle.json" -Raw | ConvertFrom-Json).revision
 $env:PGBIN = "$root\bundle\postgresql\bin"
-$env:PATH = "$env:PGBIN;$root\bundle\dotnet;$env:PATH"
-$env:DOTNET_ROOT = "$root\bundle\dotnet"
+$env:PATH = "$env:PGBIN;$env:PATH"
+# All three executables are self-contained; the SDK is validated on the host, not installed in the guest.
 try {
     $mode = switch ($Phase) {
         'volumes' { '--verify-volumes' }

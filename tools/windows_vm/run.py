@@ -57,7 +57,9 @@ class VM:
                 '-device', 'ide-hd,drive=osdisk,bus=sata.0',
                 '-netdev', f'user,id=private,restrict=on,hostfwd=tcp:127.0.0.1:{self.port}-:5985',
                 '-device', 'e1000e,netdev=private',
-                '-qmp', f'unix:{self.qmp_path},server=on,wait=off', '-boot', 'order=c,once=d' if install else 'order=c']
+                '-qmp', f'unix:{self.qmp_path},server=on,wait=off',
+                '-chardev', f'file,id=setup,path={self.root / "setup.log"},append=on',
+                '-device', 'isa-serial,chardev=setup', '-boot', 'order=c,once=d' if install else 'order=c']
         if install:
             args += ['-drive', f'if=none,id=install,media=cdrom,format=raw,readonly=on,file={self.iso}',
                      '-device', 'ide-cd,drive=install,bus=sata.1',
@@ -106,7 +108,7 @@ def answer(password):
 </CreatePartitions><ModifyPartitions><ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Format>FAT32</Format><Label>System</Label></ModifyPartition><ModifyPartition wcm:action="add"><Order>2</Order><PartitionID>3</PartitionID><Format>NTFS</Format><Label>SPBWindows</Label><Letter>C</Letter></ModifyPartition></ModifyPartitions></Disk></DiskConfiguration>
 <ImageInstall><OSImage><InstallFrom><MetaData wcm:action="add"><Key>/IMAGE/INDEX</Key><Value>2</Value></MetaData></InstallFrom><InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo></OSImage></ImageInstall><UserData><AcceptEula>true</AcceptEula><FullName>SP Backup Lab</FullName><Organization>Isolated test</Organization></UserData></component></settings>
 <settings pass="specialize"><component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"><ComputerName>SPB-VM</ComputerName><TimeZone>UTC</TimeZone></component>
-<component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"><RunSynchronous><RunSynchronousCommand wcm:action="add"><Order>1</Order><Path>cmd /c for %d in (D E F G H I) do if exist %d:\\SPBLAB.marker powershell.exe -NoProfile -ExecutionPolicy Bypass -File %d:\\bootstrap.ps1</Path></RunSynchronousCommand></RunSynchronous></component></settings>
+<component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"><RunSynchronous><RunSynchronousCommand wcm:action="add"><Order>1</Order><Path>cmd /c for %d in (D E F G H I) do if exist %d:\\SPBLAB.marker powershell.exe -NoProfile -ExecutionPolicy Bypass -File %d:\\bootstrap.ps1 -StageOnly</Path></RunSynchronousCommand></RunSynchronous></component></settings>
 <settings pass="oobeSystem"><component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"><OOBE><HideEULAPage>true</HideEULAPage><HideOnlineAccountScreens>true</HideOnlineAccountScreens><HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE><ProtectYourPC>3</ProtectYourPC><SkipMachineOOBE>true</SkipMachineOOBE><SkipUserOOBE>true</SkipUserOOBE></OOBE><UserAccounts><AdministratorPassword><Value>{escape(password)}</Value><PlainText>true</PlainText></AdministratorPassword></UserAccounts></component></settings></unattend>'''
 
 
@@ -144,7 +146,9 @@ def main():
         download('https://aka.ms/vs/17/release/vc_redist.x64.exe', seed / 'vc_redist.x64.exe')
         with zipfile.ZipFile(seed / 'bundle.zip', 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
             for path in bundle.rglob('*'):
-                if path.is_file(): archive.write(path, path.relative_to(bundle).as_posix())
+                relative = path.relative_to(bundle)
+                if path.is_file() and (relative.parts[0] in ('agent', 'desktop', 'probe', 'postgresql') or relative.as_posix() == 'bundle.json'):
+                    archive.write(path, relative.as_posix())
         subprocess.run(['genisoimage', '-quiet', '-J', '-R', '-V', 'SPBLAB', '-o', str(root / 'seed.iso'), str(seed)], check=True)
         vm = VM(root, iso, root / 'seed.iso')
         vm.start(install=True)
@@ -161,8 +165,17 @@ def main():
             return result.std_out.decode('utf-8-sig').strip()
         def wait_guest(seconds):
             deadline = time.monotonic() + seconds
+            last_setup_line = ''
             while time.monotonic() < deadline:
                 if vm.process.poll() is not None: raise RuntimeError('The owned VM exited before readiness.')
+                setup_log = root / 'setup.log'
+                if setup_log.exists():
+                    lines = setup_log.read_text(errors='replace').splitlines()
+                    line = lines[-1] if lines else ''
+                    if line and line != last_setup_line:
+                        print('Windows setup: ' + line.replace(password, '[redacted]'), flush=True)
+                        last_setup_line = line
+                    if any('FAILED:' in line for line in lines): raise RuntimeError('Windows bootstrap failed: ' + line)
                 try:
                     value = ps("if((Get-ItemProperty HKLM:\\SYSTEM\\Setup).SystemSetupInProgress -ne 0){throw 'setup'};Get-Content C:\\SPBLab\\ready.json -Raw")
                     if json.loads(value)['ready']: return
@@ -262,7 +275,8 @@ def main():
     finally:
         if vm: vm.stop()
         (output / 'vm-result.json').write_text(json.dumps(provenance, indent=2))
-        if (root / 'qemu.log').exists(): shutil.copyfile(root / 'qemu.log', output / 'qemu.log')
+        for log_name in ('qemu.log', 'setup.log'):
+            if (root / log_name).exists(): shutil.copyfile(root / log_name, output / log_name)
         shutil.rmtree(root)
 
 
