@@ -135,7 +135,7 @@ def main():
     try:
         bundle = args.bundle.resolve()
         manifest = json.loads((bundle / 'bundle.json').read_text(encoding='utf-8-sig'))
-        if manifest['revision'] != provenance['source'] or not manifest['runnerVerified']:
+        if manifest['revision'] != provenance['source'] or not manifest['runnerVerified'] or not manifest.get('desktopVerified'):
             raise RuntimeError('The bundle does not belong to this tested source.')
         for item in manifest['files']:
             if sha256(bundle / item['path'].replace('\\', '/')) != item['sha256'].lower():
