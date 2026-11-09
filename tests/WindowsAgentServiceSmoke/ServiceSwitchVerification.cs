@@ -15,7 +15,7 @@ internal static partial class Program
         var accounts = new[] { "spba" + Guid.NewGuid().ToString("N")[..10], "spbb" + Guid.NewGuid().ToString("N")[..10] };
         var passwords = new[] { "Sw!8a-" + Guid.NewGuid().ToString("N"), "Sw!8b-" + Guid.NewGuid().ToString("N") };
         var created = new List<string>(); var checks = new List<string>(); string? failure = null;
-        var accountSids = new List<string>(); var completedCopies = 0;
+        var accountSids = new List<string>(); var sourceProbes = new List<SourceCheckReport>(); var completedCopies = 0;
         var archiveStore = new WindowsArchivePasswordStore(); string? archiveKey = null;
         try
         {
@@ -51,21 +51,29 @@ internal static partial class Program
                 WindowsAgentService.Install(agent, DefaultOwnerProfile, selected.Name, owner, passwords[index]);
                 await WaitService(4); LocalAgentState? state = null;
                 await Wait(async () => (state = await control.ReadAsync()) is { Phase: LocalAgentPhase.Running, CanCheckSources: true, CanRunManually: true }, "Switched service did not become ready.");
-                var report = await new LocalSourceCheckQueue(DefaultOwnerProfile).WaitAsync(await new LocalSourceCheckQueue(DefaultOwnerProfile).EnqueueAsync(state!.SessionId, job));
-                Require(report.Succeeded && report.ExecutionIdentity?.WindowsSid == selected.Sid && selected.Sid != owner,
-                    "The source probe did not identify the newly selected service account.");
-                accountSids.Add(selected.Sid);
+                // A source probe correctly rejects a 1CD held by the startup archive.
+                // Confirm startup completion first; this scenario checks identities, not busy-file handling.
                 if (index == 0)
                 {
-                    await Wait(async () => (await history.ReadAsync()).Count(run => run.Status == BackupRunStatus.Succeeded) == 1, "Initial startup backup failed.");
+                    await Wait(async () => (await history.ReadAsync()).Any(run => run.JobId == job.Id && run.Status != BackupRunStatus.Running), "Initial startup backup did not finish.");
+                    var initial = (await history.ReadAsync()).Single();
+                    Require(initial.Status == BackupRunStatus.Succeeded, "Initial startup backup failed: " + initial.Error);
                     first = (await catalog.ReadAsync()).Single(); firstHash = await HashAsync(first.Backup.Location);
                 }
                 else
                 {
                     await Wait(async () => (await control.ReadAsync()) is { Phase: LocalAgentPhase.Running } live
-                        && live.SessionId == state.SessionId && live.UpdatedUtc >= live.StartedUtc.AddSeconds(32),
+                        && live.SessionId == state!.SessionId && live.UpdatedUtc >= live.StartedUtc.AddSeconds(32),
                         "The switched account did not remain live through a scheduler cycle.");
                     Require((await history.ReadAsync()).Count == 1, "Changing the service account replayed the startup backup.");
+                }
+                var report = await new LocalSourceCheckQueue(DefaultOwnerProfile).WaitAsync(await new LocalSourceCheckQueue(DefaultOwnerProfile).EnqueueAsync(state!.SessionId, job));
+                sourceProbes.Add(report);
+                Require(report.Succeeded && report.ExecutionIdentity?.WindowsSid == selected.Sid && selected.Sid != owner,
+                    "The source probe did not identify the selected account: " + report.Details);
+                accountSids.Add(selected.Sid);
+                if (index == 1)
+                {
                     var queue = new LocalManualRunQueue(DefaultOwnerProfile);
                     var command = await queue.EnqueueAsync(state.SessionId, job.Id);
                     await Wait(async () => (await queue.ReadReceiptAsync(command.RequestId)) is { Phase: LocalManualRunPhase.Finished }, "Explicit switched-account backup did not finish.");
@@ -111,7 +119,7 @@ internal static partial class Program
             catch (Exception error) { failure = (failure ?? "") + " Cleanup: " + error.Message; }
         }
         await File.WriteAllTextAsync(Path.Combine(output, "service-switch-result.json"), JsonSerializer.Serialize(new {
-            success = failure is null, revision = Environment.GetEnvironmentVariable("GITHUB_SHA"), accountSids, completedCopies, checks, error = failure }));
+            success = failure is null, revision = Environment.GetEnvironmentVariable("GITHUB_SHA"), accountSids, completedCopies, sourceProbes, checks, error = failure }));
         return failure is null ? 0 : 1;
     }
 }
