@@ -5,6 +5,7 @@ param(
     [string]$PlatformExecutable,
     [string]$AgentExecutable,
     [string]$WorkParent = (Join-Path $env:LOCALAPPDATA 'SPBackup-Tests'),
+    [switch]$PlatformOnly,
     [ValidateRange(1,10080)][int]$DumpTimeoutMinutes = 120
 )
 $ErrorActionPreference = 'Stop'
@@ -18,6 +19,7 @@ $report = [ordered]@{
     format = 1; scenario = 'real-windows-onec'; startedUtc = [DateTime]::UtcNow.ToString('o')
     success = $false; platformVersion = ''; agentVersion = ''; actor = 'current-interactive-user'
     checks = $checks; errorType = $null; errorCode = $null; phase = 'preflight'; diskSpace = $null
+    scope = $(if ($PlatformOnly) { 'platform-only' } else { 'all' }); selectedChecksPassed = $false
 }
 function Write-Utf8([string]$Path, [string]$Text) { [IO.File]::WriteAllText($Path, $Text, $utf8) }
 function Add-Check([string]$Name, [string]$Status, [string]$Note) {
@@ -130,15 +132,22 @@ function Test-FileCases([string]$Source, [string]$Destination, [string]$Tag) {
         Add-Check $case 'passed' 'Закрытая настоящая база: ZIP восстановлен побайтно, лишнего предупреждения нет.'
     }
     Write-Host 'Откроется отдельная ТЕСТОВАЯ база. Дождитесь загрузки. Менять данные не требуется.'
+    Write-Host "Путь тестовой базы: $Source"
+    Write-Host 'Если появился список баз, выберите тестовую базу с этим путём и нажмите «1С:Предприятие». Сам список баз ещё не является открытым сеансом.'
     $platform = Start-Owned $PlatformExecutable @('ENTERPRISE', '/F', $Source, '/DisableStartupMessages')
     $ownedPlatforms.Add($platform)
-    Read-Host 'После открытия ТЕСТОВОЙ базы нажмите Enter' | Out-Null
+    Read-Host 'Только после открытия данных ТЕСТОВОЙ базы нажмите Enter' | Out-Null
     $busy = $false
     try {
         $lease = New-Object IO.FileStream (Join-Path $Source '1Cv8.1CD'), 'Open', 'Read', 'None'
         $lease.Dispose()
     } catch [IO.IOException] { $busy = $true }
-    if (-not $busy) { throw 'Платформа не удерживает файл тестовой базы. Проверка открытого сеанса не состоялась.' }
+    if (-not $busy) {
+        Add-Check ($Tag + '-open-session') 'not-exercised' 'Платформа не удерживает файл тестовой базы. Проверка открытого сеанса не состоялась; независимые этапы продолжатся.'
+        Read-Host 'Закройте окно или сообщение ТЕСТОВОЙ базы, если оно появилось, и нажмите Enter' | Out-Null
+        Wait-Closed $Source
+        return
+    }
     $blocked = Invoke-Job (New-Job $Source $Destination $false) ($Tag + '-open-blocked')
     if ([string]$blocked.Run.Status -notin @('Failed','2') -or $blocked.Run.Backup) { throw 'Открытая база скопирована без разрешения.' }
     Add-Check ($Tag + '-open-blocked') 'passed' 'Настоящий открытый сеанс: без разрешения копия отклонена.'
@@ -227,16 +236,19 @@ try {
         } finally { $targetStream.Dispose() }
     } finally { $sourceLease.Dispose() }
     Add-Check 'isolated-source-copy' 'passed' 'Тестовая база создана при эксклюзивном чтении исходника; запись в исходник не выполнялась.'
-    $report.phase = 'local-file-cases'
-    Test-FileCases $clone (Join-Path $root 'copies-local') 'local'
-    $principal = New-Object Security.Principal.WindowsPrincipal ([Security.Principal.WindowsIdentity]::GetCurrent())
-    if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        $report.phase = 'unc-file-cases'
-        $shareName = 'SPB1CTest_' + [Guid]::NewGuid().ToString('N') + '$'
-        New-SmbShare -Name $shareName -Path $root -FullAccess ([Security.Principal.WindowsIdentity]::GetCurrent().Name) | Out-Null
-        $unc = '\\' + $env:COMPUTERNAME + '\' + $shareName
-        Test-FileCases ($unc + '\base') ($unc + '\copies-unc') 'unc'
-    } else { Add-Check 'unc' 'not-exercised' 'Для отдельной временной UNC-папки запустите сценарий от администратора.' }
+    if (-not $PlatformOnly) {
+        $report.phase = 'local-file-cases'
+        Test-FileCases $clone (Join-Path $root 'copies-local') 'local'
+        $principal = New-Object Security.Principal.WindowsPrincipal ([Security.Principal.WindowsIdentity]::GetCurrent())
+        if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            $report.phase = 'unc-file-cases'
+            $shareName = 'SPB1CTest_' + [Guid]::NewGuid().ToString('N') + '$'
+            New-SmbShare -Name $shareName -Path $root -FullAccess ([Security.Principal.WindowsIdentity]::GetCurrent().Name) | Out-Null
+            $unc = '\\' + $env:COMPUTERNAME + '\' + $shareName
+            Test-FileCases ($unc + '\base') ($unc + '\copies-unc') 'unc'
+        } else { Add-Check 'unc' 'not-exercised' 'Для отдельной временной UNC-папки запустите сценарий от администратора.' }
+    } else { Write-Host 'Выбран режим PlatformOnly: повторные ZIP/UNC-проверки не выполняются. Общая приёмка этим запуском не закрывается.' }
+    Wait-Closed $clone
     $report.phase = 'platform-dump'
     $dump = Invoke-Job (New-Job $clone (Join-Path $root 'dumps') $false $true) 'platform-dump'
     if (-not (Is-Succeeded $dump.Run) -or -not $dump.Run.Backup -or (Get-Item -LiteralPath $dump.Run.Backup.Location).Length -le 0) { throw 'Платформа не создала успешную непустую выгрузку. Подробности остались локально.' }
@@ -263,7 +275,8 @@ try {
         Wait-Closed $clone
         Add-Check 'platform-cancel' 'passed' 'Отменена настоящая выгрузка: агент завершился, копия не зарегистрирована, база освобождена.'
     } else { Add-Check 'platform-cancel' 'not-exercised' 'Выгрузка завершилась до отправки отмены; этот сценарий ещё не подтверждён.' }
-    $report.success = @($checks | Where-Object { $_.status -ne 'passed' }).Count -eq 0
+    $report.selectedChecksPassed = @($checks | Where-Object { $_.status -ne 'passed' }).Count -eq 0
+    $report.success = $report.selectedChecksPassed -and -not $PlatformOnly
     $report.phase = 'completed'
 } catch {
     $report.errorType = $_.Exception.GetType().FullName

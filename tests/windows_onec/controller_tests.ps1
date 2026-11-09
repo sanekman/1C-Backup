@@ -21,6 +21,8 @@ try {
     if ($LASTEXITCODE -ne 1) { throw 'A workspace inside the source was accepted.' }
     if ((Get-FileHash -LiteralPath $database -Algorithm SHA256).Hash -ne $before) { throw 'A rejected controller run changed its source.' }
     if (@(Get-ChildItem -LiteralPath $source).Count -ne 1) { throw 'A rejected controller run wrote into its source.' }
+    & $shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'session_tests.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'The unconfirmed-session controller check failed on Windows PowerShell.' }
     @{ success = $true; scope = 'controller-safety-only'; actualOneC = $false; checks = @(
         'wrong-platform-rejected-before-workspace-creation',
         'workspace-inside-source-rejected',
