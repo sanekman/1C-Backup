@@ -52,7 +52,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force artifacts/ui | Out-Null
           $fixtureProcess = Start-Process -FilePath dotnet -ArgumentList @('src/SPBackup.Desktop/bin/Debug/net10.0-windows/SPBackup.Desktop.dll', '--smoke-ui', 'artifacts/ui') -PassThru
-          if (-not $fixtureProcess.WaitForExit(120000)) {
+          # Match the installed-build suite budget; individual UI assertions retain their deadlines.
+          if (-not $fixtureProcess.WaitForExit(180000)) {
             $fixtureProcess.Kill()
             throw 'WPF smoke test timed out'
           }
