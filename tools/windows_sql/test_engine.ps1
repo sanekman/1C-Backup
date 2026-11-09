@@ -20,6 +20,7 @@ $actorPassword = 'SpBw!9-' + [Guid]::NewGuid().ToString('N')
 Write-Host "::add-mask::$actorPassword"
 $actorCreated = $false; $taskRegistered = $false
 $taskName = 'SPBackupSQL-' + [Guid]::NewGuid().ToString('N')
+$taskDiagnostics = $null
 $certificate = $null; $serviceInstalled = $false; $provenance = $null
 $hostsPath = Join-Path $env:WINDIR 'System32\drivers\etc\hosts'
 $hostEntry = $null
@@ -160,10 +161,14 @@ param([string]$ConfigPath,[string]$ExitPath)
 $ErrorActionPreference='Stop'
 $code=1
 try {
+    [IO.File]::WriteAllText(($ExitPath+'.started'),'started')
     $config=Get-Content -LiteralPath $ConfigPath -Raw|ConvertFrom-Json
     foreach($entry in $config.Environment.PSObject.Properties){[Environment]::SetEnvironmentVariable($entry.Name,[string]$entry.Value,'Process')}
     & $config.Executable $config.Workspace *> (Join-Path $config.Workspace 'probe-console.txt')
     $code=$LASTEXITCODE
+} catch {
+    @{errorType=$_.Exception.GetType().FullName;errorId=$_.FullyQualifiedErrorId}|ConvertTo-Json|
+        Set-Content -LiteralPath ($ExitPath+'.error.json') -Encoding UTF8
 } finally {
     [Environment]::SetEnvironmentVariable('SPBACKUP_SQL_TEST_PASSWORD',$null,'Process')
     [IO.File]::WriteAllText($ExitPath,[string]$code)
@@ -175,18 +180,32 @@ exit $code
         if ($LASTEXITCODE -ne 0) { throw 'Could not protect the selected-user task configuration.' }
     }
     $action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" `
+        -WorkingDirectory $workspace `
         -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $taskScript + '" -ConfigPath "' + $configPath + '" -ExitPath "' + $exitPath + '"')
     $taskSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew
     Register-ScheduledTask -TaskName $taskName -Action $action -Settings $taskSettings -User $actorAccount -Password $actorPassword -RunLevel Limited | Out-Null
     $taskRegistered = $true
     $phase = 'verify-engine'
+    $taskStartedAt = Get-Date
     Start-ScheduledTask -TaskName $taskName
     $taskDeadline = (Get-Date).AddSeconds(300)
     while (-not (Test-Path -LiteralPath $exitPath)) {
+        $task = Get-ScheduledTask -TaskName $taskName
+        $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName
+        $taskDiagnostics = @{ state = [string]$task.State; result = [long]$taskInfo.LastTaskResult;
+            logonType = [string]$task.Principal.LogonType; started = (Test-Path -LiteralPath ($exitPath+'.started')) }
+        if ($taskInfo.LastRunTime -ge $taskStartedAt.AddSeconds(-2) -and $task.State -notin @('Running','Queued') -and -not (Test-Path -LiteralPath $exitPath)) {
+            throw ('The selected-user SQL task exited without a receipt: result 0x{0:X8}.' -f [long]$taskInfo.LastTaskResult)
+        }
         if ((Get-Date) -ge $taskDeadline) { throw 'The selected-user SQL probe did not finish.' }
         Start-Sleep -Milliseconds 300
     }
     $probeExit = [int](Get-Content -LiteralPath $exitPath -Raw)
+    if (Test-Path -LiteralPath ($exitPath+'.error.json')) {
+        $taskDiagnostics = @{ result = $probeExit; started = (Test-Path -LiteralPath ($exitPath+'.started'));
+            scriptError = (Get-Content -LiteralPath ($exitPath+'.error.json') -Raw | ConvertFrom-Json) }
+        throw 'The selected-user task script failed before a SQL result was returned.'
+    }
     New-Item -ItemType Directory -Path $Output | Out-Null
     Copy-Item -LiteralPath (Join-Path $workspace 'report\sql-engine-result.json') -Destination $Output
     $provenance | ConvertTo-Json | Set-Content (Join-Path $Output 'sql-media-provenance.json') -Encoding UTF8
@@ -210,8 +229,8 @@ exit $code
     if ($provenance) { $provenance | ConvertTo-Json | Set-Content (Join-Path $Output 'sql-media-provenance.json') -Encoding UTF8 }
     @{ success = $false; source = $env:GITHUB_SHA; phase = $phase;
         errorType = $setupError.Exception.GetType().FullName; error = $setupError.Exception.Message.Replace($password,'[redacted]');
-        configuredEndpoint = $env:SPBACKUP_SQL_TEST_SERVER; startupErrors = $startupErrors } |
-        ConvertTo-Json | Set-Content (Join-Path $Output 'sql-setup-result.json') -Encoding UTF8
+        configuredEndpoint = "tcp:127.0.0.1,$port"; startupErrors = $startupErrors; task = $taskDiagnostics } |
+        ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Output 'sql-setup-result.json') -Encoding UTF8
     throw $setupError
 } finally {
     if ($taskRegistered) {
