@@ -27,3 +27,6 @@ try {
         'rejected-runs-preserve-source-bytes-and-directory'
     ) } | ConvertTo-Json -Compress
 } finally { Remove-Item -LiteralPath $fixture -Recurse -Force }
+# Both negative probes intentionally return 1. Do not leak their native exit code
+# to the CI shell after all source-preservation assertions have passed.
+exit 0
