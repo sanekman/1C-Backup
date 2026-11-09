@@ -65,30 +65,21 @@ try {
     $instanceId = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL').$instance
     if (-not $instanceId) { throw 'The owned full SQL instance was not registered.' }
     $network = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceId\MSSQLServer\SuperSocketNetLib"
-    $certificate = New-SelfSignedCertificate -DnsName @($env:COMPUTERNAME,'localhost') -CertStoreLocation 'Cert:\LocalMachine\My' `
-        -Provider 'Microsoft RSA SChannel Cryptographic Provider' -KeySpec KeyExchange -KeyLength 2048 -HashAlgorithm SHA256 `
-        -Type SSLServerAuthentication -NotAfter (Get-Date).AddDays(2)
-    $key = [Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($certificate)
-    try {
-        if ($key -is [Security.Cryptography.RSACryptoServiceProvider]) {
-            if (-not $key.CspKeyContainerInfo.MachineKeyStore) { throw 'SQL requires a machine CSP key.' }
-            $uniqueKeyName = $key.CspKeyContainerInfo.UniqueKeyContainerName
-            $keyDirectory = Join-Path $env:ProgramData 'Microsoft\Crypto\RSA\MachineKeys'
-        } elseif ($key -is [Security.Cryptography.RSACng]) {
-            if (-not $key.Key.IsMachineKey) { throw 'SQL requires a machine CNG key.' }
-            $uniqueKeyName = $key.Key.UniqueName
-            $keyDirectory = Join-Path $env:ProgramData 'Microsoft\Crypto\Keys'
-        } else { throw 'The SQL certificate has no supported persisted RSA private key.' }
-        if ([string]::IsNullOrWhiteSpace($uniqueKeyName)) { throw 'The SQL private key has no persisted filename.' }
-        $keyFile = Join-Path $keyDirectory $uniqueKeyName
-        if (-not (Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'The SQL private key file is missing; directory ACLs must not be changed.' }
-    }
-    finally { $key.Dispose() }
     $serviceAccount = (Get-CimInstance Win32_Service -Filter "Name='$serviceName'").StartName
     $serviceSid = (New-Object Security.Principal.NTAccount $serviceAccount).Translate([Security.Principal.SecurityIdentifier])
-    $fileAcl = Get-Acl -LiteralPath $keyFile
-    $fileAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule ($serviceSid,'Read','Allow')))
-    Set-Acl -LiteralPath $keyFile -AclObject $fileAcl
+    # Apply the key ACL through the certificate provider itself. Physical key
+    # filenames differ by provider and must never be inferred from RSA wrappers.
+    # https://learn.microsoft.com/powershell/module/pki/new-selfsignedcertificate#-securitydescriptor
+    $keySecurity = New-Object Security.AccessControl.FileSecurity
+    $keySecurity.SetOwner($owner.User); $keySecurity.SetAccessRuleProtection($true, $false)
+    foreach ($sid in @($owner.User.Value,'S-1-5-18','S-1-5-32-544') | Select-Object -Unique) {
+        $keySecurity.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule ((New-Object Security.Principal.SecurityIdentifier $sid),'FullControl','Allow')))
+    }
+    $keySecurity.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule ($serviceSid,'Read','Allow')))
+    $certificate = New-SelfSignedCertificate -DnsName @($env:COMPUTERNAME,'localhost') -CertStoreLocation 'Cert:\LocalMachine\My' `
+        -Provider 'Microsoft RSA SChannel Cryptographic Provider' -KeySpec KeyExchange -KeyLength 2048 -HashAlgorithm SHA256 `
+        -SecurityDescriptor $keySecurity -Type SSLServerAuthentication -NotAfter (Get-Date).AddDays(2)
+    if (-not $certificate.HasPrivateKey) { throw 'The owned SQL certificate has no private key.' }
     $public = Join-Path $private 'server.cer'; Export-Certificate -Cert $certificate -FilePath $public | Out-Null
     Import-Certificate -FilePath $public -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
     Set-ItemProperty $network Certificate $certificate.Thumbprint.ToLowerInvariant()
