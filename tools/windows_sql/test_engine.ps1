@@ -15,6 +15,7 @@ $serviceName = 'MSSQL$' + $instance
 $password = 'SpB!9-' + [Guid]::NewGuid().ToString('N')
 Write-Host "::add-mask::$password"
 $certificate = $null; $serviceInstalled = $false; $provenance = $null
+$phase = 'download-bootstrap'
 function Invoke-OwnedTool([string]$Executable, [string[]]$Arguments, [int]$TimeoutSeconds) {
     $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -PassThru -NoNewWindow `
         -RedirectStandardOutput (Join-Path $private 'tool-output.txt') -RedirectStandardError (Join-Path $private 'tool-error.txt')
@@ -43,6 +44,7 @@ try {
     Invoke-WebRequest -Uri $url -OutFile $bootstrap
     Assert-MicrosoftSignature $bootstrap
     $media = Join-Path $private 'media'; New-Item -ItemType Directory -Path $media | Out-Null
+    $phase = 'download-full-engine'
     Invoke-OwnedTool $bootstrap @('/Action=Download','/MediaType=Core',('/MediaPath="' + $media + '"'),'/Quiet') 900
     $packages = @(Get-ChildItem -LiteralPath $media -Recurse -Filter 'SQLEXPR*.exe')
     if ($packages.Count -ne 1) { throw 'Expected exactly one full SQL Express engine installer.' }
@@ -50,13 +52,16 @@ try {
     $provenance = @{ bootstrapUrl = $url; bootstrapSha256 = (Get-FileHash $bootstrap -Algorithm SHA256).Hash;
         mediaSha256 = (Get-FileHash $package -Algorithm SHA256).Hash; microsoftSignatureVerified = $true }
     $engine = Join-Path $private 'engine'
+    $phase = 'extract-full-engine'
     Invoke-OwnedTool $package @(('/x:"' + $engine + '"'),'/q') 300
     $setup = Join-Path $engine 'SETUP.EXE'
     if (-not (Test-Path -LiteralPath $setup)) { throw 'Full SQL setup executable is missing.' }
+    $phase = 'install-full-engine'
     Invoke-OwnedTool $setup @('/Q','/ACTION=Install','/FEATURES=SQLENGINE',('/INSTANCENAME=' + $instance),
         '/SECURITYMODE=SQL',('/SAPWD=' + $password),('/SQLSYSADMINACCOUNTS="' + $owner.Name + '"'),
         '/SQLSVCSTARTUPTYPE=Automatic','/TCPENABLED=1','/NPENABLED=0','/UPDATEENABLED=False','/IACCEPTSQLSERVERLICENSETERMS') 1200
     $serviceInstalled = $true
+    $phase = 'configure-tls-and-loopback'
     $instanceId = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL').$instance
     if (-not $instanceId) { throw 'The owned full SQL instance was not registered.' }
     $network = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceId\MSSQLServer\SuperSocketNetLib"
@@ -98,15 +103,39 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not grant SQL fixture traversal.' }
     Set-Content -LiteralPath (Join-Path $workspace 'owned-stand.marker') -Value $instance
     $binary = Join-Path $private 'probe'
+    $phase = 'build-probe'
     & dotnet publish (Join-Path $repo 'tests/WindowsSqlEngineSmoke') -c Release -r win-x64 --self-contained true -m:1 -nr:false -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the SQL engine probe.' }
     $env:SPBACKUP_NATIVE_SQL_ENGINE_TEST = '1'; $env:SPBACKUP_SQL_TEST_SERVER = "localhost,$port"; $env:SPBACKUP_SQL_TEST_PASSWORD = $password
+    $phase = 'verify-engine'
     & (Join-Path $binary 'WindowsSqlEngineSmoke.exe') $workspace
     $probeExit = $LASTEXITCODE
     New-Item -ItemType Directory -Path $Output | Out-Null
     Copy-Item -LiteralPath (Join-Path $workspace 'report\sql-engine-result.json') -Destination $Output
     $provenance | ConvertTo-Json | Set-Content (Join-Path $Output 'sql-media-provenance.json') -Encoding UTF8
     if ($probeExit -ne 0) { throw 'Full SQL engine verification failed; see the sanitized result JSON.' }
+} catch {
+    $setupError = $_
+    $startupErrors = @()
+    if ($phase -eq 'configure-tls-and-loopback' -and $instanceId) {
+        try {
+            $parameters = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceId\MSSQLServer\Parameters"
+            $errorArgument = @($parameters.PSObject.Properties | Where-Object { $_.Name -like 'SQLArg*' -and [string]$_.Value -like '-e*' } | Select-Object -First 1)
+            if ($errorArgument.Count -eq 1) {
+                $logPath = ([string]$errorArgument[0].Value).Substring(2)
+                $startupErrors = @(Get-Content -LiteralPath $logPath -Tail 100 |
+                    Where-Object { $_ -match '(?i)error|certificate|encryption|TDSSNI|TLS|SSL|failed' } |
+                    ForEach-Object { $_.Replace($password,'[redacted]') })
+            }
+        } catch { $startupErrors = @('SQL startup diagnostics were unavailable.') }
+    }
+    New-Item -ItemType Directory -Path $Output -Force | Out-Null
+    if ($provenance) { $provenance | ConvertTo-Json | Set-Content (Join-Path $Output 'sql-media-provenance.json') -Encoding UTF8 }
+    @{ success = $false; source = $env:GITHUB_SHA; phase = $phase;
+        errorType = $setupError.Exception.GetType().FullName; error = $setupError.Exception.Message.Replace($password,'[redacted]');
+        startupErrors = $startupErrors } |
+        ConvertTo-Json | Set-Content (Join-Path $Output 'sql-setup-result.json') -Encoding UTF8
+    throw $setupError
 } finally {
     Remove-Item Env:SPBACKUP_SQL_TEST_PASSWORD -ErrorAction SilentlyContinue
     Remove-Item Env:SPBACKUP_NATIVE_SQL_ENGINE_TEST -ErrorAction SilentlyContinue

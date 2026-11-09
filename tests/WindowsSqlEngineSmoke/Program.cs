@@ -90,15 +90,31 @@ try
     var observed = await source.ReadAsync(monitor);
     Require(new[] { "D", "I", "L" }.All(type => observed.Any(item => item.BackupType == type && item.SizeBytes > 0 && item.Outcome == ExternalBackupOutcome.Completed)),
         "Real full/differential/log history was not observed.");
+    var agentId = Guid.NewGuid(); var evaluated = DateTimeOffset.UtcNow;
+    var reports = observed.Select(item => new ExternalBackupReport(Guid.NewGuid(), agentId, monitor.Id, null, evaluated, item)).ToArray();
+    var tracked = monitor with { MaximumBackupAgeHours = 1 };
+    var poll = new ExternalBackupPollResult(monitor.Id, monitor.Name, evaluated, observed.Count, observed.Count);
+    var task = ExternalBackupTask.Create([tracked], reports, [poll], agentId, evaluated).Single();
+    Require(task.ResultCode == "CopyFound" && task.LastFullUtc is not null && task.LastDifferentialUtc is not null && task.LastLogUtc is not null,
+        "Monitoring did not expose the real full/differential/log backup dates.");
+    Require(ExternalBackupTask.Create([tracked], reports, [poll], agentId, evaluated.AddHours(2)).Single().ResultCode == "Overdue",
+        "Actual backup evidence did not become overdue at a future evaluation time.");
+    var changed = ExternalBackupTask.Create([tracked with { DatabaseName = prefix + "_empty" }], reports, [poll], agentId, evaluated).Single();
+    Require(changed.Latest is null && changed.LastSuccessfulUtc is null && changed.FreshnessWarning,
+        "Old backup evidence masked a newly selected database with no copies.");
     Require((await source.ReadAsync(monitor with { DatabaseName = prefix + "_empty" })).Count == 0, "A new source reused previous database history.");
     var denied = monitor with { SqlAuthentication = SqlServerAuthentication.SqlServer, SqlCredentialKey = key };
     await Execute($"CREATE USER [{login}] FOR LOGIN [{login}]; DENY SELECT ON dbo.backupset TO [{login}]; DENY SELECT ON dbo.backupmediafamily TO [{login}];", "msdb");
     var deniedCorrectly = false;
     try { await source.ReadAsync(denied); } catch (Exception error) when (error is SqlException or IOException) { deniedCorrectly = true; }
     Require(deniedCorrectly, "A SQL user without msdb read permissions was reported as a successful poll.");
+    var failedPoll = poll with { Error = "Owned SQL stand permission denial", ErrorCode = "AccessDenied" };
+    Require(ExternalBackupTask.Create([tracked], reports, [failedPoll], agentId, evaluated).Single().ResultCode == "PollFailed",
+        "Previous successful history masked a later failed poll.");
     Require((await source.ReadAsync(monitor)).Count == observed.Count, "Failed monitoring affected the next healthy read.");
     Require(beforeCopies == JsonSerializer.Serialize(await catalog.ReadAsync()), "Monitoring changed the agent backup catalog.");
     checks.Add("real-msdb-full-differential-log-empty-source-and-permission-error-without-owning-external-copies");
+    checks.Add("actual-history-type-dates-freshness-new-database-and-failed-poll-precedence");
 }
 catch (Exception error) { failure = (error.GetType().Name + ": " + error.Message).Replace(password, "[redacted]"); }
 finally
