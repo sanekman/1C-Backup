@@ -127,6 +127,7 @@ internal static partial class Program
         var profileCreated = false; var userCreated = false;
         var archiveStore = new WindowsArchivePasswordStore(); string? archiveKey = null;
         var pgStore = new WindowsPostgreSqlCredentialStore(); var pgKey = Guid.NewGuid().ToString("N");
+        var pgWrongKey = Guid.NewGuid().ToString("N");
         PostgreSqlFixture? postgres = null;
         WindowsSmbFixture? smb = null;
         WindowsSmbFixture? nasSmb = null;
@@ -147,6 +148,7 @@ internal static partial class Program
             Require(File.Exists(executable), "Published agent not found.");
             postgres = new PostgreSqlFixture(); await postgres.StartAsync();
             pgStore.Save(pgKey, postgres.Username, postgres.Password);
+            pgStore.Save(pgWrongKey, postgres.Username, "Deliberately invalid owned fixture credential");
             if (domainSmb is null) { Native.AddUser(account, password); userCreated = true; }
             var selected = WindowsServiceAccounts.Resolve(account);
             var sid = WindowsIdentity.GetCurrent().User!.Value;
@@ -178,6 +180,19 @@ internal static partial class Program
             File.Copy(postgres.RootCertificatePath, publicCertificate);
             var pgJob = postgres.Job(Path.Combine(directory, "copies", "postgresql"), pgKey, archiveKey);
             pgJob = pgJob with { PostgreSql = pgJob.PostgreSql! with { Tls = new() { RootCertificatePath = publicCertificate } } };
+            var unrelatedCertificate = Path.Combine(directory, "pg-unrelated-ca.pem");
+            File.Copy(postgres.UnrelatedCertificatePath, unrelatedCertificate);
+            var pgNegativeProbes = new[]
+            {
+                pgJob with { Id = Guid.NewGuid(), Name = "PostgreSQL missing CA rejection", PostgreSql = pgJob.PostgreSql! with
+                    { Tls = new() { RootCertificatePath = Path.Combine(directory, "absent-ca.pem") } } },
+                pgJob with { Id = Guid.NewGuid(), Name = "PostgreSQL unrelated CA rejection", PostgreSql = pgJob.PostgreSql! with
+                    { Tls = new() { RootCertificatePath = unrelatedCertificate } } },
+                pgJob with { Id = Guid.NewGuid(), Name = "PostgreSQL certificate hostname rejection", PostgreSql = pgJob.PostgreSql! with
+                    { Host = "localhost" } }, // The owned server certificate has only the 127.0.0.1 IP SAN.
+                pgJob with { Id = Guid.NewGuid(), Name = "PostgreSQL wrong delegated password rejection", PostgreSql = pgJob.PostgreSql! with
+                    { CredentialKey = pgWrongKey } }
+            };
             var network = manual with { Id = Guid.NewGuid(), Name = "service-account UNC fixture",
                 StorageKind = StorageKind.NetworkShare, DestinationDirectory = domainSmb?.AllowedUnc ?? smb!.UncPath };
             var deniedNetwork = network with { Id = Guid.NewGuid(), Name = "service-account denied UNC fixture",
@@ -212,7 +227,7 @@ internal static partial class Program
                         Source = unc + "\\" + fileName, DestinationDirectory = Path.Combine(directory, "unused-source-probe-destination") });
                 }
             }
-            var jobs = new[] { manual, startup, pgJob, network, deniedNetwork }.Concat(sourceProbeJobs).Concat(nasJob is null ? [] : new[] { nasJob, nasWrongJob! }).ToArray();
+            var jobs = new[] { manual, startup, pgJob, network, deniedNetwork }.Concat(sourceProbeJobs).Concat(pgNegativeProbes).Concat(nasJob is null ? [] : new[] { nasJob, nasWrongJob! }).ToArray();
             var jobStore = new JobStore(Path.Combine(directory, "jobs.json")); await jobStore.SaveAsync(jobs);
             var originalJobs = await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json"));
             WindowsFtpCredentialStore.SetServiceCache(new(directory, sid, selected.Sid));
@@ -278,6 +293,17 @@ internal static partial class Program
             var pgSourceProbe = await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession, pgJob));
             Require(pgSourceProbe.Succeeded && pgSourceProbe.ExecutionIdentity?.WindowsSid == selected.Sid,
                 "PostgreSQL source check failed under the service identity with its delegated password and TLS.");
+            foreach (var invalid in pgNegativeProbes)
+            {
+                var rejected = await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession, invalid));
+                Require(!rejected.Succeeded && !rejected.Cancelled && rejected.ExecutionIdentity?.WindowsSid == selected.Sid
+                    && !string.IsNullOrWhiteSpace(rejected.Details) && rejected.StartedUtc is not null && rejected.FinishedUtc >= rejected.StartedUtc,
+                    "PostgreSQL invalid TLS/authentication settings were not rejected by the actual service: " + invalid.Name);
+            }
+            var healthyAgain = await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession, pgJob));
+            Require(healthyAgain.Succeeded && healthyAgain.ExecutionIdentity?.WindowsSid == selected.Sid,
+                "PostgreSQL rejected settings poisoned the following healthy service source check.");
+            checks.Add("postgresql-service-rejects-missing-and-unrelated-ca-hostname-and-password-then-recovers");
             var sourceProbeHistory = await File.ReadAllBytesAsync(Path.Combine(directory, "runs.json"));
             var sourceProbeCatalog = await File.ReadAllBytesAsync(Path.Combine(directory, "copies.json"));
             Require(beforeProbeHistory.SequenceEqual(sourceProbeHistory)
@@ -573,7 +599,7 @@ internal static partial class Program
             catch (Exception error) { failure = (failure ?? "") + "\nNAS fixture cleanup: " + error.GetType().Name; }
             if (nasCreated && nasAccount is not null && Native.DeleteUser(nasAccount) != 0) failure = (failure ?? "") + "\nNAS account cleanup failed.";
             WindowsFtpCredentialStore.SetServiceCache(null);
-            try { pgStore.Delete(pgKey); if (postgres is not null) await postgres.DisposeAsync(); }
+            try { pgStore.Delete(pgKey); pgStore.Delete(pgWrongKey); if (postgres is not null) await postgres.DisposeAsync(); }
             catch (Exception error) { failure = (failure ?? "") + "\nPostgreSQL fixture cleanup: " + error.GetType().Name; }
             try { if (archiveKey is not null) archiveStore.Delete(archiveKey); }
             catch (Exception error) { failure = (failure ?? "") + "\nCredential cleanup: " + error.GetType().Name; }

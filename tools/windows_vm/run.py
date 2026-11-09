@@ -98,6 +98,17 @@ class VM:
                 self.process.kill()
                 self.process.wait(timeout=10)
 
+    def shutdown(self):
+        """Flush the guest registry and profile through an actual orderly shutdown.
+
+        Only the interrupted-backup phase deliberately cuts power. The later
+        user-login phase must preserve freshly written Winlogon/Run values.
+        """
+        self.command('system_powerdown')
+        self.process.wait(timeout=120)
+        if self.process.returncode != 0:
+            raise RuntimeError('The owned Windows guest did not shut down cleanly.')
+
 
 def answer(password):
     return f'''<?xml version="1.0" encoding="utf-8"?>
@@ -281,16 +292,29 @@ def main():
         ps("$k='HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon';"
            "Set-ItemProperty $k AutoAdminLogon '1';Set-ItemProperty $k DefaultUserName 'Administrator';"
            "Set-ItemProperty $k DefaultDomainName $env:COMPUTERNAME;"
-           "Set-ItemProperty $k DefaultPassword (Get-Content C:\\SPBLab\\owner.secret -Raw)")
-        vm.stop()
+           "Set-ItemProperty $k DefaultPassword (Get-Content C:\\SPBLab\\owner.secret -Raw);"
+           "New-ItemProperty $k AutoLogonCount -PropertyType DWord -Value 1 -Force|Out-Null;"
+           "New-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' DisableCAD -PropertyType DWord -Value 1 -Force|Out-Null")
+        vm.shutdown()
         vm.start()
         wait_guest(300)
         deadline = time.monotonic() + 180
         while not ps('(Get-CimInstance Win32_ComputerSystem).UserName'):
-            if time.monotonic() > deadline: raise TimeoutError('The owned interactive owner did not log in.')
+            if time.monotonic() > deadline:
+                # Allowlist only non-secret configuration; never export the
+                # generated password, answer file, private disk or checkpoint.
+                provenance['user_login_diagnostics'] = json.loads(ps(
+                    "$k=Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon';"
+                    "$p=Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System';"
+                    "@{autoAdminLogon=$k.AutoAdminLogon;autoLogonCount=$k.AutoLogonCount;disableCAD=$p.DisableCAD;"
+                    "defaultUserIsOwner=($k.DefaultUserName -eq 'Administrator');"
+                    "defaultDomainIsLocal=($k.DefaultDomainName -eq $env:COMPUTERNAME);"
+                    "passwordPresent=([bool]$k.DefaultPassword)}|ConvertTo-Json -Compress"))
+                raise TimeoutError('The owned interactive owner did not log in.')
             time.sleep(3)
         ps("$k='HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon';"
-           "Set-ItemProperty $k AutoAdminLogon '0';Remove-ItemProperty $k DefaultPassword -ErrorAction SilentlyContinue")
+           "Set-ItemProperty $k AutoAdminLogon '0';Remove-ItemProperty $k DefaultPassword -ErrorAction SilentlyContinue;"
+           "Remove-ItemProperty $k AutoLogonCount -ErrorAction SilentlyContinue")
         launch('user-verify')
         user_result = wait_result('user-verify', r'C:\SPBLab\results\user-startup\user-startup-result.json')
         if user_result['previousBootId'] == user_result['bootId']:

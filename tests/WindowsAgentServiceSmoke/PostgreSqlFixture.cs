@@ -183,6 +183,7 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
             PgDumpPath = Tool("pg_dump"), PgRestorePath = Tool("pg_restore"), TimeoutMinutes = 2 }
     };
     public string RootCertificatePath => Path.Combine(root, "ca.pem");
+    public string UnrelatedCertificatePath => Path.Combine(root, "wrong-ca.pem");
     public string Username => user;
     public string DumpExecutablePath => Tool("pg_dump");
     public async Task AssertRestoresAsync(string dump)
