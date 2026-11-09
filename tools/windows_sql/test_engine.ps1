@@ -53,6 +53,34 @@ try {
     $actorCreated = $true
     try { Add-LocalGroupMember -SID (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545') -Member $actorAccount }
     catch { if ($_.FullyQualifiedErrorId -notlike 'MemberExists,*') { throw } }
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class OwnedSqlBatchRight {
+    [StructLayout(LayoutKind.Sequential)] struct Attributes { public uint Length; public IntPtr Root,Name; public uint Flags; public IntPtr Descriptor,Quality; }
+    [StructLayout(LayoutKind.Sequential)] struct UnicodeString { public ushort Length,MaximumLength; public IntPtr Buffer; }
+    public static void Change(string value,bool remove) {
+        var sid=new SecurityIdentifier(value); var bytes=new byte[sid.BinaryLength];sid.GetBinaryForm(bytes,0);
+        var attributes=new Attributes{Length=(uint)Marshal.SizeOf<Attributes>()};
+        var status=LsaOpenPolicy(IntPtr.Zero,ref attributes,0x810,out var policy);
+        if(status!=0)throw new Win32Exception((int)LsaNtStatusToWinError(status));
+        const string name="SeBatchLogonRight";
+        var right=new UnicodeString{Length=(ushort)(name.Length*2),MaximumLength=(ushort)((name.Length+1)*2),Buffer=Marshal.StringToHGlobalUni(name)};
+        try {
+            status=remove?LsaRemoveAccountRights(policy,bytes,false,new[]{right},1):LsaAddAccountRights(policy,bytes,new[]{right},1);
+            if(status!=0 && !(remove && LsaNtStatusToWinError(status)==2))throw new Win32Exception((int)LsaNtStatusToWinError(status));
+        }finally{Marshal.FreeHGlobal(right.Buffer);LsaClose(policy);}
+    }
+    [DllImport("advapi32.dll")]static extern uint LsaOpenPolicy(IntPtr system,ref Attributes attributes,uint access,out IntPtr policy);
+    [DllImport("advapi32.dll")]static extern uint LsaAddAccountRights(IntPtr policy,byte[] sid,UnicodeString[] rights,uint count);
+    [DllImport("advapi32.dll")]static extern uint LsaRemoveAccountRights(IntPtr policy,byte[] sid,[MarshalAs(UnmanagedType.Bool)]bool all,UnicodeString[] rights,uint count);
+    [DllImport("advapi32.dll")]static extern uint LsaNtStatusToWinError(uint status);
+    [DllImport("advapi32.dll")]static extern uint LsaClose(IntPtr policy);
+}
+'@
+    [OwnedSqlBatchRight]::Change($actor.SID.Value,$false)
     $url = 'https://go.microsoft.com/fwlink/p/?linkid=2216019&clcid=0x409&culture=en-us&country=us'
     $bootstrap = Join-Path $private 'sql-bootstrap.exe'
     Invoke-WebRequest -Uri $url -OutFile $bootstrap
@@ -182,7 +210,8 @@ exit $code
     $action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" `
         -WorkingDirectory $workspace `
         -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $taskScript + '" -ConfigPath "' + $configPath + '" -ExitPath "' + $exitPath + '"')
-    $taskSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew
+    $taskSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
     Register-ScheduledTask -TaskName $taskName -Action $action -Settings $taskSettings -User $actorAccount -Password $actorPassword -RunLevel Limited | Out-Null
     $taskRegistered = $true
     $phase = 'verify-engine'
@@ -193,7 +222,9 @@ exit $code
         $task = Get-ScheduledTask -TaskName $taskName
         $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName
         $taskDiagnostics = @{ state = [string]$task.State; result = [long]$taskInfo.LastTaskResult;
-            logonType = [string]$task.Principal.LogonType; started = (Test-Path -LiteralPath ($exitPath+'.started')) }
+            logonType = [string]$task.Principal.LogonType; started = (Test-Path -LiteralPath ($exitPath+'.started'));
+            enabled = $task.Settings.Enabled; demandStartAllowed = $task.Settings.AllowDemandStart;
+            batteryDisallowed = $task.Settings.DisallowStartIfOnBatteries }
         if ($taskInfo.LastRunTime -ge $taskStartedAt.AddSeconds(-2) -and $task.State -notin @('Running','Queued') -and -not (Test-Path -LiteralPath $exitPath)) {
             throw ('The selected-user SQL task exited without a receipt: result 0x{0:X8}.' -f [long]$taskInfo.LastTaskResult)
         }
@@ -213,6 +244,19 @@ exit $code
 } catch {
     $setupError = $_
     $startupErrors = @()
+    $taskEventCodes = @()
+    if ($taskRegistered) {
+        foreach ($event in @(Get-WinEvent -FilterHashtable @{ LogName='Microsoft-Windows-TaskScheduler/Operational';
+            StartTime=$taskStartedAt.AddSeconds(-2); Id=101,104,202,203 } -ErrorAction SilentlyContinue)) {
+            $xml = [xml]$event.ToXml(); $data = @{}
+            foreach ($field in $xml.Event.EventData.Data) { $data[[string]$field.Name] = [string]$field.'#text' }
+            if ($data.TaskName -eq ('\'+$taskName)) {
+                $codes = @{}
+                foreach ($name in @('ResultCode','ErrorCode','ErrorValue')) { if ($data.ContainsKey($name)) { $codes[$name]=$data[$name] } }
+                $taskEventCodes += @{ id=$event.Id; codes=$codes }
+            }
+        }
+    }
     if ($phase -in @('configure-tls-and-loopback','verify-engine') -and $instanceId) {
         try {
             $parameters = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceId\MSSQLServer\Parameters"
@@ -229,7 +273,7 @@ exit $code
     if ($provenance) { $provenance | ConvertTo-Json | Set-Content (Join-Path $Output 'sql-media-provenance.json') -Encoding UTF8 }
     @{ success = $false; source = $env:GITHUB_SHA; phase = $phase;
         errorType = $setupError.Exception.GetType().FullName; error = $setupError.Exception.Message.Replace($password,'[redacted]');
-        configuredEndpoint = "tcp:127.0.0.1,$port"; startupErrors = $startupErrors; task = $taskDiagnostics } |
+        configuredEndpoint = "tcp:127.0.0.1,$port"; startupErrors = $startupErrors; task = $taskDiagnostics; taskEventCodes = $taskEventCodes } |
         ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Output 'sql-setup-result.json') -Encoding UTF8
     throw $setupError
 } finally {
@@ -256,7 +300,10 @@ exit $code
         Remove-Item -LiteralPath ('Cert:\LocalMachine\Root\' + $certificate.Thumbprint) -ErrorAction Continue
         Remove-Item -LiteralPath ('Cert:\LocalMachine\My\' + $certificate.Thumbprint) -DeleteKey -ErrorAction Continue
     }
-    if ($actorCreated -and (Get-LocalUser -Name $actorName).SID.Value -eq $actor.SID.Value) { Remove-LocalUser -Name $actorName }
+    if ($actorCreated -and (Get-LocalUser -Name $actorName).SID.Value -eq $actor.SID.Value) {
+        if ('OwnedSqlBatchRight' -as [type]) { [OwnedSqlBatchRight]::Change($actor.SID.Value,$true) }
+        Remove-LocalUser -Name $actorName
+    }
     # Media, databases, installer logs and credentials are never uploaded.
     # The entire host is discarded by GitHub after this owned job.
 }
