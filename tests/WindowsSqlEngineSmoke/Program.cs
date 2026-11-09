@@ -10,6 +10,7 @@ var server = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_SERVER") ?? t
 var password = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_PASSWORD") ?? throw new InvalidOperationException("Missing owned login.");
 var expectedInstance = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_INSTANCE") ?? throw new InvalidOperationException("Missing owned instance.");
 var mismatchServer = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_MISMATCH_SERVER") ?? throw new InvalidOperationException("Missing owned certificate-negative endpoint.");
+var windowsServer = Environment.GetEnvironmentVariable("SPBACKUP_SQL_TEST_WINDOWS_SERVER") ?? throw new InvalidOperationException("Missing owned local Windows endpoint.");
 var actorSid = WindowsIdentity.GetCurrent().User?.Value;
 var prefix = "SPB_" + Guid.NewGuid().ToString("N");
 var database = prefix + "_source"; var login = prefix + "_login";
@@ -22,7 +23,7 @@ string Literal(string value) => "N'" + value.Replace("'", "''") + "'";
 void Require(bool condition, string message) { if (!condition) throw new InvalidDataException(message); }
 SqlConnection Owner(string name = "master") => new(new SqlConnectionStringBuilder
 {
-    DataSource = server, InitialCatalog = name, IntegratedSecurity = true,
+    DataSource = windowsServer, InitialCatalog = name, IntegratedSecurity = true,
     Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = false,
     Pooling = false, ConnectTimeout = 15
 }.ConnectionString);
@@ -42,7 +43,7 @@ try
     Require(Convert.ToInt32(await Execute("SELECT CONVERT(int,SERVERPROPERTY('IsLocalDB'))")) == 0, "LocalDB cannot satisfy the full-engine stand.");
     Require(Convert.ToInt32(await Execute("SELECT CONVERT(int,SERVERPROPERTY('IsIntegratedSecurityOnly'))")) == 0, "The stand must use mixed authentication.");
     engine = Convert.ToString(await Execute("SELECT CONVERT(nvarchar(256),SERVERPROPERTY('ProductVersion'))+' '+CONVERT(nvarchar(256),SERVERPROPERTY('Edition'))"));
-    checks.Add("full-windows-engine-mixed-mode-with-verified-tls-not-localdb");
+    checks.Add("full-windows-engine-mixed-mode-local-windows-login-not-localdb");
     await Execute($"CREATE DATABASE [{database}]; ALTER DATABASE [{database}] SET RECOVERY FULL;");
     await Execute("CREATE TABLE dbo.Fixture(Id int PRIMARY KEY, Value nvarchar(100)); INSERT dbo.Fixture VALUES(1,N'Проверка копии'),(2,N'fixture two');", database);
     await Execute($"CREATE LOGIN [{login}] WITH PASSWORD={Literal(password)}, CHECK_POLICY=OFF;");
@@ -55,10 +56,10 @@ try
     var job = new BackupJob { Name = "Full SQL engine fixture", Kind = DatabaseKind.SqlServer, Source = database,
         Enabled = false, ScheduleKind = ScheduleKind.Manual, KeepLast = 10,
         DestinationDirectory = Path.Combine(root, "copies"), TemporaryDirectory = Path.Combine(root, "work"),
-        SqlServer = new() { Server = server, ServerBackupDirectory = stage, AgentReadDirectory = stage, TimeoutMinutes = 2 } };
+        SqlServer = new() { Server = windowsServer, ServerBackupDirectory = stage, AgentReadDirectory = stage, TimeoutMinutes = 2 } };
     var checker = new SourceReadinessChecker(new BackupProcessRunner(), Path.Combine(root, "probe-work"));
     var windowsProbe = await checker.CheckAsync(job); Require(windowsProbe.Succeeded, "Windows login source check failed: " + windowsProbe.Details);
-    var sqlJob = job with { Id = Guid.NewGuid(), SqlServer = job.SqlServer with { Authentication = SqlServerAuthentication.SqlServer, CredentialKey = key } };
+    var sqlJob = job with { Id = Guid.NewGuid(), SqlServer = job.SqlServer with { Server = server, Authentication = SqlServerAuthentication.SqlServer, CredentialKey = key } };
     var sqlProbe = await checker.CheckAsync(sqlJob); Require(sqlProbe.Succeeded, "SQL login source check failed: " + sqlProbe.Details);
     var wrong = await checker.CheckAsync(sqlJob with { SqlServer = sqlJob.SqlServer! with { CredentialKey = wrongKey } });
     Require(!wrong.Succeeded && !wrong.Cancelled, "Wrong SQL password was accepted.");
@@ -70,7 +71,7 @@ try
         "Explicit untrusted-certificate opt-in did not connect.");
     Require((await checker.CheckAsync(sqlJob)).Succeeded, "A rejected login poisoned a healthy connection.");
     Require(!Directory.EnumerateFiles(stage).Any(), "Read-only source checks created backup files.");
-    checks.Add("windows-and-vault-sql-logins-wrong-password-and-hostname-rejection-explicit-opt-in-and-recovery");
+    checks.Add("local-windows-and-tls-tcp-vault-sql-logins-wrong-password-and-hostname-rejection-explicit-opt-in-and-recovery");
     var catalog = new BackupCatalog(Path.Combine(root, "copies.json"));
     var history = new BackupRunHistory(Path.Combine(root, "runs.json"));
     var storage = new FileBackupStorage();
@@ -96,7 +97,7 @@ try
     await Execute($"BACKUP DATABASE [{database}] TO DISK={Literal(Path.Combine(external, "diff.bak"))} WITH DIFFERENTIAL,CHECKSUM;");
     await Execute($"BACKUP LOG [{database}] TO DISK={Literal(Path.Combine(external, "log.trn"))} WITH CHECKSUM;");
     var monitor = new ExternalBackupMonitor { Name = "Owned SQL history", Kind = ExternalBackupSourceKind.SqlServerHistory,
-        SqlServer = server, DatabaseName = database, TimeZoneId = TimeZoneInfo.Local.Id };
+        SqlServer = windowsServer, DatabaseName = database, TimeZoneId = TimeZoneInfo.Local.Id };
     var source = new SqlServerBackupHistorySource(credentials: credentials);
     var observed = await source.ReadAsync(monitor);
     Require(new[] { "D", "I", "L" }.All(type => observed.Any(item => item.BackupType == type && item.SizeBytes > 0 && item.Outcome == ExternalBackupOutcome.Completed)),
@@ -121,7 +122,7 @@ try
     Require(changed.Latest is null && changed.LastSuccessfulUtc is null && changed.FreshnessWarning,
         "Old backup evidence masked a newly selected database with no copies.");
     Require((await source.ReadAsync(monitor with { DatabaseName = prefix + "_empty" })).Count == 0, "A new source reused previous database history.");
-    var denied = monitor with { SqlAuthentication = SqlServerAuthentication.SqlServer, SqlCredentialKey = key };
+    var denied = monitor with { SqlServer = server, SqlAuthentication = SqlServerAuthentication.SqlServer, SqlCredentialKey = key };
     await Execute($"CREATE USER [{login}] FOR LOGIN [{login}]; DENY SELECT ON dbo.backupset TO [{login}]; DENY SELECT ON dbo.backupmediafamily TO [{login}];", "msdb");
     var deniedCorrectly = false;
     try { await source.ReadAsync(denied); } catch (Exception error) when (error is SqlException or IOException) { deniedCorrectly = true; }
@@ -164,8 +165,9 @@ finally
     }
     catch (Exception error) { failure = (failure ?? "") + " Cleanup: " + error.GetType().Name; }
     var result = new { success = failure is null, source = Environment.GetEnvironmentVariable("GITHUB_SHA"),
-        scope = "full-engine-local-tcp-selected-task-user", remoteHostVerified = false, serviceIdentityVerified = false,
-        actorSid, endpoint = server, engine, checks, error = failure };
+        scope = "full-engine-local-selected-task-user", remoteHostVerified = false, serviceIdentityVerified = false,
+        windowsTcpVerified = false, windowsTransport = "shared-memory", sqlLoginTransport = "tls-tcp-ipv4",
+        actorSid, endpoint = server, windowsEndpoint = windowsServer, engine, checks, error = failure };
     Directory.CreateDirectory(Path.Combine(root, "report"));
     await File.WriteAllTextAsync(Path.Combine(root, "report", "sql-engine-result.json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
 }

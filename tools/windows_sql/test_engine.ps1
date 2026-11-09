@@ -182,6 +182,7 @@ public static class OwnedSqlBatchRight {
     @{ Executable = (Join-Path $binary 'WindowsSqlEngineSmoke.exe'); Workspace = $workspace;
         Environment = @{ SPBACKUP_NATIVE_SQL_ENGINE_TEST = '1'; SPBACKUP_SQL_TEST_SERVER = "tcp:127.0.0.1,$port";
             SPBACKUP_SQL_TEST_PASSWORD = $password; SPBACKUP_SQL_TEST_MISMATCH_SERVER = "tcp:$mismatchedHost,$port";
+            SPBACKUP_SQL_TEST_WINDOWS_SERVER = ("lpc:" + $env:COMPUTERNAME + '\' + $instance);
             SPBACKUP_SQL_TEST_INSTANCE = $instance; SPBACKUP_SQL_TEST_ACTOR_SID = $actor.SID.Value; GITHUB_SHA = $env:GITHUB_SHA } } |
         ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configPath -Encoding UTF8
     @'
