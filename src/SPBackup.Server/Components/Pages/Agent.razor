@@ -28,9 +28,11 @@
         <div class="table-scroll"><table><thead><tr><th>Задание</th><th>Расписание</th><th>Последний результат</th><th>Последняя успешная копия без пропусков</th><th>Следующий запуск</th></tr></thead><tbody>
         @foreach (var job in Tasks(monitoring.Snapshot))
         {
-            var last = Latest.FirstOrDefault(r=>r.JobId==job.JobId);
             var observation = job.TaskKind == "Observation";
             var poll = monitoring.Snapshot.Sources?.FirstOrDefault(source=>source.MonitorId==job.JobId);
+            var last = observation && poll?.ObservationStatus is not null
+                ? CurrentObservationRuns.FirstOrDefault(r=>r.JobId==job.JobId && r.RunId==poll.LatestReportId)
+                : Latest.FirstOrDefault(r=>r.JobId==job.JobId);
             var matchingHistory = !observation || poll?.ObservationStatus is null ||
                 poll.LatestReportId is not null && last?.RunId == poll.LatestReportId;
             <tr><td>@job.Name<small>@(observation ? "Наблюдение · " + Source(job.SourceKind) : Source(job.SourceKind) + " · хранилищ: " + job.DestinationCount)</small></td>
@@ -38,6 +40,8 @@
             <td>@(observation && poll?.ObservationStatus is { } currentStatus ? ObservationStatus(currentStatus) : poll?.Failed == true ? "Ошибка опроса" : observation && last?.Status == "Failed" ? "Ошибка внешней копии" : poll?.FreshnessWarning == true ? "Нет свежей копии" : last is null ? observation ? "Копии пока не обнаружены" : "Результатов ещё нет" : Status(last))<small>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LatestFinishedUtc : last?.FinishedUtc)</small>
             @if (observation)
             { <small>Последний опрос: @Clock.Time(poll?.PolledUtc). @(matchingHistory && last?.Evidence is { } evidence ? Evidence(evidence) : "")</small> }
+            @if (observation && poll?.LatestReportId is not null && poll.ObservationStatus is not null && last is null)
+            { <small>Подробный отчёт ещё не получен сервером.</small> }
             @if (observation && poll?.MaximumBackupAgeHours is { } maximumAge)
             { <small>Допустимый возраст успешной копии: @maximumAge ч. Последняя успешная: @Clock.Time(poll.LastSuccessfulUtc).</small> }
             @if (observation && poll?.SqlBackupTypesReported == true)
@@ -133,6 +137,7 @@ else { <h1>Агент не найден</h1> }
     private MonitoringState? Monitoring;
     private MonitoredRunPage? Runs;
     private IReadOnlyList<MonitoredRun> Latest = [];
+    private IReadOnlyList<MonitoredRun> CurrentObservationRuns = [];
     private IReadOnlyList<MonitoredRun> Successful = [];
     private static IEnumerable<MonitoredJob> Tasks(MonitoringSnapshot snapshot) => snapshot.Jobs.Concat(
         (snapshot.Sources ?? []).Where(source=>!snapshot.Jobs.Any(job=>job.JobId==source.MonitorId))
@@ -168,6 +173,9 @@ else { <h1>Агент не найден</h1> }
         Runs = await Store.RunsAsync(Id,RunPage,Http.HttpContext.RequestAborted);
         Successful = await Store.LastSuccessfulRunsAsync(Id,Http.HttpContext.RequestAborted);
         Latest = await Store.LatestRunsAsync(Id,Http.HttpContext.RequestAborted);
+        CurrentObservationRuns = await Store.RunsByIdAsync(Id, Monitoring?.Snapshot.Sources?
+            .Where(source=>source.ObservationStatus is not null && source.LatestReportId is not null)
+            .Select(source=>source.LatestReportId!.Value).ToArray() ?? [], Http.HttpContext.RequestAborted);
         if (Data is null) Http.HttpContext.Response.StatusCode = 404;
     }
 }

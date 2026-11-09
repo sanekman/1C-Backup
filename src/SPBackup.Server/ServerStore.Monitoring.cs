@@ -74,4 +74,16 @@ public sealed partial class ServerStore
         while (await reader.ReadAsync(token)) runs.Add(JsonSerializer.Deserialize<MonitoredRun>(reader.GetString(0),MonitoringJson)!);
         return runs;
     }
+    public async Task<IReadOnlyList<MonitoredRun>> RunsByIdAsync(Guid id, IReadOnlyList<Guid> runIds, CancellationToken token)
+    {
+        if (runIds.Count > 1000 || runIds.Any(value => value == Guid.Empty)) throw new ServerRequestException(400,"invalid_run_ids");
+        if (runIds.Count == 0) return [];
+        await using var db = await source.OpenConnectionAsync(token);
+        await using var cmd = Command(db,null,"SELECT document::text FROM server_runs WHERE agent_id=@id AND run_id=ANY(@runs)",
+            ("id",id),("runs",runIds.Distinct().ToArray()));
+        await using var reader = await cmd.ExecuteReaderAsync(token);
+        var runs = new List<MonitoredRun>();
+        while (await reader.ReadAsync(token)) runs.Add(JsonSerializer.Deserialize<MonitoredRun>(reader.GetString(0),MonitoringJson)!);
+        return runs;
+    }
 }
