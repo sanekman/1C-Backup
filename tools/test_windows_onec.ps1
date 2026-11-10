@@ -269,11 +269,18 @@ try {
         try {
             $out = $save.StandardOutput.ReadToEndAsync(); $err = $save.StandardError.ReadToEndAsync()
             $bytes = $utf8.GetBytes((ConvertTo-Json @{ username=$oneCUsername; password=$oneCPassword } -Compress))
-            try { $save.StandardInput.BaseStream.Write($bytes,0,$bytes.Length); $save.StandardInput.Close() }
-            finally { [Array]::Clear($bytes,0,$bytes.Length) }
+            # Write only UTF-8 bytes. Closing the unused StreamWriter can append its own
+            # encoding preamble after the JSON on Windows PowerShell/.NET Framework.
+            $inputPipe = $save.StandardInput.BaseStream
+            try { $inputPipe.Write($bytes,0,$bytes.Length); $inputPipe.Flush() }
+            finally { $inputPipe.Close(); [Array]::Clear($bytes,0,$bytes.Length) }
             if (-not $save.WaitForExit(10000)) { $save.Kill(); throw 'Сохранение данных входа 1С не завершилось.' }
             $out.GetAwaiter().GetResult() | Out-Null; $err.GetAwaiter().GetResult() | Out-Null
-            if ($save.ExitCode -ne 0) { throw 'Не удалось сохранить тестовые данные пользователя ИБ в Windows.' }
+            if ($save.ExitCode -ne 0) {
+                $report.errorCode = 'InfobaseCredentialSaveFailed'
+                $report.credentialHelperExitCode = $save.ExitCode
+                throw 'Не удалось сохранить тестовые данные пользователя ИБ в Windows. Код помощника записан в JSON; исходная база ещё не читалась.'
+            }
         } finally { $save.Dispose(); $login.Password.Dispose(); $login = $null }
         Add-Check 'infobase-login-stored' 'passed' 'Данные пользователя ИБ введены локально и сохранены в Windows только для этого теста; вход проверит настоящая выгрузка.'
     }
