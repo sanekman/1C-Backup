@@ -43,6 +43,7 @@ public sealed class JobStore(string path, bool useLocalTime = false) : IBackupJo
     private string PendingPath => Path.GetFullPath(path) + ".pending.json";
     private sealed record ProtectedDocument(int FormatVersion, IReadOnlyList<BackupJob> Jobs);
     private static bool Protected(BackupJob job) => job.Kind == DatabaseKind.PostgreSql && job.PostgreSql?.Tls is not null
+        || job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.PlatformDump && job.OneC?.CredentialKey is not null
         || job.NetworkShare is not null || job.AdditionalDestinations?.Any(d => d?.NetworkShare is not null) == true;
     private IReadOnlyList<BackupJob> Normalize(IReadOnlyList<BackupJob> jobs)
     {

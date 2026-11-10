@@ -102,6 +102,31 @@ internal static partial class Program
         await File.WriteAllTextAsync(Path.Combine(output, "failure-context.json"), json);
     }
 
+    private static async Task<string> InvokeOneCCredentialHelper(string executable, string command, string? key = null, string? input = null)
+    {
+        var start = new ProcessStartInfo(executable) {
+            UseShellExecute = false, RedirectStandardInput = true,
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardInputEncoding = new UTF8Encoding(false), CreateNoWindow = true
+        };
+        start.ArgumentList.Add(command);
+        if (key is not null) start.ArgumentList.Add(key);
+        using var process = Process.Start(start) ?? throw new IOException("Credential helper did not start.");
+        var output = process.StandardOutput.ReadToEndAsync(); var errors = process.StandardError.ReadToEndAsync();
+        try
+        {
+            if (input is not null) await process.StandardInput.WriteAsync(input);
+            process.StandardInput.Close();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+            Require(process.ExitCode == 0 && string.IsNullOrEmpty(await errors), "Infobase credential helper failed.");
+            return await output;
+        }
+        finally
+        {
+            if (!process.HasExited) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); }
+        }
+    }
+
     public static async Task<int> Main(string[] args)
     {
         if (Environment.GetEnvironmentVariable("ONECBACKUP_NATIVE_SERVICE_TEST") != "1" || args.Length is < 2 or > 3)
@@ -128,6 +153,7 @@ internal static partial class Program
         var archiveStore = new WindowsArchivePasswordStore(); string? archiveKey = null;
         var pgStore = new WindowsPostgreSqlCredentialStore(); var pgKey = Guid.NewGuid().ToString("N");
         var pgWrongKey = Guid.NewGuid().ToString("N");
+        var oneCStore = new WindowsOneCCredentialStore(); var oneCKey = Guid.NewGuid().ToString("N");
         PostgreSqlFixture? postgres = null;
         WindowsSmbFixture? smb = null;
         WindowsSmbFixture? nasSmb = null;
@@ -149,6 +175,11 @@ internal static partial class Program
             postgres = new PostgreSqlFixture(); await postgres.StartAsync();
             pgStore.Save(pgKey, postgres.Username, postgres.Password);
             pgStore.Save(pgWrongKey, postgres.Username, "Deliberately invalid owned fixture credential");
+            Require((await InvokeOneCCredentialHelper(executable,"--supports-onec-credentials")).Trim()=="OneCInfobaseCredentials/1", "Published agent lacks infobase credential protocol.");
+            const string oneCPassword = "Owned пароль 1С for credential availability only";
+            await InvokeOneCCredentialHelper(executable,"--store-onec-credentials",oneCKey,
+                JsonSerializer.Serialize(new { username="fixture-infobase-user",password=oneCPassword }));
+            Require((await oneCStore.GetAsync(oneCKey)).Password==oneCPassword,"Infobase credential UTF-8 stdin transfer failed.");
             if (domainSmb is null) { Native.AddUser(account, password); userCreated = true; }
             var selected = WindowsServiceAccounts.Resolve(account);
             var sid = WindowsIdentity.GetCurrent().User!.Value;
@@ -227,7 +258,9 @@ internal static partial class Program
                         Source = unc + "\\" + fileName, DestinationDirectory = Path.Combine(directory, "unused-source-probe-destination") });
                 }
             }
-            var jobs = new[] { manual, startup, pgJob, network, deniedNetwork }.Concat(sourceProbeJobs).Concat(pgNegativeProbes).Concat(nasJob is null ? [] : new[] { nasJob, nasWrongJob! }).ToArray();
+            var oneCProbe = manual with { Id=Guid.NewGuid(),Name="Infobase credential availability only",OneCMethod=OneCBackupMethod.PlatformDump,
+                OneC=new() { ExecutablePath=executable,Username="fixture-infobase-user",CredentialKey=oneCKey } };
+            var jobs = new[] { manual, startup, pgJob, network, deniedNetwork, oneCProbe }.Concat(sourceProbeJobs).Concat(pgNegativeProbes).Concat(nasJob is null ? [] : new[] { nasJob, nasWrongJob! }).ToArray();
             var jobStore = new JobStore(Path.Combine(directory, "jobs.json")); await jobStore.SaveAsync(jobs);
             var originalJobs = await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json"));
             WindowsFtpCredentialStore.SetServiceCache(new(directory, sid, selected.Sid));
@@ -291,6 +324,14 @@ internal static partial class Program
                     "An inaccessible source was falsely reported as available to the service.");
             }
             var pgSourceProbe = await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession, pgJob));
+            var oneCSourceProbe = await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession,oneCProbe));
+            Require(oneCSourceProbe.Succeeded && oneCSourceProbe.ExecutionIdentity?.WindowsSid==selected.Sid
+                && oneCSourceProbe.Details.Contains("данные пользователя ИБ доступны исполнителю",StringComparison.Ordinal),
+                "Infobase credentials were unavailable through the delegated service cache.");
+            var absentOneC = oneCProbe with { OneC=oneCProbe.OneC! with { CredentialKey=Guid.NewGuid().ToString("N") } };
+            Require(!(await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession,absentOneC))).Succeeded,
+                "Missing infobase credentials silently fell back to the Windows user.");
+            checks.Add("onec-infobase-credential-export-under-distinct-service-identity-without-launching-platform");
             Require(pgSourceProbe.Succeeded && pgSourceProbe.ExecutionIdentity?.WindowsSid == selected.Sid,
                 "PostgreSQL source check failed under the service identity with its delegated password and TLS.");
             foreach (var invalid in pgNegativeProbes)
@@ -599,7 +640,7 @@ internal static partial class Program
             catch (Exception error) { failure = (failure ?? "") + "\nNAS fixture cleanup: " + error.GetType().Name; }
             if (nasCreated && nasAccount is not null && Native.DeleteUser(nasAccount) != 0) failure = (failure ?? "") + "\nNAS account cleanup failed.";
             WindowsFtpCredentialStore.SetServiceCache(null);
-            try { pgStore.Delete(pgKey); pgStore.Delete(pgWrongKey); if (postgres is not null) await postgres.DisposeAsync(); }
+            try { oneCStore.Delete(oneCKey); pgStore.Delete(pgKey); pgStore.Delete(pgWrongKey); if (postgres is not null) await postgres.DisposeAsync(); }
             catch (Exception error) { failure = (failure ?? "") + "\nPostgreSQL fixture cleanup: " + error.GetType().Name; }
             try { if (archiveKey is not null) archiveStore.Delete(archiveKey); }
             catch (Exception error) { failure = (failure ?? "") + "\nCredential cleanup: " + error.GetType().Name; }

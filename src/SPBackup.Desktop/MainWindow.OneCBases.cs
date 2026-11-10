@@ -14,7 +14,8 @@ public partial class MainWindow
     {
         AutoSelectPlatform = AutoOneCPlatform.IsChecked == true,
         PlatformVersion = OneCPlatformVersion.Text.Trim(),
-        ExecutablePath = OneCExecutable.Text.Trim(), TimeoutMinutes = timeout
+        ExecutablePath = OneCExecutable.Text.Trim(), TimeoutMinutes = timeout,
+        Username = oneCUsername, CredentialKey = oneCCredentialKey
     };
     private void ResetOneCBasePicker()
     {
@@ -56,6 +57,8 @@ public partial class MainWindow
     private void OneCSource_Changed(object sender, TextChangedEventArgs e)
     {
         if (Source is null || JobName is null) return;
+        if (editorOpen && oneCCredentialKey is not null)
+        { oneCCredentialKey=null; UpdateOneCCredentialStatus(); }
         UpdateCopiedSourceName();
         if (changingOneCBasePicker || OneCPlatformVersion is null || OneCBasePicker?.SelectedItem is not OneCUserBase selected || selected.Directory.Length == 0) return;
         if (!Source.Text.Equals(selected.Directory, StringComparison.OrdinalIgnoreCase))
@@ -76,6 +79,7 @@ public partial class MainWindow
     private void UpdateOneCPlatformControls()
     {
         if (AutoOneCPlatformPanel is null || ManualOneCPlatformPanel is null || OneCPlatformStatus is null || OneCExecutable is null) return;
+        UpdateOneCCredentialStatus();
         var auto = AutoOneCPlatform.IsChecked == true;
         AutoOneCPlatformPanel.Visibility = auto ? Visibility.Visible : Visibility.Collapsed;
         ManualOneCPlatformPanel.Visibility = auto ? Visibility.Collapsed : Visibility.Visible;

@@ -387,6 +387,7 @@ public partial class MainWindow : Window
         webDavCredentialKey = job.WebDav?.CredentialKey;
         WebDavTimeout.Text = (job.WebDav?.TimeoutMinutes ?? 120).ToString(); UpdateWebDavCredentialStatus();
         JobName.Text = job.Name; Kind.SelectedItem = job.Kind; Source.Text = job.Source;
+        oneCCredentialKey=job.OneC?.CredentialKey; oneCUsername=job.OneC?.Username; UpdateOneCCredentialStatus();
         OneCMethodPicker.SelectedValue = job.OneCMethod;
         FileBackupModePicker.SelectedValue = job.FileBackupMode;
         FullBackupDayPicker.SelectedValue = job.FullBackupDayOfWeek is { } fullDay ? (int)fullDay : -1;
@@ -433,6 +434,7 @@ public partial class MainWindow : Window
         ResetOneCBasePicker();
         AutoOneCPlatform.IsChecked = true; OneCPlatformVersion.Clear();
         OneCExecutable.Clear(); OneCTimeout.Text = "120";
+        oneCCredentialKey=null;oneCUsername=null;UpdateOneCCredentialStatus();
         _ = RefreshOneCBasesAsync();
         SqlBackupServer.Clear(); SqlServerDirectory.Clear(); SqlAgentDirectory.Clear(); SqlBackupTimeout.Text = "120";
         SqlTrustServerCertificate.IsChecked = false;

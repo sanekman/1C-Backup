@@ -6,6 +6,7 @@ param(
     [string]$AgentExecutable,
     [string]$WorkParent = (Join-Path $env:LOCALAPPDATA 'SPBackup-Tests'),
     [switch]$PlatformOnly,
+    [switch]$AskOneCLogin,
     [ValidateRange(1,10080)][int]$DumpTimeoutMinutes = 120
 )
 $ErrorActionPreference = 'Stop'
@@ -15,11 +16,14 @@ $utf8 = New-Object Text.UTF8Encoding $false
 $root = $null; $shareName = $null; $ownsRoot = $false
 $ownedPlatforms = New-Object 'Collections.Generic.List[Diagnostics.Process]'
 $checks = New-Object 'Collections.Generic.List[object]'
+$oneCCredentialKey = $null; $oneCUsername = $null; $oneCPassword = $null
+$ownedLoginFiles = New-Object 'Collections.Generic.List[string]'
 $report = [ordered]@{
     format = 1; scenario = 'real-windows-onec'; startedUtc = [DateTime]::UtcNow.ToString('o')
     success = $false; platformVersion = ''; agentVersion = ''; actor = 'current-interactive-user'
     checks = $checks; errorType = $null; errorCode = $null; phase = 'preflight'; diskSpace = $null
     scope = $(if ($PlatformOnly) { 'platform-only' } else { 'all' }); selectedChecksPassed = $false
+    authentication = $(if ($AskOneCLogin) { 'infobase-user' } else { 'no-user-configured' })
 }
 function Write-Utf8([string]$Path, [string]$Text) { [IO.File]::WriteAllText($Path, $Text, $utf8) }
 function Add-Check([string]$Name, [string]$Status, [string]$Note) {
@@ -49,7 +53,25 @@ function Wait-Closed([string]$Directory) {
         }
     } while ($true)
 }
+function Start-AuthenticatedPlatform([string[]]$Arguments) {
+    $parameters = @($Arguments) + @('/WA-')
+    if (-not $oneCCredentialKey) { return Start-Owned $PlatformExecutable $parameters }
+    $parameters += @('/N',$oneCUsername,'/P',$oneCPassword)
+    $file = Join-Path $root ('login-' + [Guid]::NewGuid().ToString('N') + '.prm')
+    $encoding = [Text.Encoding]::GetEncoding([Text.Encoding]::Default.CodePage, [Text.EncoderFallback]::ExceptionFallback, [Text.DecoderFallback]::ExceptionFallback)
+    $parts = New-Object 'Collections.Generic.List[string]'; $valueExpected = $false
+    foreach($parameter in $parameters) {
+        if($valueExpected) { $parts.Add('"' + $parameter.Replace('"','""') + '"'); $valueExpected=$false }
+        else { $parts.Add($parameter); $valueExpected=$parameter -in @('/F','/DumpIB','/RestoreIB','/Out','/N','/P') }
+    }
+    $text = $parts -join ' '
+    [IO.File]::WriteAllText($file,$text,$encoding)
+    $ownedLoginFiles.Add($file)
+    return Start-Owned $PlatformExecutable @('/@',$file)
+}
 function New-Job([string]$Source, [string]$Destination, [bool]$AllowOpen, [bool]$Dump = $false) {
+    $settings = @{ ExecutablePath = $PlatformExecutable; AutoSelectPlatform = $false; TimeoutMinutes = $DumpTimeoutMinutes }
+    if ($Dump -and $oneCCredentialKey) { $settings.Username = $oneCUsername; $settings.CredentialKey = $oneCCredentialKey }
     return [ordered]@{
         Id = [Guid]::NewGuid().ToString(); Name = 'SP Backup acceptance'
         Kind = 'OneCFile'; Source = $Source; DestinationDirectory = $Destination
@@ -57,7 +79,7 @@ function New-Job([string]$Source, [string]$Destination, [bool]$AllowOpen, [bool]
         KeepLast = 20; Enabled = $false; ScheduleKind = 'Manual'
         OneCMethod = $(if ($Dump) { 'PlatformDump' } else { 'FileArchive' })
         AllowOpenOneCDatabase = $AllowOpen
-        OneC = @{ ExecutablePath = $PlatformExecutable; AutoSelectPlatform = $false; TimeoutMinutes = $DumpTimeoutMinutes }
+        OneC = $settings
     }
 }
 function Invoke-Job($Job, [string]$Case, [bool]$CancelPlatform = $false) {
@@ -74,7 +96,9 @@ function Invoke-Job($Job, [string]$Case, [bool]$CancelPlatform = $false) {
             if ([DateTime]::UtcNow -ge $deadline) { throw 'Истёк срок проверки задания.' }
             if ($CancelPlatform -and -not $cancelSent) {
                 $child = Get-CimInstance Win32_Process -Filter "ParentProcessId = $($process.Id)" -OperationTimeoutSec 3 |
-                    Where-Object { $_.ExecutablePath -eq $PlatformExecutable -and $_.CommandLine -and $_.CommandLine.Contains('/DumpIB') -and $_.CommandLine.Contains($root) } |
+                    Where-Object { $_.ExecutablePath -eq $PlatformExecutable -and $_.CommandLine -and
+                        (($_.CommandLine.Contains('/DumpIB') -and $_.CommandLine.Contains($root)) -or
+                         ($oneCCredentialKey -and $_.CommandLine.Contains('/@') -and $_.CommandLine.Contains('OneCBackup-ib-login-'))) } |
                     Select-Object -First 1
                 if ($child) {
                     $cancelledChild = $child
@@ -218,6 +242,38 @@ try {
         $report.errorCode = 'InsufficientDiskSpace'
         throw ('Недостаточно места: нужно {0:N1} ГиБ, свободно {1:N1} ГиБ. Добавьте -WorkParent с каталогом на другом диске. Копирование исходной базы ещё не начиналось.' -f ($needed / 1GB), ($available / 1GB))
     }
+    if ($AskOneCLogin) {
+        $report.phase = 'infobase-login'
+        $probe = Start-Owned $AgentExecutable @('--supports-onec-credentials') $true
+        try {
+            $probeOut=$probe.StandardOutput.ReadToEndAsync(); $probeErr=$probe.StandardError.ReadToEndAsync()
+            if(-not $probe.WaitForExit(10000)) { $probe.Kill(); throw 'Проверка поддержки входа ИБ не завершилась.' }
+            $support=$probeOut.GetAwaiter().GetResult().Trim();$probeErr.GetAwaiter().GetResult() | Out-Null
+            $supported=$probe.ExitCode -eq 0 -and $support -eq 'OneCInfobaseCredentials/1'
+        } finally { $probe.Dispose() }
+        if (-not $supported) {
+            $report.errorCode = 'AgentInfobaseCredentialsUnsupported'
+            throw 'Эта сборка агента не поддерживает вход пользователя ИБ. Укажите новую тестовую сборку через -AgentExecutable; пароль ещё не запрашивался.'
+        }
+        $login = Get-Credential -Message 'Пользователь информационной базы 1С. Пароль вводится только на этом компьютере.'
+        if (-not $login) { throw 'Ввод данных пользователя ИБ отменён.' }
+        $oneCUsername = $login.UserName; $oneCPassword = $login.GetNetworkCredential().Password
+        $oneCCredentialKey = [Guid]::NewGuid().ToString('N')
+        $start = New-Object Diagnostics.ProcessStartInfo
+        $start.FileName = $AgentExecutable; $start.Arguments = '--store-onec-credentials ' + $oneCCredentialKey
+        $start.UseShellExecute = $false; $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+        $save = [Diagnostics.Process]::Start($start)
+        try {
+            $out = $save.StandardOutput.ReadToEndAsync(); $err = $save.StandardError.ReadToEndAsync()
+            $bytes = $utf8.GetBytes((ConvertTo-Json @{ username=$oneCUsername; password=$oneCPassword } -Compress))
+            try { $save.StandardInput.BaseStream.Write($bytes,0,$bytes.Length); $save.StandardInput.Close() }
+            finally { [Array]::Clear($bytes,0,$bytes.Length) }
+            if (-not $save.WaitForExit(10000)) { $save.Kill(); throw 'Сохранение данных входа 1С не завершилось.' }
+            $out.GetAwaiter().GetResult() | Out-Null; $err.GetAwaiter().GetResult() | Out-Null
+            if ($save.ExitCode -ne 0) { throw 'Не удалось сохранить тестовые данные пользователя ИБ в Windows.' }
+        } finally { $save.Dispose(); $login.Password.Dispose(); $login = $null }
+        Add-Check 'infobase-login-stored' 'passed' 'Данные пользователя ИБ введены локально и сохранены в Windows только для этого теста; вход проверит настоящая выгрузка.'
+    }
     $report.phase = 'isolated-source-copy'
     Write-Host 'Исходная база должна быть закрыта. Она откроется только для чтения на время создания отдельной копии.'
     $clone = Join-Path $root 'base'
@@ -257,12 +313,13 @@ try {
     $restore = Join-Path $root 'restored-dt'
     New-Item -ItemType Directory -Path $restore | Out-Null
     Copy-Item -LiteralPath (Join-Path $clone '1Cv8.1CD') -Destination (Join-Path $restore '1Cv8.1CD')
-    $restoreProcess = Start-Owned $PlatformExecutable @('DESIGNER','/F',$restore,'/RestoreIB',[string]$dump.Run.Backup.Location,'/Out',(Join-Path $root 'restore-platform.log'),'/DisableStartupMessages','/DisableStartupDialogs')
+    # The new empty target has no infobase users until the DT has been restored.
+    $restoreProcess = Start-Owned $PlatformExecutable @('DESIGNER','/F',$restore,'/RestoreIB',[string]$dump.Run.Backup.Location,'/Out',(Join-Path $root 'restore-platform.log'),'/DisableStartupMessages','/DisableStartupDialogs','/WA-')
     $ownedPlatforms.Add($restoreProcess)
     if (-not $restoreProcess.WaitForExit($DumpTimeoutMinutes * 60000)) { throw 'Истёк срок восстановления DT в отдельную тестовую базу.' }
     if ($restoreProcess.ExitCode -ne 0) { throw 'Платформа отклонила восстановление DT. Подробности остались в локальном журнале.' }
     Add-Check 'platform-restore' 'passed' 'Платформа восстановила DT в отдельную тестовую базу с кодом 0.'
-    $restoredClient = Start-Owned $PlatformExecutable @('ENTERPRISE','/F',$restore,'/DisableStartupMessages')
+    $restoredClient = Start-AuthenticatedPlatform @('ENTERPRISE','/F',$restore,'/DisableStartupMessages')
     $ownedPlatforms.Add($restoredClient)
     $answer = Read-Host 'Проверьте документы и справочники в ВОССТАНОВЛЕННОЙ тестовой базе. Если данные верны, введите ДА'
     Add-Check 'restored-data-human-check' $(if ($answer -in @('ДА','да','yes','YES')) { 'passed' } else { 'not-confirmed' }) 'Проверка данных DT пользователем: отдельный результат, не автоматическая проверка ZIP.'
@@ -291,6 +348,16 @@ try {
             $process.Dispose()
         } catch { $report.success = $false; $report.errorType = 'OwnedPlatformCleanupFailed' }
     }
+    foreach ($file in $ownedLoginFiles) {
+        try { if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force } }
+        catch { $report.success=$false; $report.selectedChecksPassed=$false; $report.errorType='OwnedLoginFileCleanupFailed' }
+    }
+    if ($oneCCredentialKey) {
+        try { & $AgentExecutable '--remove-onec-credentials' $oneCCredentialKey | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Credential cleanup failed.' } }
+        catch { $report.success=$false; $report.selectedChecksPassed=$false; $report.errorType='OwnedInfobaseCredentialCleanupFailed' }
+    }
+    $oneCPassword=$null; $oneCUsername=$null
     if ($shareName) {
         try {
             $share = Get-SmbShare -Name $shareName

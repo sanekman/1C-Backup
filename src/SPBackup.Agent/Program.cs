@@ -5,6 +5,31 @@ using SPBackup.Core;
 var diagnosticExitCode = 0;
 try
 {
+    if (args.Length==1 && args[0]=="--supports-onec-credentials")
+    { if(!OperatingSystem.IsWindows())return 1;Console.WriteLine("OneCInfobaseCredentials/1"); return 0; }
+    if (args.Length==2 && args[0] is "--store-onec-credentials" or "--remove-onec-credentials")
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Сохранение входа 1С доступно в Windows.");
+        if (!Guid.TryParseExact(args[1],"N",out _)) throw new ArgumentException("Нужен новый идентификатор данных входа.");
+        var store=new WindowsOneCCredentialStore();
+        if (args[0]=="--remove-onec-credentials") { store.Delete(args[1]); return 0; }
+        try
+        {
+            Console.InputEncoding=new System.Text.UTF8Encoding(false,true);
+            var buffer=new char[8193];var count=await Console.In.ReadBlockAsync(buffer,0,buffer.Length);
+            try
+            {
+                if (count==0 || count>8192) throw new InvalidDataException();
+                using var document=JsonDocument.Parse(new string(buffer,0,count));
+                var value=document.RootElement;
+                if (value.ValueKind!=JsonValueKind.Object || value.EnumerateObject().Count()!=2) throw new InvalidDataException();
+                store.Save(args[1],value.GetProperty("username").GetString()!,value.GetProperty("password").GetString()!);
+                return 0;
+            }
+            finally { Array.Clear(buffer); }
+        }
+        catch { Console.Error.WriteLine("Не удалось сохранить данные входа ИБ 1С. Проверьте имя пользователя и пароль локально."); return 1; }
+    }
     if (args.Length == 1 && args[0] == "--registered-service")
     {
         if (!OperatingSystem.IsWindows()) return 0;

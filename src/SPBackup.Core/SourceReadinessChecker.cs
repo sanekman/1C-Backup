@@ -13,7 +13,8 @@ public sealed record SourceCheckReport(bool Succeeded, string Details, bool Canc
 /// <summary>Reads source availability without creating a database backup or running the 1C platform.</summary>
 public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, string defaultWorkRoot,
     Func<BackupJob, DbConnection>? sqlConnectionFactory = null, Func<BackupJob, WebDavClient>? webDavClientFactory = null,
-    ISqlServerCredentialStore? sqlCredentials = null, IPostgreSqlCredentialStore? postgreSqlCredentials = null)
+    ISqlServerCredentialStore? sqlCredentials = null, IPostgreSqlCredentialStore? postgreSqlCredentials = null,
+    IOneCCredentialStore? oneCCredentials = null)
 {
     public async Task<SourceCheckReport> CheckAsync(BackupJob job, CancellationToken cancellationToken = default)
     {
@@ -31,7 +32,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         {
             var result = job.Kind switch
             {
-                DatabaseKind.OneCFile => CheckFile(job, timeout.Token),
+                DatabaseKind.OneCFile => await CheckOneCAsync(job, timeout.Token),
                 DatabaseKind.SqlServer => await CheckSqlAsync(job, timeout.Token),
                 DatabaseKind.PostgreSql => await CheckPostgreSqlAsync(job, timeout.Token),
                 DatabaseKind.FilesAndFolders => CheckFiles(job, timeout.Token),
@@ -50,6 +51,20 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Error, ex, jobId: job.Id, sourceKind: job.Kind); return Complete(new(false, job.Kind == DatabaseKind.SqlServer ? SqlServerErrorHints.Describe(ex) ?? ex.Message : ex.Message)); }
     }
 
+    private async Task<SourceCheckReport> CheckOneCAsync(BackupJob job, CancellationToken token)
+    {
+        var result=CheckFile(job,token);
+        if (!result.Succeeded || job.OneCMethod!=OneCBackupMethod.PlatformDump || job.OneC?.CredentialKey is not { } key) return result;
+        var store=oneCCredentials;
+        if (store is null)
+        {
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Для сохранённых данных входа 1С нужно хранилище учётных данных.");
+            store=new WindowsOneCCredentialStore();
+        }
+        var credential=await store.GetAsync(key,token);
+        if (credential.UserName!=job.OneC.Username) throw new InvalidDataException("Пользователь ИБ 1С изменён. Задайте пароль заново.");
+        return result with { Details=result.Details+" Сохранённые данные пользователя ИБ доступны исполнителю. Вход в 1С и право выгрузки проверяются созданием DT." };
+    }
     private async Task<SourceCheckReport> CheckWebDavAsync(BackupJob job, CancellationToken token)
     {
         using var client = webDavClientFactory?.Invoke(job) ?? await WebDavClient.OpenAsync(job, token);

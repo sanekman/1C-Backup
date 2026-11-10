@@ -47,6 +47,9 @@ public partial class MainWindow
                 AdditionalDestinations = imported.AdditionalDestinations?.Select(d => d with {
                     NetworkShare = d.NetworkShare is { } extra ? extra with { CredentialKey = "" } : null }).ToArray() };
             var requiresPostgreSqlPassword = imported.Kind == DatabaseKind.PostgreSql && imported.PostgreSql?.CredentialKey is not null;
+            // An imported file cannot authorize reusing an infobase password for its selected path.
+            if (imported.Kind==DatabaseKind.OneCFile && imported.OneC?.CredentialKey is not null)
+                imported=imported with { OneC=imported.OneC with { CredentialKey=null } };
             if (requiresPostgreSqlPassword && imported.PostgreSql is { } pg)
             {
                 var known = jobs.Any(local => local.Kind == DatabaseKind.PostgreSql && local.PostgreSql is { } trusted

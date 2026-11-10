@@ -8,6 +8,10 @@ public sealed record OneCSettings
     public bool AutoSelectPlatform { get; init; }
     public string PlatformVersion { get; init; } = "";
     public int TimeoutMinutes { get; init; } = 120;
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Username { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? CredentialKey { get; init; }
 
     public IReadOnlyList<string> Validate()
     {
@@ -18,6 +22,10 @@ public sealed record OneCSettings
             errors.Add("Укажите версию платформы, например 8.3 или 8.3.25.1540, либо оставьте поле пустым для самой новой.");
         if (TimeoutMinutes is < 1 or > 10080)
             errors.Add("Время ожидания выгрузки должно быть от 1 до 10080 минут.");
+        if (CredentialKey is not null && (string.IsNullOrWhiteSpace(CredentialKey) || CredentialKey.Length>512 || CredentialKey.Any(char.IsControl)
+            || string.IsNullOrWhiteSpace(Username) || Username.Length>512 || Username.Any(char.IsControl)))
+            errors.Add("Задайте пользователя и пароль информационной базы 1С.");
+        if (Username is not null && CredentialKey is null) errors.Add("Сохраните пароль пользователя 1С заново.");
         return errors;
     }
 }
@@ -121,7 +129,8 @@ public interface IBackupExecutor
 }
 
 /// <summary>Uses the platform's exclusive Designer dump; never copies an open 1CD file.</summary>
-public sealed class OneCBackupExecutor(IBackupProcessRunner processRunner, IArchivePasswordStore? passwords = null, Func<OneCSettings, string>? platformResolver = null) : IBackupExecutor
+public sealed class OneCBackupExecutor(IBackupProcessRunner processRunner, IArchivePasswordStore? passwords = null, Func<OneCSettings, string>? platformResolver = null,
+    IOneCCredentialStore? credentials = null) : IBackupExecutor
 {
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
@@ -140,19 +149,37 @@ public sealed class OneCBackupExecutor(IBackupProcessRunner processRunner, IArch
         Directory.CreateDirectory(workDirectory);
         var dump = Path.Combine(Path.GetFullPath(workDirectory), BackupFileName.Create(job, ".dt"));
         var log = Path.Combine(Path.GetFullPath(workDirectory), "platform.log");
-        var command = new BackupProcess(executable,
-            ["DESIGNER", "/F", source, "/DumpIB", dump, "/Out", log,
-             "/DisableStartupMessages", "/DisableStartupDialogs"], Path.GetFullPath(workDirectory));
+        var arguments = new List<string> { "DESIGNER", "/F", source, "/DumpIB", dump, "/Out", log,
+             "/DisableStartupMessages", "/DisableStartupDialogs", "/WA-" };
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(settings.TimeoutMinutes));
+        OneCStartupFile? startup = null;
         int exitCode;
-        try { exitCode = await processRunner.RunAsync(command, timeout.Token); }
+        try
+        {
+            if (settings.CredentialKey is { } key)
+            {
+                var store = credentials;
+                if (store is null)
+                {
+                    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Для сохранённых данных входа 1С нужно хранилище учётных данных.");
+                    store = new WindowsOneCCredentialStore();
+                }
+                var value = await store.GetAsync(key,timeout.Token);
+                if (!string.Equals(value.UserName,settings.Username,StringComparison.Ordinal)) throw new InvalidDataException("Пользователь 1С изменён. Задайте пароль заново.");
+                arguments.AddRange(["/N",value.UserName,"/P",value.Password]);
+                startup = await OneCStartupFile.CreateAsync(arguments,timeout.Token);
+            }
+            var command = new BackupProcess(executable,startup is null ? arguments : ["/@",startup.Path],Path.GetFullPath(workDirectory));
+            exitCode = await processRunner.RunAsync(command, timeout.Token);
+        }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { throw new TimeoutException($"Выгрузка 1С превысила {settings.TimeoutMinutes} мин. Журнал: {log}"); }
+        finally { startup?.Dispose(); }
         cancellationToken.ThrowIfCancellationRequested();
-        if (exitCode != 0) throw new IOException($"Платформа 1С завершилась с кодом {exitCode}. Журнал: {log}");
+        if (exitCode != 0) throw new IOException((OneCPlatformErrorHints.Read(log) ?? $"Платформа 1С завершилась с кодом {exitCode}.") + $" Журнал: {log}");
         if (!File.Exists(dump) || new FileInfo(dump).Length == 0)
-            throw new InvalidDataException($"Платформа 1С не создала непустую выгрузку. Журнал: {log}");
+            throw new InvalidDataException((OneCPlatformErrorHints.Read(log) ?? "Платформа 1С не создала непустую выгрузку.") + $" Журнал: {log}");
         return dump;
     }
 }
