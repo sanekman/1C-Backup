@@ -316,8 +316,9 @@ try {
     $restore = Join-Path $root 'restored-dt'
     New-Item -ItemType Directory -Path $restore | Out-Null
     Copy-Item -LiteralPath (Join-Path $clone '1Cv8.1CD') -Destination (Join-Path $restore '1Cv8.1CD')
-    # The new empty target has no infobase users until the DT has been restored.
-    $restoreProcess = Start-Owned $PlatformExecutable @('DESIGNER','/F',$restore,'/RestoreIB',[string]$dump.Run.Backup.Location,'/Out',(Join-Path $root 'restore-platform.log'),'/DisableStartupMessages','/DisableStartupDialogs','/WA-')
+    # This target is a separate copy of the test database and retains its infobase users.
+    # Authenticate against that copy before replacing it with the DT contents.
+    $restoreProcess = Start-AuthenticatedPlatform @('DESIGNER','/F',$restore,'/RestoreIB',[string]$dump.Run.Backup.Location,'/Out',(Join-Path $root 'restore-platform.log'),'/DisableStartupMessages','/DisableStartupDialogs')
     $ownedPlatforms.Add($restoreProcess)
     if (-not $restoreProcess.WaitForExit($DumpTimeoutMinutes * 60000)) { throw 'Истёк срок восстановления DT в отдельную тестовую базу.' }
     if ($restoreProcess.ExitCode -ne 0) { throw 'Платформа отклонила восстановление DT. Подробности остались в локальном журнале.' }
