@@ -195,7 +195,16 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
     }
     public async Task<string> PrepareCompatibilityDataAsync()
     {
-        await Sql("service_source", "INSERT INTO fixture VALUES (2,'Проверка копии — Unicode');");
+        // Older Windows psql can decode non-ASCII argv through the active ANSI code page.
+        // Read UTF-8 SQL bytes instead; still assert the actual restored Unicode value.
+        var script = Path.Combine(root, "compatibility-seed.sql");
+        await File.WriteAllTextAsync(script, "INSERT INTO fixture VALUES (2,'Проверка копии — Unicode');\n", new System.Text.UTF8Encoding(false));
+        try
+        {
+            await Run("psql", ["--no-psqlrc", "--no-password", "--host=127.0.0.1", "--port=" + port,
+                "--username=" + user, "--dbname=service_source", "--set=ON_ERROR_STOP=1", "--file=" + script]);
+        }
+        finally { File.Delete(script); }
         return await Sql("postgres", "SHOW server_version;");
     }
     public async Task AssertCompatibilityRestoresAsync(string dump, string restoreExecutable)
