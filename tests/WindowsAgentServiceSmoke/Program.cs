@@ -258,7 +258,7 @@ internal static partial class Program
                         Source = unc + "\\" + fileName, DestinationDirectory = Path.Combine(directory, "unused-source-probe-destination") });
                 }
             }
-            var oneCProbe = manual with { Id=Guid.NewGuid(),Name="Infobase credential availability only",OneCMethod=OneCBackupMethod.PlatformDump,
+            var oneCProbe = manual with { Id=Guid.NewGuid(),Name="Infobase credential availability only",OneCMethod=OneCBackupMethod.PlatformDump,ArchivePasswordKey=null,
                 OneC=new() { ExecutablePath=executable,Username="fixture-infobase-user",CredentialKey=oneCKey } };
             var jobs = new[] { manual, startup, pgJob, network, deniedNetwork, oneCProbe }.Concat(sourceProbeJobs).Concat(pgNegativeProbes).Concat(nasJob is null ? [] : new[] { nasJob, nasWrongJob! }).ToArray();
             var jobStore = new JobStore(Path.Combine(directory, "jobs.json")); await jobStore.SaveAsync(jobs);
