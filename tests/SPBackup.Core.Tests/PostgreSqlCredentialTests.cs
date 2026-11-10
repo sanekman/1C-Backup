@@ -79,7 +79,17 @@ public sealed class PostgreSqlCredentialTests : IDisposable
         var action = new PostgreSqlBackupExecutor(process, new Credentials()).CreateAsync(Job, Path.Combine(root, "work"), cancellation.Token);
         if (outcome == "success") Assert.True(File.Exists(await action));
         else if (outcome == "cancel") await Assert.ThrowsAnyAsync<OperationCanceledException>(() => action);
-        else if (outcome == "catalog-error") await Assert.ThrowsAsync<InvalidDataException>(() => action);
+        else if (outcome == "catalog-error")
+        {
+            var error = await Assert.ThrowsAsync<InvalidDataException>(() => action);
+            Assert.Contains("из одного комплекта", error.Message);
+            Assert.Contains("Копия не передана", error.Message);
+        }
+        else if (outcome == "dump-error")
+        {
+            var error = await Assert.ThrowsAsync<IOException>(() => action);
+            Assert.Contains("не старее версии сервера", error.Message);
+        }
         else await Assert.ThrowsAnyAsync<IOException>(() => action);
         Assert.NotNull(path); Assert.False(File.Exists(path)); Assert.False(Directory.Exists(Path.GetDirectoryName(path)));
         Assert.Equal(outcome is "success" or "catalog-error" ? 2 : 1, calls);

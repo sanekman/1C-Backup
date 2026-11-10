@@ -43,8 +43,9 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
     };
     private async Task<string> Run(string name, IEnumerable<string> args, bool capture = true)
     {
-        var start = new ProcessStartInfo(Tool(name)) { UseShellExecute = false, CreateNoWindow = true,
+        var start = new ProcessStartInfo(Path.IsPathFullyQualified(name) ? name : Tool(name)) { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = capture, RedirectStandardError = capture };
+        if (capture) { start.StandardOutputEncoding = System.Text.Encoding.UTF8; start.StandardErrorEncoding = System.Text.Encoding.UTF8; }
         foreach (var arg in args) start.ArgumentList.Add(arg);
         foreach (var pair in Authentication)
             if (pair.Value is null) start.Environment.Remove(pair.Key); else start.Environment[pair.Key] = pair.Value;
@@ -188,12 +189,30 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
     public string DumpExecutablePath => Tool("pg_dump");
     public async Task AssertRestoresAsync(string dump)
     {
-        var restored = "service_restored_" + Guid.NewGuid().ToString("N");
-        await Sql("postgres", "CREATE DATABASE " + restored + ";");
-        await Run("pg_restore", ["--no-password", "--exit-on-error", "--host=127.0.0.1", "--port=" + port,
-            "--username=" + user, "--dbname=" + restored, dump]);
+        var restored = await RestoreAsync(dump, Tool("pg_restore"));
         if (await Sql(restored, "SELECT value FROM fixture WHERE id=1;") != "from service")
             throw new InvalidDataException("The service PostgreSQL backup did not restore expected data.");
+    }
+    public async Task<string> PrepareCompatibilityDataAsync()
+    {
+        await Sql("service_source", "INSERT INTO fixture VALUES (2,'Проверка копии — Unicode');");
+        return await Sql("postgres", "SHOW server_version;");
+    }
+    public async Task AssertCompatibilityRestoresAsync(string dump, string restoreExecutable)
+    {
+        var restored = await RestoreAsync(dump, restoreExecutable);
+        if (await Sql(restored, "SELECT count(*) FROM fixture;") != "2"
+            || await Sql(restored, "SELECT value FROM fixture WHERE id=1;") != "from service"
+            || await Sql(restored, "SELECT value FROM fixture WHERE id=2;") != "Проверка копии — Unicode")
+            throw new InvalidDataException("The restored compatibility fixture differs from the two original rows.");
+    }
+    private async Task<string> RestoreAsync(string dump, string restoreExecutable)
+    {
+        var restored = "service_restored_" + Guid.NewGuid().ToString("N");
+        await Sql("postgres", "CREATE DATABASE " + restored + ";");
+        await Run(restoreExecutable, ["--no-password", "--exit-on-error", "--host=127.0.0.1", "--port=" + port,
+            "--username=" + user, "--dbname=" + restored, dump]);
+        return restored;
     }
     public async ValueTask DisposeAsync()
     {
