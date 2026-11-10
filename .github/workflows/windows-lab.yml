@@ -124,9 +124,13 @@ jobs:
           Expand-Archive -LiteralPath artifacts/candidate/SP-Backup-0.1.0-dev-windows-x64.zip -DestinationPath artifacts/expanded
           & "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -ExecutionPolicy Bypass -File tests/windows_onec/credential_transport_tests.ps1 -AgentExecutable (Join-Path $PWD 'artifacts/expanded/SP-Backup/SPBackup.Agent.exe') -Output (Join-Path $PWD 'artifacts/credential-transport.json')
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell credential transport failed' }
+          & "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -ExecutionPolicy Bypass -File tests/windows_onec/login_probe_controller_tests.ps1 -AgentExecutable (Join-Path $PWD 'artifacts/expanded/SP-Backup/SPBackup.Agent.exe') -Output (Join-Path $PWD 'artifacts/login-probe-controller.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated login probe safety verification failed' }
       - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-powershell-onec-credential-transport
-          path: artifacts/credential-transport.json
+          path: |
+            artifacts/credential-transport.json
+            artifacts/login-probe-controller.json
           retention-days: 14
