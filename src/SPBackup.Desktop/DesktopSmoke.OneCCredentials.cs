@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Security.Principal;
 using System.Windows.Controls;
 using SPBackup.Core;
 
@@ -17,6 +18,8 @@ internal static partial class DesktopSmoke
         File.WriteAllText(Path.Combine(root,"1cv8.exe"),"UI fixture; never execute");
         var store=new WindowsOneCCredentialStore();string? key=null;
         const string secret="owned-onec-ui-secret";
+        var cache = new WindowsServiceCredentialCache(Path.Combine(root,"service-profile"),WindowsIdentity.GetCurrent().User!.Value);
+        WindowsFtpCredentialStore.SetServiceCache(cache);
         try
         {
             Click("JobsNavigation");Click("NewJobButton");
@@ -36,6 +39,7 @@ internal static partial class DesktopSmoke
             };
             Click("OneCCredentialsButton");
             Require(Control<TextBlock>("OneCCredentialStatus").Text.Contains("ib-admin"),"Вход ИБ не подтверждён после сохранения.");
+            Require(cache.Read("OneCInfobase",key!) is null,"Несохранённый черновик передал пароль службе.");
             screenshot("onec-infobase-credentials");
             Click("NextStepButton");Control<TextBox>("Destination").Text=Path.Combine(root,"copies");
             Click("NextStepButton");Control<ComboBox>("Schedule").SelectedValue=ScheduleKind.Manual;Control<CheckBox>("Enabled").IsChecked=false;
@@ -45,6 +49,7 @@ internal static partial class DesktopSmoke
             var job=(await new JobStore(path).LoadAsync()).Single(j=>j.Name=="1С — пользователь ИБ");
             Require(key is not null && job.OneC?.CredentialKey==key && job.OneC.Username=="ib-admin","Привязка пользователя ИБ потеряна.");
             Require((await store.GetAsync(key!)).Password==secret,"Пароль ИБ отсутствует в Windows Vault.");
+            Require(cache.Read("OneCInfobase",key!)?.Password==secret,"Сохранение нового задания не подготовило пароль ИБ для настроенной службы.");
             Require(!(await File.ReadAllTextAsync(path+".protected.json")).Contains(secret),"Пароль ИБ попал в JSON.");
             Click("EditJobButton");Require(Control<TextBlock>("OneCCredentialStatus").Text.Contains("ib-admin"),"Вход ИБ потерян после открытия задания.");
             Control<TextBox>("Source").Text=Path.Combine(root,"different-base");
@@ -52,6 +57,6 @@ internal static partial class DesktopSmoke
             Click("NextStepButton");Require(Control<TextBlock>("WizardError").IsVisible,"Изменённая привязка ИБ сохранена без нового пароля.");
             Click("CancelEditorButton");
         }
-        finally { window.OneCCredentialsDialogOpened=null;if(key is not null)store.Delete(key);Directory.Delete(root,true); }
+        finally { WindowsFtpCredentialStore.SetServiceCache(null);window.OneCCredentialsDialogOpened=null;if(key is not null)store.Delete(key);Directory.Delete(root,true); }
     }
 }

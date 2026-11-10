@@ -278,6 +278,11 @@ public partial class MainWindow : Window
             foreach (var key in updated.Where(job => job.Kind == DatabaseKind.SqlServer && job.SqlServer?.Authentication == SqlServerAuthentication.SqlServer)
                 .Select(job => job.SqlServer?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal).Where(key => !knownSqlKeys.Contains(key)))
                 await new WindowsSqlServerCredentialStore().ExportForServiceAsync(key);
+            var knownOneCKeys = jobs.Where(job => job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.PlatformDump)
+                .Select(job => job.OneC?.CredentialKey).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            foreach (var key in updated.Where(job => job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.PlatformDump)
+                .Select(job => job.OneC?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal).Where(key => !knownOneCKeys.Contains(key)))
+                await new WindowsOneCCredentialStore().ExportForServiceAsync(key);
             var knownNetworkKeys = jobs.SelectMany(job => job.StorageJobs).Select(job => job.NetworkShare?.CredentialKey)
                 .OfType<string>().ToHashSet(StringComparer.Ordinal);
             foreach (var key in updated.SelectMany(job => job.StorageJobs).Select(job => job.NetworkShare?.CredentialKey)
