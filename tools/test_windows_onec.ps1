@@ -16,7 +16,7 @@ $utf8 = New-Object Text.UTF8Encoding $false
 $root = $null; $shareName = $null; $ownsRoot = $false
 $ownedPlatforms = New-Object 'Collections.Generic.List[Diagnostics.Process]'
 $checks = New-Object 'Collections.Generic.List[object]'
-$oneCCredentialKey = $null; $oneCUsername = $null; $oneCPassword = $null
+$oneCCredentialKey = $null; $oneCUsername = $null; $oneCPassword = $null; $login = $null
 $ownedLoginFiles = New-Object 'Collections.Generic.List[string]'
 $report = [ordered]@{
     format = 1; scenario = 'real-windows-onec'; startedUtc = [DateTime]::UtcNow.ToString('o')
@@ -255,9 +255,12 @@ try {
             $report.errorCode = 'AgentInfobaseCredentialsUnsupported'
             throw 'Эта сборка агента не поддерживает вход пользователя ИБ. Укажите новую тестовую сборку через -AgentExecutable; пароль ещё не запрашивался.'
         }
-        $login = Get-Credential -Message 'Пользователь информационной базы 1С. Пароль вводится только на этом компьютере.'
-        if (-not $login) { throw 'Ввод данных пользователя ИБ отменён.' }
-        $oneCUsername = $login.UserName; $oneCPassword = $login.GetNetworkCredential().Password
+        # Windows PowerShell can hide its graphical credential dialog behind the console.
+        # Keep both prompts in this console; the password is read as a SecureString.
+        $oneCUsername = Read-Host 'Имя пользователя информационной базы 1С (из списка входа в базу)'
+        if ([string]::IsNullOrWhiteSpace($oneCUsername)) { throw 'Имя пользователя ИБ не введено. Проверка отменена до чтения исходной базы.' }
+        $login = [Management.Automation.PSCredential]::new($oneCUsername, (Read-Host 'Пароль пользователя ИБ 1С (ввод скрыт)' -AsSecureString))
+        $oneCPassword = $login.GetNetworkCredential().Password
         $oneCCredentialKey = [Guid]::NewGuid().ToString('N')
         $start = New-Object Diagnostics.ProcessStartInfo
         $start.FileName = $AgentExecutable; $start.Arguments = '--store-onec-credentials ' + $oneCCredentialKey
@@ -358,6 +361,7 @@ try {
         catch { $report.success=$false; $report.selectedChecksPassed=$false; $report.errorType='OwnedInfobaseCredentialCleanupFailed' }
     }
     $oneCPassword=$null; $oneCUsername=$null
+    if ($login) { $login.Password.Dispose(); $login=$null }
     if ($shareName) {
         try {
             $share = Get-SmbShare -Name $shareName
