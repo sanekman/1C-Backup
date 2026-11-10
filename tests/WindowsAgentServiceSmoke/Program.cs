@@ -328,9 +328,16 @@ internal static partial class Program
             Require(oneCSourceProbe.Succeeded && oneCSourceProbe.ExecutionIdentity?.WindowsSid==selected.Sid
                 && oneCSourceProbe.Details.Contains("данные пользователя ИБ доступны исполнителю",StringComparison.Ordinal),
                 "Infobase credentials were unavailable through the delegated service cache.");
-            var absentOneC = oneCProbe with { OneC=oneCProbe.OneC! with { CredentialKey=Guid.NewGuid().ToString("N") } };
-            Require(!(await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession,absentOneC))).Succeeded,
+            // Keep the saved configuration unchanged: the queue correctly rejects mismatched fingerprints.
+            // Remove only our owned secret to exercise absence under the actual service identity.
+            oneCStore.Delete(oneCKey);
+            var absentOneC = await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession,oneCProbe));
+            Require(!absentOneC.Succeeded && absentOneC.ExecutionIdentity?.WindowsSid==selected.Sid,
                 "Missing infobase credentials silently fell back to the Windows user.");
+            oneCStore.Save(oneCKey,"fixture-infobase-user",oneCPassword);
+            await oneCStore.ExportForServiceAsync(oneCKey);
+            Require((await sourceChecks.WaitAsync(await sourceChecks.EnqueueAsync(firstSession,oneCProbe))).Succeeded,
+                "Infobase source probe did not recover after its owned secret was restored.");
             checks.Add("onec-infobase-credential-export-under-distinct-service-identity-without-launching-platform");
             Require(pgSourceProbe.Succeeded && pgSourceProbe.ExecutionIdentity?.WindowsSid == selected.Sid,
                 "PostgreSQL source check failed under the service identity with its delegated password and TLS.");
