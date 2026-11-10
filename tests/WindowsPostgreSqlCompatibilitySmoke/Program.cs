@@ -8,8 +8,10 @@ var output = Path.GetFullPath(args.Single()); Directory.CreateDirectory(output);
 var source = Environment.GetEnvironmentVariable("SPBACKUP_COMPAT_SOURCE") ?? throw new InvalidOperationException("Exact source is required.");
 var manifest = JsonSerializer.Deserialize<Toolchain[]>(await File.ReadAllTextAsync(Environment.GetEnvironmentVariable("SPBACKUP_COMPAT_TOOLS")!))!;
 var cases = new List<Case>(); var versions = new List<object>();
+var fixtureSecrets = new List<string>();
 var root = Path.Combine(Path.GetTempPath(), "SPBackup-pg-compat-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
 var phase = "validate-toolchains"; var succeeded = false; string? error = null;
+string? detail = null;
 var previousBin = Environment.GetEnvironmentVariable("PGBIN");
 try
 {
@@ -24,12 +26,14 @@ try
     }
     var newest = manifest.Single(t => t.Major == 18);
     Environment.SetEnvironmentVariable("PGBIN", newest.Bin);
-    await using var upgradeTarget = new PostgreSqlFixture(); await upgradeTarget.StartAsync();
+    await using var upgradeTarget = new PostgreSqlFixture(); fixtureSecrets.Add(upgradeTarget.Password);
+    phase = "upgrade-target-start"; await upgradeTarget.StartAsync();
     foreach (var server in manifest.OrderBy(t => t.Major))
     {
-        phase = "server-" + server.Major;
+        phase = "server-" + server.Major + "-start";
         Environment.SetEnvironmentVariable("PGBIN", server.Bin);
-        await using var fixture = new PostgreSqlFixture(); await fixture.StartAsync();
+        await using var fixture = new PostgreSqlFixture(); fixtureSecrets.Add(fixture.Password); await fixture.StartAsync();
+        phase = "server-" + server.Major + "-seed";
         var version = await fixture.PrepareCompatibilityDataAsync();
         Require(int.Parse(version.Split('.')[0]) == server.Major, "actual-server-major-mismatch");
         var credentials = new WindowsPostgreSqlCredentialStore(); var key = Guid.NewGuid().ToString("N");
@@ -95,13 +99,23 @@ try
         && cases.Count(c => c.Expected == "dump-rejected") == 6, "matrix-incomplete");
     succeeded = true;
 }
-catch (Exception exception) { error = exception is InvalidDataException ? exception.Message : exception.GetType().Name; }
+catch (Exception exception)
+{
+    error = exception is InvalidDataException ? exception.Message : exception.GetType().Name;
+    if (exception is IOException)
+    {
+        detail = exception.Message;
+        foreach (var secret in fixtureSecrets) detail = detail.Replace(secret,"[redacted]",StringComparison.Ordinal);
+        detail = detail.Replace(Path.GetTempPath(),"[temporary]/",StringComparison.OrdinalIgnoreCase);
+        if (detail.Length > 600) detail = detail[..600];
+    }
+}
 finally
 {
     Environment.SetEnvironmentVariable("PGBIN", previousBin);
     await File.WriteAllTextAsync(Path.Combine(output,"postgresql-compatibility-result.json"), JsonSerializer.Serialize(new
         { success = succeeded, source, scope = "windows-current-user-native-tools-vault-scram-verify-full", serviceIdentityVerified = false,
-            phase, error, toolchains = versions, cases }, new JsonSerializerOptions { WriteIndented = true }));
+            phase, error, detail, toolchains = versions, cases }, new JsonSerializerOptions { WriteIndented = true }));
     if (Directory.Exists(root)) Directory.Delete(root,true);
 }
 return succeeded ? 0 : 1;
