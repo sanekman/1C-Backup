@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -36,17 +35,19 @@ internal sealed class OneCStartupFile : IDisposable
                 }
             }
             var text = string.Join(" ",parts);
-            Encoding encoding;
-            if (OperatingSystem.IsWindows())
-            {
-                Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-                encoding = Encoding.GetEncoding((int)GetACP(),EncoderFallback.ExceptionFallback,DecoderFallback.ExceptionFallback);
-            }
-            else encoding = new UTF8Encoding(false,true);
+            // 1C detects a Unicode parameter file by its BOM. GetACP can return 65001
+            // for a UTF-8 apphost; UTF-8 without a BOM is interpreted as ANSI by 1C.
+            var encoding = new UTF8Encoding(true,true);
             byte[] bytes;
-            try { bytes=encoding.GetBytes(text); }
+            try
+            {
+                var preamble=encoding.GetPreamble();
+                bytes=new byte[preamble.Length+encoding.GetByteCount(text)];
+                preamble.CopyTo(bytes,0);
+                encoding.GetBytes(text.AsSpan(),bytes.AsSpan(preamble.Length));
+            }
             catch (EncoderFallbackException)
-            { throw new InvalidDataException("Символы данных входа 1С не поддерживаются системной кодировкой Windows. Проверьте язык для программ, не поддерживающих Юникод."); }
+            { throw new InvalidDataException("Параметры запуска 1С содержат некорректные символы Юникода."); }
             try
             {
                 var options = new FileStreamOptions { Mode=FileMode.CreateNew,Access=FileAccess.Write,Share=FileShare.None,Options=FileOptions.Asynchronous };
@@ -79,5 +80,4 @@ internal sealed class OneCStartupFile : IDisposable
         if (File.Exists(Path)) File.Delete(Path);
         if (Directory.Exists(directory)) Directory.Delete(directory);
     }
-    [DllImport("kernel32.dll")] private static extern uint GetACP();
 }

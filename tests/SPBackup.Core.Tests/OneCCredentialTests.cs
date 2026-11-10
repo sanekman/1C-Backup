@@ -8,7 +8,7 @@ namespace SPBackup.Core.Tests;
 
 public sealed class OneCCredentialTests : IDisposable
 {
-    private const string Password="private password /WA+ with\\backslash";
+    private const string Password="private пароль 🔐 /WA+ with\\backslash";
     private readonly string root=Path.Combine(Path.GetTempPath(),"sp-onec-login-"+Guid.NewGuid().ToString("N"));
     private BackupJob Job => new() { Name="protected DT",Source=Path.Combine(root,"source"),DestinationDirectory=Path.Combine(root,"copies"),
         OneCMethod=OneCBackupMethod.PlatformDump,OneC=new() { ExecutablePath=Path.Combine(root,"1cv8.exe"),Username="ib-user",CredentialKey="owned-key" } };
@@ -33,7 +33,9 @@ public sealed class OneCCredentialTests : IDisposable
             Assert.Equal("/@",command.Arguments[0]); Assert.Equal(2,command.Arguments.Count);
             parameters=command.Arguments[1];Assert.False(parameters.StartsWith(root+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(Password,JsonSerializer.Serialize(command));
-            var bytes=await File.ReadAllBytesAsync(parameters,token);var text=Encoding.UTF8.GetString(bytes); // This fixture uses only ASCII parameters on Windows too.
+            var bytes=await File.ReadAllBytesAsync(parameters,token);
+            Assert.Equal(new byte[] { 0xEF,0xBB,0xBF },bytes[..3]);
+            var text=new UTF8Encoding(false,true).GetString(bytes,3,bytes.Length-3);
             Assert.StartsWith("DESIGNER /F ",text);Assert.Contains(" /WA- ",text);Assert.Contains("/N \"ib-user\"",text);Assert.Contains("/P \""+Password+"\"",text);
             Assert.Empty(Directory.GetFiles(work));
             if (!OperatingSystem.IsWindows())

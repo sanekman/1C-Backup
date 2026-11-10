@@ -85,7 +85,7 @@ function Start-AuthenticatedPlatform([string[]]$Arguments) {
     if (-not $oneCCredentialKey) { return Start-Owned $PlatformExecutable $parameters }
     $parameters += @('/N',$oneCUsername,'/P',$oneCPassword)
     $file = Join-Path $root ('login-' + [Guid]::NewGuid().ToString('N') + '.prm')
-    $encoding = [Text.Encoding]::GetEncoding([Text.Encoding]::Default.CodePage, [Text.EncoderFallback]::ExceptionFallback, [Text.DecoderFallback]::ExceptionFallback)
+    $encoding = New-Object Text.UTF8Encoding $true,$true
     $parts = New-Object 'Collections.Generic.List[string]'; $valueExpected = $false
     foreach($parameter in $parameters) {
         if($valueExpected) { $parts.Add('"' + $parameter.Replace('"','""') + '"'); $valueExpected=$false }
