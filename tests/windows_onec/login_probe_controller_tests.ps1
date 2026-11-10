@@ -46,7 +46,7 @@ public static class OwnedOneCLoginProbe {
  function Quote-Literal([string]$v){return "'"+$v.Replace("'","''")+"'"}
  $command="function global:Read-Host {param([string]`$Prompt,[switch]`$AsSecureString) if(-not `$AsSecureString){throw 'Unexpected interactive prompt'}; ConvertTo-SecureString 'owned-login-probe-fixture' -AsPlainText -Force }; & "+(Quote-Literal $scriptPath)+' -WorkParent '+(Quote-Literal $workspace)+' -AgentExecutable '+(Quote-Literal $AgentExecutable)
  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
- & (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded
+ & (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand $encoded
  if($LASTEXITCODE -ne 0){throw 'Controlled login probe failed.'}
  $outputFile=@(Get-ChildItem -LiteralPath $testRoot -Filter 'one-c-login-probe-result.json' -Recurse) | Select-Object -First 1
  if(-not $outputFile){throw 'Login probe did not write its result.'}
@@ -54,7 +54,7 @@ public static class OwnedOneCLoginProbe {
  if(-not $result.success -or -not $result.vaultRoundTrip -or -not $result.cloneReused -or $result.originalDatabaseAccessed){throw 'Login probe did not confirm bounded credential round-trip.'}
  if(@($result.cases).Count -ne 4 -or @($result.cases | Where-Object {$_.passed}).Count -ne 1 -or -not ($result.cases | Where-Object {$_.encoding -eq 'utf8-bom'}).passed){throw 'Login probe misclassified the controlled encoding matrix.'}
  if((Get-FileHash -LiteralPath (Join-Path $source '1Cv8.1CD')).Hash -ne $before){throw 'Probe changed the controlled source bytes.'}
- if(@(Get-ChildItem -LiteralPath $testRoot -Recurse -Include 'startup.prm','probe.cf').Count -ne 0){throw 'Private parameters or generated configuration were left behind.'}
+ if(@(Get-ChildItem -LiteralPath $testRoot -Recurse -File | Where-Object {$_.Name -in @('startup.prm','probe.cf')}).Count -ne 0){throw 'Private parameters or generated configuration were left behind.'}
  $report.checks=@('real-agent-vault-round-trip','four-encoding-classifications-with-controlled-platform','owned-clone-reused-without-source-copy','source-bytes-preserved','private-parameter-and-configuration-cleanup')
  $report.success=$true
 } catch {$report.errorType=$_.Exception.GetType().FullName;Write-Warning $_.Exception.Message}
