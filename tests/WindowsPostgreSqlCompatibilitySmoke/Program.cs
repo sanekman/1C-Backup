@@ -74,7 +74,8 @@ try
                     // Do not claim that SQL produced by v18 is guaranteed to load back into v15.
                     var target = dump.Major == server.Major ? fixture : upgradeTarget;
                     await target.AssertCompatibilityRestoresAsync(copy.Backup.Location,
-                        dump.Major == server.Major ? job.PostgreSql.PgRestorePath : Path.Combine(newest.Bin,"pg_restore.exe"));
+                        dump.Major == server.Major ? job.PostgreSql.PgRestorePath : Path.Combine(newest.Bin,"pg_restore.exe"),
+                        differentServer: dump.Major != server.Major);
                     Require(!Directory.Exists(run.WorkDirectory), "successful-work-not-cleaned");
                 }
                 else

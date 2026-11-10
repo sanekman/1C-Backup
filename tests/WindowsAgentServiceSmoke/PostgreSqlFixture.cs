@@ -207,20 +207,24 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
         finally { File.Delete(script); }
         return await Sql("postgres", "SHOW server_version;");
     }
-    public async Task AssertCompatibilityRestoresAsync(string dump, string restoreExecutable)
+    public async Task AssertCompatibilityRestoresAsync(string dump, string restoreExecutable, bool differentServer = false)
     {
-        var restored = await RestoreAsync(dump, restoreExecutable);
+        var restored = await RestoreAsync(dump, restoreExecutable, differentServer);
         if (await Sql(restored, "SELECT count(*) FROM fixture;") != "2"
             || await Sql(restored, "SELECT value FROM fixture WHERE id=1;") != "from service"
             || await Sql(restored, "SELECT value FROM fixture WHERE id=2;") != "Проверка копии — Unicode")
             throw new InvalidDataException("The restored compatibility fixture differs from the two original rows.");
     }
-    private async Task<string> RestoreAsync(string dump, string restoreExecutable)
+    private async Task<string> RestoreAsync(string dump, string restoreExecutable, bool omitOwnership = false)
     {
         var restored = "service_restored_" + Guid.NewGuid().ToString("N");
         await Sql("postgres", "CREATE DATABASE " + restored + ";");
-        await Run(restoreExecutable, ["--no-password", "--exit-on-error", "--host=127.0.0.1", "--port=" + port,
-            "--username=" + user, "--dbname=" + restored, dump]);
+        var arguments = new List<string> { "--no-password", "--exit-on-error", "--host=127.0.0.1", "--port=" + port,
+            "--username=" + user, "--dbname=" + restored };
+        // Cluster roles are not contained in pg_dump. The upgrade target has its own test login.
+        if (omitOwnership) arguments.AddRange(["--no-owner", "--no-privileges"]);
+        arguments.Add(dump);
+        await Run(restoreExecutable, arguments);
         return restored;
     }
     public async ValueTask DisposeAsync()
