@@ -41,6 +41,33 @@ function Start-Owned([string]$Executable, [string[]]$Arguments, [bool]$Redirect 
     $start.RedirectStandardOutput = $Redirect; $start.RedirectStandardError = $Redirect
     return [Diagnostics.Process]::Start($start)
 }
+function Save-OneCTestCredential([string]$Key, [byte[]]$Bytes) {
+    # .NET Framework constructs an auto-flushed StreamWriter for redirected stdin.
+    # Its console encoding can emit a BOM before raw bytes are written.
+    $previousInputEncoding = [Console]::InputEncoding
+    $save = $null
+    try {
+        [Console]::InputEncoding = New-Object Text.UTF8Encoding $false
+        $start = New-Object Diagnostics.ProcessStartInfo
+        $start.FileName = $AgentExecutable; $start.Arguments = '--store-onec-credentials ' + $Key
+        $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+        $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+        $save = [Diagnostics.Process]::Start($start)
+        $out = $save.StandardOutput.ReadToEndAsync(); $err = $save.StandardError.ReadToEndAsync()
+        $inputPipe = $save.StandardInput.BaseStream
+        try { $inputPipe.Write($Bytes,0,$Bytes.Length); $inputPipe.Flush() }
+        finally { $inputPipe.Close() }
+        if (-not $save.WaitForExit(10000)) { $save.Kill(); throw 'Сохранение данных входа 1С не завершилось.' }
+        $out.GetAwaiter().GetResult() | Out-Null; $err.GetAwaiter().GetResult() | Out-Null
+        return $save.ExitCode
+    } finally {
+        if ($save) {
+            if (-not $save.HasExited) { $save.Kill(); $save.WaitForExit(10000) | Out-Null }
+            $save.Dispose()
+        }
+        [Console]::InputEncoding = $previousInputEncoding
+    }
+}
 function Wait-Closed([string]$Directory) {
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
     do {
@@ -260,28 +287,17 @@ try {
         $oneCUsername = Read-Host 'Имя пользователя информационной базы 1С (из списка входа в базу)'
         if ([string]::IsNullOrWhiteSpace($oneCUsername)) { throw 'Имя пользователя ИБ не введено. Проверка отменена до чтения исходной базы.' }
         $login = [Management.Automation.PSCredential]::new($oneCUsername, (Read-Host 'Пароль пользователя ИБ 1С (ввод скрыт)' -AsSecureString))
+        $oneCUsername = $login.UserName
         $oneCPassword = $login.GetNetworkCredential().Password
         $oneCCredentialKey = [Guid]::NewGuid().ToString('N')
-        $start = New-Object Diagnostics.ProcessStartInfo
-        $start.FileName = $AgentExecutable; $start.Arguments = '--store-onec-credentials ' + $oneCCredentialKey
-        $start.UseShellExecute = $false; $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
-        $save = [Diagnostics.Process]::Start($start)
-        try {
-            $out = $save.StandardOutput.ReadToEndAsync(); $err = $save.StandardError.ReadToEndAsync()
-            $bytes = $utf8.GetBytes((ConvertTo-Json @{ username=$oneCUsername; password=$oneCPassword } -Compress))
-            # Write only UTF-8 bytes. Closing the unused StreamWriter can append its own
-            # encoding preamble after the JSON on Windows PowerShell/.NET Framework.
-            $inputPipe = $save.StandardInput.BaseStream
-            try { $inputPipe.Write($bytes,0,$bytes.Length); $inputPipe.Flush() }
-            finally { $inputPipe.Close(); [Array]::Clear($bytes,0,$bytes.Length) }
-            if (-not $save.WaitForExit(10000)) { $save.Kill(); throw 'Сохранение данных входа 1С не завершилось.' }
-            $out.GetAwaiter().GetResult() | Out-Null; $err.GetAwaiter().GetResult() | Out-Null
-            if ($save.ExitCode -ne 0) {
-                $report.errorCode = 'InfobaseCredentialSaveFailed'
-                $report.credentialHelperExitCode = $save.ExitCode
-                throw 'Не удалось сохранить тестовые данные пользователя ИБ в Windows. Код помощника записан в JSON; исходная база ещё не читалась.'
-            }
-        } finally { $save.Dispose(); $login.Password.Dispose(); $login = $null }
+        $bytes = $utf8.GetBytes((ConvertTo-Json @{ username=$oneCUsername; password=$oneCPassword } -Compress))
+        try { $storeExitCode = Save-OneCTestCredential $oneCCredentialKey $bytes }
+        finally { [Array]::Clear($bytes,0,$bytes.Length); $login.Password.Dispose(); $login=$null }
+        if ($storeExitCode -ne 0) {
+            $report.errorCode = 'InfobaseCredentialSaveFailed'
+            $report.credentialHelperExitCode = $storeExitCode
+            throw 'Не удалось сохранить тестовые данные пользователя ИБ в Windows. Код помощника записан в JSON; исходная база ещё не читалась.'
+        }
         Add-Check 'infobase-login-stored' 'passed' 'Данные пользователя ИБ введены локально и сохранены в Windows только для этого теста; вход проверит настоящая выгрузка.'
     }
     $report.phase = 'isolated-source-copy'
