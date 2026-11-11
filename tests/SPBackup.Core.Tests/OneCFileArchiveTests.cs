@@ -36,7 +36,7 @@ public sealed class OneCFileArchiveTests : IDisposable
         var job = Job with { ArchiveCopies = additionalZip, Source = directFile ? SourceFile : Job.Source };
         var result = await Runner.RunAsync(job);
         Assert.Equal(BackupRunStatus.Succeeded, result.Status);
-        Assert.EndsWith(".1CD.zip", result.Backup!.Location);
+        Assert.EndsWith(".zip", result.Backup!.Location);
         Assert.DoesNotContain(".zip.zip", result.Backup.Location);
         using var zip = ZipFile.OpenRead(result.Backup.Location);
         var entry = Assert.Single(zip.Entries);

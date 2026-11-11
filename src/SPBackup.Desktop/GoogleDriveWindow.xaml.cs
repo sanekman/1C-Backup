@@ -63,7 +63,7 @@ public partial class GoogleDriveWindow : Window
             var folder = existingFolder ?? await drive.CreateFolderAsync(cancellation.Token);
             await drive.CheckFolderAsync(folder, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
-            var key = credentialKey ?? "google-" + Guid.NewGuid().ToString("N");
+            var key = "google-" + Guid.NewGuid().ToString("N");
             new WindowsGoogleDriveCredentialStore().Save(key, credentials);
             Settings = new GoogleDriveSettings { CredentialKey = key }; FolderId = folder;
             DialogResult = true;

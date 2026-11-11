@@ -28,7 +28,7 @@ public sealed class OneCFileArchiveExecutor(IArchivePasswordStore? passwords = n
         {
             if (input.Length == 0) throw new InvalidDataException("Файл базы 1Cv8.1CD пуст.");
             var archive = Path.Combine(Path.GetFullPath(workDirectory),
-                BackupFileName.Create(job, ".1CD.zip"));
+                BackupFileName.Create(job, ".zip"));
             // Do not reopen the path: retain the selected sharing mode through packing and verification.
             return await new BackupArchiver().CreateZipAsync(input, "1Cv8.1CD", archive,
                 cancellationToken: cancellationToken, password: password);

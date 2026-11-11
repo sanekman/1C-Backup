@@ -31,7 +31,7 @@ public sealed class WebDavBackupExecutor(BackupCatalog catalog, FileBackupSnapsh
         var oldFiles = previous?.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, FileBackupEntry>(StringComparer.OrdinalIgnoreCase);
         var id = Guid.NewGuid(); Directory.CreateDirectory(workDirectory);
-        var destination = Path.Combine(Path.GetFullPath(workDirectory), BackupFileName.Create(job, $".files-{(previous is null ? "full" : "incremental")}.zip", uniqueId: id));
+        var destination = Path.Combine(Path.GetFullPath(workDirectory), BackupFileName.Create(job, $".files-{(previous is null ? "full" : "incremental")}.zip"));
         var temporary = destination + ".partial"; var download = Path.Combine(workDirectory, id.ToString("N") + ".webdav-partial");
         var files = new List<FileBackupEntry>(); var changed = new List<string>();
         try

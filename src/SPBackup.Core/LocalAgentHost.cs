@@ -9,12 +9,13 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         Func<BackupRun, Task>? report = null, CancellationToken cancellationToken = default)
     {
         DiagnosticLog.Current.Write(DiagnosticEvent.AgentStarted);
-        using var lease = new BackupEngineCoordinator(directory).Acquire();
+        var coordinator = new BackupEngineCoordinator(directory);
+        using var lease = coordinator.Acquire();
         var warnings = new AgentRuntimeWarnings();
         AgentSettings? settings = null;
         try { settings = await new AgentSettingsStore(Path.Combine(directory, "agent.json")).LoadAsync(cancellationToken); }
         catch (Exception error) when (runJobId is null && AgentRuntimeWarnings.Recoverable(error)) { warnings.Set("Настройки агента", error); }
-        var store = new JobStore(Path.Combine(directory, "jobs.json"), useLocalTime: true);
+        var store = new JobStore(Path.Combine(directory, "jobs.json"), useLocalTime: true, coordinator: coordinator);
         ServerMonitoringSettings? connection = null;
         ManagedAgentProfile? managedProfile = null;
         if (settings?.Mode == AgentMode.Managed)
@@ -47,7 +48,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         var control = new LocalAgentControlStore(directory);
         var now = DateTimeOffset.UtcNow;
         var state = new LocalAgentState(Guid.NewGuid(), Environment.ProcessId, now, now, LocalAgentPhase.Running)
-        { CanCancelCurrentRun = true, RunsSchedules = manual is null, ExecutionMode = settings?.Mode };
+        { CanCancelCurrentRun = true, CanUpdateLocalJobs = managedProfile is null && settings?.Mode == AgentMode.Standalone, RunsSchedules = manual is null, ExecutionMode = settings?.Mode };
         var stateGate = new object();
         IReadOnlyList<LocalManualRunReceipt>? abandonedManualReceipts = null;
         if (manual is null)
@@ -93,6 +94,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                         finally { DiagnosticLog.Current.Write(DiagnosticEvent.AgentStopRequested); lifetime.Cancel(); }
                         return;
                     }
+                    await new LocalJobUpdates(directory).ProcessAsync(state.SessionId, store, state.CanUpdateLocalJobs, lifetime.Token);
                     var cancel = await control.ReadCancelRunAsync(lifetime.Token);
                     if (cancel?.SessionId == state.SessionId)
                     {
@@ -128,7 +130,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                         throw new InvalidDataException("Настройки серверного режима восстановлены. Перезапустите агент для подключения без подстановки локальных заданий.");
                     await history.RecoverInterruptedAsync(lifetime.Token);
                     var revision = managedConfiguration is null ? null : await managedConfiguration.GetActiveRevisionAsync(settings, lifetime.Token);
-                    lock (stateGate) Volatile.Write(ref state, state with { ExecutionMode = settings.Mode, ConfigurationRevision = revision });
+                    lock (stateGate) Volatile.Write(ref state, state with { ExecutionMode = settings.Mode, ConfigurationRevision = revision, CanUpdateLocalJobs = managedProfile is null && settings.Mode == AgentMode.Standalone });
                     warnings.Set("Настройки агента", null); warnings.Set("История запусков", null);
                     return;
                 }

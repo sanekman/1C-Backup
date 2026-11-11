@@ -133,7 +133,7 @@ public sealed class LocalDispatcherTests : IDisposable
         var result = Assert.Single(await history.ReadAsync());
         Assert.Equal(BackupRunStatus.Succeeded, result.Status);
         Assert.True(File.Exists(result.Backup!.Location));
-        Assert.EndsWith(".1CD.zip", result.Backup.Location);
+        Assert.EndsWith(".zip", result.Backup.Location);
     }
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider

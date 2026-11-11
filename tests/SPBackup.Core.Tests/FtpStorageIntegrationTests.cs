@@ -90,7 +90,7 @@ public sealed class FtpStorageIntegrationTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatcher.RunScheduleAsync(
             _ => { cancellation.Cancel(); return Task.CompletedTask; }, cancellation.Token, timeProvider: new FixtureClock()));
         var record = Assert.Single(await catalog.ReadAsync());
-        Assert.EndsWith(".1CD.zip", record.Backup.Location);
+        Assert.EndsWith(".zip", record.Backup.Location);
         var remote = Path.Combine(RemoteRoot, remoteDirectory.TrimStart('/'));
         var copy = Assert.Single(Directory.GetFiles(remote));
         using var zip = ZipFile.OpenRead(copy);

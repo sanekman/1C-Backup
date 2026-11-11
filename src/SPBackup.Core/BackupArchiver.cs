@@ -21,7 +21,8 @@ public sealed class BackupArchiver
             throw new ArgumentException("Для облачных и FTP-хранилищ используйте BackupDelivery с локальным рабочим каталогом.", nameof(job));
         if (string.IsNullOrWhiteSpace(job.DestinationDirectory))
             throw new ArgumentException("Укажите каталог резервных копий.", nameof(job));
-        return CreateZipAsync(source, Path.Combine(job.DestinationDirectory, Path.GetFileName(source) + ".zip"),
+        return CreateZipAsync(source, Path.Combine(job.DestinationDirectory, job.Kind == DatabaseKind.SqlServer
+            ? BackupFileName.Create(job, ".bak.zip") : Path.GetFileName(source) + ".zip"),
             cancellationToken: cancellationToken);
     }
 

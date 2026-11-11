@@ -22,7 +22,7 @@ public partial class MainWindow
         NetworkCredentialStatus.Text = NetworkUseCredentials.IsChecked != true
             ? "Используется сетевой вход пользователя исполнителя. Доступ из Проводника не подтверждает доступ службы; после сохранения выполните «Проверить хранилища» через работающую службу."
             : string.IsNullOrEmpty(networkShareSettings?.CredentialKey) ? "Задайте отдельный логин NAS и пароль. Они применяются только к этой сетевой папке назначения, а не к источнику. Секрет будет сохранён в Windows."
-            : "Вход задан. Для применения остановите автоматическое копирование, сохраните задание и включите копирование снова. Затем проверьте хранилища через службу.";
+            : "Вход задан. Сохраните задание: работающая служба применит новый доступ. Затем проверьте хранилища через службу.";
     }
     private void NetworkDestination_Changed(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
@@ -45,7 +45,7 @@ public partial class MainWindow
             var dialog = new FtpCredentialsWindow(key, new WindowsNetworkShareCredentialStore().Save, "Логин и пароль NAS / сетевой папки")
             { Owner = this, SizeToContent = SizeToContent.Height };
             dialog.BindingName.Text = "Укажите пользователя, которому на сетевом сервере разрешена запись в эту общую папку.";
-            dialog.CredentialExplanation.Text = "Это сетевой пароль, а не PIN Windows. Здесь сохраняется только черновик доступа. Для применения остановите автоматическое копирование, сохраните задание и включите копирование снова.";
+            dialog.CredentialExplanation.Text = "Это сетевой пароль, а не PIN Windows. Здесь сохраняется только черновик доступа. Сохраните задание, чтобы служба применила новый доступ без остановки.";
             NetworkShareCredentialsDialogOpened?.Invoke(dialog);
             if (dialog.ShowDialog() != true) return;
             networkShareSettings = new() { ShareRoot = root, CredentialKey = key }; UpdateNetworkStatus();

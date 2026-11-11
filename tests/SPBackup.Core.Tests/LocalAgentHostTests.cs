@@ -62,7 +62,7 @@ public sealed class LocalAgentHostTests : IDisposable
         Assert.Equal(BackupStage.Completed, progress.Progress.Stage);
         Assert.Equal(100, progress.Progress.Percent);
         var record = Assert.Single(await new BackupCatalog(Path.Combine(directory, "copies.json")).ReadAsync());
-        Assert.EndsWith(".1CD.zip", record.Backup.Location);
+        Assert.EndsWith(".zip", record.Backup.Location);
         await new BackupCopyVerifier(new FileBackupStorage()).VerifyAsync(record, job);
         Assert.Equal(LocalAgentPhase.Stopped, (await new LocalAgentControlStore(directory).ReadAsync())!.Phase);
         Assert.False(new BackupEngineCoordinator(directory).IsHeldElsewhere());

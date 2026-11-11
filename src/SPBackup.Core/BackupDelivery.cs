@@ -40,8 +40,10 @@ public sealed class BackupDelivery(IBackupStorage storage, IArchivePasswordStore
         Directory.CreateDirectory(workDirectory);
         try
         {
+            var archiveName = job.Kind == DatabaseKind.SqlServer
+                ? BackupFileName.Create(job, ".bak.zip") : Path.GetFileName(completedBackupPath) + ".zip";
             var archive = await new BackupArchiver().CreateZipAsync(completedBackupPath,
-                Path.Combine(workDirectory, Path.GetFileName(completedBackupPath) + ".zip"),
+                Path.Combine(workDirectory, archiveName),
                 cancellationToken: cancellationToken, password: password);
             return new PreparedBackup(archive, workDirectory);
         }

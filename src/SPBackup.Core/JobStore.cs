@@ -5,7 +5,7 @@ namespace SPBackup.Core;
 
 // The caller owns synchronization. A temporary file in the same directory avoids
 // exposing a partial JSON document when writing fails or the process stops.
-public sealed class JobStore(string path, bool useLocalTime = false) : IBackupJobSource
+public sealed class JobStore(string path, bool useLocalTime = false, BackupEngineCoordinator? coordinator = null) : IBackupJobSource
 {
     internal string StartupSchedulePath => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "startup-schedule.json");
 
@@ -64,6 +64,8 @@ public sealed class JobStore(string path, bool useLocalTime = false) : IBackupJo
     }
     public async Task SaveAsync(IReadOnlyList<BackupJob> jobs, CancellationToken cancellationToken = default)
     {
+        if (coordinator is not null && !coordinator.ForDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!))
+            throw new ArgumentException("Исполнитель принадлежит другому рабочему профилю.", nameof(coordinator));
         jobs = Normalize(jobs);
         var secured = jobs.Where(Protected).ToArray();
         var previous = File.Exists(PendingPath) ? [] : await ReadProtectedAsync(ProtectedPath, cancellationToken) ?? [];
@@ -72,8 +74,8 @@ public sealed class JobStore(string path, bool useLocalTime = false) : IBackupJo
         {
             await SaveLegacyAsync(ordinary, cancellationToken); return;
         }
-        // An old executor must be stopped before a job is moved out of its legacy file.
-        using var lease = new BackupEngineCoordinator(Path.GetDirectoryName(Path.GetFullPath(path))!).Acquire();
+        // Only the owning executor may publish protected changes while running; external writers still require an idle engine.
+        using var lease = (coordinator ?? new BackupEngineCoordinator(Path.GetDirectoryName(Path.GetFullPath(path))!)).Acquire();
         await new AgentJsonFile<ProtectedDocument>(PendingPath).WriteAsync(new(1, jobs), cancellationToken);
         // From this publication onward readers see the complete pending snapshot. Finish without
         // cancellation; an interrupted commit is recoverable from that durable snapshot.

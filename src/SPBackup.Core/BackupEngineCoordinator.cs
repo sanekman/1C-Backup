@@ -6,6 +6,9 @@ public sealed class BackupEngineBusyException(Exception inner)
 /// <summary>One coordinator per host; exclusive file ownership across processes, counted within a host.</summary>
 public sealed class BackupEngineCoordinator(string dataDirectory)
 {
+    internal bool ForDirectory(string directory) => string.Equals(
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(dataDirectory)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)),
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     private readonly object gate = new();
     private FileStream? stream;
     private int references;

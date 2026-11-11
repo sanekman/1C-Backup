@@ -105,7 +105,8 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
         var errors = job.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         Directory.CreateDirectory(workDirectory);
-        var name = BackupFileName.Create(job, ".bak");
+        // The SQL server media path remains unique; only the delivered ZIP gets the human-readable name.
+        var name = BackupFileName.Create(job, "_" + Guid.NewGuid().ToString("N")[..6] + ".bak");
         var serverPath = settings.ServerBackupDirectory.TrimEnd('/', '\\') +
             (settings.ServerBackupDirectory.StartsWith('/') ? "/" : "\\") + name;
         var readablePath = Path.Combine(settings.AgentReadDirectory, name);

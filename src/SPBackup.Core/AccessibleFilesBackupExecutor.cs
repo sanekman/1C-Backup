@@ -130,7 +130,7 @@ public sealed class AccessibleFilesBackupExecutor(IBackupExecutor normal, IArchi
         var id = Guid.NewGuid();
         Directory.CreateDirectory(workDirectory);
         var destination = Path.Combine(Path.GetFullPath(workDirectory), BackupFileName.Create(job,
-            previous is null ? ".files-full.zip" : ".files-incremental.zip", uniqueId: id));
+            previous is null ? ".files-full.zip" : ".files-incremental.zip"));
         var temporary = destination + ".partial";
         var staging = Path.Combine(Path.GetFullPath(workDirectory), "source-stage-" + Guid.NewGuid().ToString("N"));
         try

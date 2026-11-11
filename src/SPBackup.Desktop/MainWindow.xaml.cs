@@ -290,7 +290,15 @@ public partial class MainWindow : Window
             foreach (var key in updated.SelectMany(job => job.StorageJobs).Select(job => job.NetworkShare?.CredentialKey)
                 .OfType<string>().Distinct(StringComparer.Ordinal).Where(key => !knownNetworkKeys.Contains(key)))
                 await new WindowsNetworkShareCredentialStore().ExportForServiceAsync(key);
-            await store.SaveAsync(updated);
+            if (engine.IsHeldElsewhere())
+            {
+                var live = await backgroundControl.ReadAsync();
+                if (live is not { Phase: LocalAgentPhase.Running }) throw new IOException("Дождитесь готовности работающего исполнителя и повторите сохранение.");
+                if (!live.CanUpdateLocalJobs) throw new InvalidOperationException("Версия работающей службы не поддерживает применение настроек. Установите службу из той же новой сборки, что и программа.");
+                await new LocalJobUpdates(DesktopPaths.DataDirectory).ApplyAsync(live, jobs, updated);
+            }
+            else
+                await new JobStore(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"), useLocalTime: true, coordinator: engine).SaveAsync(updated);
             jobs = updated;
             BindAgentTasks();
             ApplyJobFilter();
@@ -591,17 +599,17 @@ public partial class MainWindow : Window
         ArchivePasswordButton.ToolTip = !canSave ? "Настройки этого задания управляются сервером."
             : !idle ? "Дождитесь завершения текущего действия в окне программы."
             : "Новый пароль можно задать при работающем агенте. Он применяется после сохранения задания; прежние копии сохраняют свой пароль.";
-        GoogleDriveConnectButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
+        GoogleDriveConnectButton.IsEnabled = ready && canSave && idle && editorOpen;
         FtpCredentialsButton.IsEnabled = ready && canSave && idle && editorOpen;
         FtpCredentialsButton.ToolTip = !canSave ? "Настройки этого задания управляются сервером."
             : !idle ? "Дождитесь завершения текущего действия в окне программы."
             : "Логин и пароль можно задать при работающем агенте. Действующее задание изменится только после сохранения его настроек.";
         // NAS drafts use a new Vault key, leaving running jobs unchanged.
-        // JobStore still requires an idle executor to publish protected jobs.
+        // A running executor publishes protected changes through its own leased job store.
         NetworkCredentialsButton.IsEnabled = ready && canSave && idle && editorOpen;
         NetworkCredentialsButton.ToolTip = !canSave ? "Настройки этого задания управляются сервером."
             : !idle ? "Дождитесь завершения текущего действия в окне программы."
-            : "Логин и пароль можно задать при работающем агенте. Для сохранения задания остановите автоматическое копирование, затем включите его снова.";
+            : "Логин и пароль можно задать при работающем агенте. Сохраните задание: актуальная служба применит настройки без остановки.";
         StopScheduleButton.IsEnabled = schedulingTask is not null && !schedulerStopping;
         RefreshCopiesButton.IsEnabled = ready && !copiesRefreshing;
         VerifyCopyButton.IsEnabled = ready && idle && engineAvailable && schedulingTask is null &&

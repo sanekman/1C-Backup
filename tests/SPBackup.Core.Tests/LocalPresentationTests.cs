@@ -13,9 +13,8 @@ public sealed class LocalPresentationTests
     public void BackupNameIsWindowsSafeAndUsesLocalDate(string name, string expected)
     {
         var created = new DateTimeOffset(2026, 10, 12, 14, 15, 16, TimeSpan.FromHours(10));
-        var id = Guid.Parse("12345678-1234-1234-1234-123456789abc");
-        var actual = BackupFileName.Create(new() { Name = name }, ".bak.zip", created, id);
-        Assert.Equal(expected + "_" + created.ToLocalTime().ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture) + "_123456.bak.zip", actual);
+        var actual = BackupFileName.Create(new() { Name = name }, ".bak.zip", created);
+        Assert.Equal(expected + "_" + created.ToLocalTime().ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture) + ".bak.zip", actual);
         Assert.DoesNotContain(actual, c => char.IsControl(c) || "<>:\"/\\|?*".Contains(c));
     }
 
@@ -26,6 +25,18 @@ public sealed class LocalPresentationTests
         var instant = DateTimeOffset.Now;
         Assert.NotEqual(BackupFileName.Create(job, ".dt", instant), BackupFileName.Create(job, ".dt", instant));
         Assert.True(BackupFileName.Create(job with { Name = new string('я', 200) }, ".1CD.zip").Length < 130);
+    }
+
+    [Fact]
+    public void OneCZipNameHasNoDatabaseExtensionAndSameSecondCollisionsUseReadableNumbers()
+    {
+        var job = new BackupJob { Name = "УНФ.1CD", Kind = DatabaseKind.OneCFile };
+        var date = new DateTimeOffset(2026, 11, 11, 17, 36, 47, TimeSpan.FromHours(10));
+        var first = BackupFileName.Create(job, ".zip", date);
+        Assert.Matches(@"^УНФ_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.zip$", first);
+        Assert.DoesNotContain(".1CD", first);
+        var second = BackupFileName.Create(job, ".zip", date);
+        Assert.Equal(first[..^4] + " (2).zip", second);
     }
 
     [Fact]

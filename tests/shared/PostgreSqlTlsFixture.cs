@@ -14,7 +14,8 @@ internal static class PostgreSqlTlsFixture
         using var authority = authorityRequest.CreateSelfSigned(since, since.AddDays(2));
         await File.WriteAllTextAsync(Path.Combine(root, "ca.pem"), authority.ExportCertificatePem());
         using var key = RSA.Create(2048);
-        var request = new CertificateRequest("CN=isolated PostgreSQL", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        // libpq before 17 checks the CN for numeric hosts; SAN remains present for current clients.
+        var request = new CertificateRequest("CN=127.0.0.1", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var names = new SubjectAlternativeNameBuilder(); names.AddIpAddress(IPAddress.Loopback);
         request.CertificateExtensions.Add(names.Build());
         request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));

@@ -150,7 +150,7 @@ internal static partial class Program
         var password = domainSmb?.Password ?? "OcB!a9-" + Guid.NewGuid().ToString("N");
         var archivePassword = "CI encrypted service fixture password";
         var profileCreated = false; var userCreated = false;
-        var archiveStore = new WindowsArchivePasswordStore(); string? archiveKey = null;
+        var archiveStore = new WindowsArchivePasswordStore(); string? archiveKey = null; string? liveArchiveKey = null;
         var pgStore = new WindowsPostgreSqlCredentialStore(); var pgKey = Guid.NewGuid().ToString("N");
         var pgWrongKey = Guid.NewGuid().ToString("N");
         var oneCStore = new WindowsOneCCredentialStore(); var oneCKey = Guid.NewGuid().ToString("N");
@@ -261,7 +261,7 @@ internal static partial class Program
             var oneCProbe = manual with { Id=Guid.NewGuid(),Name="Infobase credential availability only",OneCMethod=OneCBackupMethod.PlatformDump,ArchivePasswordKey=null,
                 OneC=new() { ExecutablePath=executable,Username="fixture-infobase-user",CredentialKey=oneCKey } };
             var jobs = new[] { manual, startup, pgJob, network, deniedNetwork, oneCProbe }.Concat(sourceProbeJobs).Concat(pgNegativeProbes).Concat(nasJob is null ? [] : new[] { nasJob, nasWrongJob! }).ToArray();
-            var jobStore = new JobStore(Path.Combine(directory, "jobs.json")); await jobStore.SaveAsync(jobs);
+            var jobStore = new JobStore(Path.Combine(directory, "jobs.json"), useLocalTime: true); await jobStore.SaveAsync(jobs);
             var originalJobs = await File.ReadAllTextAsync(Path.Combine(directory, "jobs.json"));
             WindowsFtpCredentialStore.SetServiceCache(new(directory, sid, selected.Sid));
             await WindowsFtpCredentialStore.ExportProfileForServiceAsync(jobs, []);
@@ -296,6 +296,7 @@ internal static partial class Program
             var startupRun = (await history.ReadAsync()).Single(run => run.JobId == startup.Id);
             Require(startupRun.Status == BackupRunStatus.Succeeded, "Startup backup failed under the service account: " + startupRun.Error);
             checks.Add("startup-backup-without-interactive-login");
+            liveArchiveKey = await VerifyLiveSettingsAsync(directory, checks);
             var storageChecks = new LocalStorageCheckQueue(directory);
             var beforeProbeHistory = await File.ReadAllBytesAsync(Path.Combine(directory, "runs.json"));
             var beforeProbeCatalog = await File.ReadAllBytesAsync(Path.Combine(directory, "copies.json"));
@@ -461,7 +462,7 @@ internal static partial class Program
             }
             var baselineRuns = await history.ReadAsync();
             var baselineCopyCount = (await catalog.ReadAsync()).Count;
-            Require(baselineRuns.Count == (nasJob is null ? 4 : 5) && baselineRuns.All(run => run.Status == BackupRunStatus.Succeeded)
+            Require(baselineRuns.Count == (nasJob is null ? 5 : 6) && baselineRuns.All(run => run.Status == BackupRunStatus.Succeeded)
                 && baselineCopyCount == baselineRuns.Count, "Expected distinct successful service backups before restart checks.");
             checks.Add("distinct-service-account-unc-encrypted-backup-sha256-and-restoration");
             WindowsAgentService.Stop(executable, directory); await WaitService(1);
@@ -649,7 +650,7 @@ internal static partial class Program
             WindowsFtpCredentialStore.SetServiceCache(null);
             try { oneCStore.Delete(oneCKey); pgStore.Delete(pgKey); pgStore.Delete(pgWrongKey); if (postgres is not null) await postgres.DisposeAsync(); }
             catch (Exception error) { failure = (failure ?? "") + "\nPostgreSQL fixture cleanup: " + error.GetType().Name; }
-            try { if (archiveKey is not null) archiveStore.Delete(archiveKey); }
+            try { if (archiveKey is not null) archiveStore.Delete(archiveKey); if (liveArchiveKey is not null) archiveStore.Delete(liveArchiveKey); }
             catch (Exception error) { failure = (failure ?? "") + "\nCredential cleanup: " + error.GetType().Name; }
             if (userCreated)
             {
