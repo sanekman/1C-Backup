@@ -52,7 +52,7 @@ if ($settings) {
         } finally { $certificate.Dispose() }
     } catch { Item 'CertificateFile' 'Unknown' 'Срок сертификата на диске не получен' 'Для нестандартного сертификата проверьте его в настройках HTTPS. При работающей панели используйте сведения о загруженном сертификате.' }
 }
-$report=[pscustomobject]@{Format=1;CheckedUtc=[DateTime]::UtcNow.ToString('o');Healthy=(@($items | Where-Object State -ne 'Healthy').Count -eq 0);Checks=@($items)}
+$report=[pscustomobject]@{Format=1;CheckedUtc=[DateTime]::UtcNow.ToString('o');Healthy=(@($items | Where-Object State -ne 'Healthy').Count -eq 0);Checks=$items.ToArray()}
 if ($ShowWindow) {
     Add-Type -AssemblyName System.Windows.Forms
     $form=New-Object Windows.Forms.Form; $form.Text='SP Backup Server — проверка на этом компьютере'; $form.Width=760;$form.Height=580;$form.StartPosition='CenterScreen'
