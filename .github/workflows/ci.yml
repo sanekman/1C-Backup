@@ -12,6 +12,11 @@ on:
         type: choice
         default: all
         options: [all, windows, linux]
+      scope:
+        description: 'Use management after unchanged SQL/SMB/volume checks already passed'
+        type: choice
+        default: full
+        options: [full, management]
 
 permissions:
   contents: read
@@ -82,7 +87,7 @@ jobs:
           retention-days: 14
 
   native-sql:
-    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'linux'
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management')
     runs-on: windows-latest
     timeout-minutes: 20
     env:
@@ -113,7 +118,7 @@ jobs:
           retention-days: 14
 
   native-smb:
-    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'linux'
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management')
     runs-on: windows-latest
     timeout-minutes: 10
     env:
@@ -166,7 +171,7 @@ jobs:
           retention-days: 14
 
   native-volume:
-    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'linux'
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management')
     runs-on: windows-latest
     timeout-minutes: 10
     env:
@@ -189,6 +194,7 @@ jobs:
           retention-days: 14
 
   package:
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.native-agent-service.result == 'success' && (inputs.scope == 'management' || (needs.native-sql.result == 'success' && needs.native-smb.result == 'success' && needs.native-volume.result == 'success')) }}
     needs: [verify, native-sql, native-smb, native-agent-service, native-volume]
     runs-on: windows-latest
     timeout-minutes: 20

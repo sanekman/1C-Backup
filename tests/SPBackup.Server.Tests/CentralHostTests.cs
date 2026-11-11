@@ -57,22 +57,26 @@ public sealed class CentralHostTests(ServerFixture fixture) : IClassFixture<Serv
             var profile = new ManagedAgentProfile(root, settings, connection);
             Assert.Equal(1, await profile.CreateConfiguration().GetActiveRevisionAsync(settings));
             firstStop.Cancel(); Assert.Equal(0, await host.WaitAsync(TimeSpan.FromSeconds(10)));
+            var address = fixture.Address;
             await fixture.App.StopAsync();
             try
             {
                 using var offlineStop = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+                var control = new LocalAgentControlStore(root);
+                var previousSession = (await control.ReadAsync())!.SessionId;
                 var offline = new LocalAgentHost(root, executor, new Credentials(agent.Token)).RunAsync(pollInterval: TimeSpan.FromMilliseconds(30), cancellationToken: offlineStop.Token);
                 try
                 {
-                    var control = new LocalAgentControlStore(root); LocalAgentState? state = null;
-                    await Wait(async () => (state = await control.ReadAsync())?.CanRunManually == true);
+                    LocalAgentState? state = null;
+                    await Wait(async () => (state = await control.ReadAsync()) is { CanRunManually: true, Phase: LocalAgentPhase.Running, ConfigurationRevision: 1 }
+                        && state.SessionId != previousSession);
                     var queue = new LocalManualRunQueue(root); var queued = await queue.EnqueueAsync(state!.SessionId, job.Id);
                     await Wait(async () => (await queue.ReadReceiptAsync(queued.RequestId))?.Phase == LocalManualRunPhase.Finished);
                     Assert.Equal(2, executor.Count); Assert.Equal(2, (await history.ReadAsync()).Count);
                 }
                 finally { offlineStop.Cancel(); Assert.Equal(0, await offline.WaitAsync(TimeSpan.FromSeconds(10))); }
             }
-            finally { await fixture.App.StartAsync(); }
+            finally { await fixture.RestartAsync(address); }
             using var finalStop = new CancellationTokenSource(TimeSpan.FromMinutes(1));
             var final = new LocalAgentHost(root, executor, new Credentials(agent.Token)).RunAsync(pollInterval: TimeSpan.FromMilliseconds(30), cancellationToken: finalStop.Token);
             try

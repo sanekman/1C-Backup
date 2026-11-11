@@ -361,9 +361,9 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         Exception? failure = null;
         try
         {
-            var completed = manual is null
-                ? await Task.WhenAny(executionTask, controlTask, monitoringTask, manualRequestsTask, storageChecksTask, sourceChecksTask, remoteCommandsTask)
-                : await Task.WhenAny(executionTask, controlTask);
+            Task[] supervised = [executionTask, controlTask, monitoringTask, manualRequestsTask, storageChecksTask, sourceChecksTask];
+            if (managedProfile is not null) supervised = [.. supervised, remoteCommandsTask];
+            var completed = manual is null ? await Task.WhenAny(supervised) : await Task.WhenAny(executionTask, controlTask);
             await completed;
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }

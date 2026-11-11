@@ -128,7 +128,13 @@ public sealed partial class ServerStore
                 throw new ServerRequestException(409, "remote_run_final");
             return;
         }
-        if (receipt.Status == old.Status) return;
+        if (receipt.Status == old.Status)
+        {
+            // Start permission is single-use, unlike result delivery. A client with a lost/restored
+            // local journal must not treat an old Running state as a fresh permission to execute.
+            if (receipt.Status == "Running") throw new ServerRequestException(409, "remote_run_already_started");
+            return;
+        }
         // Delayed nonterminal receipts never undo progress or completion.
         if (old.Status == "Running" && receipt.Status == "Accepted") return;
         if (receipt.Status is "Accepted" or "Running")

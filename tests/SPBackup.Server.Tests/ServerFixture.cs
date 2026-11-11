@@ -151,9 +151,11 @@ public sealed class ServerFixture : IAsyncLifetime
         DROP TABLE server_agent_folders;
         DELETE FROM server_schema WHERE version>=5;
         """);
-    public async Task RestartAsync()
+    public async Task RestartAsync(Uri? address = null)
     {
-        await App.StopAsync(); await App.DisposeAsync(); App = Build(); await App.StartAsync();
+        await App.StopAsync(); await App.DisposeAsync(); App = Build();
+        if (address is not null) { App.Urls.Clear(); App.Urls.Add(address.ToString().TrimEnd('/')); }
+        await App.StartAsync();
         Administrator.Dispose(); Administrator = new HttpClient(Handler(cookies)) { BaseAddress = Address };
         Administrator.DefaultRequestHeaders.Add("X-CSRF-TOKEN", adminCsrf);
     }

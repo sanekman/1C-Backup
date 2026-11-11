@@ -45,6 +45,7 @@ public sealed class CentralManagementTests(ServerFixture fixture) : IClassFixtur
             Assert.Contains(request.CommandId.ToString(), await poll.Content.ReadAsStringAsync());
         await Receipt(client, agent.AgentId, new(request.CommandId, "Accepted"));
         await Receipt(client, agent.AgentId, new(request.CommandId, "Running"));
+        await Receipt(client, agent.AgentId, new(request.CommandId, "Running"), HttpStatusCode.Conflict);
         await Receipt(client, agent.AgentId, new(request.CommandId, "Accepted"));
         Assert.Equal("Running", Assert.Single(await fixture.Store.RemoteRunsAsync(agent.AgentId, default)).Status);
         var result = new RemoteRunReceipt(request.CommandId, "Succeeded", Guid.NewGuid());
@@ -69,6 +70,7 @@ public sealed class CentralManagementTests(ServerFixture fixture) : IClassFixtur
         var second = request with { CommandId = Guid.NewGuid() }; await Submit(agent.AgentId, second);
         await fixture.ExecuteAsync("UPDATE server_configurations SET revision=3,document=jsonb_set(document,'{revision}','3') WHERE agent_id=@id", ("id", agent.AgentId));
         await Receipt(client, agent.AgentId, new(second.CommandId, "Accepted"), HttpStatusCode.Conflict);
+        await fixture.Store.RevokeAsync(await AdminId(), agent.AgentId, default);
         var enrolled = await fixture.EnrollAsync(agent.AgentId);
         using var next = fixture.Client(); next.DefaultRequestHeaders.Authorization = new("Bearer", enrolled.Token);
         next.DefaultRequestHeaders.Add(AgentCapabilities.Header, AgentCapabilities.RemoteRunsV1);
@@ -121,8 +123,9 @@ public sealed class CentralManagementTests(ServerFixture fixture) : IClassFixtur
         await fixture.Store.SaveRunAsync(agent.AgentId, new(Guid.NewGuid(), removed, "Removed job", DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(-1), "Failed", 0, false, null, []), default);
         await fixture.Store.SaveRunAsync(agent.AgentId, new(Guid.NewGuid(), job.Id, job.Name, DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(-1), "PartiallySucceeded", 1, true, null, []), default);
         var problems = await fixture.Store.ProblemsAsync(0, null, "current", parent, false, 120, default);
-        Assert.Equal(4, (await fixture.Store.ProblemsAsync(0, null, "унф", parent, false, 120, default)).Total);
-        Assert.Equal(4, problems.Total); Assert.All(problems.Items, p => Assert.Equal(job.Id, p.JobId));
+        Assert.Equal(5, (await fixture.Store.ProblemsAsync(0, null, "унф", parent, false, 120, default)).Total);
+        Assert.Equal(5, problems.Total);
+        Assert.Equal(new[] { "AccessRequired", "Failed", "Incomplete", "Overdue", "Warning" }, problems.Items.Select(p => p.Code).Order().ToArray()); Assert.All(problems.Items, p => Assert.Equal(job.Id, p.JobId));
         Assert.DoesNotContain((await fixture.Store.ProblemsAsync(0, null, null, parent, false, 120, default)).Items, p => p.JobId == removed);
         Assert.Single((await fixture.Store.ProblemsAsync(0, "Incomplete", null, parent, false, 120, default)).Items);
         Assert.Empty((await fixture.Store.ProblemsAsync(0, null, "current", null, true, 120, default)).Items);

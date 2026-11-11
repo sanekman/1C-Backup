@@ -50,6 +50,11 @@ public sealed class RemoteRunProcessor(string directory, AgentSettings settings,
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException)
                 { corrupt.Add(id); JournalWarning = true; continue; }
                 if (saved is null) continue;
+                if (saved.Receipt.Status == "Accepted" && saved.Command.ExpiresUtc <= Now)
+                {
+                    saved = saved with { Receipt = new(id, "Expired", Reason: "DeadlineElapsed"), Delivered = false };
+                    await WriteAsync(saved, token);
+                }
                 if (saved.Receipt.Status == "Running")
                 {
                     saved = saved with { Receipt = new(id, "Interrupted", Reason: "AgentRestarted"), Delivered = false };

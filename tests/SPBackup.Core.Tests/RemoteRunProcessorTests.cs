@@ -16,12 +16,15 @@ public sealed class RemoteRunProcessorTests : IDisposable
     {
         public IReadOnlyList<RemoteRunCommand> Commands = [];
         public List<RemoteRunReceipt> Receipts = [];
+        private readonly HashSet<Guid> starts = [];
         public bool LoseFinalReply;
         public bool LoseStartReply;
         public Task<IReadOnlyList<RemoteRunCommand>> PollCommandsAsync(AgentSettings settings, CancellationToken token) => Task.FromResult(Commands);
         public Task SendCommandReceiptAsync(AgentSettings settings, RemoteRunReceipt receipt, CancellationToken token)
         {
             Receipts.Add(receipt);
+            if (receipt.Status == "Running" && !starts.Add(receipt.CommandId))
+                throw new HttpRequestException("Already started", null, System.Net.HttpStatusCode.Conflict);
             if (receipt.Status == "Running" && LoseStartReply) throw new IOException("Lost start reply");
             if (receipt.Terminal && LoseFinalReply) { LoseFinalReply = false; throw new IOException("Lost committed reply"); }
             return Task.CompletedTask;
@@ -52,13 +55,19 @@ public sealed class RemoteRunProcessorTests : IDisposable
     [Fact]
     public async Task LostFinalReplyAndRepeatedDeliveryExecuteDisabledManualJobOnlyOnce()
     {
-        var (processor, api, _, _) = await Create(); api.LoseFinalReply = true;
+        var (processor, api, dispatcher, _) = await Create(); api.LoseFinalReply = true;
         await Assert.ThrowsAsync<IOException>(() => processor.PollOnceAsync());
         await processor.PollOnceAsync(); await processor.PollOnceAsync();
         Assert.Equal(1, executed);
         Assert.Contains(api.Receipts, r => r.Status == "Accepted");
         Assert.Contains(api.Receipts, r => r.Status == "Running");
         Assert.All(api.Receipts.Where(r => r.Status == "Succeeded"), r => Assert.Equal(lastRun!.RunId, r.RunId));
+        // A new/lost journal still cannot obtain the same server start permission twice.
+        var profile = new ManagedAgentProfile(root, settings);
+        var fresh = new RemoteRunProcessor(Path.Combine(root, "fresh-journal"), settings, api,
+            new AgentExecutionJobSource(profile.CreateConfiguration(), settings), dispatcher, () => lastRun, clock);
+        await fresh.PollOnceAsync(); Assert.Equal(1, executed);
+        Assert.Contains(api.Receipts, r => r.Status == "Interrupted");
     }
     [Fact]
     public async Task LostPermissionToStartIsUncertainAndNeverReplayed()
