@@ -97,6 +97,7 @@ public sealed class AgentConfiguration(JobStore localJobs, AgentConfigurationCac
 
     private static IReadOnlyList<BackupJob> Freeze(IReadOnlyList<BackupJob> jobs) => Array.AsReadOnly(jobs.Select(job => job with
     {
+        ManagedSecrets = job.ManagedSecrets is not { } secrets ? null : secrets with { NetworkDestinations = Array.AsReadOnly(secrets.NetworkDestinations.ToArray()) },
         AdditionalDailyTimes = job.AdditionalDailyTimes is null ? null : Array.AsReadOnly(job.AdditionalDailyTimes.ToArray()),
         AdditionalDestinations = job.AdditionalDestinations is null ? null : Array.AsReadOnly(job.AdditionalDestinations.ToArray())
     }).ToArray());

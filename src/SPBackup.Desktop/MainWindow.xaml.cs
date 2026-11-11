@@ -330,6 +330,11 @@ public partial class MainWindow : Window
         else configuration = new AgentConfiguration(store, agentCache);
         var snapshot = await configuration.GetSnapshotAsync(agentSettings);
         jobs = snapshot.Jobs.ToList(); managedRevision = snapshot.Revision;
+        if (agentSettings.Mode == AgentMode.Managed)
+        {
+            var bindings = new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings).Bindings;
+            for (var i = 0; i < jobs.Count; i++) jobs[i] = await bindings.ResolveAsync(jobs[i]);
+        }
         await RefreshObservationTasksAsync();
         BindAgentTasks();
         ApplyJobFilter();
@@ -543,6 +548,8 @@ public partial class MainWindow : Window
         PreviousStepButton.IsEnabled = ready && canSave && idle && wizardStep > 0;
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
         JobsSummary.Text = $"Всего: {jobs.Count + observationTasks.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}" + (observationTasks.Count == 0 ? "" : $" · Наблюдений: {observationTasks.Count}");
+        ManagedAccessMenuItem.IsEnabled = ready && agentSettings?.Mode == AgentMode.Managed && idle && engineAvailable
+            && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob { ManagedSecrets: not null };
         UpdateManualRunControl();
         var canInspectLocally = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
         CheckStorageButton.IsEnabled = ready && idle && !editorOpen && Jobs.SelectedItem is BackupJob

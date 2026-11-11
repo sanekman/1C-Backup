@@ -32,6 +32,8 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }
             try
             {
+                if (!ManagedJobBindings.Ready(job))
+                    throw new InvalidOperationException("Не задан защищённый доступ серверного задания. В Windows-программе остановите агент, выберите задание и нажмите «Доступ…». После изменения источника или хранилищ задайте доступ заново.");
                 Directory.CreateDirectory(work);
                 log.Write(DiagnosticEvent.SourcePreparationStarted);
                 BackupProgressContext.Report(BackupStage.PreparingStorage);

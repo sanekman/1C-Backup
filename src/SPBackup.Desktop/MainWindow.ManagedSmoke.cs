@@ -82,6 +82,24 @@ public partial class MainWindow
             ShowPage("jobs"); UpdateLayout(); screenshot("managed-manual-offline");
             stop.Cancel(); Require(await host.WaitAsync(TimeSpan.FromSeconds(10)) == 0, "Managed host did not stop."); host = null;
             await RefreshBackgroundStateAsync();
+            var protectedJob = serverJob with { ManagedSecrets = new(true, []) };
+            await new AgentConfigurationCache(profile.CachePath).SaveAsync(new(managed.NormalizedServerAddress,
+                new(managed.AgentId, 12, [protectedJob]), DateTimeOffset.UtcNow));
+            await LoadEffectiveJobsAsync(); Jobs.SelectedItem = jobs.Single(); UpdateRunControls();
+            Require(ManagedAccessMenuItem.IsEnabled && !ManagedJobBindings.Ready(jobs.Single()), "Managed access is not available for an unbound protected job.");
+            ManagedAccessConfirmation = _ => true;
+            ManagedArchiveDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                dialog.Password.Password = dialog.Confirmation.Password = "Managed UI temporary archive password";
+                dialog.ApplyButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            }));
+            await ConfigureManagedAccessAsync();
+            Require(ManagedJobBindings.Ready(jobs.Single()) && !string.IsNullOrEmpty(jobs.Single().ArchivePasswordKey), "Managed archive access was not bound locally.");
+            var cachedText = await File.ReadAllTextAsync(profile.CachePath);
+            Require(!cachedText.Contains(jobs.Single().ArchivePasswordKey!) && !cachedText.Contains("Managed UI temporary archive password"), "Local access leaked into the accepted server document.");
+            ShowPage("jobs"); UpdateLayout(); screenshot("managed-local-access");
+            new WindowsArchivePasswordStore().Delete(jobs.Single().ArchivePasswordKey!);
+            ManagedAccessConfirmation = null; ManagedArchiveDialogOpened = null;
             await File.WriteAllTextAsync(Path.Combine(root, "server-monitoring.json"), "broken enrollment");
             AgentModePicker.SelectedValue = AgentMode.Standalone;
             await ApplyAgentModeAsync();

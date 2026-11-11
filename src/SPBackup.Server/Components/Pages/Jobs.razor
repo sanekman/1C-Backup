@@ -19,7 +19,7 @@
                 @if (!agent.Revoked) { <a class="button" href="@($"agents/{Id}/jobs/new")">Создать задание</a> }</div>
             <p>После сохранения агент должен получить и принять настройки. Это ещё не означает, что копия создана.
                 Принятие ревизии и результаты копирования показаны в <a href="@($"agents/{Id}")">карточке агента</a>.</p>
-            <p><a href="@($"agents/{Id}/jobs/history")">История планов и возврат к прежним настройкам</a></p>
+            <p><a href="@($"agents/{Id}/jobs/history")">История планов и возврат к прежним настройкам</a> · <a href="@($"agents/{Id}/commands")">Удалённые запуски</a></p>
             <p class="muted">В Windows-программе подключите сервер по приглашению, выберите «Задания с сервера», примените режим и включите автоматическую работу.
                 При недоступном сервере агент продолжает последний принятый план.</p>
             @if (configuration.Jobs.Count == 0) { <p>Заданий пока нет. Создайте первое: выберите источник, время и папку копий.</p> }
@@ -34,8 +34,9 @@
                             <dt>Хранилище @(index + 2)</dt><dd class="path">@destination.DestinationDirectory<br />Архивов хранить: @(destination.KeepLast is { } keep ? keep.ToString() : $"как в основном ({job.KeepLast})")</dd>
                         }
                         <dt>Запуск</dt><dd>@FileJobDraft.ScheduleLabel(job.ScheduleKind)@if (job.ScheduleKind != "Manual") { <span> · @(job.Enabled ? "расписание включено" : "расписание выключено")</span> }</dd></dl>
+                    @if (job.ManagedSecrets is { } access) { <p>Защищённый доступ задаётся на агенте: @(access.ArchivePassword ? "пароль AES-256; " : "") отдельный сетевой вход для хранилищ: @string.Join(", ", access.NetworkDestinations.Select(i => i + 1)). В Windows-программе: «Файл → Доступ серверного задания…».</p> }
                     @if (!agent.Revoked)
-                    { <div class="actions"><a href="@($"agents/{Id}/jobs/{job.Id}/edit")">Изменить</a><a href="@($"agents/{Id}/jobs/{job.Id}/copy")">Создать на основе…</a><a href="@($"agents/{Id}/jobs/{job.Id}/remove")">Удалить…</a></div> }
+                    { <div class="actions"><a href="@($"agents/{Id}/jobs/{job.Id}/run")">Запустить…</a><a href="@($"agents/{Id}/jobs/{job.Id}/edit")">Изменить</a><a href="@($"agents/{Id}/jobs/{job.Id}/copy")">Создать на основе…</a><a href="@($"agents/{Id}/jobs/{job.Id}/remove")">Удалить…</a></div> }
                 </article>
             }
         </section>

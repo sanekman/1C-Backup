@@ -64,7 +64,8 @@ public sealed class ManagedExecutionTests : IDisposable
             pollInterval: TimeSpan.FromMilliseconds(20), report: _ => { stop.Cancel(); return Task.CompletedTask; }, cancellationToken: stop.Token));
         var run = (await history.ReadAsync()).Single(r => r.Configuration is not null);
         Assert.Equal(BackupRunStatus.Succeeded, run.Status);
-        Assert.Equal(new BackupConfigurationStamp(Profile.ConnectionId, 7), run.Configuration);
+        Assert.Equal(new BackupConfigurationStamp(Profile.ConnectionId, 7) { JobScope = ManagedJobBindings.Scope(Job) }, run.Configuration);
+        Assert.Equal(ManagedJobBindings.Scope(Job), ServerMonitoringDispatcher.ToReport(run).BackupScope);
         Assert.True(run.Backup!.FileSnapshot!.IsFull); // Never extends a same-ID standalone chain.
         Assert.True(File.Exists(standalone.Backup!.Location)); Assert.True(File.Exists(run.Backup.Location));
         Assert.Single(await standaloneCatalog.ReadAsync()); Assert.Single(await new BackupCatalog(Profile.CatalogPath).ReadAsync());

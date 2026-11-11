@@ -43,6 +43,21 @@ public sealed class LocalBackupDispatcher
         finally { executionGate.Release(); }
     }
 
+    internal async Task<BackupRun?> ExecuteCommandAsync(Func<CancellationToken, Task<BackupJob?>> prepare,
+        Func<BackupRun?> result, CancellationToken token)
+    {
+        await executionGate.WaitAsync(token);
+        try
+        {
+            var job = await prepare(token);
+            if (job is null) return null;
+            if (!Supports(job)) throw new NotSupportedException("Неизвестный тип задания.");
+            await execute(job, token);
+            return result();
+        }
+        finally { executionGate.Release(); }
+    }
+
     public async Task<IReadOnlyList<BackupJob>> LoadScheduledJobsAsync(CancellationToken cancellationToken = default)
     {
         var jobs = await store.LoadAsync(cancellationToken);

@@ -20,6 +20,10 @@ internal static partial class Program
         public readonly string Token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         public readonly Guid AgentId = Guid.NewGuid();
         private readonly Guid offer = Guid.NewGuid();
+        public long Revision = 1;
+        public RemoteRunCommand? Command;
+        public RemoteRunReceipt? CommandResult;
+        public bool LoseTerminalReply;
         public volatile bool Online;
         public volatile bool Accepted;
         public int Gets;
@@ -56,17 +60,25 @@ internal static partial class Program
                 {
                     if (!AgentCapabilities.Parse(context.Request.Headers[AgentCapabilities.Header]).Contains(AgentCapabilities.ManagedExecutionV1))
                     { context.Response.StatusCode = 409; return; }
-                    context.Response.Headers.ETag = "\"1\"";
+                    context.Response.Headers.ETag = "\"" + Revision + "\"";
                     context.Response.Headers[ConfigurationReceipt.OfferHeader] = offer.ToString("D");
-                    if (context.Request.Headers.IfNoneMatch == "\"1\"") { context.Response.StatusCode = 304; return; }
-                    await context.Response.WriteAsJsonAsync(new ServerConfiguration(AgentId, 1, [Job]), json, context.RequestAborted);
+                    if (context.Request.Headers.IfNoneMatch == "\"" + Revision + "\"") { context.Response.StatusCode = 304; return; }
+                    await context.Response.WriteAsJsonAsync(new ServerConfiguration(AgentId, Revision, [Job]), json, context.RequestAborted);
                 }
                 else if (context.Request.Path.Value.EndsWith("/configuration-receipt", StringComparison.Ordinal))
                 {
                     var receipt = await context.Request.ReadFromJsonAsync<ConfigurationReceipt>(json, context.RequestAborted);
-                    if (receipt?.AgentId != AgentId || receipt.OfferId != offer || receipt.Revision != 1 || receipt.Status != "Accepted")
+                    if (receipt?.AgentId != AgentId || receipt.OfferId != offer || receipt.Revision != Revision || receipt.Status != "Accepted")
                     { context.Response.StatusCode = 400; return; }
                     Accepted = true; context.Response.StatusCode = 204;
+                }
+                else if (context.Request.Path.Value.EndsWith("/commands", StringComparison.Ordinal))
+                    await context.Response.WriteAsJsonAsync(Command is null ? Array.Empty<RemoteRunCommand>() : new[] { Command }, json, context.RequestAborted);
+                else if (context.Request.Path.Value.EndsWith("/commands/receipt", StringComparison.Ordinal))
+                {
+                    CommandResult = await context.Request.ReadFromJsonAsync<RemoteRunReceipt>(json, context.RequestAborted);
+                    if (CommandResult?.Terminal == true && LoseTerminalReply) { LoseTerminalReply = false; context.Response.StatusCode = 503; }
+                    else context.Response.StatusCode = 204;
                 }
                 else if (context.Request.Path.Value.EndsWith("/runs", StringComparison.Ordinal))
                 {
@@ -90,6 +102,7 @@ internal static partial class Program
         var monitorPath = Path.Combine(directory, "server-monitoring.json");
         var originalMonitoring = File.Exists(monitorPath) ? await File.ReadAllBytesAsync(monitorPath) : null;
         var credentials = new WindowsFtpCredentialStore();
+        string? protectedPasswordKey = null;
         var key = "managed-smoke-" + Guid.NewGuid().ToString("N");
         await using var server = new ManagedServer();
         await server.Start();
@@ -137,6 +150,33 @@ internal static partial class Program
             Require((await history.ReadAsync()).Count == count + 1, "Offline restart replayed the startup slot or lost its explicit manual run.");
             checks.Add("managed-scm-offline-restart-preserves-slot-and-runs-manual-command");
             await Stop();
+            server.Job = server.Job with { ManagedSecrets = new(true, []), ScheduleKind = ScheduleKind.Manual, Enabled = false };
+            server.Revision = 2;
+            protectedPasswordKey = new WindowsArchivePasswordStore().SaveNew("ManagedService archive fixture password");
+            await WindowsFtpCredentialStore.ExportProfileForServiceAsync([server.Job with { ArchivePasswordKey = protectedPasswordKey }], []);
+            await profile.Bindings.SaveAsync(server.Job, new(server.Job.Id, ManagedJobBindings.Scope(server.Job), protectedPasswordKey, new Dictionary<int,string>()));
+            server.Online = true;
+            WindowsAgentService.Start(executable, directory); await WaitService(4);
+            await Wait(async () => (await control.ReadAsync())?.ConfigurationRevision == 2, "Protected server plan was not accepted by the SCM service.");
+            server.Command = new(Guid.NewGuid(), server.Job.Id, 2, DateTimeOffset.UtcNow.AddMinutes(5));
+            server.LoseTerminalReply = true;
+            await Wait(() => Task.FromResult(server.CommandResult?.Status == "Succeeded"), "The SCM service did not execute its protected remote command.");
+            var remoteResult = server.CommandResult!;
+            var encryptedCopy = (await new BackupCatalog(profile.CatalogPath).ReadAsync()).OrderByDescending(c => c.CompletedUtc).First();
+            using (var zip = new ZipFile(encryptedCopy.Backup.Location) { Password = "ManagedService archive fixture password" })
+            using (var reader = new StreamReader(zip.GetInputStream(zip.GetEntry("1Cv8.1CD"))))
+                Require(zip.GetEntry("1Cv8.1CD").IsCrypted && await reader.ReadToEndAsync() == "managed service data", "The delegated managed archive password did not restore the service copy.");
+            var completedCount = (await history.ReadAsync()).Count;
+            await Stop();
+            WindowsAgentService.Start(executable, directory); await WaitService(4);
+            await Wait(async () => (await control.ReadAsync())?.ConfigurationRevision == 2, "Restarted service lost the protected plan.");
+            await Task.Delay(3000);
+            Require((await history.ReadAsync()).Count == completedCount && server.CommandResult?.RunId == remoteResult.RunId,
+                "Redelivery or a lost terminal reply replayed the remote command after SCM restart.");
+            var protectedCache = await File.ReadAllTextAsync(profile.CachePath);
+            Require(!protectedCache.Contains(protectedPasswordKey) && !protectedCache.Contains("ManagedService archive fixture password"), "Local secret references leaked into the server cache.");
+            checks.Add("managed-scm-local-secret-binding-aes-restore-remote-command-lost-reply-and-restart-no-replay");
+            await Stop(); server.Online = false;
             credentials.Save(key + "-new", "agent", server.Token); await credentials.ExportForServiceAsync(key + "-new");
             await new AgentSettingsStore(Path.Combine(directory, "agent.json")).SaveAsync(settings with { CredentialKey = key + "-new" });
             await ServerMonitoringDispatcher.SaveSettingsAsync(directory, connection with { CredentialKey = key + "-new" });
@@ -144,7 +184,7 @@ internal static partial class Program
             await Wait(async () => (state = await control.ReadAsync()) is { CanRunManually: true, ConfigurationRevision: null, Phase: LocalAgentPhase.Running }, "The new enrollment did not start without an inherited cache.");
             var rejected = await queue.EnqueueAsync(state!.SessionId, server.Job.Id);
             await Wait(async () => (await queue.ReadReceiptAsync(rejected.RequestId))?.Phase == LocalManualRunPhase.Rejected, "A new enrollment reused the prior job or local fallback.");
-            Require((await history.ReadAsync()).Count == count + 1 && File.Exists(copy.Backup.Location), "Changing enrollment lost archives or executed an inherited job.");
+            Require((await history.ReadAsync()).Count == completedCount && File.Exists(copy.Backup.Location), "Changing enrollment lost archives or executed an inherited job.");
             var afterJobs = await File.ReadAllBytesAsync(Path.Combine(directory, "jobs.json"));
             Require(jobs.SequenceEqual(afterJobs), "Managed service rewrote standalone jobs.");
             checks.Add("managed-scm-new-enrollment-isolates-cache-and-preserves-standalone-profile");
@@ -154,6 +194,7 @@ internal static partial class Program
             await Stop();
             await File.WriteAllBytesAsync(Path.Combine(directory, "agent.json"), originalSettings);
             if (originalMonitoring is null) File.Delete(monitorPath); else await File.WriteAllBytesAsync(monitorPath, originalMonitoring);
+            if (protectedPasswordKey is not null) new WindowsArchivePasswordStore().Delete(protectedPasswordKey);
             credentials.Delete(key); credentials.Delete(key + "-new");
         }
     }

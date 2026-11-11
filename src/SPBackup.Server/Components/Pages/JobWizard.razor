@@ -54,6 +54,8 @@ else if (Model is { } model && Configuration is not null && Agent is { Revoked: 
             else if (model.Step == 2)
             {
                 <h2>2. Когда делать копии</h2>
+                <label>Допустимый возраст успешной копии, часов<input name="Model.MaximumAge" value="@model.MaximumAge" type="number" min="1" max="87600" placeholder="Не контролировать возраст" /></label>
+                <p>Пустое поле отключает контроль возраста. Если свежей полной или инкрементной копии без пропусков нет, сводка проблем покажет предупреждение. Это не меняет расписание.</p>
                 <label>Расписание<select name="Model.Schedule">
                     @foreach (var schedule in new[] { "Manual", "Daily", "Weekly", "SystemStartup" })
                     { <option value="@schedule" selected="@(model.Schedule == schedule)">@FileJobDraft.ScheduleLabel(schedule)</option> }
@@ -78,12 +80,16 @@ else if (Model is { } model && Configuration is not null && Agent is { Revoked: 
                 <label>Папка резервных копий<input name="Model.Destination" value="@model.Destination" maxlength="4096" required placeholder="D:\Копии или \\хранилище\копии" spellcheck="false" /></label>
                 <p>Это диск компьютера агента или сетевая папка UNC. Для службы используйте \\сервер\папка вместо буквы подключённого сетевого диска.
                     Доступ проверяется под пользователем агента или службы. Пароль Windows в панели не задаётся.</p>
+                <label class="check"><input type="checkbox" name="Model.NetworkLogin" value="true" checked="@model.NetworkLogin" />Для UNC: отдельный сетевой логин</label><input type="hidden" name="Model.NetworkLogin" value="false" />
+                <label class="check"><input type="checkbox" name="Model.Encrypt" value="true" checked="@model.Encrypt" />Шифровать архивы паролем (AES-256)</label><input type="hidden" name="Model.Encrypt" value="false" />
+                <p>После принятия плана остановите агент в Windows-программе, выберите задание и нажмите «Доступ…». Логин и пароли задаются там, в Windows; панель их не получает. Пока доступ не задан, защищённая копия не запускается. Источник UNC читается с правами пользователя службы.</p>
                 <label>Сколько архивов хранить<input name="Model.Keep" value="@model.Keep" inputmode="numeric" maxlength="5" required /></label>
                 @for (var index = 0; index < model.AdditionalDestinations.Count; index++)
                 {
                     var row = model.AdditionalDestinations[index];
                     <fieldset class="storage-row"><legend>Хранилище @(index + 2)</legend>
                         <label>Дополнительная папка копий<input name="@($"Model.AdditionalDestinations[{index}].Destination")" value="@row?.Destination" maxlength="4096" required placeholder="E:\Копии или \\другой-сервер\копии" spellcheck="false" /></label>
+                        <label class="check"><input type="checkbox" name="@($"Model.AdditionalDestinations[{index}].NetworkLogin")" value="true" checked="@row?.NetworkLogin" />Для UNC: отдельный сетевой логин</label><input type="hidden" name="@($"Model.AdditionalDestinations[{index}].NetworkLogin")" value="false" />
                         <label>Сколько архивов хранить<input name="@($"Model.AdditionalDestinations[{index}].Keep")" value="@row?.Keep" inputmode="numeric" maxlength="5" placeholder="Как в основном хранилище" /></label>
                         <p>Оставьте лимит пустым, чтобы использовать основной. Папка должна находиться отдельно от источника, рабочей папки и других хранилищ.</p>
                         <button type="submit" name="Command" value="@($"remove-storage:{index}")" class="quiet" formnovalidate>Убрать это хранилище из задания</button>
@@ -113,6 +119,7 @@ else if (Model is { } model && Configuration is not null && Agent is { Revoked: 
             else
             {
                 <h2>4. Проверьте задание</h2>
+                <p>Шифрование: @(model.Encrypt ? "AES-256, пароль задаётся на агенте" : "без пароля"). Отдельный вход в основное UNC-хранилище: @(model.NetworkLogin ? "задать на агенте" : "пользователь исполнителя").</p>
                 <dl><dt>Название</dt><dd>@model.Name</dd><dt>Источник</dt><dd class="path">@model.Source</dd>
                     <dt>Тип</dt><dd>@(model.Kind == "OneCFile" ? "Файловая база 1С — полный ZIP" : "Файлы и папки")</dd>
                     <dt>Расписание</dt><dd>@FileJobDraft.ScheduleLabel(model.Schedule)@if (model.Schedule != "Manual") { <span> · @(model.Enabled ? "включено" : "выключено")</span> }</dd>

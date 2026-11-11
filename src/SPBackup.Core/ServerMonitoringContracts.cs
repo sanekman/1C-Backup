@@ -24,6 +24,10 @@ public sealed record MonitoredJob(Guid JobId, string Name, string SourceKind, bo
     DateTimeOffset? NextRunUtc, int DestinationCount)
 {
     public string TaskKind { get; init; } = "Backup";
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? BackupScope { get; init; }
+    public int? MaximumBackupAgeHours { get; init; }
+    public bool? LocalAccessReady { get; init; }
 }
 public sealed record MonitoredDestination(int Index, bool Succeeded, long Bytes, bool Incomplete);
 public sealed record MonitoredRun(Guid RunId, Guid JobId, string JobName, DateTimeOffset StartedUtc,
@@ -32,6 +36,8 @@ public sealed record MonitoredRun(Guid RunId, Guid JobId, string JobName, DateTi
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public long? ConfigurationRevision { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? BackupScope { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<MonitoredIssue>? Issues { get; init; }
 }
@@ -87,7 +93,7 @@ public static class MonitoringValidation
         && (s.ExecutionMode != "Standalone" || s.ConfigurationRevision is null)
         && Text(s.AgentVersion,128) && s.PendingRuns >= 0 && s.CollectionWarnings >= 0 && s.Jobs is { Count: <= 1000 }
         && (s.ConfigurationCapabilities is null || AgentCapabilities.Valid(s.ConfigurationCapabilities))
-        && s.Jobs.All(j => j is not null && j.JobId != Guid.Empty && Text(j.Name,256) && Text(j.SourceKind,64)
+        && s.Jobs.All(j => j is not null && (j.BackupScope is null || j.BackupScope.Length == 64 && j.BackupScope.All(Uri.IsHexDigit)) && j.MaximumBackupAgeHours is not (< 1 or > 87600) && j.JobId != Guid.Empty && Text(j.Name,256) && Text(j.SourceKind,64)
             && Text(j.Schedule,512) && (j.TaskKind == "Backup" && j.DestinationCount is >= 1 and <= 100
                 || j.TaskKind == "Observation" && j.DestinationCount == 0 && j.SourceKind is "SqlServerHistory" or "PostgreSqlReports"))
         && s.Jobs.Select(j=>j.JobId).Distinct().Count() == s.Jobs.Count
@@ -107,7 +113,7 @@ public static class MonitoringValidation
             && s.Sources.Select(m=>m.MonitorId).Distinct().Count()==s.Sources.Count)
         && (s.Progress is null || s.Progress.RunId != Guid.Empty && s.Progress.JobId != Guid.Empty
             && Text(s.Progress.Stage,64) && s.Progress.Percent is null or >= 0 and <= 100 && s.Progress.UpdatedUtc != default);
-    public static bool Valid(MonitoredRun? r) => r is not null && r.RunId != Guid.Empty && r.JobId != Guid.Empty
+    public static bool Valid(MonitoredRun? r) => r is not null && (r.BackupScope is null || r.BackupScope.Length == 64 && r.BackupScope.All(Uri.IsHexDigit)) && r.RunId != Guid.Empty && r.JobId != Guid.Empty
         && r.ConfigurationRevision is null or > 0
         && Text(r.JobName,256) && r.StartedUtc != default && r.FinishedUtc >= r.StartedUtc
         && r.StartedUtc.Offset == TimeSpan.Zero && r.FinishedUtc.Offset == TimeSpan.Zero

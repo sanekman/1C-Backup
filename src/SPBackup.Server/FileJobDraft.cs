@@ -5,6 +5,9 @@ namespace SPBackup.Server;
 /// <summary>Browser form values remain strings until validated, so a failed step preserves the draft.</summary>
 public sealed partial class FileJobDraft
 {
+    public string MaximumAge { get; set; } = "";
+    public bool Encrypt { get; set; }
+    public bool NetworkLogin { get; set; }
     public int Step { get; set; } = 1;
     public string Revision { get; set; } = "";
     public string JobId { get; set; } = Guid.NewGuid().ToString();
@@ -70,8 +73,13 @@ public sealed partial class FileJobDraft
                 && FileConfigurationContract.Overlap(source, Destination!.Trim())) errors.Add("Источник и папка копий должны находиться отдельно: одна не должна содержать другую.");
             if (!string.IsNullOrWhiteSpace(Temporary) && (FileConfigurationContract.Overlap(source, Temporary.Trim())
                 || FileConfigurationContract.Overlap(Destination?.Trim() ?? "", Temporary.Trim()))) errors.Add("Рабочая папка не должна пересекаться с источником и папкой копий.");
+            if (NetworkLogin && !(Destination ?? "").Trim().StartsWith(@"\\")) errors.Add("Отдельный сетевой вход доступен только для UNC-хранилища.");
+            if (AdditionalDestinations.Any(d => d is not null && d.NetworkLogin && !d.Destination.Trim().StartsWith(@"\\")))
+                errors.Add("Отдельный сетевой вход доступен только для UNC-хранилища.");
             errors.AddRange(ValidateAdditionalDestinations(source));
         }
+        if (step == 2 && !string.IsNullOrWhiteSpace(MaximumAge) && (!int.TryParse(MaximumAge, out var age) || age is < 1 or > 87600))
+            errors.Add("Допустимый возраст копии: от 1 до 87600 часов или пустое поле.");
         return errors;
     }
 
@@ -97,10 +105,18 @@ public sealed partial class FileJobDraft
             TemporaryDirectory = string.IsNullOrWhiteSpace(Temporary) ? null : Temporary.Trim(), KeepLast = int.Parse(Keep),
             FileBackupMode = Kind == "OneCFile" ? "Full" : BackupMode, FullBackupEvery = int.Parse(FullEvery),
             FullBackupDayOfWeek = Kind == "OneCFile" || FullDay == "" ? null : (DayOfWeek)int.Parse(FullDay),
-            AdditionalDestinations = BuildAdditionalDestinations() };
+            MaximumBackupAgeHours = string.IsNullOrWhiteSpace(MaximumAge) ? null : int.Parse(MaximumAge), ManagedSecrets = BuildRequirements(), AdditionalDestinations = BuildAdditionalDestinations() };
         FileConfigurationContract.Validate(1, [job]); return job;
     }
+    private ManagedSecretRequirements? BuildRequirements()
+    {
+        var indices = (NetworkLogin ? new[] { 0 } : []).Concat(AdditionalDestinations.Select((d, i) => (d, i))
+            .Where(pair => pair.d.NetworkLogin).Select(pair => pair.i + 1)).ToArray();
+        return Encrypt || indices.Length > 0 ? new(Encrypt, indices) : null;
+    }
     public static FileJobDraft From(ManagedFileJob job, long revision) => new() {
+        MaximumAge = job.MaximumBackupAgeHours?.ToString(CultureInfo.InvariantCulture) ?? "",
+        Encrypt = job.ManagedSecrets?.ArchivePassword == true, NetworkLogin = job.ManagedSecrets?.NetworkDestinations.Contains(0) == true,
         Revision = revision.ToString(CultureInfo.InvariantCulture), JobId = job.Id.ToString(), Name = job.Name, Kind = job.Kind,
         Source = job.Source, AllowOpen = job.AllowOpenOneCDatabase, Schedule = job.ScheduleKind, Enabled = job.Enabled,
         Times = string.Join(", ", new[] { job.DailyAt }.Concat(job.AdditionalDailyTimes ?? []).Select(t => t.ToString(t.Second == 0 && t.Ticks % TimeSpan.TicksPerSecond == 0 ? "HH:mm" : "HH:mm:ss.fffffff", CultureInfo.InvariantCulture))),
@@ -109,16 +125,17 @@ public sealed partial class FileJobDraft
         Friday = job.DaysOfWeek.Contains("Friday"), Saturday = job.DaysOfWeek.Contains("Saturday"), Sunday = job.DaysOfWeek.Contains("Sunday"),
         Destination = job.DestinationDirectory, Temporary = job.TemporaryDirectory ?? "", Keep = job.KeepLast.ToString(CultureInfo.InvariantCulture),
         BackupMode = job.FileBackupMode, FullEvery = job.FullBackupEvery.ToString(CultureInfo.InvariantCulture), FullDay = job.FullBackupDayOfWeek is { } day ? ((int)day).ToString() : "",
-        AdditionalDestinations = (job.AdditionalDestinations ?? []).Select(d => new FileDestinationDraft {
+        AdditionalDestinations = (job.AdditionalDestinations ?? []).Select((d, index) => new FileDestinationDraft {
+            NetworkLogin = job.ManagedSecrets?.NetworkDestinations.Contains(index + 1) == true,
             Destination = d.DestinationDirectory, Keep = d.KeepLast?.ToString(CultureInfo.InvariantCulture) ?? "" }).ToList() };
 
     public IEnumerable<KeyValuePair<string, string>> HiddenFields()
     {
         string[][] visible = [[], [nameof(Name), nameof(Kind), nameof(Source), nameof(AllowOpen)],
-            [nameof(Schedule), nameof(Enabled), nameof(Times), nameof(TimeZone), ..Days.Select(d => d.Key)],
-            [nameof(Destination), nameof(Temporary), nameof(Keep), nameof(BackupMode), nameof(FullEvery), nameof(FullDay)]];
+            [nameof(MaximumAge), nameof(Schedule), nameof(Enabled), nameof(Times), nameof(TimeZone), ..Days.Select(d => d.Key)],
+            [nameof(Encrypt), nameof(NetworkLogin), nameof(Destination), nameof(Temporary), nameof(Keep), nameof(BackupMode), nameof(FullEvery), nameof(FullDay)]];
         // Only simple explicit form properties are carried forward; computed properties are never posted.
-        string[] all = [nameof(Step), nameof(Revision), nameof(JobId), nameof(Name), nameof(SuggestedName), nameof(Kind), nameof(Source), nameof(AllowOpen),
+        string[] all = [nameof(MaximumAge), nameof(Encrypt), nameof(NetworkLogin), nameof(Step), nameof(Revision), nameof(JobId), nameof(Name), nameof(SuggestedName), nameof(Kind), nameof(Source), nameof(AllowOpen),
             nameof(Schedule), nameof(Enabled), nameof(Times), nameof(TimeZone), ..Days.Select(d => d.Key), nameof(Destination),
             nameof(Temporary), nameof(Keep), nameof(BackupMode), nameof(FullEvery), nameof(FullDay)];
         foreach (var key in all.Where(k => Step is < 1 or > 3 || !visible[Step].Contains(k)))
@@ -127,6 +144,7 @@ public sealed partial class FileJobDraft
             for (var index = 0; index < AdditionalDestinations.Count; index++)
             {
                 yield return new($"Model.AdditionalDestinations[{index}].Destination", AdditionalDestinations[index]?.Destination ?? "");
+                yield return new($"Model.AdditionalDestinations[{index}].NetworkLogin", AdditionalDestinations[index]?.NetworkLogin == true ? "True" : "False");
                 yield return new($"Model.AdditionalDestinations[{index}].Keep", AdditionalDestinations[index]?.Keep ?? "");
             }
     }

@@ -12,7 +12,7 @@ public interface IAgentCredentialProvider
 }
 
 /// <summary>API v1, outgoing HTTPS only. Redirects and invalid TLS certificates are not accepted.</summary>
-public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgentConfigurationReceiptApi, IDisposable
+public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgentConfigurationReceiptApi, IRemoteRunApi, IDisposable
 {
     private readonly HttpClient client;
     private readonly IAgentCredentialProvider credentials;
@@ -141,6 +141,39 @@ public sealed class AgentApiClient : IAgentApi, IExternalBackupReportApi, IAgent
         using var request = await RequestAsync(settings, HttpMethod.Post, "heartbeat", timeout.Token);
         request.Content = JsonContent.Create(heartbeat, options: JsonOptions);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task<IReadOnlyList<RemoteRunCommand>> PollCommandsAsync(AgentSettings settings, CancellationToken token)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        using var request = await RequestAsync(settings, HttpMethod.Get, "commands", deadline.Token);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+        response.EnsureSuccessStatusCode();
+        await using var input = await response.Content.ReadAsStreamAsync(deadline.Token);
+        using var body = new MemoryStream();
+        var buffer = new byte[4096]; int read;
+        while ((read = await input.ReadAsync(buffer, deadline.Token)) != 0)
+        {
+            if (body.Length + read > 65536) throw new InvalidDataException("Слишком большой ответ очереди команд.");
+            body.Write(buffer, 0, read);
+        }
+        var commands = JsonSerializer.Deserialize<RemoteRunCommand[]>(body.ToArray(), JsonOptions)
+            ?? throw new InvalidDataException("Пустой ответ очереди команд.");
+        if (commands.Length > 16 || commands.Any(c => c is null || c.CommandId == Guid.Empty || c.JobId == Guid.Empty || c.Revision < 1
+            || c.ExpiresUtc == default || c.ExpiresUtc.Offset != TimeSpan.Zero) || commands.DistinctBy(c => c.CommandId).Count() != commands.Length)
+            throw new InvalidDataException("Неверная очередь команд.");
+        return commands;
+    }
+    public async Task SendCommandReceiptAsync(AgentSettings settings, RemoteRunReceipt receipt, CancellationToken token)
+    {
+        if (!receipt.Valid()) throw new ArgumentException("Неверный результат команды.");
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        using var request = await RequestAsync(settings, HttpMethod.Post, "commands/receipt", deadline.Token);
+        request.Content = JsonContent.Create(receipt, options: JsonOptions);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
         response.EnsureSuccessStatusCode();
     }
 

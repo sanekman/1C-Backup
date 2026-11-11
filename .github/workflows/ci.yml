@@ -6,6 +6,12 @@ on:
     tags: ['v*-preview.*', 'v*-alpha.*', 'v*-beta.*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Acceptance platform (Windows first, then Linux)'
+        type: choice
+        default: all
+        options: [all, windows, linux]
 
 permissions:
   contents: read
@@ -15,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.platform == 'windows' && '["windows-latest"]' || github.event_name == 'workflow_dispatch' && inputs.platform == 'linux' && '["ubuntu-latest"]' || '["windows-latest","ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -76,6 +82,7 @@ jobs:
           retention-days: 14
 
   native-sql:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'linux'
     runs-on: windows-latest
     timeout-minutes: 20
     env:
@@ -106,6 +113,7 @@ jobs:
           retention-days: 14
 
   native-smb:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'linux'
     runs-on: windows-latest
     timeout-minutes: 10
     env:
@@ -127,6 +135,7 @@ jobs:
           retention-days: 14
 
   native-agent-service:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'linux'
     runs-on: windows-latest
     timeout-minutes: 10
     env:
@@ -157,6 +166,7 @@ jobs:
           retention-days: 14
 
   native-volume:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'linux'
     runs-on: windows-latest
     timeout-minutes: 10
     env:

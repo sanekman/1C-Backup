@@ -26,6 +26,10 @@ internal static class ConfigurationCompatibility
             foreach (var job in jobs.EnumerateArray())
             {
                 if (job.ValueKind != JsonValueKind.Object) throw new JsonException();
+                if (job.EnumerateObject().Any(p => p.Name.Equals("managedSecrets", StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind != JsonValueKind.Null))
+                    required.Add(AgentCapabilities.ManagedSecretsV1);
+                if (job.EnumerateObject().Any(p => p.Name.Equals("maximumBackupAgeHours", StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind != JsonValueKind.Null))
+                    required.Add(AgentCapabilities.BackupAgeV1);
                 // Inspect every spelling, not just the first matching property. Ambiguous JSON
                 // must not hide a TLS requirement from compatibility negotiation.
                 foreach (var field in job.EnumerateObject().Where(p => p.Name.Equals("postgreSql", StringComparison.OrdinalIgnoreCase)))

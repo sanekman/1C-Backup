@@ -14,6 +14,10 @@ public sealed record BackupJob
     internal BackupConfigurationStamp? ExecutionConfiguration { get; init; }
     [JsonRequired]
     public Guid Id { get; init; } = Guid.NewGuid();
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ManagedSecretRequirements? ManagedSecrets { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaximumBackupAgeHours { get; init; }
     public string Name { get; init; } = "";
     public DatabaseKind Kind { get; init; }
     public string Source { get; init; } = "";
@@ -32,7 +36,7 @@ public sealed record BackupJob
     public IReadOnlyList<BackupDestination>? AdditionalDestinations { get; init; }
 
     [JsonIgnore]
-    public IReadOnlyList<BackupJob> StorageJobs => new[] { this with { AdditionalDestinations = null } }
+    public IReadOnlyList<BackupJob> StorageJobs => new[] { this with { AdditionalDestinations = null, ManagedSecrets = null } }
         .Concat((AdditionalDestinations ?? []).Select(destination => destination.ApplyTo(this))).ToArray();
     public TimeOnly DailyAt { get; init; } = new(23, 0);
     public IReadOnlyList<TimeOnly>? AdditionalDailyTimes { get; init; }
@@ -78,6 +82,7 @@ public sealed record BackupJob
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
+        if (MaximumBackupAgeHours is < 1 or > 87600) errors.Add("Допустимый возраст копии: от 1 до 87600 часов.");
         if (Id == Guid.Empty) errors.Add("Не указан идентификатор задания.");
         if (string.IsNullOrWhiteSpace(Name)) errors.Add("Укажите название задания.");
         if (!Enum.IsDefined(Kind)) errors.Add("Неизвестный тип базы данных.");
@@ -178,6 +183,9 @@ public sealed record BackupJob
             if (PostgreSql?.CredentialKey is not null && (Source is null || Source == "*" || Source.Any(char.IsControl)))
                 errors.Add("Для сохранённого пароля PostgreSQL укажите конкретное имя базы без управляющих символов.");
         }
+        if (ManagedSecrets is { } required && (!required.Valid(1 + (AdditionalDestinations?.Count ?? 0))
+            || required.NetworkDestinations.Any(i => StorageJobs.ElementAtOrDefault(i)?.StorageKind != StorageKind.NetworkShare)))
+            errors.Add("Некорректные требования защищённого доступа серверного задания.");
         return errors;
     }
 

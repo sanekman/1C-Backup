@@ -7,6 +7,10 @@ namespace SPBackup.Server;
 // Limited to Windows file jobs. No credentials, executables, SQL or arbitrary JSON.
 public sealed record ManagedFileJob
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ManagedSecretRequirements? ManagedSecrets { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaximumBackupAgeHours { get; init; }
     public required Guid Id { get; init; }
     public required string Name { get; init; }
     public string Kind { get; init; } = "FilesAndFolders";
@@ -103,7 +107,7 @@ internal static class FileConfigurationContract
     private static bool Text(string? value, int limit) => !string.IsNullOrWhiteSpace(value) && value.Length <= limit && !value.Any(char.IsControl);
     private static bool Valid(ManagedFileJob j)
     {
-        if (j.Id == Guid.Empty || !Text(j.Name, 256) || j.Kind is not ("FilesAndFolders" or "OneCFile")
+        if (j.MaximumBackupAgeHours is < 1 or > 87600 || j.Id == Guid.Empty || !Text(j.Name, 256) || j.Kind is not ("FilesAndFolders" or "OneCFile")
             || j.StorageKind is not ("LocalDirectory" or "NetworkShare") || !WindowsPath(j.Source)
             || !WindowsPath(j.DestinationDirectory) || j.TemporaryDirectory is not null && !WindowsPath(j.TemporaryDirectory)
             || (j.StorageKind == "NetworkShare") != j.DestinationDirectory.Replace('/', '\\').StartsWith(@"\\")
@@ -126,6 +130,8 @@ internal static class FileConfigurationContract
             || !WindowsPath(d.DestinationDirectory) || d.StorageKind is not ("LocalDirectory" or "NetworkShare")
             || (d.StorageKind == "NetworkShare") != d.DestinationDirectory.Replace('/', '\\').StartsWith(@"\\")
             || d.KeepLast is < 1 or > 10000) == true) return false;
+        if (j.ManagedSecrets is { } secrets && (!secrets.Valid(1 + (j.AdditionalDestinations?.Count ?? 0))
+            || secrets.NetworkDestinations.Any(i => (i == 0 ? j.StorageKind : j.AdditionalDestinations![i - 1].StorageKind) != "NetworkShare"))) return false;
         var destinations = new[] { j.DestinationDirectory }.Concat(j.AdditionalDestinations?.Select(d => d.DestinationDirectory) ?? []).ToArray();
         if (destinations.Any(path => Overlap(source, path) || j.TemporaryDirectory is not null && Overlap(j.TemporaryDirectory, path))
             || j.TemporaryDirectory is not null && Overlap(source, j.TemporaryDirectory)) return false;

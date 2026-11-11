@@ -4,6 +4,7 @@ namespace SPBackup.Server;
 
 public sealed class FileDestinationDraft
 {
+    public bool NetworkLogin { get; set; }
     public string Destination { get; set; } = "";
     public string Keep { get; set; } = "";
 }

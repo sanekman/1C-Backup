@@ -7,7 +7,9 @@ namespace SPBackup.Core;
 /// <summary>Durable provenance of a server-selected job. The connection ID contains no bearer token.</summary>
 public sealed record BackupConfigurationStamp(string ConnectionId, long Revision)
 {
-    internal bool Valid => Revision > 0 && ConnectionId is { Length: 64 } && ConnectionId.All(Uri.IsHexDigit);
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? JobScope { get; init; }
+    internal bool Valid => (JobScope is null || JobScope.Length == 64 && JobScope.All(Uri.IsHexDigit)) && Revision > 0 && ConnectionId is { Length: 64 } && ConnectionId.All(Uri.IsHexDigit);
 }
 
 /// <summary>Isolate accepted settings, receipts, startup slots, catalog and file snapshots for each enrollment.</summary>
@@ -17,6 +19,7 @@ public sealed class ManagedAgentProfile
     public AgentSettings Settings { get; }
     public string ConnectionId { get; }
     public string DirectoryPath { get; }
+    public ManagedJobBindings Bindings => new(Path.Combine(DirectoryPath, "bindings"));
     public string CachePath => Path.Combine(DirectoryPath, "configuration.json");
     public string StartupSchedulePath => Path.Combine(DirectoryPath, "startup-schedule.json");
     public string CatalogPath => Path.Combine(DirectoryPath, "copies.json");

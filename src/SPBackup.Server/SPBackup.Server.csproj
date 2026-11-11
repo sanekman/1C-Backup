@@ -15,6 +15,8 @@
     <Compile Include="../SPBackup.Core/ServerMonitoringContracts.cs" Link="Monitoring/Contracts.cs" />
     <Compile Include="../SPBackup.Core/AgentCapabilities.cs" Link="Configuration/AgentCapabilities.cs" />
     <Compile Include="../SPBackup.Core/ConfigurationReceiptContracts.cs" Link="Configuration/ReceiptContracts.cs" />
+    <Compile Include="../SPBackup.Core/RemoteRunContracts.cs" Link="Commands/Contracts.cs" />
+    <Compile Include="../SPBackup.Core/ManagedSecretRequirements.cs" Link="Configuration/SecretRequirements.cs" />
     <EmbeddedResource Include="Migrations/*.sql" />
     <Content Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

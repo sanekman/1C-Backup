@@ -145,6 +145,7 @@ public sealed class ServerFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
     public Task RemoveFolderSchemaForMigrationTestAsync() => ExecuteAsync("""
+        DROP TABLE server_remote_runs;
         ALTER TABLE server_invitations DROP COLUMN agent_display_name, DROP COLUMN folder_id, DROP COLUMN organization_configured;
         ALTER TABLE server_agents DROP COLUMN computer_name, DROP COLUMN folder_id;
         DROP TABLE server_agent_folders;

@@ -1,0 +1,35 @@
+@page "/agents/{Id:guid}/commands"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+@inject ServerOptions Settings
+<PageTitle>Команды агента — @Settings.DisplayName</PageTitle>
+<a href="@($"agents/{Id}")">← Карточка агента</a>
+<div class="heading"><h1>Удалённые запуски</h1><a href="@($"agents/{Id}/commands")">Обновить</a></div>
+<p>Последние 100 команд. Ожидание связи, принятие, выполнение и результат — отдельные состояния. Истёкшая команда не запускается.</p>
+<section class="card"><div class="table-scroll"><table><thead><tr><th>Задание / команда</th><th>Состояние</th><th>Отправлена / изменена</th><th>Запустить до</th></tr></thead><tbody>
+@foreach (var item in Data)
+{
+<tr><td>@(Jobs.FirstOrDefault(j => j.Id == item.Command.JobId)?.Name ?? item.Command.JobId.ToString())
+    <small>Ревизия @item.Command.Revision · @item.Command.CommandId</small></td>
+<td>@RemoteRunText.Status(item.Status)
+    @if (item.Reason is not null) { <small>@RemoteRunText.Reason(item.Reason)</small> }
+    @if (item.RunId is { } run) { <small>Запуск @run. <a href="@($"agents/{Id}")">Результат копии</a></small> }
+    @if (item.Status == "Running") { <small>Завершение ещё не подтверждено. При потере связи итог может прийти позже.</small> }
+</td><td>@Clock.Time(item.CreatedUtc)<small>@Clock.Time(item.UpdatedUtc)</small></td><td>@Clock.Time(item.Command.ExpiresUtc)</td></tr>
+}
+</tbody></table></div>
+@if (Data.Count == 0) { <p>Команд пока нет. Откройте задание и выберите «Запустить…».</p> }
+</section>
+<p class="muted">Прерывание означает, что результат требует проверки по истории. Автоматического повторного запуска такой команды нет.</p>
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private IReadOnlyList<RemoteRunState> Data = [];
+    private IReadOnlyList<ManagedFileJob> Jobs = [];
+    protected override async Task OnParametersSetAsync()
+    {
+        if (await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted) is null) { Http.HttpContext.Response.StatusCode = 404; return; }
+        Data = await Store.RemoteRunsAsync(Id, Http.HttpContext.RequestAborted);
+        try { Jobs = (await Store.ReadFileConfigurationAsync(Id, Http.HttpContext.RequestAborted)).Jobs; } catch (ServerRequestException) { }
+    }
+}

@@ -25,7 +25,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         }
         using var managedApi = connection is null ? null : AgentApiClient.ForManagedHost(connection, credentials);
         var managedConfiguration = managedProfile?.CreateConfiguration(managedApi);
-        var managedJobs = managedConfiguration is null ? null : new AgentExecutionJobSource(managedConfiguration, settings!);
+        var managedJobs = managedConfiguration is null ? null : new AgentExecutionJobSource(managedConfiguration, settings!, managedProfile!.Bindings);
         IBackupJobSource source = managedJobs is null ? store : managedJobs;
         var workRoot = managedProfile?.WorkDirectory ?? Path.Combine(directory, "work");
         var jobs = runJobId is not null ? await source.LoadAsync(cancellationToken) : [];
@@ -247,6 +247,13 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
             }
         }
         var connectionTask = manual is null && managedConfiguration is not null ? ConnectionLoop() : Task.CompletedTask;
+        async Task RemoteCommandsLoop()
+        {
+            await initialized;
+            await new RemoteRunProcessor(Path.Combine(managedProfile!.DirectoryPath, "remote-runs"), settings!, managedApi!,
+                managedJobs!, dispatcher, () => lastRun).RunAsync(error => warnings.Set("Удалённый запуск", error), lifetime.Token);
+        }
+        var remoteCommandsTask = manual is null && managedProfile is not null ? RemoteCommandsLoop() : Task.CompletedTask;
         async Task ManualRequestLoop()
         {
             await initialized;
@@ -355,7 +362,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         try
         {
             var completed = manual is null
-                ? await Task.WhenAny(executionTask, controlTask, monitoringTask, manualRequestsTask, storageChecksTask, sourceChecksTask)
+                ? await Task.WhenAny(executionTask, controlTask, monitoringTask, manualRequestsTask, storageChecksTask, sourceChecksTask, remoteCommandsTask)
                 : await Task.WhenAny(executionTask, controlTask);
             await completed;
         }
@@ -364,7 +371,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         finally
         {
             lifetime.Cancel();
-            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask, serverMonitoringTask, manualRequestsTask, storageChecksTask, sourceChecksTask, connectionTask); }
+            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask, serverMonitoringTask, manualRequestsTask, storageChecksTask, sourceChecksTask, connectionTask, remoteCommandsTask); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) { failure ??= ex; }
             var error = failure?.Message ?? (manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? lastRun.Error : null);

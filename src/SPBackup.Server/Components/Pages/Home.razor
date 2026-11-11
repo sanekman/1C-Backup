@@ -9,7 +9,7 @@
 @if (HealthStatus is { } healthStatus) { <ServerHealthNotices Snapshot="healthStatus" Compact="true" /> }
 @if (Overview is { } overview)
 {
-    <section class="card"><div class="summary"><strong>Мониторинг всех агентов</strong><span>Нет связи: @overview.Offline</span><span>Нет отчётов: @overview.Unreported</span><span>Проблемных заданий: @overview.Failed</span><span>Неполных копий: @overview.Incomplete</span><span>С предупреждениями: @overview.Warning</span><span>В очереди: @overview.Pending</span></div></section>
+    <section class="card"><div class="summary"><strong>Мониторинг всех агентов</strong><span>Нет связи: @overview.Offline</span><span>Нет отчётов: @overview.Unreported</span><a href="problems">Ошибки, неполные и просроченные копии →</a><span>В очереди: @overview.Pending</span></div></section>
 }
 <div class="agents-layout">
 <aside class="card folder-sidebar" aria-label="Папки агентов">
@@ -24,6 +24,7 @@
 {
     <section class="card">
         <h2>@FolderTitle</h2>
+        <p><a href="@($"problems?folder={Uri.EscapeDataString(Folder ?? "")}")">Показать проблемы этой папки и подпапок</a></p>
         @if (SelectedFolder is not null) { <p class="muted">Включая агентов всех подпапок.</p> }
         <div class="summary"><strong>Всего: @data.Total</strong><span>Страница @(data.Page + 1)</span><a href="@PageLink(data.Page)">Обновить</a></div>
         @if (data.Total == 0)

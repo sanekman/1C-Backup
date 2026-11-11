@@ -134,7 +134,7 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
         var observationTasks = ExternalBackupTask.Create(monitors, external, polling, settings.AgentId).ToDictionary(task => task.Id);
         var snapshot = new MonitoringSnapshot(DateTimeOffset.UtcNow, typeof(ServerMonitoringDispatcher).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute),false).Cast<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown",
             jobs.Select(j=>new MonitoredJob(j.Id,Label(j.Name),j.Kind.ToString(),j.Enabled,j.ScheduleDescription+" · "+j.TimeZoneId+(j.ScheduleKind==ScheduleKind.Weekly ? " · "+j.DaysOfWeek : ""),
-                BackupSchedule.NextRun(j,DateTimeOffset.UtcNow),j.StorageJobs.Count))
+                BackupSchedule.NextRun(j,DateTimeOffset.UtcNow),j.StorageJobs.Count) { BackupScope = j.ExecutionConfiguration?.JobScope, MaximumBackupAgeHours = j.MaximumBackupAgeHours, LocalAccessReady = j.ManagedSecrets is null ? null : ManagedJobBindings.Ready(j) })
                 .Concat(monitors.Select(m=>new MonitoredJob(m.Id,Label(m.Name),m.Kind.ToString(),m.Enabled,
                     "Опрос каждые "+m.PollIntervalSeconds+" с",null,0) { TaskKind = "Observation" })).ToArray(),
             progress is { Finished:false } && history.Any(r=>r.RunId==progress.RunId && r.Status==BackupRunStatus.Running) ? new(progress.RunId,progress.JobId,
@@ -190,7 +190,7 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
         return new(r.RunId,r.JobId,Label(r.JobName),r.StartedUtc,r.FinishedUtc ?? throw new InvalidDataException("Запуск ещё выполняется."),r.Status.ToString(),r.Warnings?.Count ?? 0,
             snapshot?.IsIncomplete == true,snapshot is null ? null : snapshot.IsFull ? "Full" : "Incremental",r.Destinations?.Select((d,i)=>new MonitoredDestination(i,d.Record is not null,d.Record?.Backup.Length ?? 0,d.Record?.Backup.FileSnapshot?.IsIncomplete == true)).ToArray()
                 ?? (r.Backup is { } backup ? [new(0,true,backup.Length,backup.FileSnapshot?.IsIncomplete == true)] : []))
-        { ConfigurationRevision = r.Configuration?.Revision, Issues = r.Issues };
+        { ConfigurationRevision = r.Configuration?.Revision, BackupScope = r.Configuration?.JobScope, Issues = r.Issues };
     }
     public static Task SaveSettingsAsync(string directory, ServerMonitoringSettings settings, CancellationToken token = default)
     { settings.Validate(); return new AgentJsonFile<ServerMonitoringSettings>(Path.Combine(directory,"server-monitoring.json")).WriteAsync(settings,token); }

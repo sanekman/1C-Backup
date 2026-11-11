@@ -32,6 +32,6 @@ public sealed record BackupDestination
     {
         StorageKind = StorageKind, DestinationDirectory = DestinationDirectory, Ftp = Ftp, NetworkShare = NetworkShare, GoogleDrive = GoogleDrive, RemoteGateway = RemoteGateway,
         KeepLast = KeepLast ?? job.KeepLast,
-        AdditionalDestinations = null
+        AdditionalDestinations = null, ManagedSecrets = null
     };
 }

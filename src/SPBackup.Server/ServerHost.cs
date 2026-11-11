@@ -87,7 +87,7 @@ public static partial class ServerHost
         if (settings.PathBase is not null) app.UsePathBase(settings.PathBase);
         app.Use(async (context, next) =>
         {
-            if (HttpMethods.IsGet(context.Request.Method) && (context.Request.Path == "/" || context.Request.Path == "/system" || context.Request.Path.StartsWithSegments("/agents")))
+            if (HttpMethods.IsGet(context.Request.Method) && (context.Request.Path == "/" || context.Request.Path == "/system" || context.Request.Path.StartsWithSegments("/agents") || context.Request.Path == "/problems"))
                 context.Response.Headers["Refresh"] = "30";
             context.Response.Headers.CacheControl = "no-store";
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -112,7 +112,7 @@ public static partial class ServerHost
         app.MapGet("/health/live", () => Results.Text("live"));
         app.MapGet("/health/ready", async (ServerStore store, CancellationToken token) => await store.ReadyAsync(token) ? Results.Text("ready") : Results.StatusCode(503));
         app.MapOpenApi().RequireAuthorization(ServerAuthentication.Administrator);
-        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app);
+        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app); MapRemoteRuns(app);
         app.MapRazorComponents<App>();
         return app;
     }

@@ -5,6 +5,12 @@ on:
     tags: ['server-v*-preview.*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Acceptance platform (Windows first, then Linux)'
+        type: choice
+        default: all
+        options: [all, windows, linux]
 permissions:
   contents: read
 jobs:
@@ -12,11 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            runtime: linux-x64
-          - os: windows-latest
-            runtime: win-x64
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.platform == 'windows' && '[{"os":"windows-latest","runtime":"win-x64"}]' || github.event_name == 'workflow_dispatch' && inputs.platform == 'linux' && '[{"os":"ubuntu-latest","runtime":"linux-x64"}]' || '[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     steps:
@@ -89,6 +91,7 @@ jobs:
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
 
   proxmox-installer:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'windows'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
