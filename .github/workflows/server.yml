@@ -28,12 +28,12 @@ on:
         description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
         default: full
-        options: [full, compose, maintenance, installed]
+        options: [full, compose, maintenance, installed, proxmox]
 permissions:
   contents: read
 jobs:
   server:
-    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed')
+    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'proxmox')
     strategy:
       fail-fast: false
       matrix:
@@ -133,13 +133,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: python3 -m unittest discover -s tests/server -p 'test_proxmox*.py'
       - name: Verify native installation with PostgreSQL and HTTPS on Debian 13
         run: python3 tests/server/lxc_installer_smoke.py
       - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: server-proxmox-installer-verification
-          path: artifacts/server-tests/proxmox-installer-result.json
+          path: |
+            artifacts/server-tests/proxmox-installer-result.json
+            artifacts/server-tests/proxmox-update-result.json
           retention-days: 14
 
   compose-only:

@@ -35,6 +35,12 @@ def main():
         installer.download(f'https://github.com/{installer.REPOSITORY}/releases/download/server-v{installer.VERSION}/server-release.json', packages / 'server-release.json', 1024 * 1024)
         asset = installer.package_asset(json.loads((packages / 'server-release.json').read_text()), installer.VERSION)
         installer.download(asset['url'], packages / installer.ARCHIVE, asset['bytes'])
+        for version in ['0.1.0-preview.8', '0.1.0-preview.9']:
+            target = packages / version
+            target.mkdir()
+            installer.download(f'https://github.com/{installer.REPOSITORY}/releases/download/server-v{version}/server-release.json', target / 'server-release.json', 1024 * 1024)
+            asset = installer.package_asset(json.loads((target / 'server-release.json').read_text()), version)
+            installer.download(asset['url'], target / installer.ARCHIVE, asset['bytes'])
         (work / 'Dockerfile').write_text('''FROM debian:trixie-slim
 RUN --mount=type=secret,id=build-ca,required=true \\
     apt-get -o Acquire::https::CaInfo=/run/secrets/build-ca update && \\
@@ -47,6 +53,7 @@ RUN --mount=type=secret,id=build-ca,required=true \\
                    '--mount', f'type=bind,src={ROOT / "deploy/server/create-proxmox-lxc.py"},dst=/setup/install.py,readonly',
                    '--mount', f'type=bind,src={ROOT / "tests/server/proxmox_systemctl.py"},dst=/setup/systemctl.py,readonly',
                    '--mount', f'type=bind,src={ROOT / "tests/server/proxmox_guest_probe.py"},dst=/setup/probe.py,readonly',
+                   '--mount', f'type=bind,src={ROOT / "tests/server/proxmox_update_probe.py"},dst=/setup/update-probe.py,readonly',
                    '--mount', f'type=bind,src={ca},dst=/run/proxy-ca.pem,readonly',
                    '-e', 'SSL_CERT_FILE=/run/proxy-ca.pem', identity, 'sleep', 'infinity', check=True, stdout=subprocess.DEVNULL)
             setup = '''set -eu
@@ -79,7 +86,9 @@ python3 /setup/probe.py verify
             docker('cp', identity + ':/tmp/proxmox-installer-result.json', report, check=True)
             result = json.loads(report.read_text())
             assert result['success'] and not result['realSystemdTested'] and not result['realProxmoxTested']
-            print('PASS: native server installation on Debian 13, actual PG/HTTPS; systemctl recorded, no real Proxmox.')
+            docker('exec', identity, 'python3', '/setup/update-probe.py', check=True)
+            docker('cp', identity + ':/tmp/proxmox-update-result.json', ROOT / 'artifacts/server-tests/proxmox-update-result.json', check=True)
+            print('PASS: native server installation and update/recovery on Debian 13, actual PG/HTTPS; systemctl recorded, no real Proxmox.')
         finally:
             docker('rm', '-f', identity, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             docker('image', 'rm', identity, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

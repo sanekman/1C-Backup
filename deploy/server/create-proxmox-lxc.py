@@ -167,7 +167,7 @@ def extract_package(archive, target, version):
         raise ValueError('В архиве нет исполняемого сервера нужной версии.')
 
 
-def install_package(request, package_directory):
+def install_package(request, package_directory, activate=True):
     with tempfile.TemporaryDirectory(prefix='sp-backup-package-') as work:
         temporary = Path(work)
         manifest_path = temporary / 'server-release.json'
@@ -204,6 +204,8 @@ def install_package(request, package_directory):
                 extract_package(archive, extracted, version)
                 atomic_json(extracted / 'installed-package.json', marker, 0o644)
                 os.rename(extracted, release)
+        if not activate:
+            return release
         link = APPLICATION / 'current'
         if link.is_symlink():
             if link.resolve() != release.resolve():
@@ -447,7 +449,201 @@ def network(ip, gateway):
     return f'ip={interface},gw={router}'
 
 
+def latest_update_version():
+    with tempfile.TemporaryDirectory(prefix='sp-backup-release-') as work:
+        target = Path(work) / 'releases.json'
+        download(f'https://api.github.com/repos/{REPOSITORY}/releases?per_page=100', target, 2 * 1024 * 1024)
+        versions = [r['tag_name'].removeprefix('server-v') for r in json.loads(target.read_text())
+                    if not r.get('draft') and re.fullmatch(r'server-v0\.1\.0-preview\.[1-9][0-9]*', r.get('tag_name', ''))]
+    if not versions:
+        raise ValueError('Опубликованный совместимый серверный выпуск не найден.')
+    return max(versions, key=lambda version: int(version.rsplit('.', 1)[1]))
+
+
+def binary_command(args, *, output=None, input_file=None):
+    result = subprocess.run([str(a) for a in args], stdin=input_file, stdout=output or subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        raise RuntimeError(f'Команда {args[0]} завершилась с кодом {result.returncode}.')
+    return result.stdout
+
+
+def reject_links(path):
+    if path.is_symlink() or not path.is_dir():
+        raise ValueError('Нужен обычный каталог штатной установки: ' + str(path))
+    if any(p.is_symlink() or not (p.is_file() or p.is_dir()) for p in path.rglob('*')):
+        raise ValueError('В каталоге установки есть ссылки или специальные файлы: ' + str(path))
+
+
+def switch_release(release):
+    link = APPLICATION / ('.current-' + secrets.token_hex(8))
+    try:
+        link.symlink_to(release, target_is_directory=True)
+        os.replace(link, APPLICATION / 'current')
+    finally:
+        link.unlink(missing_ok=True)
+
+
+def snapshot_tree(source, archive):
+    reject_links(source)
+    binary_command(['tar', '--numeric-owner', '-C', source, '-cpf', archive, '.'])
+
+
+def restore_tree(archive, destination):
+    if destination.is_symlink() or not destination.is_dir():
+        raise ValueError('Каталог возврата был заменён.')
+    for child in destination.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    binary_command(['tar', '--numeric-owner', '-C', destination, '-xpf', archive])
+
+
+def guest_update(version, package_directory=None, backup_directory=None):
+    release_info = Path('/etc/os-release').read_text()
+    if ('ID=debian' not in release_info or 'VERSION_ID="13"' not in release_info
+            or platform.machine() != 'x86_64' or subprocess.run(['systemd-detect-virt', '--container'], capture_output=True).returncode):
+        raise ValueError('Обновление поддерживает Debian 13 amd64 внутри LXC из мастера.')
+    for path in [CONFIG, APPLICATION, DATA]:
+        if path != APPLICATION:
+            reject_links(path)
+        if path.is_symlink() or not path.is_dir():
+            raise ValueError('Не найдена штатная установка сервера.')
+    journal = CONFIG / 'installation.json'
+    saved = json.loads(journal.read_text())
+    if saved.get('format') != 1 or saved.get('complete') is not True:
+        raise ValueError('Сначала требуется завершённая установка из мастера.')
+    previous = validate_request(saved['request'])
+    request = validate_request({**previous, 'version': version})
+    link = APPLICATION / 'current'
+    old = link.resolve()
+    if not link.is_symlink() or old.parent != APPLICATION.resolve() or old.name != previous['version']:
+        raise ValueError('Активная версия не соответствует журналу установки; данные не изменены.')
+    reject_links(old)
+    if int(version.rsplit('.', 1)[1]) < int(previous['version'].rsplit('.', 1)[1]):
+        raise ValueError('Понижение версии не выполняется.')
+    configuration = json.loads((CONFIG / 'server.json').read_text())['Server']
+    expected = {'DataDirectory': str(DATA), 'ConnectionString': 'Host=127.0.0.1;Database=onecbackup;Username=onecbackup',
+                'DatabasePasswordFile': str(CONFIG / 'database-password.txt'), 'HttpsCertificatePath': str(CONFIG / 'server.pfx'),
+                'HttpsCertificatePasswordFile': str(CONFIG / 'certificate-password.txt')}
+    if any(configuration.get(key) != value for key, value in expected.items()):
+        raise ValueError('Конфигурация отличается от штатной установки; автоматическое обновление запрещено.')
+    if UNIT.is_symlink() or not UNIT.is_file() or UNIT.with_name(UNIT.name + '.d').exists():
+        raise ValueError('Нужна штатная служба без дополнительных override-файлов.')
+    unit = UNIT.read_text()
+    if f'User={ACCOUNT}\n' not in unit or f'ExecStart={APPLICATION}/current/SPBackup.Server\n' not in unit:
+        raise ValueError('Служба настроена иначе; обновление не выполняется.')
+    run(['systemctl', 'is-active', '--quiet', 'onec-backup-server'])
+    ensure_database_utf8()
+    wait_ready(previous['port'])
+    if version == previous['version']:
+        print('Сервер уже обновлён: ' + version)
+        return
+    backup_root = Path(backup_directory or '/var/backups/onec-backup-server').resolve()
+    if any(backup_root == p.resolve() or backup_root.is_relative_to(p.resolve()) or p.resolve().is_relative_to(backup_root)
+           for p in [CONFIG, APPLICATION, DATA]):
+        raise ValueError('Каталог копии не должен пересекаться с программой, конфигурацией или данными.')
+    backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if backup_root.stat().st_uid != 0 or backup_root.stat().st_mode & 0o022:
+        raise ValueError('Каталог комплектов должен принадлежать root и быть закрыт от записи другими пользователями.')
+    database = json.loads(sql("SELECT json_build_object('owner',pg_get_userbyid(datdba),'collate',datcollate,'ctype',datctype) FROM pg_database WHERE datname='onecbackup';"))
+    if database['owner'] != 'onecbackup':
+        raise ValueError('Неожиданный владелец базы; обновление не выполняется.')
+    required = int(sql("SELECT pg_database_size('onecbackup');")) + sum(p.stat().st_size for root in [old, DATA, CONFIG] for p in root.rglob('*') if p.is_file()) + 1024 * 1024 * 1024
+    if shutil.disk_usage(backup_root).free < required:
+        raise ValueError('Недостаточно места для пакета и полного комплекта возврата; сервер не остановлен.')
+    # Download/check/extract first. Existing installed versions and current stay untouched.
+    target = install_package(request, package_directory, activate=False)
+    reject_links(target)
+    stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + secrets.token_hex(4)
+    backup = backup_root / stamp
+    backup.mkdir(mode=0o700)
+    state = {'format': 1, 'from': previous['version'], 'to': version, 'database': database, 'status': 'preparing'}
+    def mark(status):
+        state['status'] = status
+        atomic_json(backup / 'state.json', state)
+    mark('preparing')
+    snapshot_tree(CONFIG, backup / 'config.tar')
+    snapshot_tree(old, backup / 'program.tar')
+    shutil.copy2(UNIT, backup / 'unit.service')
+    stopped = False
+    migrated = False
+    try:
+        stopped = True
+        run(['systemctl', 'stop', 'onec-backup-server'])
+        with (backup / 'database.dump').open('wb') as output:
+            binary_command(['runuser', '-u', 'postgres', '--', 'pg_dump', '-Fc', '-d', DATABASE], output=output)
+        snapshot_tree(DATA, backup / 'data.tar')
+        state['files'] = {}
+        for name in ['config.tar', 'program.tar', 'unit.service', 'database.dump', 'data.tar']:
+            with (backup / name).open('rb') as stream:
+                state['files'][name] = hashlib.file_digest(stream, 'sha256').hexdigest()
+        mark('backed-up')
+        migrated = True
+        mark('migrating')
+        run(['runuser', '-u', ACCOUNT, '--', target / 'SPBackup.Server', '--Server:ConfigFile', CONFIG / 'server.json', '--migrate'])
+        switch_release(target)
+        run(['systemctl', 'start', 'onec-backup-server'])
+        wait_ready(previous['port'])
+        atomic_json(journal, {**saved, 'request': request})
+        mark('updated')
+        print('Сервер обновлён: ' + version + '. Комплект возврата: ' + str(backup))
+    except (Exception, KeyboardInterrupt):
+        try:
+            if stopped:
+                run(['systemctl', 'stop', 'onec-backup-server'])
+            if migrated:
+                for name, digest in state['files'].items():
+                    with (backup / name).open('rb') as stream:
+                        if hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
+                            raise ValueError('Повреждён комплект возврата.')
+                mark('rolling-back')
+                run(['runuser', '-u', 'postgres', '--', 'dropdb', '--force', '--if-exists', DATABASE])
+                run(['runuser', '-u', 'postgres', '--', 'createdb', '--template=template0', '--encoding=UTF8',
+                     '--lc-collate=' + database['collate'], '--lc-ctype=' + database['ctype'], '--owner=onecbackup', DATABASE])
+                with (backup / 'database.dump').open('rb') as dump:
+                    binary_command(['runuser', '-u', 'postgres', '--', 'pg_restore', '--exit-on-error', '--no-owner', '--role=onecbackup', '-d', DATABASE], input_file=dump)
+                restore_tree(backup / 'data.tar', DATA)
+                restore_tree(backup / 'config.tar', CONFIG)
+                restore_tree(backup / 'program.tar', old)
+                shutil.copy2(backup / 'unit.service', UNIT)
+                switch_release(old)
+                run(['systemctl', 'daemon-reload'])
+            if stopped:
+                run(['systemctl', 'start', 'onec-backup-server'])
+                wait_ready(previous['port'])
+            mark('rolled-back' if migrated else 'unchanged')
+        except (Exception, KeyboardInterrupt):
+            with contextlib.suppress(Exception):
+                run(['systemctl', 'stop', 'onec-backup-server'])
+            with contextlib.suppress(Exception):
+                mark('rollback-failed')
+            raise RuntimeError('Возврат не завершён; состояние сервера не подтверждено. Комплект: ' + str(backup)) from None
+        raise RuntimeError('Обновление не выполнено; прежняя версия восстановлена. Комплект: ' + str(backup)) from None
+
+
+def host_update(args):
+    if (platform.machine() != 'x86_64' or any(not shutil.which(c) for c in ['pct', 'pvesh'])
+            or args.id is None or not 100 <= args.id <= 999999999):
+        raise ValueError('Запустите на узле Proxmox с --update --id <существующий CT>.')
+    resources = json_command(['pvesh', 'get', '/cluster/resources', '--type', 'vm', '--output-format', 'json'])
+    if not any(int(row['vmid']) == args.id and row.get('type') == 'lxc' for row in resources):
+        raise ValueError('Указанный ID не принадлежит существующему LXC.')
+    if run(['pct', 'status', str(args.id)], capture=True).strip() != 'status: running':
+        raise ValueError('Сначала запустите существующий CT на этом узле.')
+    # A unique private directory avoids replacing the original installation request/script.
+    remote = '/root/sp-backup-update-' + secrets.token_hex(8)
+    run(['pct', 'exec', str(args.id), '--', 'install', '-d', '-m', '0700', remote])
+    run(['pct', 'push', str(args.id), str(Path(__file__).resolve()), remote + '/update.py', '--perms', '0600'])
+    command = ['pct', 'exec', str(args.id), '--', 'python3', remote + '/update.py', '--inside-container', '--update', '--version', args.version]
+    if args.backup_directory:
+        command += ['--backup-directory', str(args.backup_directory)]
+    run(command)
+
+
 def host_create(args):
+    if args.version is None:
+        args.version = VERSION
     if platform.machine() != 'x86_64' or any(not shutil.which(c) for c in ('pct', 'pveam', 'pvesm', 'pvesh')):
         raise ValueError('Запустите скрипт от root в Shell хоста Proxmox VE amd64.')
     resources = json_command(['pvesh', 'get', '/cluster/resources', '--type', 'vm', '--output-format', 'json'])
@@ -555,7 +751,9 @@ def parser():
     p.add_argument('--hostname', default='sp-backup', help='сетевое имя контейнера')
     p.add_argument('--address', help='полный HTTPS-адрес панели с выбранным портом; по умолчанию IPv4 контейнера')
     p.add_argument('--port', type=int, default=7443)
-    p.add_argument('--version', default=VERSION)
+    p.add_argument('--version', help='версия сервера; установка по умолчанию '+VERSION+', обновление — последний опубликованный preview')
+    p.add_argument('--update', action='store_true', help='обновить существующий LXC из мастера, без создания CT')
+    p.add_argument('--backup-directory', type=Path, help='каталог комплектов возврата внутри CT')
     p.add_argument('--template', help='локальный Debian 13 amd64 шаблон; иначе скачивается через pveam')
     p.add_argument('--template-storage', help='хранилище шаблонов; по умолчанию local либо первое доступное')
     p.add_argument('--rootfs-pool', help='хранилище диска; по умолчанию local-lvm либо первое доступное')
@@ -577,15 +775,24 @@ def main():
     args = parser().parse_args()
     if getattr(os, 'geteuid', lambda: -1)() != 0:
         raise ValueError('Запустите от root в Shell Proxmox.')
+    if args.update and not args.inside_container and args.id is None:
+        raise ValueError('Для обновления укажите --id существующего CT.')
+    if args.version is None:
+        args.version = latest_update_version() if args.update else VERSION
     if args.inside_container:
         import fcntl
-        if args.request is None or args.request.is_symlink() or args.request.stat().st_size > 16384:
+        if not args.update and (args.request is None or args.request.is_symlink() or args.request.stat().st_size > 16384):
             raise ValueError('Нужен локальный файл запроса установки.')
         Path('/run/lock').mkdir(mode=0o755, exist_ok=True)
         descriptor = os.open('/run/lock/sp-backup-server-install.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, 'a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            guest_install(json.loads(args.request.read_text()), args.package_directory)
+            if args.update:
+                guest_update(args.version, args.package_directory, args.backup_directory)
+            else:
+                guest_install(json.loads(args.request.read_text()), args.package_directory)
+    elif args.update:
+        host_update(args)
     else:
         host_create(args)
 

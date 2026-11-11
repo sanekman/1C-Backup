@@ -17,7 +17,7 @@ if args == ['restart', 'postgresql@17-main']:
     status = subprocess.run(['pg_ctlcluster', '17', 'main', 'status'], capture_output=True)
     command = 'restart' if status.returncode == 0 else 'start'
     subprocess.run(['pg_ctlcluster', '17', 'main', command], check=True)
-elif args == ['enable', '--now', 'onec-backup-server']:
+elif args in (['enable', '--now', 'onec-backup-server'], ['start', 'onec-backup-server']):
     failure = Path('/tmp/reject-first-server-start')
     if failure.exists():
         failure.unlink()
@@ -27,10 +27,24 @@ elif args == ['enable', '--now', 'onec-backup-server']:
             '/opt/onec-backup-server/current/SPBackup.Server', '--Server:ConfigFile', '/etc/onec-backup-server/server.json'],
             stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
     Path('/tmp/native-server.pid').write_text(str(process.pid))
+elif args == ['is-active', '--quiet', 'onec-backup-server']:
+    path = Path('/tmp/native-server.pid')
+    if not path.exists(): sys.exit(3)
+    try:
+        os.kill(int(path.read_text()), 0)
+    except ProcessLookupError:
+        sys.exit(3)
 elif args == ['stop', 'onec-backup-server']:
+    path = Path('/tmp/native-server.pid')
+    if not path.exists(): sys.exit(0)
     pid = int(Path('/tmp/native-server.pid').read_text())
-    os.killpg(pid, signal.SIGTERM)
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
     for _ in range(50):
         if not Path(f'/proc/{pid}/cmdline').exists() or not Path(f'/proc/{pid}/cmdline').read_bytes():
             break
         time.sleep(.1)
+
+    path.unlink(missing_ok=True)
