@@ -5,6 +5,8 @@ COPY src/SPBackup.Server/ src/SPBackup.Server/
 COPY src/SPBackup.Core/ServerMonitoringContracts.cs src/SPBackup.Core/ServerMonitoringContracts.cs
 COPY src/SPBackup.Core/AgentCapabilities.cs src/SPBackup.Core/AgentCapabilities.cs
 COPY src/SPBackup.Core/ConfigurationReceiptContracts.cs src/SPBackup.Core/ConfigurationReceiptContracts.cs
+COPY src/SPBackup.Core/RemoteRunContracts.cs src/SPBackup.Core/RemoteRunContracts.cs
+COPY src/SPBackup.Core/ManagedSecretRequirements.cs src/SPBackup.Core/ManagedSecretRequirements.cs
 RUN --mount=type=secret,id=build-ca,required=false \
     set -e; if [ -s /run/secrets/build-ca ]; then cp /run/secrets/build-ca /usr/local/share/ca-certificates/build-network.crt; update-ca-certificates; fi; \
     dotnet restore src/SPBackup.Server --locked-mode
