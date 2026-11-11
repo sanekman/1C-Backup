@@ -6,7 +6,7 @@
 
 Опубликован [Windows-агент alpha.35](https://github.com/sanekman/1C-Backup/releases/tag/v0.2.0-alpha.35): настройки при работающей службе, доступный ввод FTP/пароля ZIP и имена архивов без случайного идентификатора. [Проверки, SHA-256 и ограничения выпуска](docs/windows-alpha35-publication.md). Установщик пока не подписан.
 
-Последний отдельный сервер управления — preview.8: веб-панель, PostgreSQL, мониторинг и файловые планы. Новые возможности управления из этапов 5–6 требуют совместимой серверной сборки; публикация alpha.35 сама по себе сервер не обновляет. [Запуск на Windows, Linux и через Docker Compose](docs/server-start.md), [мастер нового Proxmox LXC](docs/server-proxmox.md).
+Опубликован [сервер управления preview.9](https://github.com/sanekman/1C-Backup/releases/tag/server-v0.1.0-preview.9): веб-панель, PostgreSQL, файловые планы с подтверждениями и удалённым запуском, обслуживание и возврат программы вместе с БД. Для новых возможностей рекомендуется агент alpha.35. [Проверки и SHA-256](docs/server-preview9-publication.md), [запуск на Windows, Linux и через Docker Compose](docs/server-start.md), [мастер нового Proxmox LXC](docs/server-proxmox.md).
 
 Для штатного Docker Compose в рабочей ветке добавлена команда обновления
 `./deploy/server/update.sh`: сборка серверного тега, полный комплект возврата,
