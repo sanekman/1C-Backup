@@ -75,10 +75,13 @@ public partial class DestinationWindow : Window
         if (dialog.ShowDialog(this) == true) Destination.Text = dialog.FolderName;
     }
 
+    internal Action<FtpCredentialsWindow>? FtpCredentialsDialogOpened { get; set; }
     private void Credentials_Click(object sender, RoutedEventArgs e)
     {
-        var key = credentialKey ?? "ftp-" + Guid.NewGuid().ToString("N");
-        if (new FtpCredentialsWindow(key, credentials) { Owner = this }.ShowDialog() != true) return;
+        var key = "ftp-" + Guid.NewGuid().ToString("N");
+        var dialog = new FtpCredentialsWindow(key, credentials) { Owner = this };
+        FtpCredentialsDialogOpened?.Invoke(dialog);
+        if (dialog.ShowDialog() != true) return;
         credentialKey = key;
         Status.Text = "";
         CredentialsStatus.Text = "Логин и пароль сохранены в Windows. Соединение проверяется при доставке копии.";

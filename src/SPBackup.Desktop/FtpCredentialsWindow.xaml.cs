@@ -10,7 +10,12 @@ public partial class FtpCredentialsWindow : Window
     internal string CredentialKey => key;
     private readonly Action<string, string, string> save;
     public FtpCredentialsWindow(string key, WindowsFtpCredentialStore store)
-        : this(key, store.Save, "Учётные данные FTP") { }
+        : this(key, store.Save, "Логин и пароль FTP")
+    {
+        SizeToContent = SizeToContent.Height;
+        BindingName.Text = "Доступ к FTP / FTPS для этого хранилища.";
+        CredentialExplanation.Text = "Новый доступ сохраняется в Windows отдельно от прежнего. Он применяется после сохранения задания или хранилища. Отмена редактирования не меняет доступ уже сохранённых заданий.";
+    }
     public FtpCredentialsWindow(string key, Action<string, string, string> save, string title)
     {
         this.key = key; this.save = save;

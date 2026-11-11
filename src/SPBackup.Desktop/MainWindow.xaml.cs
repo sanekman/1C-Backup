@@ -587,7 +587,10 @@ public partial class MainWindow : Window
         StartScheduleButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null && !editorOpen;
         ArchivePasswordButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         GoogleDriveConnectButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
-        FtpCredentialsButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
+        FtpCredentialsButton.IsEnabled = ready && canSave && idle && editorOpen;
+        FtpCredentialsButton.ToolTip = !canSave ? "Настройки этого задания управляются сервером."
+            : !idle ? "Дождитесь завершения текущего действия в окне программы."
+            : "Логин и пароль можно задать при работающем агенте. Действующее задание изменится только после сохранения его настроек.";
         // NAS drafts use a new Vault key, leaving running jobs unchanged.
         // JobStore still requires an idle executor to publish protected jobs.
         NetworkCredentialsButton.IsEnabled = ready && canSave && idle && editorOpen;
@@ -623,7 +626,7 @@ public partial class MainWindow : Window
             || automationService is AutomationService.Starting or AutomationService.Running or AutomationService.Stopping;
         StartBackgroundButton.Visibility = automationStarted ? Visibility.Collapsed : Visibility.Visible;
         StopBackgroundButton.Visibility = automationStarted ? Visibility.Visible : Visibility.Collapsed;
-        ArchivePasswordButton.ToolTip = FtpCredentialsButton.ToolTip = !engineAvailable || schedulingTask is not null
+        ArchivePasswordButton.ToolTip = !engineAvailable || schedulingTask is not null
             ? "Для настройки пароля остановите автоматическое копирование." : null;
         SaveStartupButton.IsEnabled = ready;
         RefreshHistoryButton.IsEnabled = ready && !historyRefreshing;
@@ -1317,21 +1320,19 @@ public partial class MainWindow : Window
         Status.Text = "Новый пароль сохранён в Windows. Сохраните задание, чтобы использовать его для новых копий.";
     }
 
+    internal Action<FtpCredentialsWindow>? FtpCredentialsDialogOpened { get; set; }
     private void FtpCredentials_Click(object sender, RoutedEventArgs e)
     {
-        if (!ready || !canSave || activeRun is not null || copyVerification is not null || manualPending || schedulingTask is not null) return;
-        var key = FtpCredentialKey.Text.Trim();
-        using var lease = AcquireEngineOrReport();
-        if (lease is null) return;
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            key = "ftp-" + (editingId ?? Guid.NewGuid()).ToString("N");
-        }
-        if (new FtpCredentialsWindow(key, ftpCredentials) { Owner = this }.ShowDialog() == true)
+        if (!editorOpen || !FtpCredentialsButton.IsEnabled) return;
+        // Each draft gets a new secret: cancellation or editing must not mutate a running job.
+        var key = "ftp-" + Guid.NewGuid().ToString("N");
+        var dialog = new FtpCredentialsWindow(key, ftpCredentials) { Owner = this };
+        FtpCredentialsDialogOpened?.Invoke(dialog);
+        if (dialog.ShowDialog() == true)
         {
             FtpCredentialKey.Text = key;
             EditorFieldChanged(sender, e);
-            Status.Text = "Логин и пароль FTP сохранены в Windows. Сохраните задание; соединение проверяется при создании копии.";
+            Status.Text = "Логин и пароль FTP сохранены в Windows. Сохраните задание, чтобы применить новый доступ.";
         }
     }
 

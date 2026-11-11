@@ -30,7 +30,7 @@
     <TextBlock Text="FTP-сервер (без ftp://)" /><TextBox x:Name="FtpHost" Margin="0,4,0,10" />
     <TextBlock Text="Порт" /><TextBox x:Name="FtpPort" Text="21" Margin="0,4,0,10" />
     <CheckBox x:Name="FtpTls" Content="Защищённое соединение FTPS" IsChecked="True" Margin="0,0,0,10" />
-    <Button Content="Настроить логин и пароль" Click="Credentials_Click" HorizontalAlignment="Left" />
+    <Button x:Name="FtpCredentialsButton" Content="Настроить логин и пароль" Click="Credentials_Click" HorizontalAlignment="Left" />
     <TextBlock x:Name="CredentialsStatus" TextWrapping="Wrap" Margin="0,6,0,10" Foreground="{DynamicResource MutedBrush}" />
    </StackPanel>
   </StackPanel></ScrollViewer>

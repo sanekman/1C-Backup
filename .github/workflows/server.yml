@@ -11,6 +11,11 @@ on:
         type: choice
         default: all
         options: [all, windows, linux]
+      windows_runner:
+        description: 'Windows OS for native server acceptance'
+        type: choice
+        default: windows-latest
+        options: [windows-latest, windows-2022]
       scope:
         description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
@@ -25,7 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && (inputs.platform == 'windows' || inputs.scope == 'maintenance') && '[{"os":"windows-latest","runtime":"win-x64"}]' || github.event_name == 'workflow_dispatch' && inputs.platform == 'linux' && '[{"os":"ubuntu-latest","runtime":"linux-x64"}]' || '[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]') }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runtime == 'win-x64' && (inputs.windows_runner || 'windows-latest') || matrix.os }}
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
