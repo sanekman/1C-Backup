@@ -239,8 +239,10 @@ jobs:
           $comparison = gh api "repos/$env:GITHUB_REPOSITORY/compare/$($prior.head_sha)...$env:GITHUB_SHA" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $comparison.status -notin @('ahead','identical')) { throw 'Cannot establish source ancestry.' }
           if ($comparison.files.Count -ge 300) { throw 'Diff is truncated: run full verification.' }
-          if (@($comparison.files | Where-Object { $_.filename -notmatch '^(tests/|docs/|\.github/workflows/|AGENTS\.md$)' }).Count) { throw 'Production sources changed: run full verification.' }
-          Write-Output ('Reused passed '+$jobName+' at '+$prior.head_sha+'; only tests/docs/workflows changed.')
+          if (@($comparison.files | Where-Object { $_.filename -notmatch '^(tests/|docs/|\.github/workflows/|AGENTS\.md$|src/SPBackup\.Desktop/Help/user-guide\.html$)' }).Count) { throw 'Production sources changed: run full verification.' }
+          python tools/render_user_guide.py --check
+          if ($LASTEXITCODE -ne 0) { throw 'Generated help must match its Markdown source.' }
+          Write-Output ('Reused passed '+$jobName+' at '+$prior.head_sha+'; only tests/docs/workflows/generated help changed.')
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.402
