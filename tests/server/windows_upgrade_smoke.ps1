@@ -63,8 +63,8 @@ $oldDll=(Get-FileHash (Join-Path $install 'SPBackup.Server.dll')).Hash
 $bundle=Join-Path $parent 'before-upgrade'
 $null=& $tool -Action PrepareUpgrade -BackupDirectory $bundle -InstallDirectory $install
 $null=& $tool -Action VerifyUpgrade -BackupDirectory $bundle -InstallDirectory $install
-# Exact full-program guard includes dependencies, even if the three legacy identity files are unchanged.
-$dependency=Join-Path $install 'System.Text.Json.dll';$dependencyBytes=[IO.File]::ReadAllBytes($dependency)
+# Full-program guard includes maintenance scripts even when the three legacy identity files are unchanged.
+$dependency=Join-Path $install 'windows/Open-Panel.ps1';$dependencyBytes=[IO.File]::ReadAllBytes($dependency)
 try { [IO.File]::AppendAllText($dependency,'changed');Rejected { & $tool -Action Verify -BackupDirectory $bundle -InstallDirectory $install } }
 finally { [IO.File]::WriteAllBytes($dependency,$dependencyBytes) }
 Install $Installer
@@ -103,9 +103,23 @@ $report=& $statusTool
 if ($report.Healthy -or (Get-Service OneCBackupServerDatabase).Status -ne 'Stopped' -or @($report.Checks | Where-Object State -eq 'Error').Count -lt 2) { throw 'Local diagnostics modified stopped services or hid the fault.' }
 Start-Service OneCBackupServerDatabase;Start-Service OneCBackupServer
 Assert-Preserved 5
+# A replaced public CER is diagnosed independently of the certificate loaded by the running service.
+$faultRoot=Join-Path $parent 'status-fixture';[void][IO.Directory]::CreateDirectory($faultRoot)
+Copy-Item (Join-Path $root 'server.json') (Join-Path $faultRoot 'server.json')
+$expired=New-SelfSignedCertificate -DnsName 'localhost' -CertStoreLocation 'Cert:\CurrentUser\My' -NotBefore (Get-Date).AddDays(-10) -NotAfter (Get-Date).AddDays(-1)
+try {
+    Export-Certificate -Cert $expired -FilePath (Join-Path $faultRoot 'server.cer') | Out-Null
+    $report=& $statusTool -DataDirectory $faultRoot
+    if ($report.Healthy -or @($report.Checks | Where-Object { $_.Code -eq 'CertificateFile' -and $_.State -eq 'Error' }).Count -ne 1 -or @($report.Checks | Where-Object { $_.Code -eq 'HttpsReadiness' -and $_.State -eq 'Healthy' }).Count -ne 1) { throw 'Expired CER or independent trusted readiness was not diagnosed.' }
+} finally { Remove-Item ('Cert:\CurrentUser\My\'+$expired.Thumbprint) }
+$fault=Get-Content (Join-Path $faultRoot 'server.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$fault.Server.DataDirectory='?:\missing'
+[IO.File]::WriteAllText((Join-Path $faultRoot 'server.json'),($fault | ConvertTo-Json -Depth 6))
+$report=& $statusTool -DataDirectory $faultRoot
+if (@($report.Checks | Where-Object { $_.Code -eq 'DataDisk' -and $_.State -eq 'Unknown' }).Count -ne 1) { throw 'Unreadable data volume was shown as healthy.' }
 # Clean only this fixture, after the real retained-data uninstall has succeeded.
 $uninstall=Start-Process (Join-Path $install 'unins000.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait -PassThru
 if ($uninstall.ExitCode -ne 0 -or (Get-Service OneCBackupServer -ErrorAction SilentlyContinue) -or (Get-Service OneCBackupServerDatabase -ErrorAction SilentlyContinue)) { throw 'Fixture cleanup did not remove the owned services.' }
 Remove-Item -LiteralPath $root -Recurse -Force
 Remove-Item -LiteralPath $secret
-@{baselinePreview8=$true; schema5To6=$true; persistedDatabase=$true; preservedConfigurationAndSecrets=$true; preservedDpapiCookie=$true; preservedAgentToken=$true; fullProgramInventory=$true; ordinaryRestoreRejectsOtherVersion=$true; fullProgramAndDataRollback=$true; failedRollbackRestoresBothTrees=$true; migrationFailureRetainsSchema=$true; migrationFailureRecovery=$true; stoppedServicesDiagnosedReadOnly=$true} | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-upgrade-result.json'
+@{baselinePreview8=$true; schema5To6=$true; persistedDatabase=$true; preservedConfigurationAndSecrets=$true; preservedDpapiCookie=$true; preservedAgentToken=$true; fullProgramInventory=$true; ordinaryRestoreRejectsOtherVersion=$true; fullProgramAndDataRollback=$true; failedRollbackRestoresBothTrees=$true; migrationFailureRetainsSchema=$true; migrationFailureRecovery=$true; stoppedServicesDiagnosedReadOnly=$true; expiredCertificateDiagnosed=$true; activeHttpsIndependentOfCer=$true; unreadableVolumeDiagnosed=$true} | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-upgrade-result.json'

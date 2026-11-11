@@ -12,10 +12,10 @@ on:
         default: all
         options: [all, windows, linux]
       scope:
-        description: 'Use compose after unchanged integration/package tests already passed'
+        description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
         default: full
-        options: [full, compose]
+        options: [full, compose, maintenance]
 permissions:
   contents: read
 jobs:
@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.platform == 'windows' && '[{"os":"windows-latest","runtime":"win-x64"}]' || github.event_name == 'workflow_dispatch' && inputs.platform == 'linux' && '[{"os":"ubuntu-latest","runtime":"linux-x64"}]' || '[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]') }}
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && (inputs.platform == 'windows' || inputs.scope == 'maintenance') && '[{"os":"windows-latest","runtime":"win-x64"}]' || github.event_name == 'workflow_dispatch' && inputs.platform == 'linux' && '[{"os":"ubuntu-latest","runtime":"linux-x64"}]' || '[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     steps:
@@ -35,6 +35,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/server/windows_script_syntax.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 syntax check failed.' }
       - run: python -m unittest discover -s tests/server -p "test_*.py"
       - run: dotnet restore tests/SPBackup.Server.Tests --locked-mode
       - run: dotnet build tests/SPBackup.Server.Tests --no-restore -m:1 -nr:false
@@ -44,7 +49,7 @@ jobs:
           echo "ONECBACKUP_SERVER_TEST_CONNECTION_FILE=/tmp/onec-server-ci/connection-string.txt" >> "$GITHUB_ENV"
       - if: runner.os == 'Linux'
         run: dotnet test tests/SPBackup.Server.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=ServerPackage' --logger 'trx;LogFileName=server-linux.trx' --results-directory artifacts/server-tests
-      - if: runner.os == 'Windows'
+      - if: runner.os == 'Windows' && inputs.scope != 'maintenance'
         run: python tests/server/run_windows.py
       - run: python tools/build_server_distribution.py --runtime ${{ matrix.runtime }}
       - if: runner.os == 'Linux'
@@ -75,7 +80,7 @@ jobs:
         run: |
           $installer = (Get-ChildItem artifacts/server/SP-Backup-Server-*-windows-x64-setup.exe).FullName
           & tests/server/windows_installer_smoke.ps1 -Installer $installer
-      - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }}
+      - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }} ${{ inputs.scope == 'maintenance' && '--maintenance-only' || '' }}
       - if: runner.os == 'Linux'
         run: python3 tests/server/compose_smoke.py
       - if: always() && runner.os == 'Windows'
@@ -107,7 +112,7 @@ jobs:
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
 
   proxmox-installer:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
