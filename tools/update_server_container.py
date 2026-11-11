@@ -114,6 +114,18 @@ class ComposeUpdate:
             raise UpdateError("Нужен штатный именованный том server-data.")
         self.volume = mounts[0]["Name"]
         environment = self.config["services"]["server"].get("environment", {})
+        live_environment = dict(item.split("=", 1) for item in server["Config"]["Env"])
+        if any(live_environment.get(key) != value for key, value in environment.items()):
+            raise UpdateError("Настройки Compose отличаются от работающего контейнера. Передайте прежние --env-file и --project-name.")
+        volumes = self.config["services"]["server"].get("volumes", [])
+        if (len(volumes) != 1 or volumes[0].get("type") != "volume" or volumes[0].get("target") != DATA
+                or self.config["volumes"][volumes[0]["source"]].get("name") != self.volume):
+            raise UpdateError("Том данных в Compose отличается от работающего сервера.")
+        for name in ["database-password", "administrator-password", "server-certificate", "certificate-password"]:
+            actual = [mount for mount in server["Mounts"] if mount["Destination"] == "/run/secrets/" + name]
+            expected = self.config.get("secrets", {}).get(name, {}).get("file")
+            if len(actual) != 1 or expected is None or Path(actual[0]["Source"]).resolve() != Path(expected).resolve():
+                raise UpdateError("Файлы секретов в Compose отличаются от работающего сервера.")
         connection = dict(part.split("=", 1) for part in environment.get("Server__ConnectionString", "").split(";") if "=" in part)
         db_env = dict(item.split("=", 1) for item in database["Config"]["Env"])
         self.user = db_env.get("POSTGRES_USER", "postgres")
@@ -129,6 +141,10 @@ class ComposeUpdate:
         if self.host in {"0.0.0.0", "::"}:
             self.host = "127.0.0.1"
         self.port = int(bindings[0]["HostPort"])
+        ports = self.config["services"]["server"].get("ports", [])
+        if (len(ports) != 1 or ports[0].get("target") != 7443 or str(ports[0].get("published")) != str(self.port)
+                or ports[0].get("host_ip", "0.0.0.0") != bindings[0]["HostIp"]):
+            raise UpdateError("Порт HTTPS в Compose отличается от работающего контейнера.")
         allowed = environment.get("AllowedHosts", "localhost").split(";")
         self.health_host = health_host or next((h for h in allowed if h != "*"), "localhost")
         self.health_path = environment.get("Server__PathBase", "").rstrip("/") + "/health/ready"

@@ -98,6 +98,11 @@ set +a
 
 ## Docker Compose
 
+Обновление установленного штатного стека одной командой:
+`./deploy/server/update.sh` из актуального checkout рабочей ветки.
+[Требования, параметры, резервная копия и автоматический возврат](server-container-update.md).
+Команда выбирает серверный выпуск; Windows alpha.35 не обновляет контейнер сервера.
+
 Из репозитория используйте `deploy/server/compose.yaml`. Подготовьте закрытый каталог `deploy/server/secrets` (0700) и четыре файла:
 
 - `database-password.txt` — новый пароль контейнерной PostgreSQL;

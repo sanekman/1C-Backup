@@ -50,6 +50,36 @@ class ContainerUpdateTests(unittest.TestCase):
             self.assertEqual(2, run.call_count)
             self.assertFalse(any('stop' in call.args[0] or 'dropdb' in call.args[0] for call in run.call_args_list))
 
+    def test_changed_compose_settings_are_rejected_before_any_mutation(self):
+        import copy
+        environment = {'Server__ConnectionString': 'Host=db;Database=onecbackup'}
+        names = ['database-password', 'administrator-password', 'server-certificate', 'certificate-password']
+        config = {'name': 'fixture', 'services': {'server': {'environment': environment,
+                  'volumes': [{'source': 'server-data', 'target': updater.DATA, 'type': 'volume'}],
+                  'ports': [{'target': 7443, 'published': '7443', 'host_ip': '127.0.0.1'}]}},
+                  'volumes': {'server-data': {'name': 'fixture_server-data'}},
+                  'secrets': {name: {'file': '/tmp/fixture/' + name} for name in names}}
+        server = {'Image': 'sha256:fixture', 'State': {'Running': True},
+                  'Config': {'Env': [key + '=' + value for key, value in environment.items()]},
+                  'Mounts': [{'Type': 'volume', 'Destination': updater.DATA, 'Name': 'fixture_server-data'}] +
+                            [{'Type': 'bind', 'Destination': '/run/secrets/' + name, 'Source': '/tmp/fixture/' + name} for name in names],
+                  'NetworkSettings': {'Ports': {'7443/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '7443'}]}}}
+        db = {'State': {'Running': True}, 'Config': {'Image': 'postgres:17-alpine',
+              'Env': ['POSTGRES_USER=onecbackup', 'POSTGRES_DB=onecbackup']}}
+        for changed in ['environment', 'volume', 'secret', 'port']:
+            value = copy.deepcopy(config)
+            if changed == 'environment': value['services']['server']['environment']['Server__ConnectionString'] = 'Host=db;Database=other'
+            if changed == 'volume': value['volumes']['server-data']['name'] = 'other_volume'
+            if changed == 'secret': value['secrets']['server-certificate']['file'] = '/tmp/other-cert'
+            if changed == 'port': value['services']['server']['ports'][0]['published'] = '9999'
+            with self.subTest(changed=changed), patch.object(updater, 'command', return_value=json.dumps(value)) as run, \
+                 patch.object(updater.ComposeUpdate, 'one_container', side_effect=['server-id', 'db-id']), \
+                 patch.object(updater.ComposeUpdate, 'inspect', side_effect=[server, server, db]):
+                with self.assertRaises(updater.UpdateError):
+                    updater.ComposeUpdate(Path('/tmp/fixture/compose.yaml'))
+                self.assertEqual(1, run.call_count)
+                self.assertIn('config', run.call_args.args[0])
+
     def test_corrupt_bundle_prevents_destructive_database_restore(self):
         with tempfile.TemporaryDirectory() as temporary:
             update = updater.ComposeUpdate.__new__(updater.ComposeUpdate)
