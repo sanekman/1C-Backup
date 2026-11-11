@@ -112,6 +112,8 @@ def main():
             ready()
             assert request("api/v1/management/session")[0] == 200
             assert json.loads(request(f"api/v1/agents/{agent}/configuration", headers=bearer)[1])["agentId"] == agent
+            from compose_update_checks import verify
+            update_checks = verify(repository, root, project, environment, request)
             assert request(f"api/v1/management/agents/{agent}/revoke", {}, csrf)[0] == 204
             try:
                 request(f"api/v1/agents/{agent}/configuration", headers=bearer)
@@ -121,7 +123,7 @@ def main():
             target = repository / "artifacts/server-tests/compose-result.json"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(json.dumps({"success": True, "checks": ["trusted HTTPS", "non-root server", "first administrator", "CSRF login / invitation", "single-use registration",
-                "configuration", "heartbeat", "persistent registration and session after restart", "revocation"]}, indent=2))
+                "configuration", "heartbeat", "persistent registration and session after restart", "revocation"] + update_checks}, indent=2))
             print("PASS: actual Compose stack, PostgreSQL, trusted HTTPS, enrollment, heartbeat, restart and revocation.")
         finally:
             # Remove only this uniquely named disposable stack and its own volumes.

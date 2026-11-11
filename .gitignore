@@ -7,3 +7,5 @@ TestResults/
 artifacts/
 deploy/server/secrets/
 deploy/server/server.env
+deploy/server/backups/
+deploy/server/.update-*.lock

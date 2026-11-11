@@ -7,4 +7,6 @@ artifacts
 **/*.pfx
 **/*.pem
 **/server.env
+deploy/server/backups
+deploy/server/.update-*.lock
 **/__pycache__
