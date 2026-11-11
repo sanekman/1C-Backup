@@ -275,3 +275,9 @@ begin
     if not RunScript(ExpandConstant('{app}\windows\Remove-Server.ps1'), '') then
       RaiseException('Не удалось остановить и удалить службы. Файлы сервера сохранены.');
 end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  { Exceptions during ssPostInstall can still leave Inno with its default success code. }
+  if Configured then Result := 0 else Result := 1;
+end;
