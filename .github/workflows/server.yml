@@ -16,16 +16,24 @@ on:
         type: choice
         default: windows-latest
         options: [windows-latest, windows-2022]
+      candidate_run_id:
+        description: 'Successful server run containing server-win-x64-verification (artifact must not be expired)'
+        required: true
+        default: '42975268950'
+      installer_sha256:
+        description: 'Pinned SHA-256 of the accepted installer'
+        required: true
+        default: '93099bd6fb7cf81c0a410266dda50d63d7018070bcee1285088ec52a7b1ab3dc'
       scope:
         description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
         default: full
-        options: [full, compose, maintenance]
+        options: [full, compose, maintenance, installed]
 permissions:
   contents: read
 jobs:
   server:
-    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'compose'
+    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed')
     strategy:
       fail-fast: false
       matrix:
@@ -117,7 +125,7 @@ jobs:
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
 
   proxmox-installer:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -170,3 +178,63 @@ jobs:
       - run: python tools/publish_server_release.py --artifacts artifacts/server-release
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+  existing-installer:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'installed'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-win-x64-verification
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/candidate
+      - name: Verify candidate and native scripts
+        shell: pwsh
+        env:
+          CANDIDATE_INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+        run: |
+          if ($env:CANDIDATE_INSTALLER_SHA256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'Invalid expected installer SHA-256.' }
+          $installer = Get-ChildItem artifacts/candidate/server/SP-Backup-Server-*-windows-x64-setup.exe
+          if (@($installer).Count -ne 1) { throw 'Expected exactly one candidate installer.' }
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:CANDIDATE_INSTALLER_SHA256.ToLowerInvariant()) { throw 'Candidate checksum differs.' }
+          New-Item -ItemType Directory -Path artifacts/server-tests -Force | Out-Null
+          $os = Get-CimInstance Win32_OperatingSystem
+          @{source=$env:GITHUB_SHA; candidateRun=$env:CANDIDATE_RUN_ID; installerSha256=$hash; os=$os.Caption; build=$os.BuildNumber} | ConvertTo-Json | Set-Content artifacts/server-tests/windows-target.json
+          & (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/server/windows_script_syntax.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Native script parsing failed.' }
+      - name: Upgrade and recover the published preview.8 installation
+        shell: pwsh
+        run: |
+          $baseline = Join-Path $env:RUNNER_TEMP 'SP-Backup-Server-preview8-setup.exe'
+          Invoke-WebRequest 'https://github.com/sanekman/1C-Backup/releases/download/server-v0.1.0-preview.8/SP-Backup-Server-0.1.0-preview.8-windows-x64-setup.exe' -OutFile $baseline
+          if ((Get-FileHash $baseline -Algorithm SHA256).Hash.ToLowerInvariant() -ne '491b9157d5d0664d53ac45ac5f4ba3bc298ab71c0d63cf4d385b126311748309') { throw 'Published baseline checksum differs.' }
+          $installer = (Get-ChildItem artifacts/candidate/server/SP-Backup-Server-*-windows-x64-setup.exe).FullName
+          & (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/server/windows_upgrade_smoke.ps1 -Installer $installer -BaselineInstaller $baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Native upgrade/recovery acceptance failed.' }
+      - name: Install, maintain and restore the same candidate
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem artifacts/candidate/server/SP-Backup-Server-*-windows-x64-setup.exe).FullName
+          & tests/server/windows_installer_smoke.ps1 -Installer $installer
+          $required = @{'windows-installer-result.json'=21; 'windows-snapshot-result.json'=14; 'windows-upgrade-result.json'=16}
+          foreach ($name in $required.Keys) {
+            $report = Get-Content (Join-Path 'artifacts/server-tests' $name) -Raw | ConvertFrom-Json -AsHashtable
+            if ($report.Count -ne $required[$name] -or @($report.Values | Where-Object { $_ -isnot [bool] -or $_ -ne $true }).Count) { throw ('Native acceptance incomplete: '+$name) }
+            Write-Output ($name+': '+$report.Count+' native checks passed.')
+          }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ inputs.windows_runner }}-acceptance
+          path: |
+            artifacts/server-tests/*.json
+            artifacts/server-tests/windows-installer-*.log
+          retention-days: 14

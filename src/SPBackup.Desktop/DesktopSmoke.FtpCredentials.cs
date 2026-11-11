@@ -34,10 +34,25 @@ internal static partial class DesktopSmoke
                 save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             });
         }
+        var archiveKeys = new List<string>(); var archiveStore = new WindowsArchivePasswordStore();
+        const string archiveOriginal = "Archive original fixture password";
+        var archiveValue = archiveOriginal; var cancelArchive = false;
+        void FillArchive(ArchivePasswordWindow dialog)
+        {
+            dialog.Loaded += (_, _) => dialog.Dispatcher.BeginInvoke(() => {
+                if (cancelArchive) { dialog.DialogResult = false; return; }
+                ((PasswordBox)dialog.FindName("Password")).Password = archiveValue;
+                ((PasswordBox)dialog.FindName("Confirmation")).Password = archiveValue;
+                ((Button)dialog.FindName("ApplyButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Require(dialog.NewKey is not null, "Archive password dialog did not save.");
+                archiveKeys.Add(dialog.NewKey!);
+            });
+        }
         var path = Path.Combine(DesktopPaths.DataDirectory, "jobs.json");
         try
         {
             window.FtpCredentialsDialogOpened = Fill;
+            window.ArchivePasswordDialogOpened = FillArchive;
             Click("JobsNavigation"); Click("NewJobButton");
             Control<ComboBox>("Kind").SelectedItem = DatabaseKind.FilesAndFolders;
             Control<TextBox>("JobName").Text = "FTP credential draft fixture";
@@ -48,9 +63,12 @@ internal static partial class DesktopSmoke
             Control<TextBox>("FtpHost").Text = "ftp-fixture.invalid";
             using (new BackupEngineCoordinator(DesktopPaths.DataDirectory).Acquire())
             {
-                await WaitUntil(() => window.SmokeReady && !Control<Button>("ArchivePasswordButton").IsEnabled,
+                await WaitUntil(() => window.SmokeReady && !window.SmokeExecutorAvailable,
                     "FTP fixture did not observe the executor lock.");
-                Click("FtpCredentialsButton"); screenshot("ftp-login-with-agent");
+                Click("FtpCredentialsButton");
+                Control<CheckBox>("EncryptArchive").IsChecked = true; Click("ArchivePasswordButton");
+                Require(await archiveStore.GetAsync(archiveKeys[^1]) == archiveOriginal, "Archive draft password is unavailable.");
+                screenshot("ftp-and-archive-login-with-agent");
                 Require((await credentials.GetAsync(keys[^1])).Password == value, "FTP credentials were not saved in Windows.");
                 Require(!(await new JobStore(path).LoadAsync()).Any(j => j.Name == "FTP credential draft fixture"),
                     "Entering FTP credentials published an unfinished job.");
@@ -60,11 +78,13 @@ internal static partial class DesktopSmoke
             await WaitUntil(() => window.SmokeReady && Control<Border>("JobListCard").IsVisible, "FTP job did not save.");
             var job = (await new JobStore(path).LoadAsync()).Single(j => j.Name == "FTP credential draft fixture");
             var originalKey = job.Ftp!.CredentialKey;
+            var originalArchiveKey = job.ArchivePasswordKey;
+            Require(originalArchiveKey == archiveKeys[^1], "Archive draft was not bound to the saved job.");
             Require(originalKey == keys[^1], "FTP draft binding did not reach the saved job.");
             Click("EditJobButton"); Click("NextStepButton");
             using (new BackupEngineCoordinator(DesktopPaths.DataDirectory).Acquire())
             {
-                await WaitUntil(() => window.SmokeReady && !Control<Button>("ArchivePasswordButton").IsEnabled,
+                await WaitUntil(() => window.SmokeReady && !window.SmokeExecutorAvailable,
                     "FTP edit did not observe the executor lock.");
                 cancel = true; Click("FtpCredentialsButton");
                 Require(Control<TextBox>("FtpCredentialKey").Text == originalKey, "Cancel replaced the FTP binding.");
@@ -73,11 +93,20 @@ internal static partial class DesktopSmoke
                 Require((await credentials.GetAsync(originalKey)).Password == "FTP original fixture secret", "FTP editing changed a running job's password.");
                 Require((await new JobStore(path).LoadAsync()).Single(j => j.Id == job.Id).Ftp!.CredentialKey == originalKey,
                     "FTP editing changed the saved profile before Save.");
-                screenshot("ftp-edit-isolated-draft");
+                cancelArchive = true; Click("ArchivePasswordButton");
+                Require(window.SmokeArchivePasswordKey == originalArchiveKey, "Cancel replaced the archive password binding.");
+                cancelArchive = false; archiveValue = "Archive replacement fixture password"; Click("ArchivePasswordButton");
+                Require(archiveKeys[^1] != originalArchiveKey && window.SmokeArchivePasswordKey == archiveKeys[^1], "Archive edit did not isolate its new key.");
+                Require(await archiveStore.GetAsync(originalArchiveKey!) == archiveOriginal, "Archive editing changed the password for existing copies.");
+                Require((await new JobStore(path).LoadAsync()).Single(j => j.Id == job.Id).ArchivePasswordKey == originalArchiveKey, "Archive draft changed the saved job.");
+                screenshot("ftp-and-archive-edit-isolated-draft");
             }
             Click("CancelEditorButton");
             Require((await new JobStore(path).LoadAsync()).Single(j => j.Id == job.Id).Ftp!.CredentialKey == originalKey,
                 "Discarding the editor replaced the FTP binding.");
+            Require((await new JobStore(path).LoadAsync()).Single(j => j.Id == job.Id).ArchivePasswordKey == originalArchiveKey,
+                "Discarding the editor replaced the saved archive password.");
+            Require(!(await File.ReadAllTextAsync(path)).Contains(archiveValue), "Archive password leaked to the profile.");
             // An additional storage editor must also isolate a shared credential reference.
             var extra = new DestinationWindow(credentials, new() { StorageKind = StorageKind.Ftp,
                 DestinationDirectory = "/additional", Ftp = job.Ftp }) { Owner = window };
@@ -95,6 +124,8 @@ internal static partial class DesktopSmoke
         finally
         {
             window.FtpCredentialsDialogOpened = null;
+            window.ArchivePasswordDialogOpened = null;
+            foreach (var key in archiveKeys.Distinct()) archiveStore.Delete(key);
             foreach (var key in keys.Distinct()) credentials.Delete(key);
         }
     }

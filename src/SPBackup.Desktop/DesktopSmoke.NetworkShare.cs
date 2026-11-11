@@ -61,7 +61,7 @@ internal static partial class DesktopSmoke
             // the background agent does. Do not fake the window's busy flags.
             using (new BackupEngineCoordinator(DesktopPaths.DataDirectory).Acquire())
             {
-                await WaitUntil(() => window.SmokeReady && !Control<Button>("ArchivePasswordButton").IsEnabled,
+                await WaitUntil(() => window.SmokeReady && !window.SmokeExecutorAvailable,
                     "The window did not detect a running background executor.");
                 Require(Control<Button>("NetworkCredentialsButton").IsEnabled, "The background executor blocked NAS credential editing.");
                 var previousKey = job.NetworkShare!.CredentialKey;
@@ -72,7 +72,7 @@ internal static partial class DesktopSmoke
                 Require((await credentials.GetAsync(previousKey)).Password == secret, "A NAS draft removed the running job's password.");
                 screenshot("network-share-edit-with-agent");
             }
-            await WaitUntil(() => window.SmokeReady && Control<Button>("ArchivePasswordButton").IsEnabled,
+            await WaitUntil(() => window.SmokeReady && window.SmokeExecutorAvailable,
                 "The window did not observe the background executor stopping.");
             Click("NextStepButton"); Click("NextStepButton"); Click("SaveButton");
             await WaitUntil(() => window.SmokeReady && Control<Border>("JobListCard").IsVisible, "NAS changes could not save after the executor stopped.");

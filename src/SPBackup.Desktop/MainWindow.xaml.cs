@@ -14,6 +14,8 @@ namespace SPBackup.Desktop;
 public partial class MainWindow : Window
 {
     internal bool SmokeReady => initializationCompleted && ready && !persisting && !jobFileTransfer && !copiesRefreshing && activeRun is null && !manualPending && copyVerification is null;
+    internal bool SmokeExecutorAvailable => !backgroundBusy && !backgroundStarting;
+    internal string? SmokeArchivePasswordKey => archivePasswordKey;
     private bool initializationCompleted;
     private readonly JobStore store = new(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"), useLocalTime: true);
     private List<BackupJob> jobs = [];
@@ -585,7 +587,10 @@ public partial class MainWindow : Window
         SaveAgentSettingsButton.ToolTip = editorOpen ? "Сначала сохраните задание или закройте его редактор." : null;
         ExternalMonitoringButton.IsEnabled = ready && idle && schedulingTask is null;
         StartScheduleButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null && !editorOpen;
-        ArchivePasswordButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
+        ArchivePasswordButton.IsEnabled = ready && canSave && idle && editorOpen;
+        ArchivePasswordButton.ToolTip = !canSave ? "Настройки этого задания управляются сервером."
+            : !idle ? "Дождитесь завершения текущего действия в окне программы."
+            : "Новый пароль можно задать при работающем агенте. Он применяется после сохранения задания; прежние копии сохраняют свой пароль.";
         GoogleDriveConnectButton.IsEnabled = ready && canSave && idle && engineAvailable && schedulingTask is null;
         FtpCredentialsButton.IsEnabled = ready && canSave && idle && editorOpen;
         FtpCredentialsButton.ToolTip = !canSave ? "Настройки этого задания управляются сервером."
@@ -626,8 +631,6 @@ public partial class MainWindow : Window
             || automationService is AutomationService.Starting or AutomationService.Running or AutomationService.Stopping;
         StartBackgroundButton.Visibility = automationStarted ? Visibility.Collapsed : Visibility.Visible;
         StopBackgroundButton.Visibility = automationStarted ? Visibility.Visible : Visibility.Collapsed;
-        ArchivePasswordButton.ToolTip = !engineAvailable || schedulingTask is not null
-            ? "Для настройки пароля остановите автоматическое копирование." : null;
         SaveStartupButton.IsEnabled = ready;
         RefreshHistoryButton.IsEnabled = ready && !historyRefreshing;
         ExportHistoryButton.IsEnabled = ready && !historyRefreshing && RunHistory.Items.Count != 0;
@@ -1306,12 +1309,13 @@ public partial class MainWindow : Window
         UpdateArchivePasswordStatus();
     }
 
+    internal Action<ArchivePasswordWindow>? ArchivePasswordDialogOpened { get; set; }
     private void ArchivePassword_Click(object sender, RoutedEventArgs e)
     {
-        if (!ArchivePasswordButton.IsEnabled) return;
-        using var lease = AcquireEngineOrReport();
-        if (lease is null) return;
+        if (!editorOpen || !ArchivePasswordButton.IsEnabled) return;
+        // SaveNew creates an independent key; old copies retain their existing password.
         var dialog = new ArchivePasswordWindow { Owner = this };
+        ArchivePasswordDialogOpened?.Invoke(dialog);
         if (dialog.ShowDialog() != true) return;
         archivePasswordKey = dialog.NewKey;
         EditorFieldChanged(sender, e);
