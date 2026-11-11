@@ -36,6 +36,10 @@ Name: "{commonprograms}\SP Backup Server\Открыть панель"; Filename:
 Name: "{commonprograms}\SP Backup Server\Создать резервную копию сервера"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -STA -ExecutionPolicy Bypass -File ""{app}\windows\Open-ServerSnapshot.ps1"" -Action Backup"
 Name: "{commonprograms}\SP Backup Server\Проверить резервную копию сервера"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -STA -ExecutionPolicy Bypass -File ""{app}\windows\Open-ServerSnapshot.ps1"" -Action Verify"
 Name: "{commonprograms}\SP Backup Server\Восстановить сервер из копии"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -STA -ExecutionPolicy Bypass -File ""{app}\windows\Open-ServerSnapshot.ps1"" -Action Restore"
+Name: "{commonprograms}\SP Backup Server\Проверить сервер"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -STA -ExecutionPolicy Bypass -File ""{app}\windows\Server-Status.ps1"" -ShowWindow"
+Name: "{commonprograms}\SP Backup Server\Подготовить обновление сервера"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -STA -ExecutionPolicy Bypass -File ""{app}\windows\Open-ServerSnapshot.ps1"" -Action PrepareUpgrade"
+Name: "{commonprograms}\SP Backup Server\Проверить комплект возврата"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -STA -ExecutionPolicy Bypass -File ""{app}\windows\Open-ServerSnapshot.ps1"" -Action VerifyUpgrade"
+Name: "{commonprograms}\SP Backup Server\Вернуть программу и данные"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -STA -ExecutionPolicy Bypass -File ""{app}\windows\Open-ServerSnapshot.ps1"" -Action RollbackUpgrade"
 [Code]
 var
   Credentials, Network: TInputQueryWizardPage;
@@ -157,6 +161,24 @@ begin
   if CurPageID = Network.ID then PortChanged(Network);
 end;
 
+function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo,
+  MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+var FirewallText: String;
+begin
+  if ExistingConfiguration then begin
+    Result := MemoDirInfo + NewLine + NewLine +
+      'Обновление сохранит настройки, пароль, агентов, ключи и сертификат.' + NewLine +
+      'До установки создайте и проверьте комплект через «Подготовить обновление сервера». ' +
+      'Обычная копия данных не возвращает прежнюю программу. Комплект содержит секреты: храните его отдельно.';
+  end else begin
+    if OpenFirewall.Checked then FirewallText := 'Разрешён в доменных и частных сетях' else FirewallText := 'Правило не создаётся';
+    Result := MemoDirInfo + NewLine + NewLine + 'Имя: ' + Credentials.Values[0] + NewLine +
+      'Адрес: ' + AddressWithPort(Credentials.Values[1], Network.Values[0]) + NewLine +
+      'Брандмауэр: ' + FirewallText + NewLine + 'Администратор: admin (пароль задан на предыдущем шаге)' + NewLine +
+      'После установки откройте панель, создайте приглашение и подключите первый агент с HTTPS-отпечатком.';
+  end;
+end;
+
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := ((PageID = Credentials.ID) or (PageID = Network.ID)) and (ExistingConfiguration or WizardSilent);
@@ -238,7 +260,7 @@ begin
     if PasswordFile <> '' then Args := Args + ' -AdministratorPasswordFile "' + PasswordFile + '"';
     try
       Configured := RunScript(ExpandConstant('{app}\windows\Configure-Server.ps1'), Args);
-      if not Configured then RaiseException('Настройка сервера не завершена. Данные сохранены. Повторите установку; диагностика находится в ProgramData\OneCBackupServer\data\logs.');
+      if not Configured then RaiseException('Настройка сервера не завершена. Данные сохранены. Повторите тот же установщик или верните проверенный полный комплект программы и данных; диагностика находится в ProgramData\OneCBackupServer\data\logs.');
     finally
       if PasswordFile = ExpandConstant('{tmp}\administrator-password.txt') then DeleteFile(PasswordFile);
       DeleteFile(NameFile); DeleteFile(AddressFile);

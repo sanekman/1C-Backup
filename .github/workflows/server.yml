@@ -64,6 +64,15 @@ jobs:
       - if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $baseline = Join-Path $env:RUNNER_TEMP 'SP-Backup-Server-preview8-setup.exe'
+          Invoke-WebRequest 'https://github.com/sanekman/1C-Backup/releases/download/server-v0.1.0-preview.8/SP-Backup-Server-0.1.0-preview.8-windows-x64-setup.exe' -OutFile $baseline
+          if ((Get-FileHash $baseline -Algorithm SHA256).Hash.ToLowerInvariant() -ne '491b9157d5d0664d53ac45ac5f4ba3bc298ab71c0d63cf4d385b126311748309') { throw 'Published baseline checksum differs.' }
+          $installer = (Get-ChildItem artifacts/server/SP-Backup-Server-*-windows-x64-setup.exe).FullName
+          & (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/server/windows_upgrade_smoke.ps1 -Installer $installer -BaselineInstaller $baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows upgrade/recovery acceptance failed.' }
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
           $installer = (Get-ChildItem artifacts/server/SP-Backup-Server-*-windows-x64-setup.exe).FullName
           & tests/server/windows_installer_smoke.ps1 -Installer $installer
       - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }}
@@ -90,6 +99,7 @@ jobs:
             artifacts/server-tests/compose-result.json
             artifacts/server-tests/windows-installer-result.json
             artifacts/server-tests/windows-snapshot-result.json
+            artifacts/server-tests/windows-upgrade-result.json
             artifacts/server-tests/windows-installer-*.log
             artifacts/server-tests/windows-setup.log
           retention-days: 14

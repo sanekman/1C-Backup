@@ -1,7 +1,7 @@
 ﻿# Same-computer, same-build cold snapshots for the standard Windows installation.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('Backup','Verify','Restore')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('Backup','Verify','Restore','PrepareUpgrade','VerifyUpgrade','RollbackUpgrade')][string]$Action,
     [Parameter(Mandatory=$true)][string]$BackupDirectory,
     [string]$DataDirectory = (Join-Path $env:ProgramData 'OneCBackupServer'),
     [string]$InstallDirectory = (Split-Path $PSScriptRoot -Parent)
@@ -84,6 +84,18 @@ function Layout([string]$Root=$DataDirectory) {
     }
     return $settings
 }
+function Program-Records([string]$Root=$InstallDirectory) {
+    # Inno rewrites its uninstall database during a same-build repair.
+    @(File-Records $Root) | Where-Object { $_.Path -notmatch '^unins[0-9]+\.(exe|dat|msg)$' }
+}
+function Program-Directory([string]$Path) {
+    Private-Directory $Path
+    $acl=Get-Acl -LiteralPath $Path
+    foreach ($sid in @('S-1-5-20','S-1-5-32-545')) {
+        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule -ArgumentList @((New-Object Security.Principal.SecurityIdentifier($sid)),'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow')))
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
 function Build-Identity {
     $result=@{}
     foreach ($name in @('SPBackup.Server.exe','SPBackup.Server.dll','postgresql\bin\postgres.exe')) { $result[$name]=Hash (Join-Path $InstallDirectory $name) }
@@ -160,7 +172,13 @@ function Copy-Tree([string]$Source,[string]$Target) {
     Write-Progress -Activity 'SP Backup Server: копирование' -Completed
 }
 function File-Records([string]$Root) {
-    foreach ($item in @(Tree $Root)) { if (!$item.PSIsContainer) { [pscustomobject]@{Path=$item.FullName.Substring($Root.Length+1); Length=$item.Length; Sha256=(Hash $item.FullName)} } }
+    $files=@(Tree $Root | Where-Object { !$_.PSIsContainer }); $index=0
+    foreach ($item in $files) {
+        if ($index % 100 -eq 0) { Write-Progress -Activity 'SP Backup Server: проверка SHA-256' -Status ("Файлов: $index / "+$files.Count) -PercentComplete ([int](100*$index/[Math]::Max(1,$files.Count))) }
+        $index++
+        [pscustomobject]@{Path=$item.FullName.Substring($Root.Length+1); Length=$item.Length; Sha256=(Hash $item.FullName)}
+    }
+    Write-Progress -Activity 'SP Backup Server: проверка SHA-256' -Completed
 }
 function Same-Records($Expected,$Actual) {
     if (@($Expected).Count -ne @($Actual).Count) { return $false }
@@ -172,13 +190,21 @@ function Same-Records($Expected,$Actual) {
     return $map.Count -eq 0
 }
 function Directories([string]$Root) { foreach ($item in @(Tree $Root)) { if ($item.PSIsContainer) { $item.FullName.Substring($Root.Length+1) } } }
-function Verify-Snapshot {
+function Verify-Snapshot([bool]$Upgrade=$false) {
     Local-Ntfs $BackupDirectory; Private-Backup $BackupDirectory
     $manifest=Join-Path $BackupDirectory $manifestName
     if (!(Test-Path -LiteralPath $manifest -PathType Leaf) -or (Get-Item -LiteralPath $manifest).Length -gt 16777216) { throw 'Выберите готовую копию с файлом snapshot.json размером не более 16 МиБ.' }
     $m=Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($m.Format -ne 1 -or $m.Machine -ne (Machine) -or $m.DataDirectory -ine $DataDirectory -or $m.InstallDirectory -ine $InstallDirectory) { throw 'Копия создана на другом компьютере или для других путей установки. Здесь она не применяется.' }
-    $build=Build-Identity
+    if ($m.Format -notin @(1,2) -or $m.Machine -ne (Machine) -or $m.DataDirectory -ine $DataDirectory -or $m.InstallDirectory -ine $InstallDirectory) { throw 'Копия создана на другом компьютере или для других путей установки. Здесь она не применяется.' }
+    if ($Upgrade) {
+        if ($m.Format -ne 2 -or !$m.PSObject.Properties['ProgramFiles'] -or !@($m.ProgramFiles).Count) { throw 'Это копия данных, а не полный комплект возврата перед обновлением.' }
+        $program=Join-Path $BackupDirectory 'program'
+        if (!(Same-Records @($m.ProgramFiles) @(File-Records $program)) -or @(Compare-Object @($m.ProgramDirectories) @(Directories $program) -CaseSensitive).Count) { throw 'Файлы прежней программы отсутствуют или изменены. Комплект возврата не применяется.' }
+        if (!(Same-Records @($m.BuildFiles) @(Program-Records $program))) { throw 'Программа комплекта не совпала с версией снимка данных.' }
+    } elseif ($m.Format -eq 2 -and !(Same-Records @($m.BuildFiles) @(Program-Records))) {
+        throw 'Полный состав установленной программы отличается от копии. Для возврата другой версии используйте полный комплект обновления.'
+    }
+    $build=if ($Upgrade) { @{} } else { Build-Identity }
     foreach ($name in $build.Keys) { if ($m.Build.($name) -cne $build[$name]) { throw 'Нужен тот же комплект программы и PostgreSQL, с которым создана копия. Установите подходящие файлы программы перед восстановлением.' } }
     $payload=Join-Path $BackupDirectory 'data'; $actual=@(File-Records $payload); $expected=@($m.Files)
     if (!$expected.Count -or $expected.Count -gt 200000 -or $actual.Count -ne $expected.Count) { throw 'В копии не хватает файлов либо появились посторонние файлы.' }
@@ -216,14 +242,26 @@ try {
         try { $locked=$mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $mutex.ReleaseMutex(); throw 'Предыдущее обслуживание завершилось неожиданно. Проверьте службы и сохранённые папки перед повтором.' }
         if (!$locked) { throw 'Установка или обслуживание сервера уже выполняется.' }; $held+=,$mutex
     }
-    if ($Action -eq 'Verify') { $verified=Verify-Snapshot; [pscustomobject]@{Action=$Action; Success=$true; Path=$BackupDirectory; Files=@($verified.Files).Count}; return }
+    if ($Action -in @('Verify','VerifyUpgrade')) { $verified=Verify-Snapshot ($Action -eq 'VerifyUpgrade'); [pscustomobject]@{Action=$Action; Success=$true; Path=$BackupDirectory; Files=@($verified.Files).Count; CreatedUtc=$verified.CreatedUtc}; return }
     $state=Owned-Services
-    if ($Action -eq 'Backup') {
+    if ($Action -in @('Backup','PrepareUpgrade')) {
         $settings=Layout
         if (Test-Path -LiteralPath $BackupDirectory) { throw 'Выберите новую папку копии. Существующие копии не перезаписываются.' }
-        $before=Build-Identity; Private-Directory $BackupDirectory
+        $before=Build-Identity; $buildFiles=@(Program-Records); Private-Directory $BackupDirectory
         $complete=$false
         try {
+            # Copy and verify the immutable program before interrupting the services.
+            $programFiles=@(); $programDirectories=@()
+            if ($Action -eq 'PrepareUpgrade') {
+                $program=Join-Path $BackupDirectory 'program'; Private-Directory $program
+                Copy-Tree $InstallDirectory $program
+                $programFiles=@(File-Records $program); $programDirectories=@(Directories $program)
+                if (!(Same-Records @(File-Records $InstallDirectory) $programFiles)) { throw 'Программа изменилась при подготовке комплекта. Повторите подготовку.' }
+                [IO.File]::Copy($PSCommandPath,(Join-Path $BackupDirectory 'Server-Snapshot.ps1'),$false)
+            }
+            $dataBytes=[long]0; foreach ($item in @(Tree $DataDirectory)) { if (!$item.PSIsContainer) { $dataBytes+=$item.Length } }
+            $targetDrive=New-Object IO.DriveInfo([IO.Path]::GetPathRoot($BackupDirectory))
+            if ($targetDrive.AvailableFreeSpace -lt $dataBytes+1073741824) { throw 'Недостаточно места для данных и резерва 1 ГиБ. Службы не останавливались.' }
             Validate-RunningCluster
             Stop-Both
             $payload=Join-Path $BackupDirectory 'data'; Private-Directory $payload
@@ -234,26 +272,40 @@ try {
             if (@(Compare-Object $directories @(Directories $payload) -CaseSensitive).Count) { throw 'Папки копии не совпали с исходными. Копия не отмечена готовой.' }
             Check-Stopped
             $after=Build-Identity; foreach ($name in $before.Keys) { if ($after[$name] -cne $before[$name]) { throw 'Во время копирования изменились файлы программы сервера. Копия не отмечена готовой.' } }
-            $m=[ordered]@{Format=1; CreatedUtc=[DateTime]::UtcNow.ToString('o'); Machine=(Machine); DataDirectory=$DataDirectory; InstallDirectory=$InstallDirectory; Build=$before; Files=$records; Directories=$directories}
+            if (!(Same-Records $buildFiles @(Program-Records))) { throw 'Полный состав программы изменился при копировании.' }
+            $uninstallKey='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{ACDE2073-28A8-43F8-9A84-BB0BE3C6831D}_is1'
+            $displayVersion=(Get-ItemProperty -LiteralPath $uninstallKey -Name DisplayVersion -ErrorAction Stop).DisplayVersion
+            $m=[ordered]@{Format=2; BuildFiles=$buildFiles; ProgramFiles=$programFiles; ProgramDirectories=$programDirectories; DisplayVersion=$displayVersion; CreatedUtc=[DateTime]::UtcNow.ToString('o'); Machine=(Machine); DataDirectory=$DataDirectory; InstallDirectory=$InstallDirectory; Build=$before; Files=$records; Directories=$directories}
             $json=$m | ConvertTo-Json -Depth 6
             if ([Text.Encoding]::UTF8.GetByteCount($json) -gt 16777216) { throw 'Описание копии превысило поддерживаемый размер 16 МиБ.' }
             [IO.File]::WriteAllText((Join-Path $BackupDirectory ($manifestName+'.tmp')),$json,(New-Object Text.UTF8Encoding($false)))
             [IO.File]::Move((Join-Path $BackupDirectory ($manifestName+'.tmp')),(Join-Path $BackupDirectory $manifestName))
             $complete=$true
         } finally { Resume-Services $state }
-        if ($complete) { [pscustomobject]@{Action=$Action; Success=$true; Path=$BackupDirectory; Files=$records.Count} }
+        if ($complete) { [pscustomobject]@{Action=$Action; Success=$true; Path=$BackupDirectory; Files=$records.Count; CreatedUtc=$m.CreatedUtc; Bytes=$dataBytes} }
     } else {
-        $verified=Verify-Snapshot
+        $upgrade=$Action -eq 'RollbackUpgrade'
+        $verified=Verify-Snapshot $upgrade
         $stage=$DataDirectory+'.restore-'+[Guid]::NewGuid().ToString('N'); $previous=$DataDirectory+'.before-restore-'+[Guid]::NewGuid().ToString('N')
         Private-Directory $stage $true; Copy-Tree (Join-Path $BackupDirectory 'data') $stage
         # Validate the completed staged copy before touching live data or stopping services.
         $staged=@(File-Records $stage)
         if (!(Same-Records @($verified.Files) $staged)) { throw 'Подготовленные файлы восстановления не совпали с копией. Рабочие данные не заменялись.' }
         if (@(Compare-Object @($verified.Directories) @(Directories $stage) -CaseSensitive).Count) { throw 'Подготовленные папки восстановления не совпали с копией. Рабочие данные не заменялись.' }
+        $programStage=$InstallDirectory+'.restore-'+[Guid]::NewGuid().ToString('N')
+        $previousProgram=$InstallDirectory+'.before-restore-'+[Guid]::NewGuid().ToString('N')
+        if ($upgrade) {
+            Program-Directory $programStage; Copy-Tree (Join-Path $BackupDirectory 'program') $programStage
+            if (!(Same-Records @($verified.ProgramFiles) @(File-Records $programStage)) -or @(Compare-Object @($verified.ProgramDirectories) @(Directories $programStage) -CaseSensitive).Count) { throw 'Подготовленная программа не совпала с комплектом. Рабочие данные не заменялись.' }
+        }
         $hadPrevious=Test-Path -LiteralPath $DataDirectory
-        $swapped=$false
+        $swapped=$false; $programSwapped=$false; $programMoved=$false
         try {
             Stop-Both $false; Check-Stopped
+            if ($upgrade) {
+                [IO.Directory]::Move($InstallDirectory,$previousProgram); $programMoved=$true
+                [IO.Directory]::Move($programStage,$InstallDirectory); $programSwapped=$true
+            }
             if ($hadPrevious) { [IO.Directory]::Move($DataDirectory,$previous) }
             try { [IO.Directory]::Move($stage,$DataDirectory); $swapped=$true } catch { if ($hadPrevious) { [IO.Directory]::Move($previous,$DataDirectory) }; throw }
             Resume-Services @{App=$true;Database=$true}; Ready (Layout)
@@ -263,10 +315,16 @@ try {
                 [IO.Directory]::Move($DataDirectory,$stage)
                 if ($hadPrevious) { [IO.Directory]::Move($previous,$DataDirectory) }
             }
+            if ($programSwapped) { [IO.Directory]::Move($InstallDirectory,$programStage) }
+            if ($programMoved) { [IO.Directory]::Move($previousProgram,$InstallDirectory) }
             Resume-Services $state
             throw
         }
-        [pscustomobject]@{Action=$Action; Success=$true; Path=$BackupDirectory; PreviousData=$(if ($hadPrevious) { $previous } else { $null })}
+        if ($upgrade) {
+            # Inno's uninstall files were restored with the program; keep the displayed version consistent.
+            Set-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{ACDE2073-28A8-43F8-9A84-BB0BE3C6831D}_is1' -Name DisplayVersion -Value $verified.DisplayVersion
+        }
+        [pscustomobject]@{Action=$Action; Success=$true; Path=$BackupDirectory; PreviousProgram=$(if ($upgrade) { $previousProgram } else { $null }); PreviousData=$(if ($hadPrevious) { $previous } else { $null })}
     }
 } finally {
     foreach ($mutex in $held) { $mutex.ReleaseMutex() }
