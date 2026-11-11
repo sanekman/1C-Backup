@@ -52,7 +52,11 @@ class ContainerUpdateTests(unittest.TestCase):
 
     def test_changed_compose_settings_are_rejected_before_any_mutation(self):
         import copy
-        environment = {'Server__ConnectionString': 'Host=db;Database=onecbackup'}
+        environment = {'Server__ConnectionString': 'Host=db;Database=onecbackup',
+                       'Server__DataDirectory': updater.DATA,
+                       'Server__HttpsCertificatePath': '/run/secrets/server-certificate',
+                       'Server__HttpsCertificatePasswordFile': '/run/secrets/certificate-password',
+                       'Server__DatabasePasswordFile': '/run/secrets/database-password'}
         names = ['database-password', 'administrator-password', 'server-certificate', 'certificate-password']
         config = {'name': 'fixture', 'services': {'server': {'environment': environment,
                   'volumes': [{'source': 'server-data', 'target': updater.DATA, 'type': 'volume'}],
@@ -66,15 +70,19 @@ class ContainerUpdateTests(unittest.TestCase):
                   'NetworkSettings': {'Ports': {'7443/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '7443'}]}}}
         db = {'State': {'Running': True}, 'Config': {'Image': 'postgres:17-alpine',
               'Env': ['POSTGRES_USER=onecbackup', 'POSTGRES_DB=onecbackup']}}
-        for changed in ['environment', 'volume', 'secret', 'port']:
+        for changed in ['environment', 'volume', 'secret', 'port', 'data-directory']:
             value = copy.deepcopy(config)
             if changed == 'environment': value['services']['server']['environment']['Server__ConnectionString'] = 'Host=db;Database=other'
             if changed == 'volume': value['volumes']['server-data']['name'] = 'other_volume'
             if changed == 'secret': value['secrets']['server-certificate']['file'] = '/tmp/other-cert'
             if changed == 'port': value['services']['server']['ports'][0]['published'] = '9999'
+            live = copy.deepcopy(server)
+            if changed == 'data-directory':
+                value['services']['server']['environment']['Server__DataDirectory'] = '/unmounted-data'
+                live['Config']['Env'] = [item.replace(updater.DATA, '/unmounted-data') for item in live['Config']['Env']]
             with self.subTest(changed=changed), patch.object(updater, 'command', return_value=json.dumps(value)) as run, \
                  patch.object(updater.ComposeUpdate, 'one_container', side_effect=['server-id', 'db-id']), \
-                 patch.object(updater.ComposeUpdate, 'inspect', side_effect=[server, server, db]):
+                 patch.object(updater.ComposeUpdate, 'inspect', side_effect=[live, live, db]):
                 with self.assertRaises(updater.UpdateError):
                     updater.ComposeUpdate(Path('/tmp/fixture/compose.yaml'))
                 self.assertEqual(1, run.call_count)

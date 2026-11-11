@@ -115,6 +115,12 @@ class ComposeUpdate:
         self.volume = mounts[0]["Name"]
         environment = self.config["services"]["server"].get("environment", {})
         live_environment = dict(item.split("=", 1) for item in server["Config"]["Env"])
+        required_paths = {"Server__DataDirectory": DATA,
+                          "Server__HttpsCertificatePath": "/run/secrets/server-certificate",
+                          "Server__HttpsCertificatePasswordFile": "/run/secrets/certificate-password",
+                          "Server__DatabasePasswordFile": "/run/secrets/database-password"}
+        if any(live_environment.get(key) != value for key, value in required_paths.items()):
+            raise UpdateError("Нужны штатные постоянный каталог данных и файлы секретов контейнера.")
         if any(live_environment.get(key) != value for key, value in environment.items()):
             raise UpdateError("Настройки Compose отличаются от работающего контейнера. Передайте прежние --env-file и --project-name.")
         volumes = self.config["services"]["server"].get("volumes", [])
