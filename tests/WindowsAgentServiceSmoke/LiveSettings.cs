@@ -3,7 +3,7 @@ using ICSharpCode.SharpZipLib.Zip;
 
 internal static partial class Program
 {
-    private static async Task<string> VerifyLiveSettingsAsync(string directory, List<string> checks)
+    private static async Task<(string ArchiveKey, BackupJob Job)> VerifyLiveSettingsAsync(string directory, List<string> checks)
     {
         var control = new LocalAgentControlStore(directory);
         var state = (await control.ReadAsync())!;
@@ -47,6 +47,6 @@ internal static partial class Program
         Require(LocalJobUpdates.Hash(await store.LoadAsync()) == LocalJobUpdates.Hash(before), "Restoring the fixture profile failed.");
         checks.Add("protected-job-settings-saved-and-removed-by-running-service-without-restart");
         checks.Add("new-archive-password-applied-by-distinct-service-account-with-verified-zip-and-old-password-preserved");
-        return newKey;
+        return (newKey, copyJob);
     }
 }

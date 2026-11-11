@@ -296,7 +296,8 @@ internal static partial class Program
             var startupRun = (await history.ReadAsync()).Single(run => run.JobId == startup.Id);
             Require(startupRun.Status == BackupRunStatus.Succeeded, "Startup backup failed under the service account: " + startupRun.Error);
             checks.Add("startup-backup-without-interactive-login");
-            liveArchiveKey = await VerifyLiveSettingsAsync(directory, checks);
+            var liveSettings = await VerifyLiveSettingsAsync(directory, checks);
+            liveArchiveKey = liveSettings.ArchiveKey;
             var storageChecks = new LocalStorageCheckQueue(directory);
             var beforeProbeHistory = await File.ReadAllBytesAsync(Path.Combine(directory, "runs.json"));
             var beforeProbeCatalog = await File.ReadAllBytesAsync(Path.Combine(directory, "copies.json"));
@@ -391,14 +392,14 @@ internal static partial class Program
             await Wait(async () => (receipt = await queue.ReadReceiptAsync(command.RequestId)) is { Phase: not LocalManualRunPhase.Accepted }, "Disabled manual-only job did not finish through the owner queue.");
             Require(receipt!.Phase == LocalManualRunPhase.Finished, "Manual command was rejected: " + receipt.Error);
             var runs = await history.ReadAsync();
-            Require(runs.Count == 2 && runs.All(run => run.Status == BackupRunStatus.Succeeded), "Expected exactly two successful service backups.");
+            Require(runs.Count == 3 && runs.All(run => run.Status == BackupRunStatus.Succeeded), "Expected startup, live-settings and manual service backups.");
             checks.Add("owner-manual-queue-for-disabled-manual-job");
             var catalog = new BackupCatalog(Path.Combine(directory, "copies.json"));
-            var records = await catalog.ReadAsync(); Require(records.Count == 2, "Encrypted copies were not registered.");
+            var records = await catalog.ReadAsync(); Require(records.Count == 3, "Encrypted copies were not registered.");
             var restore = Path.Combine(directory, "restore"); Directory.CreateDirectory(restore);
             foreach (var record in records)
             {
-                var job = jobs.Single(job => job.Id == record.JobId);
+                var job = jobs.Append(liveSettings.Job).Single(job => job.Id == record.JobId);
                 var extracted = await new OneCArchiveExtractor().ExtractAsync(record, job, restore);
                 Require(await File.ReadAllTextAsync(extracted.Path) == payload, "Encrypted service copy did not restore correctly.");
             }

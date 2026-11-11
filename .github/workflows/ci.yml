@@ -17,17 +17,22 @@ on:
         type: choice
         default: windows-latest
         options: [windows-latest, windows-2022]
+      verified_run_id:
+        description: 'For packaging: prior run with passed verify job and unchanged production files'
+        required: false
+        default: ''
       scope:
-        description: 'Use management after unchanged SQL/SMB/volume checks already passed'
+        description: 'Full, management, or packaging after OS-matching source/UI verification passed'
         type: choice
         default: full
-        options: [full, management]
+        options: [full, management, packaging]
 
 permissions:
   contents: read
 
 jobs:
   verify:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'packaging' || inputs.platform != 'windows'
     strategy:
       fail-fast: false
       matrix:
@@ -92,7 +97,7 @@ jobs:
           retention-days: 14
 
   native-sql:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management' && inputs.scope != 'packaging')
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
     timeout-minutes: 20
     env:
@@ -123,7 +128,7 @@ jobs:
           retention-days: 14
 
   native-smb:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management' && inputs.scope != 'packaging')
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
     timeout-minutes: 10
     env:
@@ -176,7 +181,7 @@ jobs:
           retention-days: 14
 
   native-volume:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management' && inputs.scope != 'packaging')
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
     timeout-minutes: 10
     env:
@@ -199,14 +204,43 @@ jobs:
           retention-days: 14
 
   package:
-    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.native-agent-service.result == 'success' && (inputs.scope == 'management' || (needs.native-sql.result == 'success' && needs.native-smb.result == 'success' && needs.native-volume.result == 'success')) }}
+    if: ${{ !cancelled() && (needs.verify.result == 'success' || (inputs.scope == 'packaging' && inputs.platform == 'windows')) && needs.native-agent-service.result == 'success' && (inputs.scope == 'management' || inputs.scope == 'packaging' || (needs.native-sql.result == 'success' && needs.native-smb.result == 'success' && needs.native-volume.result == 'success')) }}
     needs: [verify, native-sql, native-smb, native-agent-service, native-volume]
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
     timeout-minutes: 20
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
+      - name: Validate reused source and UI verification
+        if: inputs.scope == 'packaging'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_RUN_ID: ${{ inputs.verified_run_id }}
+          VERIFIED_WINDOWS_RUNNER: ${{ inputs.windows_runner || 'windows-latest' }}
+        run: |
+          if ($env:VERIFIED_RUN_ID -notmatch '^\d+$') { throw 'Packaging requires a verified run ID.' }
+          $prior = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:VERIFIED_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $prior.path -ne '.github/workflows/ci.yml') { throw 'Cannot read a matching earlier verification.' }
+          $jobName = 'verify ('+$env:VERIFIED_WINDOWS_RUNNER+')'
+          $deadline = (Get-Date).AddMinutes(10)
+          do {
+            $jobs = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:VERIFIED_RUN_ID/jobs" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot read earlier job results.' }
+            $verified = @($jobs.jobs | Where-Object name -eq $jobName)
+            if ($verified.Count -ne 1) { throw 'The prior verification does not match the target OS.' }
+            if ($verified[0].status -eq 'completed') { break }
+            if ((Get-Date) -gt $deadline) { throw 'The prior verification has not finished.' }
+            Start-Sleep -Seconds 10
+          } while ($true)
+          if ($verified[0].conclusion -ne 'success') { throw 'The earlier source/UI verification did not pass.' }
+          $comparison = gh api "repos/$env:GITHUB_REPOSITORY/compare/$($prior.head_sha)...$env:GITHUB_SHA" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $comparison.status -notin @('ahead','identical')) { throw 'Cannot establish source ancestry.' }
+          if ($comparison.files.Count -ge 300) { throw 'Diff is truncated: run full verification.' }
+          if (@($comparison.files | Where-Object { $_.filename -notmatch '^(tests/|docs/|\.github/workflows/|AGENTS\.md$)' }).Count) { throw 'Production sources changed: run full verification.' }
+          Write-Output ('Reused passed '+$jobName+' at '+$prior.head_sha+'; only tests/docs/workflows changed.')
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.402
