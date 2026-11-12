@@ -28,12 +28,18 @@ on:
         description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
         default: full
-        options: [full, compose, maintenance, installed, proxmox]
+        options: [full, compose, maintenance, installed, proxmox, reports]
+      report_source_run:
+        description: 'Reports scope only: existing server.yml run to validate without rerunning checks'
+        type: string
+      report_source_commit:
+        description: 'Reports scope only: exact tested source commit'
+        type: string
 permissions:
   contents: read
 jobs:
   server:
-    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'proxmox')
+    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'proxmox' && inputs.scope != 'reports')
     strategy:
       fail-fast: false
       matrix:
@@ -125,7 +131,7 @@ jobs:
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
 
   proxmox-installer:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'reports')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -240,4 +246,56 @@ jobs:
           path: |
             artifacts/server-tests/*.json
             artifacts/server-tests/windows-installer-*.log
+          retention-days: 14
+
+  reports:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'reports'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify source commit and saved reports without repeating acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.report_source_run }}
+          SOURCE_COMMIT: ${{ inputs.report_source_commit }}
+          RUNTIME: ${{ inputs.platform == 'windows' && 'win-x64' || 'linux-x64' }}
+        run: |
+          python3 - <<'PY'
+          import json,os,re,shutil,subprocess,sys,tempfile
+          from pathlib import Path
+          from datetime import datetime,timezone
+          run=os.environ['SOURCE_RUN']; commit=os.environ['SOURCE_COMMIT']; runtime=os.environ['RUNTIME']
+          if not run.isdecimal() or not re.fullmatch('[a-f0-9]{40}',commit) or runtime not in ['win-x64','linux-x64']:
+              raise ValueError('Invalid source identity')
+          repo=os.environ['GITHUB_REPOSITORY']
+          source=json.loads(subprocess.check_output(['gh','api',f'repos/{repo}/actions/runs/{run}']))
+          if source['head_sha']!=commit or source['path']!='.github/workflows/server.yml' or source['status']!='completed':
+              raise ValueError('Source run does not match expected completed server acceptance')
+          platform='windows' if runtime=='win-x64' else 'linux'
+          with tempfile.TemporaryDirectory(prefix='server-evidence-') as temporary:
+              subprocess.run(['gh','run','download',run,'--repo',repo,'--name',f'server-{runtime}-verification','--dir',temporary],check=True)
+              matches=list(Path(temporary).rglob(f'server-{platform}.trx'))
+              if len(matches)!=1:raise ValueError('Expected exactly one integration report')
+              root=matches[0].parent
+              subprocess.run([sys.executable,'tests/server/verify_results.py','--runtime',runtime,'--results-dir',str(root)],check=True)
+              output=Path('artifacts/revalidated-server');output.mkdir(parents=True)
+              names=[f'server-{platform}.trx',f'server-package-{platform}.trx']
+              if platform=='windows':names+=['windows-installer-result.json','windows-snapshot-result.json','windows-upgrade-result.json']
+              for name in names:shutil.copy2(root/name,output/name)
+              report={'sourceRun':int(run),'sourceCommit':commit,'sourceConclusion':source['conclusion'],
+                      'sourceUrl':source['html_url'],'runtime':runtime,'reportsAccepted':True,'acceptanceRerun':False,
+                      'validatedAtUtc':datetime.now(timezone.utc).isoformat()}
+              (output/'revalidation-result.json').write_text(json.dumps(report,indent=2))
+              print(json.dumps(report))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: revalidated-server-${{ inputs.platform == 'windows' && 'win-x64' || 'linux-x64' }}-reports
+          path: artifacts/revalidated-server
           retention-days: 14
