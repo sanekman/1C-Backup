@@ -155,7 +155,8 @@ for failure in ['migration','readiness']:
     checks.append(failure+'-failure-restores-schema5-credentials-data-program-and-session')
 
 # Install the root-owned broker once, then exercise the real socket protocol.
-assert subprocess.run(['python3','/setup/install.py','--inside-container','--enable-web-updates'],capture_output=True).returncode==0
+enabled=subprocess.run(['python3','/setup/install.py','--inside-container','--enable-web-updates'],capture_output=True,text=True)
+assert enabled.returncode==0,enabled.stderr
 account=pwd.getpwnam('onec-backup-server')
 assert m.WEB_UPDATE_SCRIPT.stat().st_uid==0 and m.WEB_UPDATE_SCRIPT.stat().st_mode & 0o077==0
 assert m.WEB_UPDATE_HOME.stat().st_uid==0 and m.WEB_UPDATE_HOME.stat().st_mode & 0o077==0

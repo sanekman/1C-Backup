@@ -58,8 +58,10 @@ RUN --mount=type=secret,id=build-ca,required=true \\
                    '-e', 'SSL_CERT_FILE=/run/proxy-ca.pem', identity, 'sleep', 'infinity', check=True, stdout=subprocess.DEVNULL)
             setup = '''set -eu
 printf 'Acquire::https::CaInfo "/run/proxy-ca.pem";\n' >/etc/apt/apt.conf.d/99fixture-ca
-cp /setup/systemctl.py /usr/local/bin/systemctl
-chmod 755 /usr/local/bin/systemctl
+# The broker deliberately uses a fixed /usr/bin PATH. Replace only the
+# disposable fixture binary so its independent worker uses the same recorder.
+cp /setup/systemctl.py /usr/bin/systemctl
+chmod 755 /usr/bin/systemctl
 # Force the minimal-container failure case without preinstalling PostgreSQL:
 # the installer must still require a fresh CT, then create its own UTF8 DB.
 mkdir -p /etc/postgresql-common
