@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import tarfile
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 import hashlib
@@ -21,11 +23,14 @@ class ProxmoxUpdateTests(unittest.TestCase):
 
     def test_host_updates_existing_ct_without_creation_reboot_or_reconfiguration(self):
         calls = []
-        def run(args, **kwargs):
+        def step(label, args, **kwargs):
             calls.append(list(map(str, args)))
-            return 'status: running' if args[:2] == ['pct', 'status'] else ''
+            if args[:2] == ['pct', 'status']: return 'status: running'
+            if 'sha256sum' in args:
+                return hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest() + '  ' + args[-1]
+            return ''
         with patch.object(module.platform, 'machine', return_value='x86_64'), patch.object(module.shutil, 'which', return_value='/fixture'), \
-             patch.object(module, 'json_command', return_value=[{'vmid': 120, 'type': 'lxc'}]), patch.object(module, 'run', side_effect=run):
+             patch.object(module, 'json_command', return_value=[{'vmid': 120, 'type': 'lxc'}]), patch.object(module, 'host_update_step', side_effect=step):
             module.host_update(self.args())
         self.assertFalse(any(c[:2] in [['pct', 'create'], ['pct', 'destroy'], ['pct', 'start'], ['pct', 'reboot'], ['pct', 'set']] for c in calls))
         self.assertEqual('pct', calls[-1][0]); self.assertIn('--inside-container', calls[-1]); self.assertIn('--update', calls[-1]); self.assertIn('0.1.0-preview.9', calls[-1])
@@ -37,15 +42,52 @@ class ProxmoxUpdateTests(unittest.TestCase):
         for resources, status in [([{'vmid':120,'type':'qemu'}], 'status: running'), ([], 'status: running'), ([{'vmid':120,'type':'lxc'}], 'status: stopped')]:
             with self.subTest(resources=resources,status=status), patch.object(module.platform,'machine',return_value='x86_64'), \
                  patch.object(module.shutil,'which',return_value='/fixture'), patch.object(module,'json_command',return_value=resources), \
-                 patch.object(module,'run',return_value=status) as run:
+                 patch.object(module,'host_update_step',return_value=status) as run:
                 with self.assertRaises(ValueError): module.host_update(self.args())
-                self.assertFalse(any(call.args[0][:2] == ['pct','push'] for call in run.call_args_list))
+                self.assertFalse(any(call.args[1][:2] == ['pct','push'] for call in run.call_args_list))
 
     def test_update_requires_explicit_existing_id(self):
         args = self.args(); args.id = None
-        with patch.object(module.platform,'machine',return_value='x86_64'), patch.object(module.shutil,'which',return_value='/fixture'), patch.object(module,'run') as run:
+        with patch.object(module.platform,'machine',return_value='x86_64'), patch.object(module.shutil,'which',return_value='/fixture'), patch.object(module,'host_update_step') as run:
             with self.assertRaises(ValueError): module.host_update(args)
             run.assert_not_called()
+
+    def test_transfer_failure_and_mismatched_hash_never_launch_the_guest(self):
+        for failure in ['directory', 'push', 'hash']:
+            calls=[]
+            def step(label,args,**kwargs):
+                calls.append(args)
+                if args[:2]==['pct','status']:return 'status: running'
+                if failure=='directory' and 'install' in args:raise RuntimeError('directory failure 129')
+                if failure=='push' and args[:2]==['pct','push']:raise RuntimeError('push failure 129')
+                if 'sha256sum' in args:return '0'*64+'  '+args[-1]
+                return ''
+            with self.subTest(failure=failure),patch.object(module.platform,'machine',return_value='x86_64'), \
+                 patch.object(module.shutil,'which',return_value='/fixture'), \
+                 patch.object(module,'json_command',return_value=[{'vmid':120,'type':'lxc'}]), \
+                 patch.object(module,'host_update_step',side_effect=step):
+                with self.assertRaises((RuntimeError,ValueError)):module.host_update(self.args())
+                self.assertFalse(any('--inside-container' in call for call in calls))
+                self.assertEqual(1,sum('install' in call for call in calls))
+
+    def test_failed_pct_step_identifies_the_stage_and_preserves_exit_code(self):
+        with self.assertRaisesRegex(RuntimeError,'fixture transfer.*129'):
+            module.host_update_step('fixture transfer',[sys.executable,'-c','import sys;sys.exit(129)'])
+
+    @unittest.skipIf(os.name == 'nt', 'Linux PTY semantics used by lxc-attach')
+    def test_pct_step_has_no_tty_even_when_started_from_an_interactive_console(self):
+        import pty
+        master,slave=pty.openpty()
+        try:
+            child="import os;assert not any(os.isatty(fd) for fd in (0,1,2));print('no-tty: OK')"
+            code=("import importlib.util,sys;spec=importlib.util.spec_from_file_location('updater',"+repr(module.__file__)+
+                  ");m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
+                  "m.host_update_step('fixture console',[sys.executable,'-c',"+repr(child)+"])")
+            result=subprocess.run([sys.executable,'-c',code],stdin=slave,stdout=slave,stderr=slave,timeout=10)
+            self.assertEqual(0,result.returncode)
+            self.assertIn(b'no-tty: OK',os.read(master,8192))
+        finally:
+            os.close(slave);os.close(master)
 
     def test_latest_selects_only_published_compatible_server_previews(self):
         def download(url, target, limit):

@@ -742,6 +742,26 @@ def guest_update(version, package_directory=None, backup_directory=None):
         raise RuntimeError('Обновление не выполнено; прежняя версия восстановлена. Комплект: ' + str(backup)) from None
 
 
+def host_update_step(label, args, *, capture=False):
+    """Keep all pct descriptors off the console so lxc-attach does not allocate a PTY."""
+    print(label + '…', flush=True)
+    environment = dict(os.environ, LANG='C', LC_ALL='C')
+    output = []
+    # stderr must also be a pipe: lxc-attach checks all three standard FDs.
+    with subprocess.Popen([str(a) for a in args], stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          env=environment, text=True, encoding='utf-8', errors='replace') as process:
+        for line in process.stdout:
+            if capture:
+                output.append(line)
+            else:
+                print(line, end='', flush=True)
+        code = process.wait()
+    if code:
+        raise RuntimeError(label + ': команда ' + str(args[0]) + ' завершилась с кодом ' + str(code) + '.')
+    return ''.join(output).strip() if capture else None
+
+
 def host_update(args):
     if (platform.machine() != 'x86_64' or any(not shutil.which(c) for c in ['pct', 'pvesh'])
             or args.id is None or not 100 <= args.id <= 999999999):
@@ -749,16 +769,22 @@ def host_update(args):
     resources = json_command(['pvesh', 'get', '/cluster/resources', '--type', 'vm', '--output-format', 'json'])
     if not any(int(row['vmid']) == args.id and row.get('type') == 'lxc' for row in resources):
         raise ValueError('Указанный ID не принадлежит существующему LXC.')
-    if run(['pct', 'status', str(args.id)], capture=True).strip() != 'status: running':
+    if host_update_step('Проверка состояния CT', ['pct', 'status', str(args.id)], capture=True) != 'status: running':
         raise ValueError('Сначала запустите существующий CT на этом узле.')
     # A unique private directory avoids replacing the original installation request/script.
     remote = '/root/sp-backup-update-' + secrets.token_hex(8)
-    run(['pct', 'exec', str(args.id), '--', 'install', '-d', '-m', '0700', remote])
-    run(['pct', 'push', str(args.id), str(Path(__file__).resolve()), remote + '/update.py', '--perms', '0600'])
-    command = ['pct', 'exec', str(args.id), '--', 'python3', remote + '/update.py', '--inside-container', '--update', '--version', args.version]
+    host_update_step('Подготовка каталога в CT', ['pct', 'exec', str(args.id), '--', 'install', '-d', '-m', '0700', remote])
+    source = Path(__file__).resolve()
+    host_update_step('Передача скрипта в CT', ['pct', 'push', str(args.id), str(source), remote + '/update.py', '--perms', '0600'])
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    observed = host_update_step('Проверка SHA-256 скрипта в CT',
+                                ['pct', 'exec', str(args.id), '--', 'sha256sum', remote + '/update.py'], capture=True)
+    if observed.split() != [digest, remote + '/update.py']:
+        raise ValueError('SHA-256 переданного скрипта не совпадает; обновление не запущено.')
+    command = ['pct', 'exec', str(args.id), '--', 'python3', '-u', remote + '/update.py', '--inside-container', '--update', '--version', args.version]
     if args.backup_directory:
         command += ['--backup-directory', str(args.backup_directory)]
-    run(command)
+    host_update_step('Запуск проверенного обновлятора в CT', command)
 
 
 def host_create(args):
