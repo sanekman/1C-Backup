@@ -7,20 +7,48 @@ import argparse
 import json
 from pathlib import Path
 import time
+import socket
+import secrets
+import os
 import urllib.parse
 from playwright.sync_api import sync_playwright
 
 
+def serve_fixture(state_file, socket_path):
+    if socket_path is None or socket_path.parent.resolve()!=state_file.parent.resolve():
+        raise ValueError('Fixture socket must share the private status directory')
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as listener:
+        listener.bind(str(socket_path));listener.listen(8)
+        try:
+            while True:
+                connection,_=listener.accept()
+                with connection:
+                    request=json.loads(connection.makefile('rb').readline(4097))
+                    state=json.loads(state_file.read_text())
+                    if request.get('command') in ['check','start']:
+                        state['jobId']=secrets.token_hex(16);state.pop('backupDirectory',None)
+                        state['phase']='checking' if request['command']=='check' else 'updating'
+                        if request['command']=='start':state['targetVersion']=request['version']
+                        temporary=state_file.with_suffix('.broker.tmp');temporary.write_text(json.dumps(state));temporary.replace(state_file)
+                    connection.sendall(json.dumps(state).encode()+b'\n')
+        finally:socket_path.unlink()
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--url',required=True);parser.add_argument('--user',default='preview')
-    parser.add_argument('--password-file',type=Path,required=True);parser.add_argument('--state-file',type=Path,required=True)
-    parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--url');parser.add_argument('--user',default='preview')
+    parser.add_argument('--password-file',type=Path);parser.add_argument('--state-file',type=Path,required=True)
+    parser.add_argument('--output',type=Path)
+    parser.add_argument('--serve-fixture',action='store_true');parser.add_argument('--socket',type=Path)
     args=parser.parse_args()
-    if urllib.parse.urlsplit(args.url).hostname not in ['localhost','127.0.0.1']:
-        raise ValueError('Only isolated loopback fixtures are allowed')
     state=json.loads(args.state_file.read_text())
     if state.get('browserFixture') is not True:raise ValueError('The status file is not a browser fixture')
+    if args.state_file.parent.stat().st_uid!=os.getuid() or args.state_file.parent.stat().st_mode & 0o077:
+        raise ValueError('Fixture status directory must be private and owned by this user')
+    if args.serve_fixture:
+        serve_fixture(args.state_file,args.socket);return
+    if not args.password_file or not args.output or urllib.parse.urlsplit(args.url or '').hostname not in ['localhost','127.0.0.1']:
+        raise ValueError('Only isolated loopback fixtures with private credentials are allowed')
     args.output.mkdir(parents=True,exist_ok=True)
     checks=[]
     def save(phase,**fields):
