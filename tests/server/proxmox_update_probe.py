@@ -39,6 +39,16 @@ assert pg('SELECT max(version) FROM server_schema')=='5'
 assert (m.APPLICATION/'current').resolve().name=='0.1.0-preview.8'
 assert secrets_hash()==original
 checks.append('published-preview5-to-preview8-preparation-preserves-credentials-and-data')
+# Simulate an equivalent connection string, including quoted delimiters and explicit port.
+settings=json.loads((config/'server.json').read_text())
+connection='User ID=onecbackup; DATABASE=onecbackup; Port=5432; SERVER=localhost; Pooling=false;Timeout=10;Application Name="Proxmox; update";Password="ignored;fixture"'
+settings['Server']['ConnectionString']=connection
+(config/'server.json').write_text(json.dumps(settings))
+subprocess.run(['systemctl','stop','onec-backup-server'],check=True)
+subprocess.run(['systemctl','start','onec-backup-server'],check=True)
+m.wait_ready(8443)
+checks.append('equivalent-connection-string-validated-against-the-same-local-cluster')
+
 context=ssl.create_default_context(cafile=str(config/'ca.crt'))
 opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPSHandler(context=context),urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 base='https://127.0.0.1:8443/'
@@ -102,6 +112,7 @@ assert cli('0.1.0-preview.9').returncode==0
 assert pg('SELECT max(version) FROM server_schema')=='6'
 assert (m.APPLICATION/'current').resolve().name=='0.1.0-preview.9'
 assert secrets_hash()==original
+assert json.loads((config/'server.json').read_text())['Server']['ConnectionString']==connection
 assert request('api/v1/management/session')[0]==200
 assert request(f'api/v1/agents/{agent}/configuration',headers=bearer)[0]==200
 assert (m.APPLICATION/'0.1.0-preview.8').is_dir()

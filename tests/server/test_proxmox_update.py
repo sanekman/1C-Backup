@@ -54,6 +54,39 @@ class ProxmoxUpdateTests(unittest.TestCase):
         with patch.object(module,'download',side_effect=download):
             self.assertEqual('0.1.0-preview.9', module.latest_update_version())
 
+    def test_equivalent_local_connection_strings_are_accepted(self):
+        for value in ['Host=127.0.0.1;Database=onecbackup;Username=onecbackup',
+                      ' user id = onecbackup ; DATABASE=onecbackup; Port=5432; Server=localhost; Pooling=false;Timeout=10',
+                      'Server="127.0.0.1";Database="onecbackup";User Name=onecbackup;Application Name="fixture;name";Password="private;value"',
+                      "Host=::1;Database=onecbackup;UID=onecbackup;PWD=\"quote\"\";private\""]:
+            with self.subTest(value=value.split(';')[0]):
+                host,port=module.update_database_target(value)
+                self.assertIn(host,['localhost','127.0.0.1','::1']);self.assertEqual(5432,port)
+
+    def test_unsafe_or_ambiguous_database_targets_are_rejected_without_secret_values(self):
+        for value in ['Host=remote;Database=onecbackup;Username=onecbackup',
+                      'Host=127.0.0.1;Port=6432;Database=onecbackup;Username=onecbackup',
+                      'Host=127.0.0.1;Database=other;Username=onecbackup',
+                      'Host=127.0.0.1;Database=onecbackup;Username=postgres',
+                      'Host=127.0.0.1;Server=remote;Database=onecbackup;Username=onecbackup',
+                      'Host=127.0.0.1;Database=onecbackup;Username=onecbackup;Service=other',
+                      'Host=127.0.0.1;Database=onecbackup;Username=onecbackup;Password="private;value']:
+            with self.subTest(target=value.split(';')[0]),self.assertRaises(ValueError) as error:
+                module.update_database_target(value)
+            self.assertNotIn('private',str(error.exception))
+
+    def test_database_identity_must_match_the_cluster_being_backed_up(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);(root/'database-password.txt').write_text('private fixture credential')
+            for started in ['123.456','different-cluster']:
+                result=__import__('subprocess').CompletedProcess([],0,json.dumps({'database':'onecbackup','user':'onecbackup','started':started}),'')
+                with patch.object(module,'CONFIG',root),patch.object(module,'json_command',return_value=[{'version':'17','cluster':'main','port':5432}]), \
+                     patch.object(module,'sql',return_value='123.456'),patch.object(module.subprocess,'run',return_value=result) as run:
+                    if started=='123.456':module.verify_update_database('localhost',5432)
+                    else:
+                        with self.assertRaises(ValueError):module.verify_update_database('localhost',5432)
+                    self.assertNotIn('private fixture credential',' '.join(run.call_args.args[0]))
+
     @unittest.skipIf(os.name == 'nt', 'Linux filesystem and symlink semantics')
     def test_staging_verified_package_never_switches_current(self):
         version = '0.1.0-preview.9'

@@ -499,6 +499,106 @@ def restore_tree(archive, destination):
     binary_command(['tar', '--numeric-owner', '-C', destination, '-xpf', archive])
 
 
+def connection_fields(value):
+    """Read ADO-style quoting without exposing values (passwords may contain ';' or quotes)."""
+    if not isinstance(value, str):
+        raise ValueError('ConnectionString: отсутствует строка подключения.')
+    fields = []
+    position = 0
+    while position < len(value):
+        while position < len(value) and (value[position].isspace() or value[position] == ';'):
+            position += 1
+        if position == len(value):
+            break
+        start = position
+        while position < len(value) and value[position] not in '=;':
+            position += 1
+        if position == len(value) or value[position] != '=':
+            raise ValueError('ConnectionString: некорректный формат параметров.')
+        key = ''.join(value[start:position].split()).casefold()
+        if not key:
+            raise ValueError('ConnectionString: пустое имя параметра.')
+        position += 1
+        while position < len(value) and value[position].isspace():
+            position += 1
+        if position < len(value) and value[position] in '\"\'':
+            quote = value[position]
+            position += 1
+            text = []
+            while True:
+                if position == len(value):
+                    raise ValueError('ConnectionString: не закрыты кавычки.')
+                char = value[position]
+                position += 1
+                if char == quote:
+                    if position < len(value) and value[position] == quote:
+                        text.append(quote)
+                        position += 1
+                    else:
+                        break
+                else:
+                    text.append(char)
+            item = ''.join(text)
+            while position < len(value) and value[position].isspace():
+                position += 1
+            if position < len(value) and value[position] != ';':
+                raise ValueError('ConnectionString: лишний текст после кавычек.')
+        else:
+            start = position
+            while position < len(value) and value[position] != ';':
+                position += 1
+            item = value[start:position].strip()
+        fields.append((key, item))
+    return fields
+
+
+def update_database_target(value):
+    aliases = {'host': 'host', 'server': 'host', 'port': 'port', 'database': 'database',
+               'username': 'user', 'userid': 'user', 'uid': 'user'}
+    options = {'password', 'pwd', 'sslmode', 'trustservercertificate', 'timeout', 'commandtimeout',
+               'pooling', 'minimumpoolsize', 'minpoolsize', 'maximumpoolsize', 'maxpoolsize',
+               'connectionidlelifetime', 'connectionpruninginterval', 'connectionlifetime',
+               'keepalive', 'tcpkeepalive', 'tcpkeepalivetime', 'tcpkeepaliveinterval',
+               'applicationname', 'includerrordetail', 'persistsecurityinfo', 'noresetonclose',
+               'maxautoprepare', 'autoprepareminusages', 'readbuffersize', 'writebuffersize', 'multiplexing'}
+    target = {}
+    for key, value in connection_fields(value):
+        if key in aliases:
+            name = aliases[key]
+            if name in target:
+                raise ValueError('ConnectionString: повторяются параметры выбора БД.')
+            target[name] = value
+        elif key not in options:
+            raise ValueError('ConnectionString: неподдерживаемый параметр; автоматическое обновление запрещено.')
+    if target.get('host', '').casefold() not in {'localhost', '127.0.0.1', '::1'}:
+        raise ValueError('ConnectionString: нужен локальный Host штатной PostgreSQL.')
+    if target.get('port', '5432') != '5432':
+        raise ValueError('ConnectionString: нужен штатный Port=5432.')
+    if target.get('database') != DATABASE:
+        raise ValueError('ConnectionString: нужна Database=onecbackup.')
+    if target.get('user') != 'onecbackup':
+        raise ValueError('ConnectionString: нужен Username=onecbackup.')
+    return target['host'], 5432
+
+
+def verify_update_database(host, port):
+    clusters = json_command(['pg_lsclusters', '--json'])
+    if len(clusters) != 1 or str(clusters[0]['version']) != '17' or clusters[0]['cluster'] != 'main' or int(clusters[0]['port']) != port:
+        raise ValueError('Обновление требует штатного кластера PostgreSQL 17/main на порту 5432.')
+    expected = sql('SELECT extract(epoch FROM pg_catalog.pg_postmaster_start_time())::text;')
+    environment = {key: value for key, value in os.environ.items() if not key.startswith('PG')}
+    environment['PGPASSWORD'] = (CONFIG / 'database-password.txt').read_text().strip()
+    environment['PGCONNECT_TIMEOUT'] = '5'
+    query = "SELECT json_build_object('database',current_database(),'user',current_user,'started',extract(epoch FROM pg_catalog.pg_postmaster_start_time())::text)"
+    result = subprocess.run(['psql', '-X', '-qAt', '-h', host, '-p', str(port), '-U', 'onecbackup', '-d', DATABASE, '-c', query],
+                            env=environment, capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError('ConnectionString: не подтверждён доступ к локальной PostgreSQL; сервер не остановлен.')
+    observed = json.loads(result.stdout)
+    if observed != {'database': DATABASE, 'user': 'onecbackup', 'started': expected}:
+        raise ValueError('ConnectionString: подключение относится к другому серверу или базе; сервер не остановлен.')
+
+
 def guest_update(version, package_directory=None, backup_directory=None):
     release_info = Path('/etc/os-release').read_text()
     if ('ID=debian' not in release_info or 'VERSION_ID="13"' not in release_info
@@ -523,16 +623,27 @@ def guest_update(version, package_directory=None, backup_directory=None):
     if int(version.rsplit('.', 1)[1]) < int(previous['version'].rsplit('.', 1)[1]):
         raise ValueError('Понижение версии не выполняется.')
     configuration = json.loads((CONFIG / 'server.json').read_text())['Server']
-    expected = {'DataDirectory': str(DATA), 'ConnectionString': 'Host=127.0.0.1;Database=onecbackup;Username=onecbackup',
+    expected = {'DataDirectory': str(DATA),
                 'DatabasePasswordFile': str(CONFIG / 'database-password.txt'), 'HttpsCertificatePath': str(CONFIG / 'server.pfx'),
                 'HttpsCertificatePasswordFile': str(CONFIG / 'certificate-password.txt')}
-    if any(configuration.get(key) != value for key, value in expected.items()):
-        raise ValueError('Конфигурация отличается от штатной установки; автоматическое обновление запрещено.')
+    mismatches = [key for key, value in expected.items() if configuration.get(key) != value]
+    if mismatches:
+        raise ValueError('Не совпадают параметры штатной установки: ' + ', '.join(mismatches) + '. Сервер не остановлен.')
+    if any(key.casefold() == 'connectionstringfile' and value is not None for key, value in configuration.items()):
+        raise ValueError('ConnectionStringFile: отдельный файл подключения не поддерживается обновлением.')
+    host, port = update_database_target(configuration.get('ConnectionString'))
     if UNIT.is_symlink() or not UNIT.is_file() or UNIT.with_name(UNIT.name + '.d').exists():
         raise ValueError('Нужна штатная служба без дополнительных override-файлов.')
     unit = UNIT.read_text()
     if f'User={ACCOUNT}\n' not in unit or f'ExecStart={APPLICATION}/current/SPBackup.Server\n' not in unit:
         raise ValueError('Служба настроена иначе; обновление не выполняется.')
+    env_path = CONFIG / 'server.env'
+    lines = [line.strip() for line in env_path.read_text().splitlines() if line.strip() and not line.lstrip().startswith('#')]
+    if lines != ['ONECBACKUP_SERVER_CONFIG_FILE=' + str(CONFIG / 'server.json')] or any(line.startswith('Environment=') for line in unit.splitlines()):
+        raise ValueError('Есть дополнительные переменные службы; эффективная конфигурация не подтверждена.')
+    if [line for line in unit.splitlines() if line.startswith('EnvironmentFile=')] != ['EnvironmentFile=' + str(env_path)]:
+        raise ValueError('EnvironmentFile службы отличается от штатного.')
+    verify_update_database(host, port)
     run(['systemctl', 'is-active', '--quiet', 'onec-backup-server'])
     ensure_database_utf8()
     wait_ready(previous['port'])
