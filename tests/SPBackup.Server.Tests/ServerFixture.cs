@@ -36,6 +36,7 @@ public sealed class ServerFixture : IAsyncLifetime
     private readonly string schema = "server_test_" + Guid.NewGuid().ToString("N");
     public readonly string Password = ServerTokens.Create();
     public readonly List<string> Secrets = [];
+    public string UpdateSocketPath => Path.Combine(Root, "update.sock");
     private string adminCsrf = "";
     private string connection = "";
     private X509Certificate2 certificate = null!;
@@ -85,6 +86,7 @@ public sealed class ServerFixture : IAsyncLifetime
         List<string> args = ["--Server:ConnectionStringFile", Path.Combine(Root, "connection.txt"), "--Server:DataDirectory", Path.Combine(Root, "data"),
             "--Server:HttpsCertificatePath", Path.Combine(Root, "certificate.pfx"), "--Server:HttpsCertificatePasswordFile", Path.Combine(Root, "certificate-password.txt"),
             "--contentRoot", Path.Combine(repository, "src", "SPBackup.Server"), "--urls", (plainHttp ? "http" : "https") + "://127.0.0.1:0"];
+        args.AddRange(["--Server:UpdateControlSocketPath", UpdateSocketPath]);
         if (prefix is not null) args.AddRange(["--Server:PathBase", prefix]);
         if (displayName is not null) args.AddRange(["--Server:DisplayName", displayName]);
         if (publicAddress is not null) args.AddRange(["--Server:PublicAddress", publicAddress]);

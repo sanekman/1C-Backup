@@ -1,11 +1,12 @@
 @page "/system"
+@page "/settings"
 @attribute [Authorize(Policy = ServerAuthentication.Administrator)]
 @inject ServerStore Store
 @inject ServerOptions Settings
 @inject ServerHealth Health
 @inject IHttpContextAccessor Http
-<PageTitle>Состояние сервера — @Settings.DisplayName</PageTitle>
-<h1>Состояние сервера</h1>
+<PageTitle>Настройки сервера — @Settings.DisplayName</PageTitle>
+<h1>Настройки сервера</h1>
 @if (Status is { } status) { <ServerHealthNotices Snapshot="status" /> }
 @if (!Ready)
 {
@@ -13,6 +14,7 @@
 <p>Проверьте службу PostgreSQL, свободное место и журнал установки. После ошибки миграции повторите тот же установщик либо верните проверенный комплект программы вместе с данными. Существующую базу и ключи не удаляйте.</p>
 </section>
 }
+<ServerUpdatePanel />
 <section class="card narrow">
 <h2>Часовой пояс панели</h2>
 <p>Выберите, в каком часовом поясе показывать время всем пользователям этого сервера.</p>

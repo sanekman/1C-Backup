@@ -14,3 +14,7 @@ select{display:block;width:100%;font:inherit;color:inherit;background:var(--inpu
 .run-issues{padding-left:22px;line-height:1.55}.run-issues li{margin:14px 0}.run-issues p{margin:5px 0}.run-issues .warning{color:var(--pending-text)}
 
 .agents-layout{display:grid;grid-template-columns:minmax(200px,250px) minmax(0,1fr);gap:20px}.folder-sidebar{align-self:start}.agents-main{min-width:0}.folder-tree{list-style:none;padding-left:16px;overflow-wrap:anywhere}.folder-tree li{margin:10px 0}.folder-tree details{margin:0}.folder-tree summary{cursor:pointer}a[aria-current="page"]{font-weight:700;text-decoration:underline}.folder-row{border-top:1px solid var(--line);padding:16px 0;display:flex;gap:12px;flex-wrap:wrap;justify-content:space-between}.folder-row>a{overflow-wrap:anywhere}@media(max-width:800px){.agents-layout{grid-template-columns:1fr}}
+
+.break-path { overflow-wrap: anywhere; }
+[data-server-update] button:disabled { opacity: .55; cursor: default; }
+.server-update-actions form { margin-top: 0; }

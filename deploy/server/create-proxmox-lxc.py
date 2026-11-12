@@ -742,6 +742,225 @@ def guest_update(version, package_directory=None, backup_directory=None):
         raise RuntimeError('Обновление не выполнено; прежняя версия восстановлена. Комплект: ' + str(backup)) from None
 
 
+# Root-owned update broker. Only a fixed protocol crosses the Unix socket.
+WEB_UPDATE_HOME = Path('/var/lib/onec-backup-server-updater')
+WEB_UPDATE_SCRIPT = Path('/usr/local/lib/onec-backup-server-updater/update.py')
+WEB_UPDATE_SOCKET = '/run/onec-backup-server-update.sock'
+WEB_UPDATE_UNITS = {'checking': 'onec-backup-server-update-check.service', 'queued': 'onec-backup-server-update-run.service',
+                    'updating': 'onec-backup-server-update-run.service'}
+
+
+def web_update_version(value):
+    return isinstance(value, str) and re.fullmatch(r'0\.1\.0-preview\.[1-9][0-9]*', value) is not None
+
+
+def web_update_current():
+    saved = json.loads((CONFIG / 'installation.json').read_text())
+    value = saved['request']['version']
+    if saved.get('complete') is not True or not web_update_version(value):
+        raise ValueError('Не подтверждена штатная установка сервера.')
+    return value
+
+
+@contextlib.contextmanager
+def web_update_lock():
+    import fcntl
+    descriptor = os.open(WEB_UPDATE_HOME / 'control.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def web_update_read():
+    path = WEB_UPDATE_HOME / 'state.json'
+    if not path.exists():
+        return {'phase': 'idle'}
+    if path.is_symlink() or path.stat().st_size > 16384:
+        raise ValueError('Неверное состояние обновления.')
+    state = json.loads(path.read_text())
+    if not isinstance(state, dict): raise ValueError('Неверное состояние обновления.')
+    return state
+
+
+def web_update_save(state):
+    atomic_json(WEB_UPDATE_HOME / 'state.json', state)
+
+
+def web_update_status(state):
+    # No logs, configuration, exceptions or credentials are sent to the panel.
+    keys = ['phase', 'latestVersion', 'checkedUtc', 'jobId', 'targetVersion', 'startedUtc', 'finishedUtc', 'backupDirectory']
+    result = {**{key: state[key] for key in keys if key in state}, 'currentVersion': web_update_current()}
+    if isinstance(state.get('lastResult'), dict):
+        result['lastResult'] = {key: state['lastResult'][key] for key in ['phase', 'jobId', 'targetVersion', 'finishedUtc', 'backupDirectory'] if key in state['lastResult']}
+    return result
+
+
+def web_update_service(args):
+    result = subprocess.run(['systemctl', *args], stdin=subprocess.DEVNULL, capture_output=True,
+                            text=True, timeout=10, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C', 'LC_ALL': 'C'})
+    if result.returncode:
+        raise ValueError('Не удалось запустить системную задачу обновления.')
+    return result.stdout.strip()
+
+
+def web_update_request(request):
+    if not isinstance(request, dict) or set(request) - {'command', 'version'} or not isinstance(request.get('command'), str) or request['command'] not in {'status', 'check', 'start'}:
+        return {'phase': 'invalidRequest'}
+    command = request['command']
+    if command != 'start' and 'version' in request:
+        return {'phase': 'invalidRequest'}
+    with web_update_lock():
+        state = web_update_read()
+        phase = state.get('phase')
+        if phase in WEB_UPDATE_UNITS and time.time() - state.get('startedUtc', time.time()) > 20:
+            try:
+                active = web_update_service(['show', '--property=ActiveState', '--value', WEB_UPDATE_UNITS[phase]])
+                if active not in {'active', 'activating', 'reloading'}:
+                    state['phase'] = 'interrupted'; web_update_save(state)
+            except (ValueError, subprocess.TimeoutExpired):
+                pass  # Unknown unit state does not authorize a second update.
+        if command == 'status' or state.get('phase') in WEB_UPDATE_UNITS:
+            return web_update_status(state)
+        if state.get('phase') == 'interrupted':
+            return web_update_status(state)  # An operator must resolve an interrupted job first.
+        if command == 'start':
+            version = request.get('version')
+            if (state.get('phase') != 'available' or not web_update_version(version) or version != state.get('latestVersion')
+                    or time.time() - state.get('checkedUtc', 0) > 1800
+                    or int(version.rsplit('.', 1)[1]) <= int(web_update_current().rsplit('.', 1)[1])):
+                return {**web_update_status(state), 'requestError': 'checkRequired'}
+        state = {**state, 'phase': 'checking' if command == 'check' else 'queued',
+                 'jobId': secrets.token_hex(16), 'startedUtc': time.time()}
+        for key in ['backupDirectory', 'finishedUtc']:
+            state.pop(key, None)
+        if command == 'start': state['targetVersion'] = request['version']
+        else: state.pop('targetVersion', None)
+        web_update_save(state)
+        try:
+            web_update_service(['start', '--no-block', WEB_UPDATE_UNITS[state['phase']]])
+        except (ValueError, subprocess.TimeoutExpired):
+            state['phase'] = 'dispatchFailed'; web_update_save(state)
+        return web_update_status(state)
+
+
+def web_update_control():
+    import pwd
+    import struct
+    with socket.fromfd(0, socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(10)
+        _, uid, _ = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')))
+        if uid not in {0, pwd.getpwnam(ACCOUNT).pw_uid}:
+            return
+        data = bytearray()
+        while b'\n' not in data and len(data) <= 4096:
+            chunk = connection.recv(4097 - len(data))
+            if not chunk: break
+            data.extend(chunk)
+        try:
+            if len(data) > 4096 or not data.endswith(b'\n'): raise ValueError('invalid request')
+            result = web_update_request(json.loads(data))
+        except (ValueError, OSError, KeyError, TypeError):
+            result = {'phase': 'controlFailed'}
+        connection.sendall(json.dumps(result).encode('utf-8') + b'\n')
+
+
+def web_update_check():
+    with web_update_lock():
+        state = web_update_read()
+        if state.get('phase') != 'checking': return
+        job = state['jobId']
+    try:
+        latest = latest_update_version()
+        with tempfile.TemporaryDirectory(prefix='sp-backup-check-') as work:
+            manifest = Path(work) / 'server-release.json'
+            download(f'https://github.com/{REPOSITORY}/releases/download/server-v{latest}/server-release.json', manifest, 1024 * 1024)
+            package_asset(json.loads(manifest.read_text()), latest)
+        phase = 'available' if int(latest.rsplit('.', 1)[1]) > int(web_update_current().rsplit('.', 1)[1]) else 'upToDate'
+    except Exception:
+        phase = 'checkFailed'; latest = None
+    with web_update_lock():
+        current = web_update_read()
+        if current.get('jobId') != job: return
+        current.update(phase=phase, latestVersion=latest, checkedUtc=time.time(), finishedUtc=time.time())
+        web_update_save(current)
+
+
+def web_update_run():
+    with web_update_lock():
+        state = web_update_read()
+        version = state.get('targetVersion')
+        if state.get('phase') != 'queued' or not web_update_version(version): return
+        state['phase'] = 'updating'; web_update_save(state)
+        job = state['jobId']
+    log_path = WEB_UPDATE_HOME / (job + '.log')
+    phase = 'failed'; backup = None
+    try:
+        with log_path.open('x') as output:
+            os.chmod(log_path, 0o600)
+            result = subprocess.run([sys.executable, str(WEB_UPDATE_SCRIPT), '--inside-container', '--update', '--version', version],
+                                    stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+                                    env=dict(os.environ, PATH='/usr/sbin:/usr/bin:/sbin:/bin', LANG='C', LC_ALL='C'))
+        if result.returncode == 0 and web_update_current() == version:
+            phase = 'updated'
+        # Paths are recognized only from our own updater output, never a web request.
+        with log_path.open() as lines:
+            for line in lines:
+                match = re.search(r'/var/backups/onec-backup-server/[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}(?![0-9a-z/-])', line)
+                if match: backup = match.group(0)
+        if backup:
+            saved = json.loads((Path(backup) / 'state.json').read_text())
+            if saved.get('to') != version: backup = None
+            elif saved.get('status') == 'rolled-back' and result.returncode != 0: phase = 'rolledBack'
+            elif saved.get('status') == 'rollback-failed': phase = 'recoveryRequired'
+    except Exception:
+        phase = 'interrupted'
+    with web_update_lock():
+        state = web_update_read()
+        if state.get('jobId') != job: return
+        state.update(phase=phase, finishedUtc=time.time())
+        if backup: state['backupDirectory'] = backup
+        state['lastResult'] = {key: state[key] for key in ['phase', 'jobId', 'targetVersion', 'finishedUtc', 'backupDirectory'] if key in state}
+        web_update_save(state)
+
+
+def enable_web_updates():
+    # Reuse the complete read-only preflight (same version returns before making a kit).
+    guest_update(web_update_current())
+    for directory in [WEB_UPDATE_HOME, WEB_UPDATE_SCRIPT.parent]:
+        if directory.is_symlink(): raise ValueError('Каталог обновлятора не должен быть ссылкой.')
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory.stat().st_uid != 0 or directory.stat().st_mode & 0o077:
+            raise ValueError('Каталог обновлятора должен принадлежать root с правами 0700.')
+    with web_update_lock():
+        if web_update_read().get('phase') in {*WEB_UPDATE_UNITS, 'interrupted'}:
+            raise ValueError('Сначала завершите или проверьте текущую системную задачу обновления.')
+        if Path(__file__).resolve() != WEB_UPDATE_SCRIPT:
+            temporary = WEB_UPDATE_SCRIPT.with_suffix('.tmp')
+            if temporary.exists() or temporary.is_symlink(): raise ValueError('Временный файл обновлятора уже существует.')
+            shutil.copyfile(Path(__file__).resolve(), temporary); os.chmod(temporary, 0o700)
+            os.replace(temporary, WEB_UPDATE_SCRIPT)
+        base = '# SP Backup web updater\n[Unit]\nDescription=SP Backup server update\n'
+        service = '\n[Service]\nType=oneshot\nUser=root\nUMask=0077\nTimeoutStartSec=infinity\nEnvironment=LANG=C LC_ALL=C\n'
+        command = 'ExecStart=/usr/bin/python3 ' + str(WEB_UPDATE_SCRIPT)
+        units = {
+            'onec-backup-server-update.socket': base + '\n[Socket]\nListenStream=' + WEB_UPDATE_SOCKET + '\nAccept=yes\nSocketUser=root\nSocketGroup=' + ACCOUNT + '\nSocketMode=0660\nService=onec-backup-server-update-control@.service\n\n[Install]\nWantedBy=sockets.target\n',
+            'onec-backup-server-update-control@.service': base + '\n[Service]\nUser=root\nUMask=0077\nStandardInput=socket\nStandardOutput=socket\nStandardError=journal\n' + command + ' --web-update-control\n',
+            'onec-backup-server-update-check.service': base + service + command + ' --web-update-check\n',
+            'onec-backup-server-update-run.service': base + service + command + ' --web-update-run\n',
+        }
+        for name, content in units.items():
+            path = UNIT.parent / name
+            if path.is_symlink() or path.with_name(name + '.d').exists(): raise ValueError('Нестандартная служба обновлятора.')
+            if path.exists() and not path.read_text().startswith('# SP Backup web updater\n'):
+                raise ValueError('Служба обновлятора уже настроена иначе.')
+        for name, content in units.items():
+            path = UNIT.parent / name
+            path.write_text(content); os.chmod(path, 0o644)
+        web_update_service(['daemon-reload'])
+        web_update_service(['enable', '--now', 'onec-backup-server-update.socket'])
+    print('Обновление из веб-панели подключено. Откройте Настройки → Обновление сервера.')
+
+
 def host_update_step(label, args, *, capture=False):
     """Keep all pct descriptors off the console so lxc-attach does not allocate a PTY."""
     print(label + '…', flush=True)
@@ -781,7 +1000,8 @@ def host_update(args):
                                 ['pct', 'exec', str(args.id), '--', 'sha256sum', remote + '/update.py'], capture=True)
     if observed.split() != [digest, remote + '/update.py']:
         raise ValueError('SHA-256 переданного скрипта не совпадает; обновление не запущено.')
-    command = ['pct', 'exec', str(args.id), '--', 'python3', '-u', remote + '/update.py', '--inside-container', '--update', '--version', args.version]
+    command = ['pct', 'exec', str(args.id), '--', 'python3', '-u', remote + '/update.py', '--inside-container']
+    command += ['--enable-web-updates'] if args.enable_web_updates else ['--update', '--version', args.version]
     if args.backup_directory:
         command += ['--backup-directory', str(args.backup_directory)]
     host_update_step('Запуск проверенного обновлятора в CT', command)
@@ -898,7 +1118,12 @@ def parser():
     p.add_argument('--address', help='полный HTTPS-адрес панели с выбранным портом; по умолчанию IPv4 контейнера')
     p.add_argument('--port', type=int, default=7443)
     p.add_argument('--version', help='версия сервера; установка по умолчанию '+VERSION+', обновление — последний опубликованный preview')
-    p.add_argument('--update', action='store_true', help='обновить существующий LXC из мастера, без создания CT')
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument('--update', action='store_true', help='обновить существующий LXC из мастера, без создания CT')
+    mode.add_argument('--enable-web-updates', action='store_true', help='один раз подключить обновление из веб-панели штатного LXC')
+    mode.add_argument('--web-update-control', action='store_true', help=argparse.SUPPRESS)
+    mode.add_argument('--web-update-check', action='store_true', help=argparse.SUPPRESS)
+    mode.add_argument('--web-update-run', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--backup-directory', type=Path, help='каталог комплектов возврата внутри CT')
     p.add_argument('--template', help='локальный Debian 13 amd64 шаблон; иначе скачивается через pveam')
     p.add_argument('--template-storage', help='хранилище шаблонов; по умолчанию local либо первое доступное')
@@ -921,23 +1146,30 @@ def main():
     args = parser().parse_args()
     if getattr(os, 'geteuid', lambda: -1)() != 0:
         raise ValueError('Запустите от root в Shell Proxmox.')
-    if args.update and not args.inside_container and args.id is None:
+    if args.web_update_control or args.web_update_check or args.web_update_run:
+        if args.web_update_control: web_update_control()
+        elif args.web_update_check: web_update_check()
+        else: web_update_run()
+        return
+    if (args.update or args.enable_web_updates) and not args.inside_container and args.id is None:
         raise ValueError('Для обновления укажите --id существующего CT.')
     if args.version is None:
         args.version = latest_update_version() if args.update else VERSION
     if args.inside_container:
         import fcntl
-        if not args.update and (args.request is None or args.request.is_symlink() or args.request.stat().st_size > 16384):
+        if not args.update and not args.enable_web_updates and (args.request is None or args.request.is_symlink() or args.request.stat().st_size > 16384):
             raise ValueError('Нужен локальный файл запроса установки.')
         Path('/run/lock').mkdir(mode=0o755, exist_ok=True)
         descriptor = os.open('/run/lock/sp-backup-server-install.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, 'a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            if args.update:
+            if args.enable_web_updates:
+                enable_web_updates()
+            elif args.update:
                 guest_update(args.version, args.package_directory, args.backup_directory)
             else:
                 guest_install(json.loads(args.request.read_text()), args.package_directory)
-    elif args.update:
+    elif args.update or args.enable_web_updates:
         host_update(args)
     else:
         host_create(args)

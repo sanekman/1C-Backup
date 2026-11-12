@@ -50,6 +50,7 @@ public sealed class ServerOptions
         && uri.UserInfo.Length == 0 && uri.Query.Length == 0 && uri.Fragment.Length == 0;
     public string ConnectionString { get; init; } = "";
     public string? ConnectionStringFile { get; init; }
+    public string UpdateControlSocketPath { get; init; } = "/run/onec-backup-server-update.sock";
     public string? DatabasePasswordFile { get; init; }
     public string DataDirectory { get; init; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OneCBackupServer");
     public string? BootstrapUser { get; init; }

@@ -28,7 +28,7 @@ public static partial class ServerHost
             builder.Configuration.AddJsonFile(extraConfiguration, optional: false, reloadOnChange: false).AddEnvironmentVariables().AddCommandLine(args);
         }
         var settings = builder.Configuration.GetSection("Server").Get<ServerOptions>() ?? new();
-        if (!settings.HasValidIdentity() || !Path.IsPathFullyQualified(settings.DataDirectory) || settings.OfflineAfterSeconds is < 30 or > 86400
+        if (!settings.HasValidIdentity() || !Path.IsPathFullyQualified(settings.DataDirectory) || OperatingSystem.IsLinux() && !Path.IsPathFullyQualified(settings.UpdateControlSocketPath) || settings.OfflineAfterSeconds is < 30 or > 86400
             || settings.PathBase is not null && (settings.PathBase.Length < 2 || !settings.PathBase.StartsWith('/') || settings.PathBase.EndsWith('/')
                 || settings.PathBase.Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch is not '/' and not '-' and not '_')))
             throw new ServerRequestException(400, "invalid_server_options");
@@ -59,6 +59,7 @@ public static partial class ServerHost
         builder.Services.AddSingleton<ServerStore>(); builder.Services.AddSingleton<ServerLog>();
         builder.Services.AddSingleton<ServerDiagnostics>();
         builder.Services.AddSingleton<ServerHealth>();
+        builder.Services.AddSingleton<ServerUpdates>();
         var protection = builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(keys)).SetApplicationName("OneCBackup.Server");
         if (OperatingSystem.IsWindows()) protection.ProtectKeysWithDpapi();
         ServerAuthentication.Add(builder, settings);
@@ -112,7 +113,7 @@ public static partial class ServerHost
         app.MapGet("/health/live", () => Results.Text("live"));
         app.MapGet("/health/ready", async (ServerStore store, CancellationToken token) => await store.ReadyAsync(token) ? Results.Text("ready") : Results.StatusCode(503));
         app.MapOpenApi().RequireAuthorization(ServerAuthentication.Administrator);
-        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app); MapRemoteRuns(app);
+        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app); MapRemoteRuns(app); MapServerUpdates(app);
         app.MapRazorComponents<App>();
         return app;
     }

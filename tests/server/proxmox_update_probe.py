@@ -7,6 +7,10 @@ import json
 from pathlib import Path
 import re
 import ssl
+import socket
+import threading
+import os
+import pwd
 import subprocess
 import urllib.parse
 import urllib.request
@@ -150,7 +154,49 @@ for failure in ['migration','readiness']:
     verify_previous()
     checks.append(failure+'-failure-restores-schema5-credentials-data-program-and-session')
 
-assert cli('0.1.0-preview.9').returncode==0
+# Install the root-owned broker once, then exercise the real socket protocol.
+assert subprocess.run(['python3','/setup/install.py','--inside-container','--enable-web-updates'],capture_output=True).returncode==0
+account=pwd.getpwnam('onec-backup-server')
+assert m.WEB_UPDATE_SCRIPT.stat().st_uid==0 and m.WEB_UPDATE_SCRIPT.stat().st_mode & 0o077==0
+assert m.WEB_UPDATE_HOME.stat().st_uid==0 and m.WEB_UPDATE_HOME.stat().st_mode & 0o077==0
+assert subprocess.run(['runuser','-u',account.pw_name,'--','test','-w',str(m.WEB_UPDATE_SCRIPT)]).returncode!=0
+assert subprocess.run(['runuser','-u',account.pw_name,'--','test','-r',str(m.WEB_UPDATE_HOME)]).returncode!=0
+units=list(Path('/etc/systemd/system').glob('onec-backup-server-update*'))
+assert len(units)==4
+subprocess.run(['systemd-analyze','verify',*map(str,units)],check=True)
+checks.append('one-time-broker-install-root-only-code-state-and-valid-systemd-units')
+
+# Emulate socket activation only; each control handler and update worker is real.
+listener=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+listener.bind(m.WEB_UPDATE_SOCKET);os.chown(m.WEB_UPDATE_SOCKET,0,account.pw_gid);os.chmod(m.WEB_UPDATE_SOCKET,0o660);listener.listen()
+def rpc(payload):
+    failures=[]
+    def handler():
+        connection,_=listener.accept()
+        with connection:
+            result=subprocess.run(['python3',str(m.WEB_UPDATE_SCRIPT),'--web-update-control'],stdin=connection,stdout=connection,stderr=subprocess.PIPE)
+            if result.returncode:failures.append(result.returncode)
+    thread=threading.Thread(target=handler);thread.start()
+    code="import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(15); s.connect("+repr(m.WEB_UPDATE_SOCKET)+"); s.sendall("+repr(json.dumps(payload).encode()+b'\n')+"); print(s.makefile('rb').readline().decode())"
+    result=subprocess.run(['runuser','-u',account.pw_name,'--','python3','-c',code],capture_output=True,text=True,timeout=20)
+    thread.join(timeout=20);assert not thread.is_alive() and not failures and result.returncode==0
+    return json.loads(result.stdout)
+assert rpc({'command':'status'})['phase']=='idle'
+assert rpc({'command':'start','version':'https://other/program'})['phase']=='idle'
+assert rpc({'command':'check'})['phase']=='checking'
+m.web_update_check()
+assert rpc({'command':'status'})['phase']=='available'
+assert rpc({'command':'start','version':'0.1.0-preview.9'})['phase']=='queued'
+assert rpc({'command':'start','version':'0.1.0-preview.9'})['phase']=='queued'
+calls=Path('/tmp/systemctl-calls.txt').read_text().splitlines()
+assert calls.count('start --no-block onec-backup-server-update-run.service')==1
+checks.append('unprivileged-socket-peer-check-start-and-duplicate-request-with-fixed-root-units')
+m.web_update_run()
+state=rpc({'command':'status'})
+assert state['phase']=='updated' and state['currentVersion']=='0.1.0-preview.9',state['phase']
+assert state.get('backupDirectory') and 'log' not in state
+listener.close();Path(m.WEB_UPDATE_SOCKET).unlink()
+checks.append('separate-root-worker-updates-published-package-and-retains-result-after-app-restart')
 assert pg('SELECT max(version) FROM server_schema')=='6'
 assert (m.APPLICATION/'current').resolve().name=='0.1.0-preview.9'
 assert secrets_hash()==original
