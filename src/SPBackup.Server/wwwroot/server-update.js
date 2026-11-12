@@ -7,6 +7,7 @@
             const response = await fetch(new URL('api/v1/management/server-update', document.baseURI), {
                 credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' }
             });
+            if (response.status === 401) { window.location.assign(new URL('login', document.baseURI)); return; }
             if (response.redirected && new URL(response.url).pathname.endsWith('/login')) {
                 window.location.assign(response.url); return;
             }

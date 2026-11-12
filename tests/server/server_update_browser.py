@@ -24,8 +24,10 @@ def main():
     args.output.mkdir(parents=True,exist_ok=True)
     checks=[]
     def save(phase,**fields):
+        nonlocal state
+        state=json.loads(args.state_file.read_text())
         state.update(phase=phase,checkedUtc=time.time(),**fields)
-        args.state_file.write_text(json.dumps(state))
+        temporary=args.state_file.with_suffix('.tmp');temporary.write_text(json.dumps(state));temporary.replace(args.state_file)
     with sync_playwright() as playwright:
         browser=playwright.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
         page=browser.new_page(viewport={'width':1366,'height':900},color_scheme='light')
@@ -58,17 +60,27 @@ def main():
         page.get_by_text('Результат обновления пока не подтверждён.',exact=False).wait_for(timeout=12000)
         checks.append('lost-connection-is-not-reported-as-update-success-or-failure')
         page.unroute('**/api/v1/management/server-update')
-        save('updated',currentVersion='0.1.0-preview.10',backupDirectory='/var/backups/onec-backup-server/20261112T000000Z-12345678')
+        save('updated',currentVersion='0.1.0-preview.10',jobId='browser-done',backupDirectory='/var/backups/onec-backup-server/20261112T000000Z-12345678',lastResult={'phase':'updated','jobId':'browser-done','targetVersion':'0.1.0-preview.10','finishedUtc':time.time(),'backupDirectory':'/var/backups/onec-backup-server/20261112T000000Z-12345678'})
         page.get_by_text('Сервер обновлён. Проверка готовности прошла.',exact=True).wait_for(timeout=12000)
         assert page.get_by_text('/var/backups/onec-backup-server/20261112T000000Z-12345678',exact=True).count()==1
         page.screenshot(path=str(args.output/'settings-updated-dark-900.png'))
         checks.append('reconnected-page-shows-confirmed-result-and-backup-directory')
+        page.get_by_role('button',name='Проверить обновления').click()
+        page.get_by_role('heading',name='Последнее обновление',exact=True).wait_for()
+        assert page.get_by_text('/var/backups/onec-backup-server/20261112T000000Z-12345678',exact=True).count()==1
+        save('upToDate')
+        page.get_by_text('Установлена актуальная версия сервера.',exact=True).wait_for(timeout=12000)
+        checks.append('new-version-check-preserves-last-installation-result-and-backup')
         save('rolledBack');page.reload();page.get_by_text('Прежняя программа и данные восстановлены.',exact=False).wait_for()
         checks.append('rollback-result-is-distinct-from-success')
         save('interrupted');page.reload();page.get_by_text('Результат не подтверждён',exact=False).wait_for()
         assert page.get_by_role('button',name='Проверить обновления').count()==0
         assert page.get_by_role('button',name='Обновить до',exact=False).count()==0
         checks.append('interrupted-task-requires-operator-without-retry-button')
+        save('updating');page.reload()
+        page.route('**/api/v1/management/server-update',lambda route:route.fulfill(status=401,body=''))
+        page.wait_for_url(args.url+'login',timeout=12000)
+        checks.append('expired-session-opens-login-instead-of-waiting-forever')
         browser.close()
     result={'success':True,'fixtureOnly':True,'realNativeUpdateTested':False,'checks':checks}
     (args.output/'server-update-browser-result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
