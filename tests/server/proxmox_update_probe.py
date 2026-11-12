@@ -19,13 +19,14 @@ checks=[]
 packages=Path('/packages')
 backup=Path('/var/backups/onec-backup-server')
 config=m.CONFIG
+database_name="onecbackup"
 
 def cli(version, directory=None):
     return subprocess.run(['python3','/setup/install.py','--inside-container','--update','--version',version,
                            '--package-directory',str(directory or packages/version)],capture_output=True)
 
-def pg(statement):
-    return subprocess.check_output(['runuser','-u','postgres','--','psql','-X','-qAt','-d','onecbackup','-c',statement],text=True).strip()
+def pg(statement, database=None):
+    return subprocess.check_output(['runuser','-u','postgres','--','psql','-X','-qAt','-d',database or database_name,'-c',statement],text=True).strip()
 
 def secrets_hash():
     result={name:hashlib.sha256((config/name).read_bytes()).hexdigest() for name in
@@ -49,6 +50,45 @@ subprocess.run(['systemctl','start','onec-backup-server'],check=True)
 m.wait_ready(8443)
 checks.append('equivalent-connection-string-validated-against-the-same-local-cluster')
 
+# Simulate the actual UTF8 repair: renamed application DB alongside an old SQL_ASCII DB.
+subprocess.run(['systemctl','stop','onec-backup-server'],check=True)
+database_name='onecbackup_utf8_20261102_034056'
+m.sql('ALTER DATABASE onecbackup RENAME TO '+database_name)
+m.sql("CREATE DATABASE onecbackup OWNER onecbackup TEMPLATE template0 ENCODING 'SQL_ASCII' LC_COLLATE 'C' LC_CTYPE 'C'")
+pg("CREATE TABLE untouched_original(marker text); INSERT INTO untouched_original VALUES('old-database-retained')",database='onecbackup')
+connection=connection.replace('DATABASE=onecbackup;', 'DATABASE='+database_name+';')
+settings['Server']['ConnectionString']=connection
+(config/'server.json').write_text(json.dumps(settings))
+subprocess.run(['systemctl','start','onec-backup-server'],check=True)
+m.wait_ready(8443)
+assert secrets_hash()==original
+checks.append('renamed-utf8-application-database-alongside-old-sql-ascii-database')
+
+# Every unsafe target must be rejected before stopping the running app or making a kit.
+rejected_name='onecbackup_utf8_20261102_000001'
+for invalid in ['missing','owner','encoding','schema']:
+    if invalid!='missing':
+        owner='postgres' if invalid=='owner' else 'onecbackup'
+        encoding='SQL_ASCII' if invalid=='encoding' else 'UTF8'
+        m.sql(f"CREATE DATABASE {rejected_name} OWNER {owner} TEMPLATE template0 ENCODING '{encoding}' LC_COLLATE 'C' LC_CTYPE 'C'")
+    settings['Server']['ConnectionString']=connection.replace(database_name,rejected_name)
+    (config/'server.json').write_text(json.dumps(settings))
+    before=len(list(backup.iterdir()));pid=Path('/tmp/native-server.pid').read_text()
+    try:
+        assert cli('0.1.0-preview.9').returncode!=0
+        assert len(list(backup.iterdir()))==before and Path('/tmp/native-server.pid').read_text()==pid
+        assert pg('SELECT max(version) FROM server_schema')=='5'
+    finally:
+        settings['Server']['ConnectionString']=connection
+        (config/'server.json').write_text(json.dumps(settings))
+        if invalid!='missing':m.sql('DROP DATABASE '+rejected_name)
+checks.append('missing-owner-encoding-and-schema-refusals-without-service-stop-or-new-backup')
+
+def verify_original_database():
+    assert pg('SELECT marker FROM untouched_original',database='onecbackup')=='old-database-retained'
+    assert pg('SHOW server_encoding',database='onecbackup')=='SQL_ASCII'
+    assert pg("SELECT to_regclass('public.server_schema')",database='onecbackup')==''
+
 context=ssl.create_default_context(cafile=str(config/'ca.crt'))
 opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPSHandler(context=context),urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 base='https://127.0.0.1:8443/'
@@ -69,6 +109,7 @@ def verify_previous():
     assert pg('SELECT max(version) FROM server_schema')=='5'
     assert pg("SELECT to_regclass('update_failure_marker')") == ''
     assert secrets_hash()==original
+    verify_original_database()
     assert not (m.DATA/'update_failure_marker').exists()
     assert not (m.APPLICATION/'0.1.0-preview.8/update_failure_marker').exists()
     assert request('api/v1/management/session')[0]==200
@@ -105,6 +146,7 @@ for failure in ['migration','readiness']:
     else:raise AssertionError('Failed update reported success')
     state=json.loads(max(backup.iterdir(),key=lambda p:p.name).joinpath('state.json').read_text())
     assert state['status']=='rolled-back',state['status']
+    assert state['database']['name']==database_name
     verify_previous()
     checks.append(failure+'-failure-restores-schema5-credentials-data-program-and-session')
 
@@ -117,6 +159,7 @@ assert request('api/v1/management/session')[0]==200
 assert request(f'api/v1/agents/{agent}/configuration',headers=bearer)[0]==200
 assert (m.APPLICATION/'0.1.0-preview.8').is_dir()
 assert json.loads((config/'installation.json').read_text())['request']['version']=='0.1.0-preview.9'
+verify_original_database()
 checks.append('actual-cli-preview8-to-preview9-schema5-to6-retains-account-agent-token-session-and-certificate')
 count=len(list(backup.iterdir()));pid=Path('/tmp/native-server.pid').read_text()
 assert cli('0.1.0-preview.9').returncode==0
@@ -129,8 +172,11 @@ checks.append('downgrade-refused-without-changing-service-or-schema')
 for directory in backup.iterdir():
     assert directory.stat().st_mode & 0o077 == 0
     state=json.loads((directory/'state.json').read_text())
+    assert state['database']['name'] in ['onecbackup',database_name]
     for name,digest in state['files'].items():
         with (directory/name).open('rb') as stream:assert hashlib.file_digest(stream,'sha256').hexdigest()==digest
+verify_original_database()
+checks.append('original-sql-ascii-database-untouched-by-update-and-both-rollbacks')
 checks.append('complete-private-program-database-config-data-and-unit-bundles-with-verified-hashes')
 result={'success':True,'from':'0.1.0-preview.8','to':'0.1.0-preview.9','checks':checks,'realSystemdTested':False,'realProxmoxTested':False}
 Path('/tmp/proxmox-update-result.json').write_text(json.dumps(result,indent=2))

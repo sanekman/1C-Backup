@@ -33,7 +33,6 @@ APPLICATION = Path('/opt/onec-backup-server')
 DATA = Path('/var/lib/onec-backup-server')
 UNIT = Path('/etc/systemd/system/onec-backup-server.service')
 ACCOUNT = 'onec-backup-server'
-DATABASE = 'onecbackup'
 ARCHIVE = 'SP-Backup-server-linux-x64.tar.gz'
 BOOTSTRAP = 'export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates'
 
@@ -574,29 +573,43 @@ def update_database_target(value):
         raise ValueError('ConnectionString: нужен локальный Host штатной PostgreSQL.')
     if target.get('port', '5432') != '5432':
         raise ValueError('ConnectionString: нужен штатный Port=5432.')
-    if target.get('database') != DATABASE:
-        raise ValueError('ConnectionString: нужна Database=onecbackup.')
+    database_name = target.get('database', '')
+    if not re.fullmatch(r'onecbackup(?:_utf8_[0-9]{8}_[0-9]{6})?', database_name):
+        raise ValueError('ConnectionString: нужна штатная БД onecbackup или её именованная UTF8-копия.')
     if target.get('user') != 'onecbackup':
         raise ValueError('ConnectionString: нужен Username=onecbackup.')
-    return target['host'], 5432
+    return target['host'], 5432, database_name
 
 
-def verify_update_database(host, port):
+def verify_update_database(host, port, database_name):
     clusters = json_command(['pg_lsclusters', '--json'])
     if len(clusters) != 1 or str(clusters[0]['version']) != '17' or clusters[0]['cluster'] != 'main' or int(clusters[0]['port']) != port:
         raise ValueError('Обновление требует штатного кластера PostgreSQL 17/main на порту 5432.')
+    # database_name has already passed the restricted ASCII name check above.
+    metadata = json.loads(sql("SELECT json_build_object('name',datname,'owner',pg_get_userbyid(datdba),"
+                              "'encoding',pg_encoding_to_char(encoding),'collate',datcollate,'ctype',datctype,"
+                              "'bytes',pg_database_size(oid)) FROM pg_database WHERE datname='" + database_name + "';") or 'null')
+    if not metadata or metadata['owner'] != 'onecbackup':
+        raise ValueError('Не подтверждена БД с владельцем onecbackup; сервер не остановлен.')
+    if metadata['encoding'] != 'UTF8':
+        raise ValueError('Подключённая БД должна иметь кодировку UTF8; сервер не остановлен.')
     expected = sql('SELECT extract(epoch FROM pg_catalog.pg_postmaster_start_time())::text;')
     environment = {key: value for key, value in os.environ.items() if not key.startswith('PG')}
     environment['PGPASSWORD'] = (CONFIG / 'database-password.txt').read_text().strip()
     environment['PGCONNECT_TIMEOUT'] = '5'
-    query = "SELECT json_build_object('database',current_database(),'user',current_user,'started',extract(epoch FROM pg_catalog.pg_postmaster_start_time())::text)"
-    result = subprocess.run(['psql', '-X', '-qAt', '-h', host, '-p', str(port), '-U', 'onecbackup', '-d', DATABASE, '-c', query],
+    query = ("SELECT json_build_object('database',current_database(),'user',current_user,"
+             "'started',extract(epoch FROM pg_catalog.pg_postmaster_start_time())::text,"
+             "'schema',to_regclass('public.server_schema') IS NOT NULL AND "
+             "to_regclass('public.server_users') IS NOT NULL AND to_regclass('public.server_agents') IS NOT NULL)")
+    result = subprocess.run(['psql', '-X', '-qAt', '-h', host, '-p', str(port), '-U', 'onecbackup', '-d', database_name, '-c', query],
                             env=environment, capture_output=True, text=True)
     if result.returncode:
         raise ValueError('ConnectionString: не подтверждён доступ к локальной PostgreSQL; сервер не остановлен.')
     observed = json.loads(result.stdout)
-    if observed != {'database': DATABASE, 'user': 'onecbackup', 'started': expected}:
-        raise ValueError('ConnectionString: подключение относится к другому серверу или базе; сервер не остановлен.')
+    if observed != {'database': database_name, 'user': 'onecbackup', 'started': expected, 'schema': True}:
+        raise ValueError('ConnectionString: не подтверждены локальный кластер, выбранная БД и схема SP Backup; сервер не остановлен.')
+
+    return metadata
 
 
 def guest_update(version, package_directory=None, backup_directory=None):
@@ -631,7 +644,7 @@ def guest_update(version, package_directory=None, backup_directory=None):
         raise ValueError('Не совпадают параметры штатной установки: ' + ', '.join(mismatches) + '. Сервер не остановлен.')
     if any(key.casefold() == 'connectionstringfile' and value is not None for key, value in configuration.items()):
         raise ValueError('ConnectionStringFile: отдельный файл подключения не поддерживается обновлением.')
-    host, port = update_database_target(configuration.get('ConnectionString'))
+    host, port, database_name = update_database_target(configuration.get('ConnectionString'))
     if UNIT.is_symlink() or not UNIT.is_file() or UNIT.with_name(UNIT.name + '.d').exists():
         raise ValueError('Нужна штатная служба без дополнительных override-файлов.')
     unit = UNIT.read_text()
@@ -643,9 +656,8 @@ def guest_update(version, package_directory=None, backup_directory=None):
         raise ValueError('Есть дополнительные переменные службы; эффективная конфигурация не подтверждена.')
     if [line for line in unit.splitlines() if line.startswith('EnvironmentFile=')] != ['EnvironmentFile=' + str(env_path)]:
         raise ValueError('EnvironmentFile службы отличается от штатного.')
-    verify_update_database(host, port)
+    database = verify_update_database(host, port, database_name)
     run(['systemctl', 'is-active', '--quiet', 'onec-backup-server'])
-    ensure_database_utf8()
     wait_ready(previous['port'])
     if version == previous['version']:
         print('Сервер уже обновлён: ' + version)
@@ -657,10 +669,7 @@ def guest_update(version, package_directory=None, backup_directory=None):
     backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     if backup_root.stat().st_uid != 0 or backup_root.stat().st_mode & 0o022:
         raise ValueError('Каталог комплектов должен принадлежать root и быть закрыт от записи другими пользователями.')
-    database = json.loads(sql("SELECT json_build_object('owner',pg_get_userbyid(datdba),'collate',datcollate,'ctype',datctype) FROM pg_database WHERE datname='onecbackup';"))
-    if database['owner'] != 'onecbackup':
-        raise ValueError('Неожиданный владелец базы; обновление не выполняется.')
-    required = int(sql("SELECT pg_database_size('onecbackup');")) + sum(p.stat().st_size for root in [old, DATA, CONFIG] for p in root.rglob('*') if p.is_file()) + 1024 * 1024 * 1024
+    required = int(database['bytes']) + sum(p.stat().st_size for root in [old, DATA, CONFIG] for p in root.rglob('*') if p.is_file()) + 1024 * 1024 * 1024
     if shutil.disk_usage(backup_root).free < required:
         raise ValueError('Недостаточно места для пакета и полного комплекта возврата; сервер не остановлен.')
     # Download/check/extract first. Existing installed versions and current stay untouched.
@@ -683,7 +692,7 @@ def guest_update(version, package_directory=None, backup_directory=None):
         stopped = True
         run(['systemctl', 'stop', 'onec-backup-server'])
         with (backup / 'database.dump').open('wb') as output:
-            binary_command(['runuser', '-u', 'postgres', '--', 'pg_dump', '-Fc', '-d', DATABASE], output=output)
+            binary_command(['runuser', '-u', 'postgres', '--', 'pg_dump', '-Fc', '-d', database_name], output=output)
         snapshot_tree(DATA, backup / 'data.tar')
         state['files'] = {}
         for name in ['config.tar', 'program.tar', 'unit.service', 'database.dump', 'data.tar']:
@@ -709,11 +718,11 @@ def guest_update(version, package_directory=None, backup_directory=None):
                         if hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
                             raise ValueError('Повреждён комплект возврата.')
                 mark('rolling-back')
-                run(['runuser', '-u', 'postgres', '--', 'dropdb', '--force', '--if-exists', DATABASE])
+                run(['runuser', '-u', 'postgres', '--', 'dropdb', '--force', '--if-exists', database_name])
                 run(['runuser', '-u', 'postgres', '--', 'createdb', '--template=template0', '--encoding=UTF8',
-                     '--lc-collate=' + database['collate'], '--lc-ctype=' + database['ctype'], '--owner=onecbackup', DATABASE])
+                     '--lc-collate=' + database['collate'], '--lc-ctype=' + database['ctype'], '--owner=onecbackup', database_name])
                 with (backup / 'database.dump').open('rb') as dump:
-                    binary_command(['runuser', '-u', 'postgres', '--', 'pg_restore', '--exit-on-error', '--no-owner', '--role=onecbackup', '-d', DATABASE], input_file=dump)
+                    binary_command(['runuser', '-u', 'postgres', '--', 'pg_restore', '--exit-on-error', '--no-owner', '--role=onecbackup', '-d', database_name], input_file=dump)
                 restore_tree(backup / 'data.tar', DATA)
                 restore_tree(backup / 'config.tar', CONFIG)
                 restore_tree(backup / 'program.tar', old)

@@ -60,8 +60,8 @@ class ProxmoxUpdateTests(unittest.TestCase):
                       'Server="127.0.0.1";Database="onecbackup";User Name=onecbackup;Application Name="fixture;name";Password="private;value"',
                       "Host=::1;Database=onecbackup;UID=onecbackup;PWD=\"quote\"\";private\""]:
             with self.subTest(value=value.split(';')[0]):
-                host,port=module.update_database_target(value)
-                self.assertIn(host,['localhost','127.0.0.1','::1']);self.assertEqual(5432,port)
+                host,port,database=module.update_database_target(value)
+                self.assertIn(host,['localhost','127.0.0.1','::1']);self.assertEqual(5432,port);self.assertEqual('onecbackup',database)
 
     def test_unsafe_or_ambiguous_database_targets_are_rejected_without_secret_values(self):
         for value in ['Host=remote;Database=onecbackup;Username=onecbackup',
@@ -75,17 +75,44 @@ class ProxmoxUpdateTests(unittest.TestCase):
                 module.update_database_target(value)
             self.assertNotIn('private',str(error.exception))
 
+    def test_utf8_copy_name_is_selected_but_arbitrary_names_are_rejected(self):
+        name='onecbackup_utf8_20261102_034056'
+        self.assertEqual(('127.0.0.1',5432,name),module.update_database_target(
+            f'Host=127.0.0.1;Database={name};Username=onecbackup'))
+        for invalid in ['postgres','template1','other','onecbackup_utf8_',
+                        'onecbackup_utf8_20261102_034056_suffix',"onecbackup_utf8_20261102_034056'--"]:
+            with self.subTest(name=invalid),self.assertRaises(ValueError):
+                module.update_database_target(f'Host=127.0.0.1;Database={invalid};Username=onecbackup')
+
+    def metadata(self, name='onecbackup'):
+        return {'name':name,'owner':'onecbackup','encoding':'UTF8','collate':'C','ctype':'C','bytes':1234}
+
     def test_database_identity_must_match_the_cluster_being_backed_up(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);(root/'database-password.txt').write_text('private fixture credential')
-            for started in ['123.456','different-cluster']:
-                result=__import__('subprocess').CompletedProcess([],0,json.dumps({'database':'onecbackup','user':'onecbackup','started':started}),'')
-                with patch.object(module,'CONFIG',root),patch.object(module,'json_command',return_value=[{'version':'17','cluster':'main','port':5432}]), \
-                     patch.object(module,'sql',return_value='123.456'),patch.object(module.subprocess,'run',return_value=result) as run:
-                    if started=='123.456':module.verify_update_database('localhost',5432)
-                    else:
-                        with self.assertRaises(ValueError):module.verify_update_database('localhost',5432)
-                    self.assertNotIn('private fixture credential',' '.join(run.call_args.args[0]))
+            for name in ['onecbackup','onecbackup_utf8_20261102_034056']:
+                for mismatch in ['none','cluster','database','schema']:
+                    observed={'database':name,'user':'onecbackup','started':'123.456','schema':True}
+                    if mismatch=='cluster':observed['started']='different-cluster'
+                    if mismatch=='database':observed['database']='other'
+                    if mismatch=='schema':observed['schema']=False
+                    result=__import__('subprocess').CompletedProcess([],0,json.dumps(observed),'')
+                    with self.subTest(name=name,mismatch=mismatch),patch.object(module,'CONFIG',root), \
+                         patch.object(module,'json_command',return_value=[{'version':'17','cluster':'main','port':5432}]), \
+                         patch.object(module,'sql',side_effect=[json.dumps(self.metadata(name)),'123.456']), \
+                         patch.object(module.subprocess,'run',return_value=result) as run:
+                        if mismatch=='none':self.assertEqual(self.metadata(name),module.verify_update_database('localhost',5432,name))
+                        else:
+                            with self.assertRaises(ValueError):module.verify_update_database('localhost',5432,name)
+                        self.assertNotIn('private fixture credential',' '.join(run.call_args.args[0]))
+                        argv=run.call_args.args[0];self.assertEqual(name,argv[argv.index('-d')+1])
+
+    def test_missing_database_wrong_owner_and_non_utf8_are_refused_before_connection(self):
+        for metadata in [None,{**self.metadata(),'owner':'postgres'},{**self.metadata(),'encoding':'SQL_ASCII'}]:
+            with self.subTest(metadata=metadata),patch.object(module,'json_command',return_value=[{'version':'17','cluster':'main','port':5432}]), \
+                 patch.object(module,'sql',return_value=json.dumps(metadata)),patch.object(module.subprocess,'run') as run:
+                with self.assertRaises(ValueError):module.verify_update_database('127.0.0.1',5432,'onecbackup')
+                run.assert_not_called()
 
     @unittest.skipIf(os.name == 'nt', 'Linux filesystem and symlink semantics')
     def test_staging_verified_package_never_switches_current(self):
