@@ -1,0 +1,35 @@
+@if (Snapshot.HasWarnings)
+{
+<section class="card" aria-label="Требуется внимание к серверу">
+<h2>Сервер: требуется внимание</h2>
+@if (Snapshot.DiskState == DataDiskState.Unknown)
+{
+    <p><strong>Не удалось проверить свободное место.</strong> Проверьте доступ службы к папке данных и состояние диска в операционной системе.</p>
+}
+@if (Snapshot.DiskState is DataDiskState.Low or DataDiskState.Critical)
+{
+    <p class="@(Snapshot.DiskState == DataDiskState.Critical ? "error" : null)"><strong>@(Snapshot.DiskState == DataDiskState.Critical ? "Критически мало места на диске данных." : "Мало места на диске данных.")</strong>
+    Свободно @FormatBytes(Snapshot.FreeDataDiskBytes). При заполнении диска сервер может перестать принимать отчёты. Освободите место или увеличьте диск; файлы базы и ключи сервера не удаляйте.</p>
+}
+@if (Snapshot.CertificateState == ServerCertificateState.NotYetValid)
+{
+    <p class="error"><strong>HTTPS-сертификат ещё не действует.</strong> Начало действия: @Clock.Time(Snapshot.CertificateNotBeforeUtc). Проверьте дату и время на сервере и агентах, затем сертификат для адреса подключения.</p>
+}
+@if (Snapshot.CertificateState == ServerCertificateState.Expired)
+{
+    <p class="error"><strong>Срок HTTPS-сертификата истёк.</strong> Агенты могут перестать подключаться. Установите действующий сертификат для адреса подключения и перезапустите службу сервера. При закреплённом SHA-256 обновите отпечаток в агентах через доверенный канал.</p>
+}
+@if (Snapshot.CertificateState == ServerCertificateState.Expiring)
+{
+    <p><strong>HTTPS-сертификат скоро истекает.</strong> Действует до @Clock.Time(Snapshot.CertificateNotAfterUtc). Обновите сертификат заранее и перезапустите службу сервера. При закреплённом SHA-256 обновите отпечаток в агентах через доверенный канал.</p>
+}
+@if (Compact) { <p><a href="system">Открыть состояние сервера</a></p> }
+</section>
+}
+@code {
+    [Parameter, EditorRequired] public ServerHealthSnapshot Snapshot { get; set; } = null!;
+    [Parameter] public bool Compact { get; set; }
+    public static string FormatBytes(long? bytes) => bytes is { } value
+        ? value >= 1024L * 1024 * 1024 ? $"{value / (1024d * 1024 * 1024):F1} ГиБ" : $"{value / (1024d * 1024):F1} МиБ"
+        : "Нет данных";
+}

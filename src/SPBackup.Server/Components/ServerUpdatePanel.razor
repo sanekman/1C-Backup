@@ -1,0 +1,48 @@
+@inject ServerUpdates Updates
+<section class="card narrow" data-server-update data-update-phase="@State.Phase" aria-busy="@State.Busy.ToString().ToLowerInvariant()">
+<h2>Обновление сервера</h2>
+<p>Установлена версия <strong>@State.CurrentVersion</strong>.</p>
+<p role="status" aria-live="polite" data-update-message>@State.Message</p>
+@if (State.Phase is "notConfigured" or "unsupported")
+{
+    @if (OperatingSystem.IsLinux())
+    {
+        <p>Для LXC из мастера SP Backup один раз подключите системную задачу обновления. После этого проверять и устанавливать версии можно здесь.</p>
+        <p><a href="https://github.com/sanekman/1C-Backup/blob/feature/local-backup-agent/docs/server-proxmox.md#подключить-обновление-из-настроек" target="_blank" rel="noopener">Как подключить обновление из панели</a></p>
+    }
+    else
+    {
+        <p><a href="https://github.com/sanekman/1C-Backup/releases" target="_blank" rel="noopener">Открыть выпуски сервера</a>. Установщик сохраняет настройки; подготовьте полный комплект возврата штатными средствами сервера.</p>
+    }
+}
+else
+{
+    @if (State.CheckedUtc is { } checkedUtc) { <p class="muted">Последняя проверка: @Clock.Time(DateTimeOffset.FromUnixTimeSeconds((long)checkedUtc)).</p> }
+    @if (State.TargetVersion is { } target && State.Busy) { <p>Устанавливается версия <strong>@target</strong>. Обновление продолжится, даже если закрыть эту страницу.</p> }
+    @if (State.BackupDirectory is { } backup) { <p>Комплект возврата на сервере: <code class="break-path">@backup</code></p> }
+    @if (State.Phase is not "interrupted" and not "recoveryRequired")
+    {
+        <div class="actions server-update-actions">
+        <form action="management/server-update/check" method="post"><AntiforgeryToken /><button type="submit" class="quiet" disabled="@State.Busy">Проверить обновления</button></form>
+        @if (State.CanStart)
+        {
+            <form action="management/server-update/start" method="post"><AntiforgeryToken /><input type="hidden" name="version" value="@State.LatestVersion" /><button type="submit">Обновить до @State.LatestVersion</button></form>
+        }
+        </div>
+    }
+    @if (State.LastResult is { } last && State.JobId != last.JobId)
+    {
+        <div class="job-summary"><h3>Последнее обновление</h3><p>@last.Message</p>
+        @if (last.TargetVersion is { } previous) { <p>Версия: @previous.</p> }
+        @if (last.FinishedUtc is { } finished) { <p class="muted">@Clock.Time(DateTimeOffset.FromUnixTimeSeconds((long)finished))</p> }
+        @if (last.BackupDirectory is { } previousBackup) { <p>Комплект возврата: <code class="break-path">@previousBackup</code></p> }
+        </div>
+    }
+    <p class="muted">Перед установкой сохраняются программа, база, настройки и данные. Панель временно перезапустится; при обычной ошибке обновлятор вернёт прежнюю версию вместе с данными. Агенты продолжают выполнять принятые расписания.</p>
+}
+</section>
+<script src="server-update.js" defer></script>
+@code {
+    private ServerUpdateState State = new("idle", ServerUpdates.BuildVersion);
+    protected override async Task OnInitializedAsync() => State = await Updates.ReadAsync();
+}

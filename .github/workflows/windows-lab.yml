@@ -1,0 +1,136 @@
+name: Prepare isolated Windows lab bundle
+
+on:
+  push:
+    branches: ['feature/**']
+    paths:
+      - '.github/workflows/windows-lab.yml'
+      - 'tools/*windows_lab*.ps1'
+      - 'tools/windows_vm/**'
+      - 'tools/probe_windows_vm_host.py'
+      - 'tests/WindowsAgentServiceSmoke/**'
+      - 'tests/SPBackup.Core.Tests/**'
+      - 'tests/shared/**'
+      - 'tests/windows_lab/**'
+      - 'src/SPBackup.Core/**'
+      - 'src/SPBackup.Agent/**'
+      - 'src/SPBackup.Remote/**'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Lab bundle or accelerated VM capability probe
+        type: choice
+        options: [bundle, probe-vm, vm, credential-transport]
+        default: bundle
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe-vm:
+    if: github.event_name == 'push' || inputs.mode == 'probe-vm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Grant this disposable runner access to KVM
+        run: |
+          if [ -c /dev/kvm ]; then
+            sudo chgrp "$(id -gn)" /dev/kvm
+            sudo chmod 660 /dev/kvm
+          fi
+      - run: python3 tools/probe_windows_vm_host.py --output artifacts/windows-vm-capabilities.json
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-vm-capabilities
+          path: artifacts/windows-vm-capabilities.json
+          retention-days: 14
+
+  bundle:
+    if: github.event_name != 'workflow_dispatch' || (inputs.mode == 'bundle' || inputs.mode == 'vm')
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - name: Build agent, native probes and pinned Windows SDK for the stand
+        shell: pwsh
+        run: |
+          if (-not $env:PGBIN) { throw 'The hosted runner must provide PostgreSQL tools.' }
+          ./tests/windows_lab/controller_tests.ps1
+          ./tools/build_windows_lab.ps1 -Output artifacts/windows-lab -PostgreSqlRoot (Split-Path $env:PGBIN -Parent)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-lab-${{ github.sha }}
+          include-hidden-files: true
+          path: artifacts/windows-lab/
+          retention-days: 14
+
+  windows-vm:
+    needs: bundle
+    if: contains(github.event.head_commit.message, '[windows-vm]') || inputs.mode == 'vm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-lab-${{ github.sha }}
+          path: artifacts/vm-bundle
+      - name: Install isolated VM tools
+        run: |
+          sudo chgrp "$(id -gn)" /dev/kvm
+          sudo chmod 660 /dev/kvm
+          python3 tools/probe_windows_vm_host.py --output artifacts/vm-host.json
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils ovmf genisoimage python3-venv
+          python3 -m venv .vm-venv
+          .vm-venv/bin/pip install -q -r tools/windows_vm/requirements.txt
+      - name: Real Windows reset during a blocked database dump
+        run: .vm-venv/bin/python -u tools/windows_vm/run.py --bundle artifacts/vm-bundle --output artifacts/windows-vm
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-reboot-verification
+          path: |
+            artifacts/windows-vm/
+            artifacts/vm-host.json
+          retention-days: 14
+
+  credential-transport:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'credential-transport'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-distribution
+          run-id: 42766294210
+          github-token: ${{ github.token }}
+          path: artifacts/candidate
+      - shell: pwsh
+        run: |
+          Expand-Archive -LiteralPath artifacts/candidate/SP-Backup-0.1.0-dev-windows-x64.zip -DestinationPath artifacts/expanded
+          & "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -ExecutionPolicy Bypass -File tests/windows_onec/credential_transport_tests.ps1 -AgentExecutable (Join-Path $PWD 'artifacts/expanded/SP-Backup/SPBackup.Agent.exe') -Output (Join-Path $PWD 'artifacts/credential-transport.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell credential transport failed' }
+          & "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -ExecutionPolicy Bypass -File tests/windows_onec/login_probe_controller_tests.ps1 -AgentExecutable (Join-Path $PWD 'artifacts/expanded/SP-Backup/SPBackup.Agent.exe') -Output (Join-Path $PWD 'artifacts/login-probe-controller.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated login probe safety verification failed' }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-powershell-onec-credential-transport
+          path: |
+            artifacts/credential-transport.json
+            artifacts/login-probe-controller.json
+          retention-days: 14

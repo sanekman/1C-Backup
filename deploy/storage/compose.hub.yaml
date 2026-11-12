@@ -1,0 +1,39 @@
+services:
+  hub:
+    build:
+      context: ../..
+      dockerfile: deploy/storage/Dockerfile
+      args:
+        VERSION: "${STORAGE_VERSION:?Set STORAGE_VERSION from deploy/storage/VERSION}"
+    command: [hub, /config/hub.json]
+    user: "${STORAGE_UID:-1000}:${STORAGE_GID:-1000}"
+    volumes: ["${STORAGE_CONFIG_DIRECTORY:?Set STORAGE_CONFIG_DIRECTORY}/hub.json:/config/hub.json:ro"]
+    # Backend listens only on loopback in this namespace; Caddy shares the namespace.
+    ports: ["80:80", "443:443"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  https:
+    image: caddy:2.10.2
+    network_mode: service:hub
+    depends_on: [hub]
+    environment:
+      STORAGE_DOMAIN: "${STORAGE_DOMAIN:?Set STORAGE_DOMAIN}"
+      ACME_EMAIL: "${ACME_EMAIL:?Set ACME_EMAIL}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  caddy-data:
+  caddy-config:

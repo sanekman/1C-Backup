@@ -1,0 +1,47 @@
+@page "/problems"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject ServerOptions Settings
+@inject IHttpContextAccessor Http
+<PageTitle>Проблемы копирования — @Settings.DisplayName</PageTitle>
+<div class="heading"><div><h1>Что требует внимания</h1><p class="muted">Связь, задания, копии и применение плана.</p></div><a href="@Link(Page)">Обновить</a></div>
+<section class="card">
+<form method="get" action="problems" class="actions">
+<label>Папка<select name="folder"><option value="">Все агенты</option><option value="root" selected="@(Folder == "root")">Без папки</option>
+@foreach (var item in Folders) { <option value="@item.Id" selected="@(Folder == item.Id.ToString())">@item.Path</option> }
+</select></label>
+<label>Проблема<select name="kind">@foreach (var item in ProblemText.Filters) { <option value="@item.Key" selected="@(Kind == item.Key)">@item.Value</option> }</select></label>
+<label>Агент или задание<input name="search" value="@Search" maxlength="128" /></label><button type="submit">Показать</button>
+</form>
+<p>Подпапки включены. Возраст копии контролируется только при заданном сроке. Проблемы показаны по последним полученным данным;
+    при отсутствии связи состояние самого агента может отличаться. Одно задание может иметь несколько причин.</p>
+@if (Data is { } data)
+{
+<p>Найдено причин: @data.Total · Страница @(data.Page + 1)</p>
+<div class="table-scroll"><table><thead><tr><th>Агент / задание</th><th>Проблема и действие</th><th>Последняя связь / отчёт</th></tr></thead><tbody>
+@foreach (var item in data.Items)
+{
+<tr><td><a href="@($"agents/{item.AgentId}")">@item.AgentName</a>@if (item.JobName is not null) { <small>@item.JobName</small> }</td>
+<td><strong>@ProblemText.Filters[item.Code]</strong><small>@ProblemText.Action(item.Code)</small></td>
+<td>@Clock.Time(item.LastSeenUtc)<small>Отчёт: @Clock.Time(item.ObservedUtc)</small></td></tr>
+}
+</tbody></table></div>
+@if (data.Total == 0) { <p>По выбранным фильтрам проблем не найдено.</p> }
+<div class="pagination">@if (Page > 0) { <a href="@Link(Page-1)">← Назад</a> } @if ((Page+1L)*data.PageSize < data.Total) { <a href="@Link(Page+1)">Далее →</a> }</div>
+}
+</section>
+@code {
+    [SupplyParameterFromQuery] public int Page { get; set; }
+    [SupplyParameterFromQuery] public string? Folder { get; set; }
+    [SupplyParameterFromQuery] public string? Kind { get; set; }
+    [SupplyParameterFromQuery] public string? Search { get; set; }
+    private IReadOnlyList<AgentFolderOption> Folders = [];
+    private AgentProblemPage? Data;
+    private string Link(int page) => $"problems?page={page}&folder={Uri.EscapeDataString(Folder ?? "")}&kind={Uri.EscapeDataString(Kind ?? "all")}&search={Uri.EscapeDataString(Search ?? "")}";
+    protected override async Task OnParametersSetAsync()
+    {
+        Folders = await Store.FoldersAsync(Http.HttpContext!.RequestAborted);
+        var folder = string.IsNullOrEmpty(Folder) || Folder == "root" ? (Guid?)null : OrganizationText.FolderId(Folder);
+        Data = await Store.ProblemsAsync(Page, Kind, Search, folder, Folder == "root", Settings.OfflineAfterSeconds, Http.HttpContext.RequestAborted);
+    }
+}

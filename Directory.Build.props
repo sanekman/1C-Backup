@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <Product>SP Backup</Product>
+    <Company>SP Backup</Company>
+    <!-- CI release tags set the version for the GUI, agent and shared libraries. -->
+    <Version Condition="'$(Version)' == '' and '$(GITHUB_REF_TYPE)' == 'tag' and $([System.Text.RegularExpressions.Regex]::IsMatch('$(GITHUB_REF_NAME)', '^v[0-9]+\.[0-9]+\.[0-9]+-(preview|alpha|beta)\.[0-9]+$'))">$([System.String]::Copy('$(GITHUB_REF_NAME)').Substring(1))</Version>
+    <Version Condition="'$(Version)' == ''">0.1.0-dev</Version>
+  </PropertyGroup>
+</Project>

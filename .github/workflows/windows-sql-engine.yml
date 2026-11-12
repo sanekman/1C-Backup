@@ -1,0 +1,37 @@
+name: Verify full Windows SQL engine
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feature/**']
+    paths:
+      - '.github/workflows/windows-sql-engine.yml'
+      - 'tools/windows_sql/**'
+      - 'tests/WindowsSqlEngineSmoke/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-sql-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-engine:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - name: Install an owned full SQL Express instance and verify TCP TLS, backups and history
+        shell: pwsh
+        run: ./tools/windows_sql/test_engine.ps1 -Output artifacts/sql-engine
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-windows-sql-engine-verification
+          path: artifacts/sql-engine/*.json
+          if-no-files-found: warn
+          retention-days: 14

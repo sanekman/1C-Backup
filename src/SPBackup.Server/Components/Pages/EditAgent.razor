@@ -1,0 +1,59 @@
+@page "/agents/{Id:guid}/edit"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerOptions Settings
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+<PageTitle>Имя и папка агента — @Settings.DisplayName</PageTitle>
+<a href="@($"agents/{Id}")">← Карточка агента</a>
+<h1>Имя и папка агента</h1>
+@if (Agent is { } agent)
+{
+<section class="card narrow">
+<p>Имя компьютера: <strong>@(agent.ComputerName ?? agent.Name)</strong>.</p>
+<p class="muted">Понятное имя используется только в панели. Подключение, задания и история сохраняются.</p>
+@if (Error is not null) { <p class="error" role="alert">@Error</p> }
+@if (Saved) { <p role="status">Имя и папка сохранены. <a href="@($"agents/{Id}")">Открыть карточку агента</a></p> }
+<form method="post" @formname="agent-identity" @onsubmit="Save">
+<AntiforgeryToken />
+<label>Понятное имя агента<input name="Model.Name" value="@Model!.Name" required maxlength="128" placeholder="Например, Бухгалтерия — главный сервер" /></label>
+<label>Папка агента<select name="Model.FolderId"><option value="">Без папки</option>
+@foreach (var folder in Options) { <option value="@folder.Id" selected="@(Model.FolderId == folder.Id.ToString())">@folder.Path</option> }
+</select></label>
+<details><summary>Создать новую папку внутри выбранной</summary>
+<label>Имя новой папки<input name="Model.NewFolderName" value="@Model.NewFolderName" maxlength="128" /></label>
+<p class="hint">Если папка не выбрана, новая папка будет на верхнем уровне. Агент будет помещён в новую папку.</p>
+</details>
+<button type="submit">Сохранить имя и папку</button>
+</form>
+</section>
+}
+else { <p>Агент не найден.</p> }
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [SupplyParameterFromForm] public IdentityForm? Model { get; set; }
+    private AgentRecord? Agent;
+    private IReadOnlyList<AgentFolderOption> Options = [];
+    private string? Error; private bool Saved;
+    protected override async Task OnInitializedAsync()
+    {
+        var initialize = Model is null; Model ??= new();
+        Agent = await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted);
+        Options = await Store.FoldersAsync(Http.HttpContext.RequestAborted);
+        if (initialize) Model = new() { Name = Agent?.Name ?? "", FolderId = Agent?.FolderId?.ToString() };
+        if (Agent is null) Http.HttpContext.Response.StatusCode = 404;
+    }
+    private async Task Save()
+    {
+        if (Agent is null) return;
+        try
+        {
+            await Store.UpdateAgentIdentityAsync(ServerAuthentication.UserId(Http.HttpContext!.User), Id,
+                new(Model!.Name, OrganizationText.FolderId(Model.FolderId), OrganizationText.NewFolder(Model.NewFolderName)), Http.HttpContext.RequestAborted);
+            Agent = await Store.AgentAsync(Id, Http.HttpContext.RequestAborted);
+            Options = await Store.FoldersAsync(Http.HttpContext.RequestAborted);
+            Model = new() { Name = Agent!.Name, FolderId = Agent.FolderId?.ToString() }; Saved = true;
+        }
+        catch (ServerRequestException error) { Error = OrganizationText.Error(error); }
+    }
+    public sealed class IdentityForm { public string Name { get; set; } = ""; public string? FolderId { get; set; } public string? NewFolderName { get; set; } }
+}

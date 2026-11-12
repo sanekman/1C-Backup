@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefineConstants Condition="'$(LegacyDistribution)' != ''">$(DefineConstants);LEGACY</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(LegacyDistribution)' == ''">
+    <ProjectReference Include="../../src/SPBackup.Core/SPBackup.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(LegacyDistribution)' != ''">
+    <!-- Use the actual shipped alpha.25 assembly, not a rebuilt legacy source. -->
+    <Reference Include="OneCBackup.Core"><HintPath>$(LegacyDistribution)/OneCBackup.Core.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

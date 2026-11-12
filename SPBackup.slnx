@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SPBackup.Core/SPBackup.Core.csproj" />
+    <Project Path="src/SPBackup.Agent/SPBackup.Agent.csproj" />
+    <Project Path="src/SPBackup.Desktop/SPBackup.Desktop.csproj" />
+    <Project Path="src/SPBackup.Server/SPBackup.Server.csproj" />
+    <Project Path="src/SPBackup.Remote/SPBackup.Remote.csproj" />
+    <Project Path="src/SPBackup.StorageBridge/SPBackup.StorageBridge.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SPBackup.Core.Tests/SPBackup.Core.Tests.csproj" />
+    <Project Path="tests/SPBackup.Server.Tests/SPBackup.Server.Tests.csproj" />
+  </Folder>
+</Solution>
