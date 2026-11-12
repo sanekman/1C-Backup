@@ -923,6 +923,18 @@ def web_update_run():
         web_update_save(state)
 
 
+def web_update_units():
+    base = '# SP Backup web updater\n[Unit]\nDescription=SP Backup server update\n'
+    service = '\n[Service]\nType=oneshot\nUser=root\nUMask=0077\nTimeoutStartSec=infinity\nEnvironment=LANG=C LC_ALL=C\n'
+    command = 'ExecStart=/usr/bin/python3 ' + str(WEB_UPDATE_SCRIPT)
+    return {
+        'onec-backup-server-update.socket': base + '\n[Socket]\nListenStream=' + WEB_UPDATE_SOCKET + '\nAccept=yes\nSocketUser=root\nSocketGroup=' + ACCOUNT + '\nSocketMode=0660\n\n[Install]\nWantedBy=sockets.target\n',
+        'onec-backup-server-update@.service': base + '\n[Service]\nUser=root\nUMask=0077\nStandardInput=socket\nStandardOutput=socket\nStandardError=journal\n' + command + ' --web-update-control\n',
+        'onec-backup-server-update-check.service': base + service + command + ' --web-update-check\n',
+        'onec-backup-server-update-run.service': base + service + command + ' --web-update-run\n',
+    }
+
+
 def enable_web_updates():
     # Reuse the complete read-only preflight (same version returns before making a kit).
     guest_update(web_update_current())
@@ -939,15 +951,7 @@ def enable_web_updates():
             if temporary.exists() or temporary.is_symlink(): raise ValueError('Временный файл обновлятора уже существует.')
             shutil.copyfile(Path(__file__).resolve(), temporary); os.chmod(temporary, 0o700)
             os.replace(temporary, WEB_UPDATE_SCRIPT)
-        base = '# SP Backup web updater\n[Unit]\nDescription=SP Backup server update\n'
-        service = '\n[Service]\nType=oneshot\nUser=root\nUMask=0077\nTimeoutStartSec=infinity\nEnvironment=LANG=C LC_ALL=C\n'
-        command = 'ExecStart=/usr/bin/python3 ' + str(WEB_UPDATE_SCRIPT)
-        units = {
-            'onec-backup-server-update.socket': base + '\n[Socket]\nListenStream=' + WEB_UPDATE_SOCKET + '\nAccept=yes\nSocketUser=root\nSocketGroup=' + ACCOUNT + '\nSocketMode=0660\nService=onec-backup-server-update-control@.service\n\n[Install]\nWantedBy=sockets.target\n',
-            'onec-backup-server-update-control@.service': base + '\n[Service]\nUser=root\nUMask=0077\nStandardInput=socket\nStandardOutput=socket\nStandardError=journal\n' + command + ' --web-update-control\n',
-            'onec-backup-server-update-check.service': base + service + command + ' --web-update-check\n',
-            'onec-backup-server-update-run.service': base + service + command + ' --web-update-run\n',
-        }
+        units = web_update_units()
         for name, content in units.items():
             path = UNIT.parent / name
             if path.is_symlink() or path.with_name(name + '.d').exists(): raise ValueError('Нестандартная служба обновлятора.')

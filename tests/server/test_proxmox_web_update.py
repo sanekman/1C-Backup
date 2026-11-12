@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import time
 import unittest
@@ -24,6 +25,16 @@ class WebUpdateBrokerTests(unittest.TestCase):
         self.service.stop();self.current_patch.stop();self.home_patch.stop();self.temporary.cleanup()
     def available(self):
         m.web_update_save({'phase':'available','latestVersion':'0.1.0-preview.9','checkedUtc':time.time()})
+    @unittest.skipUnless(shutil.which('systemd-analyze'),'systemd unit parser required')
+    def test_socket_activation_and_worker_units_are_accepted_by_real_systemd_parser(self):
+        import pwd
+        with patch.object(m,'ACCOUNT',pwd.getpwuid(os.getuid()).pw_name):units=m.web_update_units()
+        paths=[]
+        for name,content in units.items():
+            path=self.root/name;path.write_text(content);paths.append(str(path))
+        result=subprocess.run(['systemd-analyze','verify',*paths],capture_output=True,text=True)
+        self.assertEqual(0,result.returncode,result.stderr)
+
     def test_untrusted_payloads_cannot_choose_a_command_path_url_or_older_release(self):
         self.available()
         for request in [{'command':'shell','version':'0.1.0-preview.9'}, {'command':'start','version':'0.1.0-preview.9','url':'https://other'},
