@@ -23,9 +23,9 @@ public static partial class ServerHost
     }
     private static void MapRemoteRuns(WebApplication app)
     {
-        app.MapGet("/api/v1/management/problems", async (int? page, string? kind, string? search, Guid? folder, bool? root,
+        app.MapGet("/api/v1/management/problems", async (int? page, string? kind, string? search, Guid? folder, bool? root, Guid? agent,
             ServerStore store, ServerOptions options, CancellationToken token) => Results.Json(await store.ProblemsAsync(page ?? 0,
-                kind, search, folder, root ?? false, options.OfflineAfterSeconds, token))).RequireAuthorization(ServerAuthentication.Administrator);
+                kind, search, folder, root ?? false, options.OfflineAfterSeconds, token, agent))).RequireAuthorization(ServerAuthentication.Administrator);
         var admin = app.MapGroup("/api/v1/management/agents/{id:guid}/commands").RequireAuthorization(ServerAuthentication.Administrator);
         admin.MapGet("", async (Guid id, ServerStore store, CancellationToken token) => Results.Json(await store.RemoteRunsAsync(id, token)));
         admin.MapPost("", async (Guid id, HttpContext context, ServerStore store, IAntiforgery anti) =>

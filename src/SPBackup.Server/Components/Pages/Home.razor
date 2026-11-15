@@ -33,13 +33,27 @@
         }
         else
         {
-            <div class="table-scroll"><table><thead><tr><th>Агент</th><th>Связь</th><th>Последняя связь</th><th>Настройки</th></tr></thead><tbody>
+            <div class="table-scroll"><table><thead><tr><th>Агент</th><th>Связь</th><th>Требует внимания</th><th>Настройки</th></tr></thead><tbody>
             @foreach (var agent in data.Agents)
             {
-                <tr><td><a href="@("agents/" + agent.AgentId)">@agent.Name</a><small>Компьютер: @(agent.ComputerName ?? agent.Name)</small>
+                <tr data-agent="@agent.AgentId"><td class="agent-name"><a href="@("agents/" + agent.AgentId)">@agent.Name</a><small>Компьютер: @(agent.ComputerName ?? agent.Name)</small>
                     <small>Папка: @(Folders.FirstOrDefault(f => f.Id == agent.FolderId)?.Path ?? "Без папки")</small><small>@(Versions.GetValueOrDefault(agent.AgentId) ?? agent.AgentVersion ?? "Версия ещё не получена")</small></td>
-                    <td><span class="badge @(agent.Revoked ? "bad" : Online(agent) ? "good" : "pending")">@State(agent)</span></td>
-                    <td>@Clock.Time(LastSeen(agent))</td>
+                    <td><span class="badge @(agent.Revoked ? "bad" : Online(agent) ? "good" : "pending")">@State(agent)</span><small>Последняя связь: @Clock.Time(LastSeen(agent))</small></td>
+                    <td class="agent-attention">
+                        @if (agent.Revoked) { <span class="muted">Не отслеживается: доступ отозван.</span> }
+                        else if (ProblemSummaries.GetValueOrDefault(agent.AgentId) is { } summary)
+                        {
+                            @if (summary.Total > 0)
+                            {
+                                <a href="@($"problems?agent={agent.AgentId}")" aria-label="@($"Проблемы агента {agent.Name}: причин {summary.Total}")">Причин: @summary.Total →</a>
+                                @foreach (var reason in summary.Reasons.OrderBy(r => ProblemText.Priority(r.Code)).ThenBy(r => r.Code, StringComparer.Ordinal).Take(2))
+                                { <small>@ProblemText.Filters[reason.Code]@if (reason.Count > 1) { <span>: @reason.Count</span> }</small> }
+                            }
+                            else { <span>По отчёту проблем не найдено.</span> }
+                            <small>Отчёт: @Clock.Time(summary.ObservedUtc)</small>
+                        }
+                        else { <span class="muted">Данные ещё не получены. Обновите страницу.</span> }
+                    </td>
                     <td><small>На сервере: @agent.DesiredRevision</small><small>Сообщено агентом: @(agent.ReportedRevision?.ToString() ?? "—")</small></td></tr>
             }
             </tbody></table></div>
@@ -67,11 +81,13 @@
         Folders = await Store.FoldersAsync(Http.HttpContext!.RequestAborted);
         SelectedFolder = Folder is null or "root" ? null : OrganizationText.FolderId(Folder);
         Data = await Store.AgentsAsync(Page, Http.HttpContext!.RequestAborted, SelectedFolder, Folder == "root");
+        ProblemSummaries = (await Store.ProblemSummariesAsync(Data.Agents.Select(a => a.AgentId).ToArray(), Settings.OfflineAfterSeconds, Http.HttpContext.RequestAborted)).ToDictionary(s => s.AgentId);
         MonitoringTimes.Clear(); Versions.Clear();
         foreach (var agent in Data.Agents)
             if (await Store.MonitoringAsync(agent.AgentId,Http.HttpContext.RequestAborted) is { } m) { MonitoringTimes[agent.AgentId]=m.ReceivedUtc; Versions[agent.AgentId]=m.Snapshot.AgentVersion; }
     }
     private readonly Dictionary<Guid, DateTimeOffset> MonitoringTimes = [];
+    private Dictionary<Guid, AgentProblemSummary> ProblemSummaries = [];
     private readonly Dictionary<Guid, string> Versions = [];
     private DateTimeOffset? LastSeen(AgentRecord agent) => MonitoringTimes.TryGetValue(agent.AgentId,out var time) && (agent.ReceivedUtc is null || time > agent.ReceivedUtc) ? time : agent.ReceivedUtc;
     private bool Online(AgentRecord agent) => LastSeen(agent) is { } time && DateTimeOffset.UtcNow - time < TimeSpan.FromSeconds(Settings.OfflineAfterSeconds);

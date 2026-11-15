@@ -5,7 +5,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 NS = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
-SERVER_TEST_COUNT = 178
+SERVER_TEST_COUNT = 181
 WINDOWS_SKIPS = {
     'SPBackup.Server.Tests.ServerUpdateClientTests.AbsentSocketDoesNotClaimThatTheServerIsUpdated',
     'SPBackup.Server.Tests.ServerUpdateClientTests.ClientUsesFixedJsonProtocolAndCannotSendACommandOrUrl',
@@ -32,7 +32,10 @@ def main():
     parser.add_argument('--runtime', choices=['linux-x64', 'win-x64'], required=True)
     parser.add_argument('--maintenance-only', action='store_true', help='Windows package/upgrade/installer checks; integration already accepted on unchanged C# sources')
     parser.add_argument('--results-dir', type=Path, default=Path(__file__).resolve().parents[2] / 'artifacts/server-tests')
+    parser.add_argument('--integration-only', action='store_true', help='Verify integration and built package; no unchanged native installer scenarios')
     args = parser.parse_args()
+    if args.integration_only and args.maintenance_only:
+        parser.error('integration-only and maintenance-only are mutually exclusive')
     if args.maintenance_only and args.runtime != 'win-x64':
         parser.error('maintenance-only is restricted to Windows')
     platform = 'windows' if args.runtime == 'win-x64' else 'linux'
@@ -40,7 +43,7 @@ def main():
     if not args.maintenance_only:
         verify_suite(root / f'server-{platform}.trx', SERVER_TEST_COUNT, WINDOWS_SKIPS if platform == 'windows' else frozenset())
     verify_suite(root / f'server-package-{platform}.trx', 1)
-    if platform == 'windows':
+    if platform == 'windows' and not args.integration_only:
         reports = {
             'windows-installer-result.json': {'installed', 'administratorLogin', 'reinstallPreservesData', 'coldSnapshotRoundTrip'},
             'windows-snapshot-result.json': {'coldBackup', 'checksumVerification', 'startupFailureRollback', 'restoredDatabase'},

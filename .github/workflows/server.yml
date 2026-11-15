@@ -28,7 +28,7 @@ on:
         description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
         default: full
-        options: [full, compose, maintenance, installed, proxmox, reports]
+        options: [full, compose, maintenance, installed, proxmox, reports, integration]
       report_source_run:
         description: 'Reports scope only: existing server.yml run to validate without rerunning checks'
         type: string
@@ -84,9 +84,9 @@ jobs:
       - if: runner.os == 'Windows'
         shell: pwsh
         run: Invoke-WebRequest 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile artifacts/server/vc_redist.x64.exe
-      - if: runner.os == 'Windows'
+      - if: runner.os == 'Windows' && inputs.scope != 'integration'
         run: python tools/build_server_windows_installer.py
-      - if: runner.os == 'Windows'
+      - if: runner.os == 'Windows' && inputs.scope != 'integration'
         shell: pwsh
         run: |
           $baseline = Join-Path $env:RUNNER_TEMP 'SP-Backup-Server-preview8-setup.exe'
@@ -95,12 +95,12 @@ jobs:
           $installer = (Get-ChildItem artifacts/server/SP-Backup-Server-*-windows-x64-setup.exe).FullName
           & (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/server/windows_upgrade_smoke.ps1 -Installer $installer -BaselineInstaller $baseline
           if ($LASTEXITCODE -ne 0) { throw 'Native Windows upgrade/recovery acceptance failed.' }
-      - if: runner.os == 'Windows'
+      - if: runner.os == 'Windows' && inputs.scope != 'integration'
         shell: pwsh
         run: |
           $installer = (Get-ChildItem artifacts/server/SP-Backup-Server-*-windows-x64-setup.exe).FullName
           & tests/server/windows_installer_smoke.ps1 -Installer $installer
-      - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }} ${{ inputs.scope == 'maintenance' && '--maintenance-only' || '' }}
+      - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }} ${{ inputs.scope == 'maintenance' && '--maintenance-only' || inputs.scope == 'integration' && '--integration-only' || '' }}
       - if: runner.os == 'Linux'
         run: python3 tests/server/compose_smoke.py
       - if: always() && runner.os == 'Windows'
@@ -132,7 +132,7 @@ jobs:
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
 
   proxmox-installer:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'reports')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'reports' && inputs.scope != 'integration')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

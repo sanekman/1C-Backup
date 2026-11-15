@@ -1,0 +1,51 @@
+"""Browser acceptance of seeded isolated ServerFixture; never connects outside loopback."""
+import argparse
+import json
+from pathlib import Path
+from urllib.parse import urlsplit
+from playwright.sync_api import sync_playwright
+
+p = argparse.ArgumentParser(description=__doc__)
+for name in ['url', 'password-file', 'agent', 'job', 'output']:
+    p.add_argument('--' + name, required=True)
+a = p.parse_args()
+assert urlsplit(a.url).hostname in ['127.0.0.1', 'localhost']
+out = Path(a.output)
+out.mkdir(parents=True, exist_ok=True)
+checks = []
+with sync_playwright() as pw:
+    browser = pw.chromium.launch(executable_path='/usr/bin/chromium', args=['--no-sandbox'])
+    page = browser.new_page(ignore_https_errors=True, viewport={'width': 1366, 'height': 900})
+    page.goto(a.url + 'login')
+    page.locator('input[name="name"]').fill('administrator')
+    page.locator('input[name="password"]').fill(Path(a.password_file).read_text().strip())
+    page.get_by_role('button', name='Войти', exact=True).click()
+    page.wait_for_url(a.url)
+    row = page.locator(f'tr[data-agent="{a.agent}"]')
+    assert 'Нет связи' in row.inner_text()
+    assert 'Отчёт:' in row.inner_text()
+    assert 'Частичная доставка' in row.inner_text()
+    checks.append('offline-partial-delivery-and-report-time-visible-together')
+    for theme in ['light', 'dark']:
+        if page.locator('html').get_attribute('data-theme') != theme:
+            page.locator('[data-theme-toggle]').click()
+        for width, height in [(1366, 900), (900, 580), (360, 800)]:
+            page.set_viewport_size({'width': width, 'height': height})
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            if width == 900:
+                assert page.locator('.agents-main .table-scroll').evaluate('(e) => e.scrollWidth <= e.clientWidth')
+            page.screenshot(path=str(out / f'overview-{theme}-{width}.png'), full_page=True)
+            checks.append(f'{theme}-{width}-no-page-overflow')
+    row.get_by_role('link', name='Проблемы агента', exact=False).focus()
+    page.keyboard.press('Enter')
+    page.wait_for_url('**/problems?agent=' + a.agent)
+    assert page.locator('input[name="agent"]').input_value() == a.agent
+    assert 'Найдено причин: 68' in page.inner_text('body')
+    page.get_by_role('link', name='Далее →', exact=True).click()
+    assert ('agent=' + a.agent) in page.url
+    page.get_by_role('link', name='← Назад', exact=True).click()
+    page.locator(f'a[href="agents/{a.agent}#job-{a.job}"]').first.click()
+    assert page.locator(f'[id="job-{a.job}"]').count() == 1
+    checks.append('keyboard-drilldown-pagination-retains-agent-and-job-anchor')
+    browser.close()
+(out / 'result.json').write_text(json.dumps({'success': True, 'checks': checks}, indent=2))

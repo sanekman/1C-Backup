@@ -1,9 +1,10 @@
 namespace SPBackup.Server;
 public static class ProblemText
 {
+    public static int Priority(string code) => code switch { "Offline" => 0, "Failed" => 1, "Partial" => 2, "Incomplete" => 3, _ => 4 };
     public static IReadOnlyDictionary<string,string> Filters { get; } = new Dictionary<string,string> {
         ["all"] = "Все проблемы", ["Offline"] = "Нет связи", ["Unreported"] = "Нет отчётов", ["Failed"] = "Ошибки копирования",
-        ["Incomplete"] = "Неполные копии", ["Overdue"] = "Нет свежей копии", ["Warning"] = "Предупреждения",
+        ["Partial"] = "Частичная доставка", ["Incomplete"] = "Неполные копии", ["Overdue"] = "Нет свежей копии", ["Warning"] = "Предупреждения",
         ["PollFailed"] = "Ошибка опроса SQL", ["AccessRequired"] = "Не задан доступ", ["PlanRejected"] = "План отклонён",
         ["PlanPending"] = "План ожидает применения", ["ExecutorUnavailable"] = "Исполнитель недоступен" };
     public static string Action(string code) => code switch {

@@ -35,7 +35,7 @@
                 : Latest.FirstOrDefault(r=>r.JobId==job.JobId);
             var matchingHistory = !observation || poll?.ObservationStatus is null ||
                 poll.LatestReportId is not null && last?.RunId == poll.LatestReportId;
-            <tr><td>@job.Name<small>@(observation ? "Наблюдение · " + Source(job.SourceKind) : Source(job.SourceKind) + " · хранилищ: " + job.DestinationCount)</small></td>
+            <tr id="@($"job-{job.JobId}")"><td>@job.Name<small>@(observation ? "Наблюдение · " + Source(job.SourceKind) : Source(job.SourceKind) + " · хранилищ: " + job.DestinationCount)</small></td>
             <td>@(job.Enabled ? job.Schedule : "Отключено")
                 @if (job.MaximumBackupAgeHours is { } jobMaximumAge) { <small>Допустимый возраст копии: @jobMaximumAge ч.</small> }
                 @if (job.LocalAccessReady == false) { <small class="error">Не задан локальный доступ. В Windows-программе: «Файл → Доступ серверного задания…».</small> }

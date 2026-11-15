@@ -5,15 +5,7 @@ public sealed record AgentProblem(Guid AgentId, string AgentName, Guid? JobId, s
 public sealed record AgentProblemPage(IReadOnlyList<AgentProblem> Items, int Page, int PageSize, long Total);
 public sealed partial class ServerStore
 {
-    public async Task<AgentProblemPage> ProblemsAsync(int page, string? kind, string? search, Guid? folder, bool root,
-        int offlineSeconds, CancellationToken token)
-    {
-        if (page is < 0 or > 100000 || offlineSeconds < 1 || !ProblemText.Filters.ContainsKey(kind ?? "all")
-            || search is { Length: > 128 } || search?.Any(char.IsControl) == true)
-            throw new ServerRequestException(400, "invalid_problem_filter");
-        if (folder is { } id && !(await FoldersAsync(token)).Any(f => f.Id == id)) throw new ServerRequestException(404, "folder_not_found");
-        await using var db = await source.OpenConnectionAsync(token);
-        await using var query = Command(db, null, """
+    private const string ProblemRowsSql = """
             WITH RECURSIVE selected_folders AS (
                 SELECT id FROM server_agent_folders WHERE id=@folder::uuid
                 UNION ALL SELECT f.id FROM server_agent_folders f JOIN selected_folders p ON f.parent_id=p.id
@@ -24,7 +16,7 @@ public sealed partial class ServerStore
                 JOIN server_configurations c ON c.agent_id=a.id
                 LEFT JOIN server_configuration_offers o ON o.agent_id=a.id AND o.generation=a.token_hash AND o.revision=c.revision
                     AND o.document_hash=sha256(convert_to(c.document::text,'UTF8'))
-                WHERE NOT a.revoked AND (@folder::uuid IS NULL OR a.folder_id IN (SELECT id FROM selected_folders))
+                WHERE NOT a.revoked AND (@agent_ids::uuid[] IS NULL OR a.id=ANY(@agent_ids::uuid[])) AND (@folder::uuid IS NULL OR a.folder_id IN (SELECT id FROM selected_folders))
                     AND (NOT @root OR a.folder_id IS NULL)
             ), jobs AS (
                 SELECT a.*,j,latest.run,successful.finished
@@ -43,7 +35,9 @@ public sealed partial class ServerStore
                 UNION ALL SELECT id,name,NULL,NULL,CASE WHEN decision='Rejected' THEN 'PlanRejected' ELSE 'PlanPending' END,seen,observed FROM agents
                     WHERE document->>'executionMode'='Managed' AND (decision='Rejected' OR coalesce((document->>'configurationRevision')::bigint,0)<>desired)
                 UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Failed',seen,observed FROM jobs
-                    WHERE run->>'status' IN ('Failed','PartiallySucceeded','Cancelled','Interrupted')
+                    WHERE run->>'status' IN ('Failed','Cancelled','Interrupted')
+                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Partial',seen,observed FROM jobs
+                    WHERE run->>'status'='PartiallySucceeded'
                 UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Incomplete',seen,observed FROM jobs WHERE (run->>'incomplete')::boolean
                 UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Warning',seen,observed FROM jobs WHERE (run->>'warningCount')::int>0
                 UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Overdue',seen,observed FROM jobs
@@ -56,13 +50,25 @@ public sealed partial class ServerStore
                     WHERE (s->>'enabled')::boolean AND ((s->>'failed')::boolean OR s->>'observationStatus'='BackupFailed'
                         OR (s->>'freshnessWarning')::boolean OR (s->>'maximumBackupAgeHours')::int>0 AND
                             (s->>'lastSuccessfulUtc' IS NULL OR (s->>'lastSuccessfulUtc')::timestamptz<now()-make_interval(hours=>(s->>'maximumBackupAgeHours')::int)))
-            ), filtered AS (
+            )
+            """;
+
+    public async Task<AgentProblemPage> ProblemsAsync(int page, string? kind, string? search, Guid? folder, bool root,
+        int offlineSeconds, CancellationToken token, Guid? agentId = null)
+    {
+        if (agentId == Guid.Empty || page is < 0 or > 100000 || offlineSeconds < 1 || !ProblemText.Filters.ContainsKey(kind ?? "all")
+            || search is { Length: > 128 } || search?.Any(char.IsControl) == true)
+            throw new ServerRequestException(400, "invalid_problem_filter");
+        if (folder is { } id && !(await FoldersAsync(token)).Any(f => f.Id == id)) throw new ServerRequestException(404, "folder_not_found");
+        await using var db = await source.OpenConnectionAsync(token);
+        await using var query = Command(db, null, ProblemRowsSql + "\n" + """
+            , filtered AS (
                 SELECT * FROM problems WHERE (@kind='all' OR code=@kind)
                     AND (@search='' OR strpos(lower(translate(name,'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')),lower(translate(@search,'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')))>0 OR strpos(lower(translate(coalesce(job_name,''),'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')),lower(translate(@search,'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')))>0)
             )
             SELECT p.id,p.name,p.job_id,p.job_name,p.code,p.seen,p.observed,t.total FROM (SELECT count(*) total FROM filtered) t
-            LEFT JOIN LATERAL (SELECT * FROM filtered ORDER BY CASE code WHEN 'Offline' THEN 0 WHEN 'Failed' THEN 1 WHEN 'Incomplete' THEN 2 ELSE 3 END,name,id,job_id,code LIMIT 50 OFFSET @offset) p ON true
-            """, ("folder", folder), ("root", root), ("seconds", offlineSeconds), ("kind", kind ?? "all"), ("search", search?.Trim() ?? ""), ("offset", page * 50));
+            LEFT JOIN LATERAL (SELECT * FROM filtered ORDER BY CASE code WHEN 'Offline' THEN 0 WHEN 'Failed' THEN 1 WHEN 'Partial' THEN 2 WHEN 'Incomplete' THEN 3 ELSE 4 END,name,id,job_id,code LIMIT 50 OFFSET @offset) p ON true
+            """, ("agent_ids", agentId is { } agent ? new[] { agent } : null), ("folder", folder), ("root", root), ("seconds", offlineSeconds), ("kind", kind ?? "all"), ("search", search?.Trim() ?? ""), ("offset", page * 50));
         await using var reader = await query.ExecuteReaderAsync(token);
         var rows = new List<AgentProblem>(); long total = 0;
         while (await reader.ReadAsync(token))

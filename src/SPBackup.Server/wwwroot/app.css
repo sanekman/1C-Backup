@@ -18,3 +18,5 @@ select{display:block;width:100%;font:inherit;color:inherit;background:var(--inpu
 .break-path { overflow-wrap: anywhere; }
 [data-server-update] button:disabled { opacity: .55; cursor: default; }
 .server-update-actions form { margin-top: 0; }
+.agent-name{min-width:140px;max-width:260px;overflow-wrap:anywhere}.agent-attention{min-width:180px;max-width:260px;overflow-wrap:anywhere}
+@media(max-width:1100px){.agents-layout{grid-template-columns:1fr}}
