@@ -348,7 +348,8 @@ PR №2 остаётся черновиком; теги и файлы опубл
 
 ## Подключить обновление из «Настроек»
 
-**Новая функция рабочей ветки, ещё не опубликована в preview.9.**
+**Опубликовано в preview.10; preview.9 функции не содержит.**
+[Переход CT 107 и отчёт выпуска](server-preview10-publication.md).
 После установки серверного пакета с этой функцией администратор один раз
 подключает системную задачу. Одно подключение задачи не добавляет интерфейс
 в старую программу preview.9. [Сценарий, доступ и ограничения](server-panel-updates.md).
@@ -357,7 +358,7 @@ PR №2 остаётся черновиком; теги и файлы опубл
 
 ```sh
 wget --https-only -O /root/update-sp-backup-server.py \
-  'https://raw.githubusercontent.com/sanekman/1C-Backup/a0b0325bbe478f216dddd17ea6096956049c280a/deploy/server/create-proxmox-lxc.py'
+  'https://raw.githubusercontent.com/sanekman/1C-Backup/304c6bf962584dec7e0a8449a071bd2230ffd74c/deploy/server/create-proxmox-lxc.py'
 ```
 
 Затем выполните отдельно (107 — ваш существующий запущенный CT):
