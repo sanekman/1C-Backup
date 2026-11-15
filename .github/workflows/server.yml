@@ -42,6 +42,7 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'proxmox' && inputs.scope != 'reports')
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && (inputs.platform == 'windows' || inputs.scope == 'maintenance') && '[{"os":"windows-latest","runtime":"win-x64"}]' || github.event_name == 'workflow_dispatch' && inputs.platform == 'linux' && '[{"os":"ubuntu-latest","runtime":"linux-x64"}]' || '[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]') }}
     runs-on: ${{ matrix.runtime == 'win-x64' && (inputs.windows_runner || 'windows-latest') || matrix.os }}
