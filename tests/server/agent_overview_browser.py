@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright
+from first_use_flow import first_use
 
 p = argparse.ArgumentParser(description=__doc__)
 for name in ['url', 'password-file', 'agent', 'job', 'output']:
@@ -47,5 +48,6 @@ with sync_playwright() as pw:
     page.locator(f'a[href="agents/{a.agent}#job-{a.job}"]').first.click()
     assert page.locator(f'[id="job-{a.job}"]').count() == 1
     checks.append('keyboard-drilldown-pagination-retains-agent-and-job-anchor')
+    first_use(pw, page, a.url, out, checks)
     browser.close()
 (out / 'result.json').write_text(json.dumps({'success': True, 'checks': checks}, indent=2))
