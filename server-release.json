@@ -1,0 +1,26 @@
+{
+  "version": "0.1.0-preview.10",
+  "sourceCommit": "304c6bf962584dec7e0a8449a071bd2230ffd74c",
+  "runtime": "10.0.13",
+  "minimumMonitoringAgent": "0.2.0-alpha.20",
+  "assets": [
+    {
+      "name": "SP-Backup-Server-0.1.0-preview.10-windows-x64-setup.exe",
+      "bytes": 89067799,
+      "sha256": "6e76b1b5f1156b1393e7c640707fa2db434b7769978deccb20268563e93f90ba",
+      "url": "https://github.com/sanekman/1C-Backup/releases/download/server-v0.1.0-preview.10/SP-Backup-Server-0.1.0-preview.10-windows-x64-setup.exe"
+    },
+    {
+      "name": "SP-Backup-server-win-x64.zip",
+      "bytes": 50520029,
+      "sha256": "6093b7a80fc026f58cafffa080e64b8bc665f1419baa6cd249661b473dbd3be2",
+      "url": "https://github.com/sanekman/1C-Backup/releases/download/server-v0.1.0-preview.10/SP-Backup-server-win-x64.zip"
+    },
+    {
+      "name": "SP-Backup-server-linux-x64.tar.gz",
+      "bytes": 49499080,
+      "sha256": "d6b51a415b2a1e2a5e6259c70c80cc6a81fac4f421576ec13e0034c6d7c854a4",
+      "url": "https://github.com/sanekman/1C-Backup/releases/download/server-v0.1.0-preview.10/SP-Backup-server-linux-x64.tar.gz"
+    }
+  ]
+}
