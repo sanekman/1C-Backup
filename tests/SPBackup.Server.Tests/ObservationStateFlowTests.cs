@@ -109,7 +109,7 @@ public sealed class ObservationStateFlowTests(ServerFixture server) : IClassFixt
         {
             using var response = await server.Administrator.GetAsync($"agents/{agent.AgentId}"); response.EnsureSuccessStatusCode();
             var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
-            var match = Regex.Match(html, @"<tr><td>Source state flow.*?</tr>", RegexOptions.Singleline);
+            var match = Regex.Match(html, @"<tr\b[^>]*><td>Source state flow.*?</tr>", RegexOptions.Singleline);
             Assert.True(match.Success, "Observation task row must be rendered"); return match.Value;
         }
     }
@@ -152,7 +152,7 @@ public sealed class ObservationStateFlowTests(ServerFixture server) : IClassFixt
         {
             using var response = await server.Administrator.GetAsync($"agents/{agent.AgentId}"); response.EnsureSuccessStatusCode();
             return Regex.Match(WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync()),
-                @"<tr><td>Source state flow.*?</tr>", RegexOptions.Singleline).Value;
+                @"<tr\b[^>]*><td>Source state flow.*?</tr>", RegexOptions.Singleline).Value;
         }
     }
 

@@ -125,7 +125,7 @@ public sealed class CentralManagementTests(ServerFixture fixture) : IClassFixtur
         var problems = await fixture.Store.ProblemsAsync(0, null, "current", parent, false, 120, default);
         Assert.Equal(5, (await fixture.Store.ProblemsAsync(0, null, "унф", parent, false, 120, default)).Total);
         Assert.Equal(5, problems.Total);
-        Assert.Equal(new[] { "AccessRequired", "Failed", "Incomplete", "Overdue", "Warning" }, problems.Items.Select(p => p.Code).Order().ToArray()); Assert.All(problems.Items, p => Assert.Equal(job.Id, p.JobId));
+        Assert.Equal(new[] { "AccessRequired", "Incomplete", "Overdue", "Partial", "Warning" }, problems.Items.Select(p => p.Code).Order().ToArray()); Assert.All(problems.Items, p => Assert.Equal(job.Id, p.JobId));
         Assert.DoesNotContain((await fixture.Store.ProblemsAsync(0, null, null, parent, false, 120, default)).Items, p => p.JobId == removed);
         Assert.Single((await fixture.Store.ProblemsAsync(0, "Incomplete", null, parent, false, 120, default)).Items);
         Assert.Empty((await fixture.Store.ProblemsAsync(0, null, "current", null, true, 120, default)).Items);
