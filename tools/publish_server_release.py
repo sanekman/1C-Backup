@@ -80,7 +80,7 @@ def main():
     # Large offline installers stay in release assets (not Git blobs).
     tree = api('git/trees', {'tree': [{'path': 'server-release.json', 'mode': '100644', 'type': 'blob', 'content': content}]})
     commit = api('git/commits', {'message': 'Immutable server distribution ' + version, 'tree': tree['sha'], 'parents': []})
-    release = api('releases', {'tag_name': tag, 'target_commitish': source, 'name': 'SP Backup Server ' + version,
+    release = api('releases', {'tag_name': tag, 'name': 'SP Backup Server ' + version,
                               'body': notes, 'draft': True, 'prerelease': True, 'make_latest': 'false'})
     upload_base = release['upload_url'].split('{')[0]
     for path in files:

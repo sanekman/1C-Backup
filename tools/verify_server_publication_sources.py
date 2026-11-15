@@ -33,8 +33,8 @@ assert len(comparison['files']) < 300
 assert all(file['filename'].startswith('tests/') and not file.get('previous_filename', 'tests/').startswith(('src/', 'deploy/', 'tools/')) for file in comparison['files'])
 for commit in [sha, native['head_sha']]:
     subprocess.run(['git', 'fetch', '--no-tags', 'origin', commit], check=True)
-# Fetch full tag source notes, verifier and publisher, not workflow branch versions.
-for name in ['docs/release-notes-server.md', 'tools/publish_server_release.py', 'tests/server/verify_results.py']:
+# Fetch exact tag notes and report verifier. Publisher uses the recovery workflow version.
+for name in ['docs/release-notes-server.md', 'tests/server/verify_results.py']:
     Path(name).write_bytes(subprocess.check_output(['git', 'show', sha + ':' + name]))
 with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
     stream.write('source=' + sha + '\n')
