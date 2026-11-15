@@ -185,7 +185,10 @@ def rpc(payload):
 assert rpc({'command':'status'})['phase']=='idle'
 assert rpc({'command':'start','version':'https://other/program'})['phase']=='idle'
 assert rpc({'command':'check'})['phase']=='checking'
-m.web_update_check()
+# Keep this compatibility fixture on its immutable preview.8 -> preview.9 path.
+# Manifest download and the separate root worker still use actual public packages.
+with patch.object(m, 'latest_update_version', return_value='0.1.0-preview.9'):
+    m.web_update_check()
 assert rpc({'command':'status'})['phase']=='available'
 assert rpc({'command':'start','version':'0.1.0-preview.9'})['phase']=='queued'
 assert rpc({'command':'start','version':'0.1.0-preview.9'})['phase']=='queued'
