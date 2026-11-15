@@ -342,28 +342,20 @@ jobs:
           path: artifacts/accepted-native
           github-token: ${{ github.token }}
           run-id: ${{ inputs.native_run }}
-      - name: Validate retained reports and remove only empty preview.11 attempt drafts
+      - name: Validate retained reports
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python tests/server/verify_results.py --runtime win-x64 --results-dir artifacts/accepted-release/server-tests
           python tests/server/verify_results.py --runtime linux-x64 --results-dir artifacts/accepted-release/server-tests
           python - <<'PYCODE'
-          import json, subprocess
+          import json
           from pathlib import Path
           for name, count in [('proxmox-installer-result.json',16),('proxmox-update-result.json',14)]:
               report=json.loads((Path('artifacts/accepted-native')/name).read_text())
               assert report['success'] is True and len(report['checks']) >= count
           report=json.loads(Path('artifacts/accepted-release/server-tests/compose-result.json').read_text())
           assert report['success'] is True and len(report['checks']) >= 14
-          for identity in [445866084,445866253]:
-              result=subprocess.run(['gh','api',f'repos/sanekman/1C-Backup/releases/{identity}'],capture_output=True,text=True)
-              if result.returncode:
-                  assert '404' in result.stderr
-                  continue
-              release=json.loads(result.stdout)
-              assert release['draft'] and release['tag_name']=='server-v0.1.0-preview.11' and not release['assets']
-              subprocess.run(['gh','api','--method','DELETE',f'repos/sanekman/1C-Backup/releases/{identity}'],check=True)
           PYCODE
       - name: Publish checked artifacts without rebuilding or replacing a release
         run: |
