@@ -366,7 +366,16 @@ jobs:
               subprocess.run(['gh','api','--method','DELETE',f'repos/sanekman/1C-Backup/releases/{identity}'],check=True)
           PYCODE
       - name: Publish checked artifacts without rebuilding or replacing a release
-        run: env GITHUB_REF_NAME="$RELEASE_TAG" GITHUB_SHA="$ACCEPTED_SOURCE" python tools/publish_server_release.py --artifacts artifacts/accepted-release
+        run: |
+          env GITHUB_REF_NAME="$RELEASE_TAG" GITHUB_SHA="$ACCEPTED_SOURCE" python - <<'PYCODE'
+          import runpy, sys, urllib.error
+          sys.argv=['tools/publish_server_release.py','--artifacts','artifacts/accepted-release']
+          try:
+              runpy.run_path(sys.argv[0],run_name='__main__')
+          except urllib.error.HTTPError as error:
+              print('GitHub publication response:',error.code,error.read().decode()[:1000])
+              raise
+          PYCODE
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
