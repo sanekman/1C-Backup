@@ -173,6 +173,16 @@ class ProxmoxUpdateTests(unittest.TestCase):
                 staged=module.install_package({'version':version},packages,activate=False)
             self.assertEqual(old,(app/'current').resolve());self.assertEqual(app/version,staged)
             self.assertEqual(version,(staged/'VERSION.txt').read_text())
+            os.chmod(staged, 0o700)
+            previous = os.umask(0o077)
+            try:
+                with patch.object(module,'APPLICATION',app):
+                    cached=module.install_package({'version':version},packages,activate=False)
+            finally:
+                os.umask(previous)
+            self.assertEqual(staged,cached)
+            self.assertEqual(0o755,cached.stat().st_mode & 0o777)
+            self.assertEqual(old,(app/'current').resolve())
 
     @unittest.skipIf(os.name == 'nt', 'Linux symlinks')
     def test_linked_or_special_backup_tree_is_refused(self):

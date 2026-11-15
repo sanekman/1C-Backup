@@ -138,6 +138,15 @@ def package_asset(manifest, version):
     return asset
 
 
+def readable_package_directories(target):
+    # Only the validated public program tree; never config/data/backup/broker paths.
+    # mkdir(mode=0755) still obeys systemd UMask=0077. chmod is required after creation.
+    reject_links(target)
+    directories = [target, *(path for path in target.rglob('*') if path.is_dir())]
+    for directory in directories:
+        os.chmod(directory, 0o755)
+
+
 def extract_package(archive, target, version):
     # No archive member may create links, devices, escape the root or replace a file.
     seen = set()
@@ -164,6 +173,7 @@ def extract_package(archive, target, version):
             or not target.joinpath('SPBackup.Server').is_file()
             or not os.access(target / 'SPBackup.Server', os.X_OK)):
         raise ValueError('В архиве нет исполняемого сервера нужной версии.')
+    readable_package_directories(target)
 
 
 def install_package(request, package_directory, activate=True):
@@ -197,6 +207,7 @@ def install_package(request, package_directory, activate=True):
         if release.exists():
             if release.is_symlink() or json.loads((release / 'installed-package.json').read_text()) != marker:
                 raise ValueError('Существующая версия не соответствует проверенному пакету.')
+            readable_package_directories(release)
         else:
             with tempfile.TemporaryDirectory(prefix='.staging-', dir=APPLICATION) as staging:
                 extracted = Path(staging) / 'server'

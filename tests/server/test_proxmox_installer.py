@@ -115,6 +115,29 @@ class ProxmoxInstallerTests(unittest.TestCase):
             with self.assertRaises((ValueError, FileExistsError)):
                 installer.extract_package(archive, root / 'duplicate', installer.VERSION)
 
+    @unittest.skipIf(os.name == 'nt', 'POSIX permissions and umask')
+    def test_public_package_directories_remain_readable_under_private_worker_umask(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work); archive = root / 'package.tar.gz'; target = root / 'program'
+            private = root / 'private'; private.mkdir(mode=0o700)
+            with tarfile.open(archive, 'w:gz') as output:
+                for name, data, mode in [('VERSION.txt', installer.VERSION.encode(), 0o644),
+                                         ('SPBackup.Server', b'fixture', 0o755),
+                                         ('wwwroot/assets/app.css', b'css', 0o644)]:
+                    member = tarfile.TarInfo('SP-Backup-Server/' + name)
+                    member.size = len(data); member.mode = mode
+                    output.addfile(member, io.BytesIO(data))
+            previous = os.umask(0o077)
+            try:
+                installer.extract_package(archive, target, installer.VERSION)
+            finally:
+                os.umask(previous)
+            for directory in [target, target / 'wwwroot', target / 'wwwroot/assets']:
+                self.assertEqual(0o755, directory.stat().st_mode & 0o777)
+            self.assertEqual(0o755, (target / 'SPBackup.Server').stat().st_mode & 0o777)
+            self.assertEqual(0o644, (target / 'wwwroot/assets/app.css').stat().st_mode & 0o777)
+            self.assertEqual(0o700, private.stat().st_mode & 0o777)
+
     def test_bad_package_hash_never_activates_or_replaces_existing_program(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work); package = root / 'package'; package.mkdir()

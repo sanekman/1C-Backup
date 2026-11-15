@@ -154,6 +154,12 @@ for failure in ['migration','readiness']:
     verify_previous()
     checks.append(failure+'-failure-restores-schema5-credentials-data-program-and-session')
 
+# Exercise the systemd worker's real strict umask, including a cached package left
+# inaccessible by an older updater. The service UID must migrate/start this package.
+for directory in [m.APPLICATION/'0.1.0-preview.9', *(p for p in (m.APPLICATION/'0.1.0-preview.9').rglob('*') if p.is_dir())]:
+    os.chmod(directory,0o700)
+os.umask(0o077)
+
 # Install the root-owned broker once, then exercise the real socket protocol.
 enabled=subprocess.run(['python3','/setup/install.py','--inside-container','--enable-web-updates'],capture_output=True,text=True)
 assert enabled.returncode==0,enabled.stderr
@@ -201,6 +207,10 @@ assert state['phase']=='updated' and state['currentVersion']=='0.1.0-preview.9',
 assert state.get('backupDirectory') and 'log' not in state
 listener.close();Path(m.WEB_UPDATE_SOCKET).unlink()
 checks.append('separate-root-worker-updates-published-package-and-retains-result-after-app-restart')
+assert (m.APPLICATION/'0.1.0-preview.9').stat().st_mode & 0o777==0o755
+assert m.WEB_UPDATE_HOME.stat().st_mode & 0o777==0o700
+assert m.WEB_UPDATE_SCRIPT.stat().st_mode & 0o777==0o700
+checks.append('strict-worker-umask-and-cached-package-directory-repair-retain-private-broker-and-backups')
 assert pg('SELECT max(version) FROM server_schema')=='6'
 assert (m.APPLICATION/'current').resolve().name=='0.1.0-preview.9'
 assert secrets_hash()==original
