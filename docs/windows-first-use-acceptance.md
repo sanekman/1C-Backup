@@ -56,7 +56,7 @@ dotnet test tests/SPBackup.Server.Tests --no-build --no-restore \
 [Windows-агент](user-guide.md), [первый запуск сервера](server-first-start.md),
 [серверное задание](server-job-wizard.md), [совместимость](windows-compatibility.md).
 Для рабочей ветки отдельно фиксируется кандидат: её интерфейс может отличаться
-от опубликованного preview.10. Новая сводка ещё не выпущена.
+от опубликованного preview.10. Сводка и инструкции опубликованы в [preview.11](server-preview11-publication.md).
 
 Использовать отдельный Windows-компьютер/VM для чистой установки и тестовые
 данные. Не удалять действующую установку ради теста и не переключать режим
