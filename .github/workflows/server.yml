@@ -28,18 +28,27 @@ on:
         description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
         default: full
-        options: [full, compose, maintenance, installed, proxmox, reports, integration]
+        options: [full, compose, maintenance, installed, proxmox, reports, integration, publish-accepted]
       report_source_run:
         description: 'Reports scope only: existing server.yml run to validate without rerunning checks'
         type: string
       report_source_commit:
         description: 'Reports scope only: exact tested source commit'
         type: string
+      release_run:
+        description: 'Publish-accepted: original tagged package run ID'
+        type: string
+      native_run:
+        description: 'Publish-accepted: successful native compatibility run ID'
+        type: string
+      release_tag:
+        description: 'Publish-accepted: immutable existing server tag'
+        type: string
 permissions:
   contents: read
 jobs:
   server:
-    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'proxmox' && inputs.scope != 'reports')
+    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'proxmox' && inputs.scope != 'reports' && inputs.scope != 'publish-accepted')
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -132,7 +141,7 @@ jobs:
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
 
   proxmox-installer:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'reports' && inputs.scope != 'integration')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'reports' && inputs.scope != 'integration' && inputs.scope != 'publish-accepted')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -300,3 +309,65 @@ jobs:
           name: revalidated-server-${{ inputs.platform == 'windows' && 'win-x64' || 'linux-x64' }}-reports
           path: artifacts/revalidated-server
           retention-days: 14
+
+  publish-accepted:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'publish-accepted'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate immutable source and independent native evidence
+        id: accepted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN: ${{ inputs.release_run }}
+          NATIVE_RUN: ${{ inputs.native_run }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python tools/verify_server_publication_sources.py
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: server-*-verification
+          path: artifacts/accepted-release
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.release_run }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-proxmox-installer-verification
+          path: artifacts/accepted-native
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.native_run }}
+      - name: Validate retained reports and remove only empty preview.11 attempt drafts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python tests/server/verify_results.py --runtime win-x64 --results-dir artifacts/accepted-release/server-tests
+          python tests/server/verify_results.py --runtime linux-x64 --results-dir artifacts/accepted-release/server-tests
+          python - <<'PYCODE'
+          import json, subprocess
+          from pathlib import Path
+          for name, count in [('proxmox-installer-result.json',16),('proxmox-update-result.json',14)]:
+              report=json.loads((Path('artifacts/accepted-native')/name).read_text())
+              assert report['success'] is True and len(report['checks']) >= count
+          report=json.loads(Path('artifacts/accepted-release/server-tests/compose-result.json').read_text())
+          assert report['success'] is True and len(report['checks']) >= 14
+          for identity in [445866084,445866253]:
+              result=subprocess.run(['gh','api',f'repos/sanekman/1C-Backup/releases/{identity}'],capture_output=True,text=True)
+              if result.returncode:
+                  assert '404' in result.stderr
+                  continue
+              release=json.loads(result.stdout)
+              assert release['draft'] and release['tag_name']=='server-v0.1.0-preview.11' and not release['assets']
+              subprocess.run(['gh','api','--method','DELETE',f'repos/sanekman/1C-Backup/releases/{identity}'],check=True)
+          PYCODE
+      - name: Publish checked artifacts without rebuilding or replacing a release
+        run: python tools/publish_server_release.py --artifacts artifacts/accepted-release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REF_NAME: ${{ inputs.release_tag }}
+          GITHUB_SHA: ${{ steps.accepted.outputs.source }}
