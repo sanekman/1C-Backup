@@ -22,6 +22,14 @@
     </Style></TextBlock.Style>
    </TextBlock>
   </DataTemplate>
+  <Style x:Key="ConnectionStatusText" TargetType="TextBlock">
+   <Setter Property="TextWrapping" Value="Wrap" />
+   <Style.Triggers>
+    <DataTrigger Binding="{Binding Text, RelativeSource={RelativeSource Self}}" Value="">
+     <Setter Property="Visibility" Value="Collapsed" />
+    </DataTrigger>
+   </Style.Triggers>
+  </Style>
   <Style x:Key="NavigationButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
    <Setter Property="Background" Value="Transparent" />
    <Setter Property="Foreground" Value="#CBD5E1" />
@@ -42,10 +50,6 @@
      <TextBlock Text="SP Backup" Foreground="White" FontSize="22" FontWeight="Bold" />
      <TextBlock Text="Резервное копирование" Foreground="#94A3B8" FontSize="12" Margin="0,6,0,0" />
      <TextBlock x:Name="AppVersion" Foreground="#94A3B8" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" />
-    </StackPanel>
-    <StackPanel DockPanel.Dock="Bottom" Margin="12,20,8,0">
-     <TextBlock Text="Локальное приложение" Foreground="#CBD5E1" FontWeight="SemiBold" />
-     <TextBlock Text="Расписание может работать после закрытия окна." Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="12" />
     </StackPanel>
     <StackPanel>
      <Button x:Name="JobsNavigation" Content="Задания" Tag="Active" Style="{StaticResource NavigationButton}" Click="JobsNavigation_Click" />
@@ -686,10 +690,10 @@
          <Button x:Name="ConnectServerMonitoringButton" Content="Подключить по приглашению…" Click="ConnectServerMonitoring_Click" Margin="0,0,8,4" />
          <Button x:Name="DisconnectServerMonitoringButton" Content="Отключить" IsEnabled="False" Visibility="Collapsed" Click="DisconnectServerMonitoring_Click" Margin="0,0,0,4" />
         </WrapPanel>
-        <TextBlock x:Name="ServerConnectionCheckStatus" TextWrapping="Wrap" Margin="0,0,0,4" AutomationProperties.LiveSetting="Polite" />
-        <TextBlock x:Name="ServerMonitoringStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
+        <TextBlock x:Name="ServerConnectionCheckStatus" Style="{StaticResource ConnectionStatusText}" Margin="0,0,0,4" AutomationProperties.LiveSetting="Polite" />
+        <TextBlock x:Name="ServerMonitoringStatus" Style="{StaticResource ConnectionStatusText}" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
         <TextBlock Text="Откуда получать задания" FontSize="16" FontWeight="SemiBold" />
-        <ComboBox x:Name="AgentModePicker" MaxWidth="360" HorizontalAlignment="Stretch" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="AgentMode_Changed" Margin="0,4,0,6" AutomationProperties.Name="Откуда получать задания" />
+        <ComboBox x:Name="AgentModePicker" MaxWidth="360" HorizontalAlignment="Left" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="AgentMode_Changed" Margin="0,4,0,6" AutomationProperties.Name="Откуда получать задания" />
         <StackPanel x:Name="ServerPanel" Visibility="Collapsed">
          <TextBlock Text="Серверные задания меняет администратор. После применения режима включите расписание в «Фоновой работе»." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6" />
         </StackPanel>

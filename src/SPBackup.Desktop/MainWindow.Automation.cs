@@ -98,7 +98,7 @@ public partial class MainWindow
         var count = state.Plan.TimedJobs + state.Plan.StartupJobs;
         var label = state.Execution switch {
             AutomationExecution.Service => "Служба работает — до входа в Windows и после закрытия программы.",
-            AutomationExecution.Background => autostartUnknown ? "Фоновый агент работает. Автозапуск проверить не удалось."
+            AutomationExecution.Background => autostartUnknown ? "Фоновый агент работает после закрытия окна. Автозапуск проверить не удалось."
                 : autostart ? "Фоновый агент работает после закрытия окна. Автозапуск при входе включён."
                 : "Фоновый агент работает после закрытия окна. Автозапуск этой копии выключен.",
             AutomationExecution.Window => TrayVisible
@@ -111,10 +111,10 @@ public partial class MainWindow
             AutomationExecution.ServiceNotReady => "Служба запущена, но агент ещё не подтвердил готовность.",
             AutomationExecution.Faulted => "Агент остановлен с ошибкой. Откройте историю и включите его снова.",
             AutomationExecution.Unavailable => "Не удалось проверить агент. Работа расписания не подтверждена.",
-            _ when observation.Service == AutomationService.Stopped => "Служба остановлена. Нажмите «Включить автоматически».",
+            _ when observation.Service == AutomationService.Stopped => "Служба остановлена. Управление в разделе «Фоновая работа».",
             _ when observation.Service == AutomationService.OtherProfile => "Служба настроена для другого профиля. Проверьте «Фоновая работа».",
             _ when observation.Service == AutomationService.Unavailable => "Не удалось проверить службу. Откройте «Фоновая работа».",
-            _ => "Расписание выключено. Нажмите «Включить автоматически»."
+            _ => "Расписание выключено. Управление в разделе «Фоновая работа»."
         };
         if (state.ScheduleRunning && count == 0) label += " Заданий по расписанию нет.";
         BackgroundStatus.Text = label;

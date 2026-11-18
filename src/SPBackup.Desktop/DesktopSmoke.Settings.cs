@@ -80,7 +80,8 @@ internal static partial class DesktopSmoke
                     || Control<Button>("SaveStartupButton").IsVisible))
                     throw new InvalidOperationException("Управление расписанием или параметры автозапуска показаны неверно.");
                 if (section == "Connections" && (Control<StackPanel>("AutomationActions").IsVisible
-                    || Control<Button>("CheckServerConnectionButton").IsEnabled
+                    || Control<Button>("CheckServerConnectionButton").IsVisible
+                    || Control<TextBlock>("ServerMonitoringStatus").IsVisible
                     || !Control<TextBox>("ServerAddress").IsVisible))
                     throw new InvalidOperationException("Настройки подключения без сервера показаны неверно.");
                 if (section == "Help")
