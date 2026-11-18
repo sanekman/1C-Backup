@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using SPBackup.Server.Monitoring;
 using Npgsql;
 
 namespace SPBackup.Server;
@@ -11,8 +13,16 @@ public sealed partial class ServerStore
     {
         await using var db = await source.OpenConnectionAsync(token);
         await using var cmd = Command(db, null, """
-            SELECT a.id,a.folder_id,a.name,a.computer_name,a.revoked,greatest(a.received_utc,m.received_utc),m.received_utc
+            SELECT a.id,a.folder_id,a.name,a.computer_name,a.revoked,greatest(a.received_utc,m.received_utc),m.received_utc,
+                   (m.document->'progress')::text,r.document::text,
+                   (SELECT j->>'name' FROM jsonb_array_elements(m.document->'jobs') AS j
+                    WHERE j->>'jobId'=m.document->'progress'->>'jobId' LIMIT 1)
             FROM server_agents a LEFT JOIN server_monitoring m ON m.agent_id=a.id
+            LEFT JOIN LATERAL (
+                SELECT document FROM server_runs
+                WHERE agent_id=a.id AND document->>'evidence' IS NULL
+                ORDER BY finished_utc DESC,run_id LIMIT 1
+            ) r ON true
             ORDER BY a.name,a.id
             """);
         await using var reader = await cmd.ExecuteReaderAsync(token);
@@ -22,7 +32,10 @@ public sealed partial class ServerStore
             agents.Add(new(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetGuid(1), reader.GetString(2),
                 reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetBoolean(4),
                 reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
-                reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6)));
+                reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6),
+                reader.IsDBNull(7) ? null : JsonSerializer.Deserialize<MonitoredProgress>(reader.GetString(7), MonitoringJson),
+                reader.IsDBNull(8) ? null : JsonSerializer.Deserialize<MonitoredRun>(reader.GetString(8), MonitoringJson),
+                reader.IsDBNull(9) ? null : reader.GetString(9)));
         }
         return agents;
     }
@@ -155,6 +168,22 @@ public sealed partial class ServerStore
         await AuditAsync(db, tx, userId, null, "FolderDeleted", token);
         await tx.CommitAsync(token);
     }
+    internal async Task MoveAgentAsync(Guid userId, Guid agentId, Guid? previous, Guid? destination, CancellationToken token)
+    {
+        await using var db = await source.OpenConnectionAsync(token);
+        await using var tx = await db.BeginTransactionAsync(token);
+        await OrganizationLockAsync(db, tx, token);
+        var folder = await ResolveFolderAsync(db, tx, userId, destination, null, token);
+        await using var update = Command(db, tx, """
+            UPDATE server_agents SET folder_id=@folder
+            WHERE id=@id AND folder_id IS NOT DISTINCT FROM @previous::uuid
+            """, ("folder", folder), ("id", agentId), ("previous", previous));
+        if (await update.ExecuteNonQueryAsync(token) != 1)
+            throw new ServerRequestException(409, "agent_folder_changed");
+        await AuditAsync(db, tx, userId, agentId, "AgentIdentityChanged", token);
+        await tx.CommitAsync(token);
+    }
+
     public async Task UpdateAgentIdentityAsync(Guid userId, Guid id, AgentIdentityRequest request, CancellationToken token = default)
     {
         var name = OrganizationName(request.Name, folder: false);

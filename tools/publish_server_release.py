@@ -71,10 +71,11 @@ def main():
     manifest_path.write_text(content)
     files.append(manifest_path)
     notes_path = Path(__file__).resolve().parents[1] / 'docs/release-notes-server.md'
-    notes = notes_path.read_text(encoding='utf-8')
+    notes = notes_path.read_text(encoding='utf-8').partition('\n---\n')[0].rstrip()
     if notes.splitlines()[0] != '# SP Backup Server ' + version:
         raise RuntimeError('Server release notes must match the new version.')
     notes = notes.replace('(docs/', '(https://github.com/' + REPOSITORY + '/blob/' + source + '/docs/')
+    notes += f'\n\n[Полные заметки и история выпусков](https://github.com/{REPOSITORY}/blob/{source}/docs/release-notes-server.md).'
     notes += '\n\nИсходный коммит: `' + source + '`. Контрольные суммы находятся рядом с файлами и в server-release.json.'
     # Each distribution branch is created once, containing the commit/checksum manifest.
     # Large offline installers stay in release assets (not Git blobs).

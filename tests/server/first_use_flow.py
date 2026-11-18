@@ -1,5 +1,7 @@
 """First-use UI flow with a protocol-only agent fixture; no backup files are created."""
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlsplit
+from playwright.sync_api import expect
 import uuid
 
 
@@ -39,50 +41,62 @@ def first_use(pw, page, url, out, checks):
         'Authorization': 'Bearer ' + agent['token'], 'SP-Backup-Capabilities': caps})
     base = url + 'api/v1/agents/' + agent_id
 
-    def monitor(revision, jobs):
+    def monitor(revision, jobs, progress=None):
         ok(api.post(base + '/heartbeat', data={'agentId': agent_id, 'agentVersion': 'browser-fixture',
             'backupExecutionAvailable': True, 'configurationRevision': revision, 'sentUtc': now()}))
         ok(api.put(base + '/monitoring', data={'sentUtc': now(), 'agentVersion': 'browser-fixture',
-            'jobs': jobs, 'progress': None, 'pendingRuns': 0, 'executionMode': 'Managed',
+            'jobs': jobs, 'progress': progress, 'pendingRuns': 0, 'executionMode': 'Managed',
             'configurationRevision': revision, 'backupExecutionAvailable': True}))
 
     monitor(1, [])
     page.goto(url + '?folder=' + parent)
     assert 'Первый агент ' + suffix in page.inner_text('body')
     page.goto(url)
-    page.get_by_role('searchbox', name='Найти агента').fill('Первый агент ' + suffix)
-    leaf = page.locator(f'[data-agent-id="{agent_id}"]')
+    dashboard = page.locator('[data-agent-directory]')
+    search = page.get_by_role('searchbox', name='Найти агента')
+    search.fill('Первый агент ' + suffix)
+    leaf = page.locator(f'[data-agent-leaf][data-agent-id="{agent_id}"]')
+    row = page.locator(f'[data-dashboard-row][data-agent-id="{agent_id}"]')
     assert leaf.is_visible()
+    assert row.is_visible()
     page.get_by_role('button', name='Сбросить').click()
-    org = page.locator('summary').filter(has_text=organization)
-    if org.locator('..').get_attribute('open') is None:
-        org.focus()
-        page.keyboard.press('Enter')
-    actions = org.locator('..').locator(':scope > .agent-folder-menu')
-    actions.locator('summary').click()
-    actions.get_by_role('link', name='Добавить подпапку').click()
-    page.locator('input[name="Model.Name"]').fill('Архив')
-    page.get_by_role('button', name='Создать папку', exact=True).click()
-    created = page.locator('summary').filter(has_text='Архив').first
-    created.click()
-    menu = created.locator('..').locator(':scope > .agent-folder-menu')
-    menu.locator('summary').click()
-    menu.get_by_role('link', name='Переименовать').click()
-    page.locator('input[name="Model.Name"]').fill('Архив копий')
-    page.get_by_role('button', name='Сохранить папку', exact=True).click()
-    assert page.locator('summary').filter(has_text='Архив копий').is_visible()
-    checks.append('agent-tree-create-subfolder-and-rename')
-    page.get_by_role('searchbox', name='Найти агента').fill('Первый агент ' + suffix)
-    leaf.get_by_role('link', name='Переместить в папку…').click()
-    page.locator('select[name="Model.FolderId"]').select_option('')
-    page.get_by_role('button', name='Переместить', exact=True).click()
-    assert 'Без папки' in page.locator('#agent-summary').inner_text()
-    leaf.get_by_role('link', name='Переместить в папку…').click()
-    page.locator('select[name="Model.FolderId"]').select_option(parent)
-    page.get_by_role('button', name='Переместить', exact=True).click()
-    assert 'Филиал / Отдел' in page.locator('#agent-summary').inner_text()
-    page.get_by_role('button', name='Сбросить').click()
-    checks.append('agent-tree-search-and-move-to-root-and-back')
+    org = page.locator(f'[data-folder-name="{organization}"]')
+    org.click()
+    dashboard.get_by_role('button', name='Новая папка', exact=True).click()
+    dialog = page.get_by_role('dialog')
+    assert organization in dialog.inner_text()
+    dialog.get_by_label('Имя папки').fill('Архив')
+    dialog.get_by_role('button', name='Создать', exact=True).click()
+    assert 'folder' not in urlsplit(page.url).path
+    created = page.locator('[data-folder-name="Архив"]')
+    try:
+        expect(created).to_be_visible(timeout=3500)
+    except AssertionError:
+        raise AssertionError(f"Folder missing at {urlsplit(page.url).path}: {page.locator('[role=alert]').all_text_contents()}")
+    dashboard.get_by_role('button', name='Переименовать', exact=True).click()
+    dialog.get_by_label('Имя папки').fill('Архив копий')
+    dialog.get_by_role('button', name='Сохранить', exact=True).click()
+    created = page.locator('[data-folder-name="Архив копий"]')
+    expect(created).to_be_visible()
+    checks.append('dashboard-create-and-rename-subfolder-in-place')
+    search.fill('Первый агент ' + suffix)
+    root = page.locator('[data-folder-key="root"]')
+    if not root.is_visible():
+        # Search hides branches without a matching agent; clear it before dragging.
+        page.get_by_role('button', name='Сбросить').click()
+        page.locator('[data-folder-key="all"]').click()
+    row.drag_to(root)
+    assert 'Без папки' in dialog.inner_text()
+    dialog.get_by_role('button', name='Отмена', exact=True).click()
+    assert 'Филиал / Отдел' in row.inner_text()
+    row.drag_to(root)
+    dialog.get_by_role('button', name='Переместить', exact=True).click()
+    assert 'Без папки' in row.inner_text()
+    row.get_by_role('button', name='Переместить', exact=False).click()
+    dialog.get_by_label('Папка назначения').select_option(parent)
+    dialog.get_by_role('button', name='Переместить', exact=True).click()
+    assert 'Филиал / Отдел' in row.inner_text()
+    checks.append('dashboard-drag-cancel-confirm-and-keyboard-move-fallback')
     page.goto(url + 'agents/' + agent_id)
     page.get_by_role('link', name='Настроить задания на сервере', exact=True).click()
     page.get_by_role('link', name='Создать задание', exact=True).click()
@@ -129,6 +143,11 @@ def first_use(pw, page, url, out, checks):
         ok(api.post(base + '/commands/receipt', data={'commandId': command_id, 'status': status, 'runId': None, 'reason': None}))
     page.reload()
     assert 'Выполняется' in page.inner_text('body')
+    monitor(2, jobs, {'runId': str(uuid.uuid4()), 'jobId': job['id'], 'stage': 'CopyingToStorage',
+                      'percent': 42, 'updatedUtc': now()})
+    page.goto(url + '?branch=all')
+    expect(page.locator(f'[data-dashboard-row][data-agent-id="{agent_id}"]')).to_contain_text('Доставка · 42%')
+    page.screenshot(path=str(out / 'dashboard-running-900.png'))
     # These reports are synthetic fixture input; no copy or restore is performed.
     run_id = str(uuid.uuid4())
     ok(api.post(base + '/runs', data={'runId': run_id, 'jobId': job['id'], 'jobName': job['name'],
@@ -150,6 +169,9 @@ def first_use(pw, page, url, out, checks):
             {'index': 0, 'succeeded': True, 'bytes': 100, 'incomplete': False},
             {'index': 1, 'succeeded': True, 'bytes': 100, 'incomplete': False}]}))
     monitor(2, jobs)
+    page.goto(url + '?branch=all')
+    expect(page.locator(f'[data-dashboard-row][data-agent-id="{agent_id}"]')).to_contain_text('Доставлено в хранилища: 2')
+    checks.append('dashboard-current-stage-and-last-completed-run-visible-in-table')
     page.goto(url + '?view=list')
     row = page.locator(f'tr[data-agent="{agent_id}"]')
     assert 'По отчёту проблем не найдено.' in row.inner_text()

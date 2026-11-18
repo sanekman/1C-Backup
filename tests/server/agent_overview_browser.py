@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 from urllib.parse import urlsplit
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 from first_use_flow import first_use
 
 p = argparse.ArgumentParser(description=__doc__)
@@ -24,7 +24,7 @@ with sync_playwright() as pw:
     page.wait_for_url(a.url)
     search = page.get_by_role('searchbox', name='Найти агента')
     search.fill('УНФ')
-    leaf = page.locator(f'[data-agent-id="{a.agent}"]')
+    leaf = page.locator(f'[data-agent-leaf][data-agent-id="{a.agent}"]')
     assert leaf.is_visible()
     page.get_by_role('checkbox', name='Требуют внимания').check()
     leaf.get_by_role('link', name='Office <УНФ>', exact=True).click()
@@ -35,9 +35,11 @@ with sync_playwright() as pw:
     assert search.input_value() == 'УНФ'
     page.get_by_role('button', name='Сбросить').click()
     assert not leaf.is_visible()
-    root_summary = page.get_by_text('Без папки', exact=True).first
-    root_summary.click()
+    root_summary = page.locator('details[data-branch-key="root"] > summary')
+    root_summary.focus()
+    page.keyboard.press('Enter')
     assert leaf.is_visible()
+    assert page.locator(f'[data-dashboard-row][data-agent-id="{a.agent}"]').is_visible()
     checks.append('tree-filter-selection-restores-disclosures-and-separates-connection-and-delivery')
     for theme in ['light', 'dark']:
         if page.locator('html').get_attribute('data-theme') != theme:
@@ -46,7 +48,7 @@ with sync_playwright() as pw:
             page.set_viewport_size({'width': width, 'height': height})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.screenshot(path=str(out / f'tree-{theme}-{width}.png'), full_page=True)
-    page.get_by_role('link', name='Таблица агентов').click()
+    page.goto(a.url + '?view=list')
     row = page.locator(f'tr[data-agent="{a.agent}"]')
     assert 'Нет связи' in row.inner_text()
     assert 'Отчёт:' in row.inner_text()
@@ -71,7 +73,7 @@ with sync_playwright() as pw:
     assert ('agent=' + a.agent) in page.url
     page.get_by_role('link', name='← Назад', exact=True).click()
     page.locator(f'a[href="agents/{a.agent}#job-{a.job}"]').first.click()
-    assert page.locator(f'[id="job-{a.job}"]').count() == 1
+    expect(page.locator(f'[id="job-{a.job}"]')).to_be_visible()
     checks.append('keyboard-drilldown-pagination-retains-agent-and-job-anchor')
     first_use(pw, page, a.url, out, checks)
     browser.close()

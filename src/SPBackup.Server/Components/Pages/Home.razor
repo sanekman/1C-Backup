@@ -1,6 +1,7 @@
 @page "/"
 @attribute [Authorize(Policy = ServerAuthentication.Administrator)]
 @inject ServerStore Store
+@inject NavigationManager Navigation
 @inject ServerOptions Settings
 @inject ServerHealth Health
 @inject IHttpContextAccessor Http
@@ -86,13 +87,87 @@
 }
 else
 {
-    <AgentDirectory Folders="Folders" AgentId="AgentId" />
+    @if (ChangeError is not null) { <p class="error" role="alert">@ChangeError</p> }
+    <AgentDirectory Folders="Folders" AgentId="AgentId" BranchKey="@(BranchKey ?? "all")" />
+<dialog id="dashboard-action" class="dashboard-dialog" aria-labelledby="dashboard-action-title">
+    <form method="post" @formname="dashboard-organize" @onsubmit="Organize">
+        <AntiforgeryToken />
+        <h2 id="dashboard-action-title">Изменить структуру</h2>
+        <p data-dialog-message></p>
+        <input type="hidden" name="Change.Kind" />
+        <input type="hidden" name="Change.Id" />
+        <input type="hidden" name="Change.Previous" />
+        <label data-dialog-name>Имя папки<input name="Change.Name" maxlength="128" /></label>
+        <label data-dialog-target>Папка назначения
+            <select name="Change.Target">
+                <option value="">Верхний уровень / Без папки</option>
+                @foreach (var folder in Folders) { <option value="@folder.Id">@folder.Path</option> }
+            </select>
+        </label>
+        <div class="dashboard-dialog-actions">
+            <button type="button" class="secondary" data-dialog-cancel>Отмена</button>
+            <button type="submit" data-dialog-submit>Сохранить</button>
+        </div>
+    </form>
+</dialog>
+
 }
 @code {
     [SupplyParameterFromQuery(Name = "page")] public int Page { get; set; }
     [SupplyParameterFromQuery(Name = "folder")] public string? Folder { get; set; }
     [SupplyParameterFromQuery(Name = "view")] public string? View { get; set; }
     [SupplyParameterFromQuery(Name = "agent")] public Guid? AgentId { get; set; }
+    [SupplyParameterFromQuery(Name = "branch")] public string? BranchKey { get; set; }
+    [SupplyParameterFromForm(FormName = "dashboard-organize")] public DashboardChange? Change { get; set; }
+    private string? ChangeError;
+    public sealed class DashboardChange
+    {
+        public string? Kind { get; set; }
+        public Guid? Id { get; set; }
+        public string? Name { get; set; }
+        public string? Target { get; set; }
+        public string? Previous { get; set; }
+    }
+
+    private async Task Organize()
+    {
+        if (Change is not { } change) return;
+        var user = ServerAuthentication.UserId(Http.HttpContext!.User);
+        var token = Http.HttpContext.RequestAborted;
+        try
+        {
+            var target = OrganizationText.FolderId(change.Target);
+            var selected = Folders.FirstOrDefault(folder => folder.Id == change.Id);
+            string destination;
+            switch (change.Kind)
+            {
+                case "create":
+                    destination = (await Store.CreateFolderAsync(user, new(change.Name ?? "", target), token)).ToString();
+                    break;
+                case "rename" when selected is not null:
+                    await Store.UpdateFolderAsync(user, selected.Id, new(change.Name ?? "", selected.ParentId), token);
+                    destination = selected.Id.ToString();
+                    break;
+                case "folder-move" when selected is not null:
+                    await Store.UpdateFolderAsync(user, selected.Id, new(selected.Name, target), token);
+                    destination = selected.Id.ToString();
+                    break;
+                case "delete" when selected is not null:
+                    await Store.DeleteFolderAsync(user, selected.Id, token);
+                    destination = selected.ParentId?.ToString() ?? "all";
+                    break;
+                case "agent-move" when change.Id is { } agentId && agentId != Guid.Empty:
+                    await Store.MoveAgentAsync(user, agentId, OrganizationText.FolderId(change.Previous), target, token);
+                    destination = target?.ToString() ?? "root";
+                    break;
+                default:
+                    throw new ServerRequestException(400, "folder_not_found");
+            }
+            Navigation.NavigateTo($"?branch={destination}");
+        }
+        catch (ServerRequestException error) { ChangeError = OrganizationText.Error(error); }
+    }
+
     private bool ListView => View == "list" || Folder is not null || Page != 0;
     private Guid? SelectedFolder;
     private IReadOnlyList<AgentFolderOption> Folders = [];

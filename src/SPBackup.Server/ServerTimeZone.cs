@@ -117,7 +117,7 @@ public sealed class ServerClock(string id, TimeZoneInfo zone, bool loadWarning =
     public string ZoneId { get; } = id;
     public string ZoneLabel => ServerTimeZone.Label(ZoneId);
     public bool LoadWarning { get; } = loadWarning;
-    public string Time(DateTimeOffset? value) => value is { } instant
-        ? TimeZoneInfo.ConvertTime(instant, zone).ToString("dd.MM.yyyy HH:mm:ss zzz", CultureInfo.InvariantCulture)
+    public string Time(DateTimeOffset? value, string format = "dd.MM.yyyy HH:mm:ss zzz") => value is { } instant
+        ? TimeZoneInfo.ConvertTime(instant, zone).ToString(format, CultureInfo.InvariantCulture)
         : "Ещё не получена";
 }

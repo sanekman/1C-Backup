@@ -69,7 +69,9 @@ def publish(root, artifacts, branch=None, notes=None):
                      "commit-tree", tree, input=("Publish Windows update " + version + "\n").encode())
         subprocess.run(["git", "push", "origin", commit + ":refs/heads/" + branch], cwd=root, check=True)
     (artifacts / "distribution-commit.txt").write_text(commit + "\n")
-    body = notes.read_text(encoding="utf-8") if notes else "SP Backup " + version
+    body = notes.read_text(encoding="utf-8").partition("\n---\n")[0].rstrip() if notes else "SP Backup " + version
+    if notes is not None:
+        body += f"\n\n[Полные заметки и история выпусков](https://github.com/sanekman/1C-Backup/blob/v{version}/docs/{notes.name})."
     base = "https://github.com/sanekman/1C-Backup/blob/" + branch + "/windows/"
     body += "\n\n[Скачать установщик](" + base + files[2] + "?raw=true)\n\n[Скачать ZIP](" + base + files[0] + "?raw=true)\n"
     body += "\n<!-- onec-update-manifest: " + branch + " -->\n"

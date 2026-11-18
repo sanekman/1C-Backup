@@ -3,26 +3,73 @@
 @inject ServerOptions Settings
 @inject IHttpContextAccessor Http
 
-<div class="agent-directory-tools">
-    <div class="agent-directory-filter" data-agent-filter hidden>
-        <label>Найти агента<input type="search" maxlength="128" data-agent-search /></label>
-        <label class="agent-attention-filter"><input type="checkbox" data-agent-attention /> Требуют внимания</label>
-        <button type="button" class="secondary" data-agent-reset>Сбросить</button>
+<div class="agent-directory dashboard" data-agent-directory data-initial-branch="@BranchKey">
+    <div class="dashboard-tools">
+        <div class="agent-directory-filter" data-agent-filter hidden>
+            <label class="dashboard-search">Найти агента<input type="search" maxlength="128" data-agent-search /></label>
+            <label class="agent-attention-filter"><input type="checkbox" data-agent-attention /> Требуют внимания</label>
+            <button type="button" class="secondary" data-agent-reset>Сбросить</button>
+        </div>
+        <span>Сейчас работают: @Rows.Count(row => row.Current is not null)</span>
+        <a href="" data-dashboard-refresh>Обновить</a>
     </div>
-    <a href="folders">Управление папками</a>
-    <a href="?view=list">Таблица агентов</a>
-</div>
-<div class="agent-directory" data-agent-directory>
-    <section class="card agent-directory-tree" aria-label="Папки и агенты">
-        <ul>
-            @foreach (var folder in Branches)
-            {
-                <AgentDirectoryBranch Branch="folder" SelectedId="AgentId" />
-            }
-        </ul>
-        <p data-agent-no-match hidden role="status">Агенты по заданным условиям не найдены.</p>
-    </section>
-    <section id="agent-summary" class="card agent-directory-summary" aria-label="Сводка агента" tabindex="-1">
+    <div class="dashboard-panes">
+        <aside class="dashboard-tree" aria-label="Дерево папок">
+            <div class="dashboard-tree-tools" data-agent-filter hidden>
+                <button type="button" data-folder-op="create">Новая папка</button>
+                <button type="button" class="secondary" data-folder-op="rename" disabled>Переименовать</button>
+                <button type="button" class="secondary" data-folder-op="folder-move" disabled>Переместить</button>
+                <button type="button" class="secondary" data-folder-op="delete" disabled>Удалить</button>
+            </div>
+            <ul class="dashboard-nodes">
+                <li><a href="?branch=all" data-folder-key="all" data-folder-path="Все агенты" aria-current="@(BranchKey == "all" ? "true" : null)">Все агенты (@Rows.Count)</a></li>
+                @foreach (var folder in Branches)
+                {
+                    <AgentDirectoryBranch Branch="folder" SelectedId="AgentId" BranchKey="@BranchKey" />
+                }
+            </ul>
+        </aside>
+        <section class="dashboard-results" aria-label="Состояние агентов">
+            <div class="dashboard-results-title"><strong data-dashboard-title>Все агенты</strong><span class="muted" data-dashboard-count aria-live="polite"></span></div>
+            <div class="dashboard-table-scroll">
+                <table class="dashboard-table">
+                    <colgroup><col class="dashboard-col-agent" /><col class="dashboard-col-state" /><col class="dashboard-col-active" /><col /><col class="dashboard-col-actions" /></colgroup>
+                    <thead><tr><th>Агент</th><th>Состояние</th><th>Текущая работа</th><th>Последний завершённый запуск</th><th aria-label="Действия"></th></tr></thead>
+                    <tbody>
+                    @foreach (var row in Rows)
+                    {
+                        <tr data-dashboard-row data-agent-id="@row.Entry.Id" data-folder-id="@row.Entry.FolderId"
+                            data-folder-path="@FolderPath(row)" data-agent-name="@row.Entry.Name" data-computer-name="@row.Entry.ComputerName"
+                            data-attention="@(row.Reasons.Count != 0 ? "yes" : "no")" draggable="true"
+                            class="@(row.Entry.Id == AgentId ? "dashboard-selected" : null)">
+                            <td><a href="@($"?agent={row.Entry.Id}#agent-summary")">@row.Entry.Name</a><small>@FolderPath(row)</small></td>
+                            <td><strong class="dashboard-state @(row.Reasons.Count == 0 && row.Connection == "На связи" ? "dashboard-good" : "dashboard-warn")">@row.Connection</strong>
+                                @if (row.Status != row.Connection) { <small>@row.Status</small> }
+                                else if (row.Entry.LastSeen is { } seen) { <small title="@Clock.Time(seen)">@Clock.Time(seen, "dd.MM HH:mm")</small> }
+                            </td>
+                            <td>
+                                @if (row.Current is { } activity)
+                                {
+                                    <strong>@row.CurrentJob</strong><small>@ProgressLabel(activity)</small>
+                                }
+                                else { <span class="muted">—</span> }
+                            </td>
+                            <td>
+                                @if (row.Entry.LatestRun is { } run)
+                                { <strong>@run.JobName</strong><small title="@Clock.Time(run.FinishedUtc)">@Delivery(run) · @Clock.Time(run.FinishedUtc, "dd.MM HH:mm")</small> }
+                                else { <span class="muted">—</span> }
+                            </td>
+                            <td><button type="button" class="dashboard-text-button" data-agent-move aria-label="@($"Переместить {row.Entry.Name} в папку")" title="Переместить в папку">⇄</button></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                <p data-agent-no-match hidden role="status">В этом разделе нет подходящих агентов.</p>
+            </div>
+        </section>
+    </div>
+    @if (AgentId is not null) {
+    <section id="agent-summary" class="dashboard-summary" aria-label="Сводка агента" tabindex="-1">
         @if (Selected is { } row)
         {
             <p class="muted">@FolderPath(row)</p>
@@ -55,42 +102,47 @@
                 </ul>
                 <p><a href="@($"problems?agent={row.Entry.Id}")">Проблемы агента →</a></p>
             }
-            <p><a href="@($"agents/{row.Entry.Id}")">Карточка агента →</a></p>
+            <h3>Недавние завершённые задания</h3>
+            <ul class="dashboard-history">
+                @foreach (var completed in Recent)
+                { <li><strong>@completed.JobName</strong> · @Delivery(completed) · @Clock.Time(completed.FinishedUtc)</li> }
+            </ul>
+            <p><a href="@($"agents/{row.Entry.Id}")">Карточка агента и вся история →</a></p>
         }
         else if (AgentId is not null)
         {
             <h2>Агент не найден</h2>
             <p>Выберите компьютер в дереве.</p>
         }
-        else
-        {
-            <h2>Сводка агента</h2>
-            @if (Branches.Any(folder => folder.Count > 0))
-            { <p>Выберите компьютер в дереве.</p> }
-            else
-            { <p>Агенты ещё не подключены.</p> }
-        }
     </section>
+    }
 </div>
 <script src="agent-directory.js" defer></script>
 
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<AgentFolderOption> Folders { get; set; } = [];
     [Parameter] public Guid? AgentId { get; set; }
+    [Parameter] public string BranchKey { get; set; } = "all";
 
     private IReadOnlyList<BranchNode> Branches = [];
+    private IReadOnlyList<AgentRow> Rows = [];
+    private IReadOnlyList<MonitoredRun> Recent = [];
     private AgentRow? Selected;
     private MonitoredRun? Latest;
     private bool HasCurrentJob;
 
     public sealed record BranchNode(string Key, string Label, Guid? FolderId, IReadOnlyList<BranchNode> Children,
-        IReadOnlyList<AgentRow> Agents)
+        IReadOnlyList<AgentRow> Agents, string Path, string Parent)
     {
         public int Count { get; } = Agents.Count + Children.Sum(child => child.Count);
         public bool Contains(Guid id) => Agents.Any(agent => agent.Entry.Id == id) || Children.Any(child => child.Contains(id));
+        public bool ContainsBranch(string key) => Key == key || Children.Any(child => child.ContainsBranch(key));
     }
 
-    public sealed record AgentRow(AgentTreeEntry Entry, string Connection, string Status, IReadOnlyList<AgentProblemCount> Reasons);
+    public sealed record AgentRow(AgentTreeEntry Entry, string Connection, string Status, IReadOnlyList<AgentProblemCount> Reasons, MonitoredProgress? Current)
+    {
+        public string CurrentJob { get; set; } = "Копирование";
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -106,20 +158,41 @@
             var connection = entry.Revoked ? "Доступ отозван" : entry.LastSeen is null ? "Ожидает первого сигнала"
                 : entry.LastSeen < cutoff ? "Нет связи" : "На связи";
             var status = reasons.Length > 0 ? ProblemText.Filters[reasons[0].Code] : connection;
-            return new AgentRow(entry, connection, status, reasons);
+            var current = !entry.Revoked && entry.Observed >= cutoff && entry.Progress is { } progress
+                && (entry.LatestRun is not { } latest || latest.JobId != progress.JobId || latest.FinishedUtc < progress.UpdatedUtc)
+                ? progress : null;
+            return new AgentRow(entry, connection, status, reasons, current) { CurrentJob = entry.ProgressJob ?? "Копирование" };
         }).ToLookup(row => row.Entry.FolderId is { } id && folderIds.Contains(id) ? id : Guid.Empty);
         var children = Folders.ToLookup(folder => folder.ParentId ?? Guid.Empty);
         BranchNode Build(AgentFolderOption folder) => new(folder.Id.ToString(), folder.Name, folder.Id,
-            children[folder.Id].Select(Build).ToArray(), rows[folder.Id].ToArray());
+            children[folder.Id].Select(Build).ToArray(), rows[folder.Id].ToArray(), folder.Path, folder.ParentId?.ToString() ?? "all");
         Branches = children[Guid.Empty].Select(Build)
-            .Append(new("root", "Без папки", null, [], rows[Guid.Empty].ToArray())).ToArray();
-        Selected = AgentId is { } selected ? rows.SelectMany(group => group).FirstOrDefault(row => row.Entry.Id == selected) : null;
-        Latest = Selected is { } item ? await Store.LatestBackupRunAsync(item.Entry.Id, token) : null;
+            .Append(new("root", "Без папки", null, [], rows[Guid.Empty].ToArray(), "Без папки", "all")).ToArray();
+        Rows = rows.SelectMany(group => group).OrderByDescending(row => row.Current is not null)
+            .ThenByDescending(row => row.Reasons.Count != 0).ThenBy(row => row.Entry.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
+        Selected = AgentId is { } selected ? Rows.FirstOrDefault(row => row.Entry.Id == selected) : null;
+        Latest = Selected?.Entry.LatestRun;
+        if (Selected is { } item) Recent = (await Store.RunsAsync(item.Entry.Id, 0, token)).Runs.Where(run => run.Evidence is null).Take(8).ToArray();
         HasCurrentJob = Selected is { } current && Latest is { } run
             && (await Store.MonitoringAsync(current.Entry.Id, token))?.Snapshot.Jobs.Any(job => job.JobId == run.JobId) == true;
     }
 
     private string FolderPath(AgentRow row) => Folders.FirstOrDefault(folder => folder.Id == row.Entry.FolderId)?.Path ?? "Без папки";
+
+    private static string ProgressLabel(MonitoredProgress progress)
+    {
+        var stage = progress.Stage switch
+        {
+            "ConnectingSource" => "Подключение к источнику",
+            "PreparingStorage" or "ConnectingStorage" => "Подключение к хранилищу",
+            "CreatingBackup" or "ScanningSource" => "Создание копии",
+            "Archiving" => "Архивация",
+            "CopyingToStorage" => "Доставка",
+            "Verifying" => "Проверка",
+            _ => "Выполняется"
+        };
+        return progress.Percent is { } percent ? $"{stage} · {percent}%" : stage;
+    }
 
     private static string Delivery(MonitoredRun run)
     {
