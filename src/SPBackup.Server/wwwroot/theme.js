@@ -10,10 +10,11 @@
     function apply(theme) {
         root.dataset.theme = theme;
         document.querySelectorAll('[data-theme-toggle]').forEach(button => {
-            button.hidden = false;
-            button.textContent = theme === 'dark' ? 'Светлая тема' : 'Тёмная тема';
-            button.title = theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему';
+            const showLight = theme === 'dark';
+            button.textContent = showLight ? '\u2600\uFE0E' : '☾';
+            button.title = showLight ? 'Включить светлую тему' : 'Включить тёмную тему';
             button.setAttribute('aria-label', button.title);
+            button.hidden = false;
         });
     }
     const current = () => selected || (system?.matches ? 'dark' : 'light');
