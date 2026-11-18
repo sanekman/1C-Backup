@@ -394,8 +394,8 @@
    <TextBlock Text="Копии лучше хранить на другом диске или компьютере, отдельно от исходных данных." TextWrapping="Wrap" Margin="0,0,0,10" />
    <StackPanel x:Name="NetworkSharePanel" Visibility="Collapsed" Margin="0,0,0,10">
     <TextBlock Text="Укажите полный сетевой путь, например \\NAS\Backups\Accounting. Буква подключённого диска Z: может быть недоступна службе. Логин ниже относится к папке назначения; чтение сетевого источника проверяется отдельно." TextWrapping="Wrap" Margin="0,0,0,8" />
-    <CheckBox x:Name="NetworkUseCredentials" Content="Отдельный логин и пароль NAS / сетевой папки" Checked="NetworkMode_Changed" Unchecked="NetworkMode_Changed" />
-    <Button x:Name="NetworkCredentialsButton" Content="Задать сетевой логин и пароль…" Click="NetworkCredentials_Click" HorizontalAlignment="Left" Margin="0,6,0,0" Visibility="Collapsed" ToolTipService.ShowOnDisabled="True" />
+    <CheckBox x:Name="NetworkUseCredentials" Content="Вход в папку копий с отдельным логином NAS" Checked="NetworkMode_Changed" Unchecked="NetworkMode_Changed" />
+    <Button x:Name="NetworkCredentialsButton" Content="Задать доступ к папке копий…" Click="NetworkCredentials_Click" HorizontalAlignment="Left" Margin="0,6,0,0" Visibility="Collapsed" ToolTipService.ShowOnDisabled="True" />
     <TextBlock x:Name="NetworkCredentialStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0" />
    </StackPanel>
    <StackPanel x:Name="GoogleDrivePanel" Visibility="Collapsed" Margin="0,4,0,10">
@@ -409,13 +409,11 @@
     <TextBlock Text="Копии передаются по защищённому каналу и хранятся в архивах с паролем. Папку на диске или NAS задайте в контейнере." TextWrapping="Wrap" Margin="0,6,0,0" />
    </StackPanel>
    <StackPanel x:Name="FtpPanel" Visibility="Collapsed">
-    <TextBlock Text="FTP-сервер (без ftp://)" /><TextBox x:Name="FtpHost" Margin="0,4,0,10" />
-    <TextBlock Text="Порт" /><TextBox x:Name="FtpPort" Text="21" Margin="0,4,0,10" />
-    <CheckBox x:Name="FtpTls" Content="Защищённое соединение FTPS" IsChecked="True" Margin="0,0,0,10" />
-    <Expander Header="Дополнительно: сохранённые учётные данные"><StackPanel><TextBlock Text="Идентификатор записи Windows" /><TextBox x:Name="FtpCredentialKey" Margin="0,4,0,10" /></StackPanel></Expander>
-    <Button x:Name="FtpCredentialsButton" Content="Настроить логин и пароль" HorizontalAlignment="Left" Padding="12,6" Click="FtpCredentials_Click" IsEnabled="False" Margin="0,0,0,10" />
-    <TextBlock Text="Пароль хранится в Windows. Защищённое соединение FTPS проверяет сертификат сервера."
-     TextWrapping="Wrap" Margin="0,0,0,10" />
+    <TextBlock Text="FTP-сервер (без ftp://)" /><TextBox x:Name="FtpHost" TextChanged="FtpAddress_Changed" Margin="0,4,0,10" />
+    <TextBlock Text="Порт" /><TextBox x:Name="FtpPort" Text="21" TextChanged="FtpAddress_Changed" Margin="0,4,0,10" />
+    <CheckBox x:Name="FtpTls" Content="Защищённое соединение FTPS" IsChecked="True" Checked="FtpAddress_Changed" Unchecked="FtpAddress_Changed" Margin="0,0,0,10" />
+    <Button x:Name="FtpCredentialsButton" Content="Задать доступ FTP…" HorizontalAlignment="Left" Padding="12,6" Click="FtpCredentials_Click" IsEnabled="False" Margin="0,0,0,6" ToolTipService.ShowOnDisabled="True" />
+    <TextBlock x:Name="FtpAccessStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
    </StackPanel>
    <Expander x:Name="AdditionalStorageOptions" Header="Копировать также в другие хранилища (0)" Margin="0,8,0,0"><StackPanel Margin="0,8,0,0">
     <TextBlock Text="Один готовый файл отправляется во все хранилища — до трёх одновременно. Для каждого можно задать своё количество копий; ошибка доставки не останавливает остальные." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8" />

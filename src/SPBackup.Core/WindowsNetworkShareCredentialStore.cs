@@ -13,6 +13,7 @@ public sealed class WindowsNetworkShareCredentialStore : IFtpCredentialStore
         catch (InvalidOperationException error)
         { throw new InvalidOperationException("Не удалось прочитать сетевой логин. В программе владельца откройте хранилище, задайте логин и пароль NAS и сохраните задание.", error); }
     }
+    public string? TryReadUsername(string? key) => store.TryReadUsername(key);
     public void Save(string key, string username, string password) => store.Save(key, username, password);
     public bool Delete(string key) => store.Delete(key);
     public Task ExportForServiceAsync(string key, CancellationToken token = default) => store.ExportForServiceAsync(key, token);

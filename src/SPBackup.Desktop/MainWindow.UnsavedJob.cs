@@ -17,14 +17,14 @@ public partial class MainWindow
             OneCPlatformVersion.Text, OneCExecutable.Text, OneCTimeout.Text,
             SqlBackupServer.Text, SqlServerDirectory.Text, SqlAgentDirectory.Text, SqlBackupTimeout.Text,
             PgTlsRootCertificate.Text, PgHost.Text, PgPort.Text, PgUsername.Text, PgDumpPath.Text, PgRestorePath.Text, PgTimeout.Text,
-            WebDavTimeout.Text, FtpHost.Text, FtpPort.Text, FtpCredentialKey.Text,
+            WebDavTimeout.Text, FtpHost.Text, FtpPort.Text,
             DailyAt.Text, KeepLast.Text, FullBackupEvery.Text },
         Selection = new[] { Kind.SelectedIndex, OneCMethodPicker.SelectedIndex, SqlAuthenticationPicker.SelectedIndex,
             FileBackupModePicker.SelectedIndex, FullBackupDayPicker.SelectedIndex, Storage.SelectedIndex, Schedule.SelectedIndex, PgAuthenticationPicker.SelectedIndex },
         Checks = new[] { PgTlsRequired.IsChecked, AllowOpenOneCDatabase.IsChecked, AutoOneCPlatform.IsChecked, FtpTls.IsChecked,
             ArchiveCopies.IsChecked, EncryptArchive.IsChecked, Enabled.IsChecked,
             Mon.IsChecked, Tue.IsChecked, Wed.IsChecked, Thu.IsChecked, Fri.IsChecked, Sat.IsChecked, Sun.IsChecked },
-        additionalDestinations, googleDriveSettings, googleDriveFolder, remoteGatewaySettings,
+        ftpAccess, additionalDestinations, googleDriveSettings, googleDriveFolder, remoteGatewaySettings,
         archivePasswordKey, webDavCredentialKey, sqlCredentialKey, postgreSqlCredentialKey, oneCCredentialKey, oneCUsername, networkShareSettings, NetworkUseCredentials.IsChecked
     });
 

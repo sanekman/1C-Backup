@@ -13,8 +13,8 @@ public partial class ArchivePasswordWindow : Window
         this.restoring = restoring;
         InitializeComponent();
         Instructions.Text = restoring
-            ? "Введите пароль этой копии. Пустое поле — использовать сохранённый пароль Windows. Введённый пароль не сохраняется."
-            : "Новый пароль сохранится для текущего пользователя Windows. Сохраните задание после закрытия окна. Прежние копии сохраняют свой пароль.";
+            ? "Введите пароль выбранной копии. Оставьте поле пустым, чтобы использовать сохранённый пароль. Введённый пароль действует только для этой операции."
+            : "После сохранения задания этот пароль будет использоваться для новых копий. Для прежних архивов действует их прежний пароль.";
         if (restoring) { ConfirmationPanel.Visibility = Visibility.Collapsed; ApplyButton.Content = restoreAction; }
         Closed += (_, _) => { Password.Clear(); Confirmation.Clear(); };
     }
@@ -30,6 +30,7 @@ public partial class ArchivePasswordWindow : Window
             }
             Password.Clear(); Confirmation.Clear(); DialogResult = true;
         }
-        catch (Exception ex) { Status.Text = ex.Message; }
+        catch (ArgumentException ex) { Status.Text = ex.Message; }
+        catch (Exception) { Status.Text = "Не удалось сохранить пароль архива в Windows. Повторите попытку."; }
     }
 }

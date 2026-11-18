@@ -9,7 +9,8 @@ namespace SPBackup.Desktop;
 public partial class DestinationWindow : Window
 {
     private readonly WindowsFtpCredentialStore credentials;
-    private string? credentialKey;
+    private FtpSettings? ftpAccess;
+    private bool ftpAccessEdited;
     private GoogleDriveSettings? googleDriveSettings;
     private string? googleDriveFolder;
     private RemoteGatewaySettings? remoteGateway;
@@ -29,7 +30,7 @@ public partial class DestinationWindow : Window
             [StorageKind.LocalDirectory] = "Локальный диск", [StorageKind.NetworkShare] = "Сетевая папка (UNC)",
             [StorageKind.Ftp] = "FTP / FTPS", [StorageKind.GoogleDrive] = "Google Drive", [StorageKind.RemoteGateway] = "Шлюз хранилища (Proxmox)"
         };
-        credentialKey = initial?.Ftp?.CredentialKey;
+        ftpAccess = initial?.Ftp;
         googleDriveSettings = initial?.GoogleDrive;
         remoteGateway = initial?.RemoteGateway;
         networkShareSettings = initial?.NetworkShare;
@@ -41,7 +42,7 @@ public partial class DestinationWindow : Window
         FtpTls.IsChecked = initial?.Ftp?.UseTls ?? true;
         Storage.SelectedValue = initial?.StorageKind ?? StorageKind.LocalDirectory;
         NetworkUseCredentials.IsChecked = initial?.NetworkShare is not null; UpdateNetworkStatus();
-        CredentialsStatus.Text = credentialKey is null ? "Доступ пока не задан. Пароль сохраняется в Windows." : "Для хранилища задан доступ в Windows.";
+        UpdateFtpAccessStatus();
         if (initial is not null) SaveButton.Content = "Применить";
     }
 
@@ -76,15 +77,41 @@ public partial class DestinationWindow : Window
     }
 
     internal Action<FtpCredentialsWindow>? FtpCredentialsDialogOpened { get; set; }
+    private string? FtpKeyFor(int port) =>
+        FtpAccessDraft.KeyFor(ftpAccess, FtpHost.Text, port, FtpTls.IsChecked == true);
+
+    private void FtpAddress_Changed(object sender, RoutedEventArgs e) => UpdateFtpAccessStatus();
+
+    private void UpdateFtpAccessStatus()
+    {
+        if (CredentialsStatus is null) return;
+        var key = int.TryParse(FtpPort.Text, out var port) ? FtpKeyFor(port) : null;
+        FtpCredentialsButton.Content = key is null ? "Задать доступ FTP…" : "Изменить доступ FTP…";
+        CredentialsStatus.Text = FtpAccessDraft.Status(ftpAccess, key, ftpAccessEdited);
+    }
+
     private void Credentials_Click(object sender, RoutedEventArgs e)
     {
+        var host = FtpHost.Text.Trim();
+        var useTls = FtpTls.IsChecked == true;
+        var error = FtpAccessDraft.ValidateAddress(host, FtpPort.Text, out var port);
+        if (error is not null)
+        {
+            Status.Text = error;
+            if (port is < 1 or > 65535) FtpPort.Focus();
+            else FtpHost.Focus();
+            return;
+        }
+
         var key = "ftp-" + Guid.NewGuid().ToString("N");
         var dialog = new FtpCredentialsWindow(key, credentials) { Owner = this };
+        dialog.DescribeStorageDraft(FtpAccessDraft.AddressLabel(host, port, useTls), credentials.TryReadUsername(FtpKeyFor(port)));
         FtpCredentialsDialogOpened?.Invoke(dialog);
         if (dialog.ShowDialog() != true) return;
-        credentialKey = key;
+        ftpAccess = new FtpSettings { Host = host, Port = port, UseTls = useTls, CredentialKey = key };
+        ftpAccessEdited = true;
         Status.Text = "";
-        CredentialsStatus.Text = "Логин и пароль сохранены в Windows. Соединение проверяется при доставке копии.";
+        UpdateFtpAccessStatus();
     }
 
     private void GoogleDriveConnect_Click(object sender, RoutedEventArgs e)
@@ -106,14 +133,24 @@ public partial class DestinationWindow : Window
             keepLast = count;
         }
         var port = 21;
-        if (kind == StorageKind.Ftp && !int.TryParse(FtpPort.Text, out port))
-        { Status.Text = "Порт FTP должен быть числом от 1 до 65535."; FtpPort.Focus(); return; }
+        if (kind == StorageKind.Ftp)
+        {
+            var error = FtpAccessDraft.ValidateAddress(FtpHost.Text, FtpPort.Text, out port);
+            if (error is not null) { Status.Text = error; return; }
+            if (FtpKeyFor(port) is null)
+            {
+                Status.Text = "Нажмите «Задать доступ FTP…» и введите данные для указанного сервера.";
+                FtpCredentialsButton.BringIntoView();
+                FtpCredentialsButton.Focus();
+                return;
+            }
+        }
         var destination = new BackupDestination { StorageKind = kind, DestinationDirectory = Destination.Text.Trim(),
             NetworkShare = kind == StorageKind.NetworkShare && NetworkUseCredentials.IsChecked == true ? networkShareSettings ?? new() : null,
             KeepLast = keepLast, GoogleDrive = kind == StorageKind.GoogleDrive ? googleDriveSettings : null,
             RemoteGateway = kind == StorageKind.RemoteGateway ? remoteGateway : null,
             Ftp = kind == StorageKind.Ftp ? new FtpSettings { Host = FtpHost.Text.Trim(), Port = port,
-                UseTls = FtpTls.IsChecked == true, CredentialKey = credentialKey ?? "" } : null };
+                UseTls = FtpTls.IsChecked == true, CredentialKey = FtpKeyFor(port) ?? "" } : null };
         var errors = destination.ApplyTo(new BackupJob { Name = "Хранилище", Source = "check", ArchiveCopies = true,
             ArchivePasswordKey = kind == StorageKind.RemoteGateway ? "validation-only" : null }).Validate().ToList();
         if (kind is StorageKind.LocalDirectory or StorageKind.NetworkShare && !Path.IsPathFullyQualified(destination.DestinationDirectory))

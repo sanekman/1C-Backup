@@ -244,7 +244,7 @@ public partial class MainWindow : Window
             Ftp = storageKind == StorageKind.Ftp ? new FtpSettings
             {
                 Host = FtpHost.Text.Trim(), Port = ftpPort, UseTls = FtpTls.IsChecked == true,
-                CredentialKey = FtpCredentialKey.Text.Trim()
+                CredentialKey = FtpKeyFor(ftpPort) ?? ""
             } : null
         };
         var errors = job.Validate();
@@ -423,14 +423,17 @@ public partial class MainWindow : Window
         DailyAt.Text = string.Join(", ", job.ScheduledTimes.Select(time => time.ToString("HH:mm", CultureInfo.InvariantCulture)));
         KeepLast.Text = job.KeepLast.ToString(); Enabled.IsChecked = job.Enabled;
         archivePasswordKey = job.ArchivePasswordKey;
+        archivePasswordEdited = false;
         EncryptArchive.IsChecked = archivePasswordKey is not null;
         ArchiveCopies.IsChecked = job.ArchiveCopies;
         UpdateArchivePasswordStatus();
         UpdateOneCControls();
         Storage.SelectedValue = job.StorageKind;
         FtpHost.Text = job.Ftp?.Host ?? ""; FtpPort.Text = (job.Ftp?.Port ?? 21).ToString();
-        FtpTls.IsChecked = job.Ftp?.UseTls ?? true; FtpCredentialKey.Text = job.Ftp?.CredentialKey ?? "";
+        FtpTls.IsChecked = job.Ftp?.UseTls ?? true;
+        ftpAccess = job.Ftp; ftpAccessEdited = false; UpdateFtpAccessStatus();
         networkShareSettings = job.NetworkShare;
+        networkAccessEdited = false;
         NetworkUseCredentials.IsChecked = job.NetworkShare is not null; UpdateNetworkStatus();
         Schedule.SelectedValue = job.ScheduleKind;
         SetDays(job.DaysOfWeek);
@@ -464,12 +467,12 @@ public partial class MainWindow : Window
         postgreSqlCredentialKey = null; PgAuthenticationPicker.SelectedIndex = 0; UpdatePostgreSqlCredentialStatus();
         ResetPostgreSqlTools(); PgDumpPath.Clear(); PgRestorePath.Clear(); PgTimeout.Text = "120";
         DailyAt.Text = "23:00"; KeepLast.Text = "7"; Enabled.IsChecked = true;
-        archivePasswordKey = null; EncryptArchive.IsChecked = false;
+        archivePasswordKey = null; archivePasswordEdited = false; EncryptArchive.IsChecked = false;
         ArchiveCopies.IsChecked = false;
         UpdateArchivePasswordStatus();
         Storage.SelectedValue = StorageKind.LocalDirectory;
-        FtpHost.Clear(); FtpPort.Text = "21"; FtpTls.IsChecked = true; FtpCredentialKey.Clear();
-        networkShareSettings = null; NetworkUseCredentials.IsChecked = false; UpdateNetworkStatus();
+        FtpHost.Clear(); FtpPort.Text = "21"; FtpTls.IsChecked = true; ftpAccess = null; ftpAccessEdited = false; UpdateFtpAccessStatus();
+        networkShareSettings = null; networkAccessEdited = false; NetworkUseCredentials.IsChecked = false; UpdateNetworkStatus();
         googleDriveSettings = null; googleDriveFolder = null; UpdateGoogleDriveStatus();
         remoteGatewaySettings = null; UpdateRemoteGatewayStatus();
         Schedule.SelectedValue = ScheduleKind.Daily; SetDays(WeekDays.Monday);
@@ -1305,10 +1308,15 @@ public partial class MainWindow : Window
         if (RemoteGatewayPanel is not null) { RemoteGatewayPanel.Visibility = Storage.SelectedValue is StorageKind.RemoteGateway ? Visibility.Visible : Visibility.Collapsed; UpdateRemoteGatewayStatus(); }
     }
 
+    private bool archivePasswordEdited;
+
     private void UpdateArchivePasswordStatus()
     {
         if (ArchivePasswordStatus is null) return;
-        ArchivePasswordStatus.Text = archivePasswordKey is null ? "Пароль пока не задан." : "Для задания задан пароль. Смена пароля действует на новые копии.";
+        ArchivePasswordButton.Content = archivePasswordKey is null ? "Задать пароль ZIP…" : "Изменить пароль ZIP…";
+        ArchivePasswordStatus.Text = archivePasswordKey is null ? "Пароль архива не задан."
+            : archivePasswordEdited ? "Пароль задан в черновике. После сохранения задания он будет использоваться для новых копий."
+            : "Пароль задан. Прежние копии сохраняют свой пароль.";
     }
 
     private void Encryption_Changed(object sender, RoutedEventArgs e)
@@ -1323,29 +1331,15 @@ public partial class MainWindow : Window
         if (!editorOpen || !ArchivePasswordButton.IsEnabled) return;
         // SaveNew creates an independent key; old copies retain their existing password.
         var dialog = new ArchivePasswordWindow { Owner = this };
+        dialog.ApplyButton.Content = "Применить к черновику";
         ArchivePasswordDialogOpened?.Invoke(dialog);
         if (dialog.ShowDialog() != true) return;
         archivePasswordKey = dialog.NewKey;
+        archivePasswordEdited = true;
         EditorFieldChanged(sender, e);
         EncryptArchive.IsChecked = true;
         UpdateArchivePasswordStatus();
         Status.Text = "Новый пароль сохранён в Windows. Сохраните задание, чтобы использовать его для новых копий.";
-    }
-
-    internal Action<FtpCredentialsWindow>? FtpCredentialsDialogOpened { get; set; }
-    private void FtpCredentials_Click(object sender, RoutedEventArgs e)
-    {
-        if (!editorOpen || !FtpCredentialsButton.IsEnabled) return;
-        // Each draft gets a new secret: cancellation or editing must not mutate a running job.
-        var key = "ftp-" + Guid.NewGuid().ToString("N");
-        var dialog = new FtpCredentialsWindow(key, ftpCredentials) { Owner = this };
-        FtpCredentialsDialogOpened?.Invoke(dialog);
-        if (dialog.ShowDialog() == true)
-        {
-            FtpCredentialKey.Text = key;
-            EditorFieldChanged(sender, e);
-            Status.Text = "Логин и пароль FTP сохранены в Windows. Сохраните задание, чтобы применить новый доступ.";
-        }
     }
 
     private async void Delete_Click(object sender, RoutedEventArgs e)

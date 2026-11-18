@@ -5,6 +5,7 @@ namespace SPBackup.Desktop;
 
 public partial class DestinationWindow
 {
+    private bool networkAccessEdited;
     internal Action<FtpCredentialsWindow>? NetworkShareCredentialsDialogOpened { get; set; }
     private void NetworkMode_Changed(object sender, RoutedEventArgs e)
     {
@@ -14,10 +15,15 @@ public partial class DestinationWindow
     }
     private void UpdateNetworkStatus()
     {
-        if (NetworkCredentialStatus is null) return;
-        NetworkCredentialStatus.Text = NetworkUseCredentials.IsChecked != true ? "Вход от пользователя исполнителя. Доступ из Проводника не подтверждает доступ службы; после сохранения проверьте хранилища через нужного исполнителя."
-            : string.IsNullOrEmpty(networkShareSettings?.CredentialKey) ? "Задайте отдельный логин NAS и пароль для этой папки назначения. Они не меняют вход к сетевому источнику и будут сохранены в Windows."
-            : "Для этой сетевой папки задан отдельный вход.";
+        if (NetworkCredentialStatus is null || NetworkCredentialsButton is null) return;
+        var key = networkShareSettings?.CredentialKey;
+        NetworkCredentialsButton.Content = string.IsNullOrEmpty(key)
+            ? "Задать доступ к папке копий…" : "Изменить доступ к папке копий…";
+        NetworkCredentialStatus.Text = NetworkUseCredentials.IsChecked != true
+            ? "Вход в папку копий от имени исполнителя. Проверьте хранилище через агент или службу."
+            : string.IsNullOrEmpty(key) ? "Отдельный доступ к папке копий не задан."
+            : networkAccessEdited ? "Доступ задан в черновике. Применится после сохранения задания."
+            : "Отдельный доступ задан. Проверьте хранилище под фактическим исполнителем.";
     }
     private void NetworkDestination_Changed(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
@@ -32,13 +38,14 @@ public partial class DestinationWindow
         {
             var root = NetworkShareSettings.Root(Destination.Text.Trim());
             var key = "smb-" + Guid.NewGuid().ToString("N");
-            var dialog = new FtpCredentialsWindow(key, new WindowsNetworkShareCredentialStore().Save, "Логин и пароль NAS / сетевой папки")
-            { Owner = this, SizeToContent = SizeToContent.Height };
-            dialog.BindingName.Text = "Укажите пользователя, которому на сетевом сервере разрешена запись в эту общую папку.";
-            dialog.CredentialExplanation.Text = "Это сетевой пароль, а не PIN Windows. Здесь сохраняется только черновик доступа. Сохраните хранилище и задание: актуальная служба применит настройки без остановки.";
+            var credentials = new WindowsNetworkShareCredentialStore();
+            var dialog = new FtpCredentialsWindow(key, credentials.Save, "Доступ к папке копий на NAS") { Owner = this };
+            dialog.DescribeStorageDraft(root, credentials.TryReadUsername(networkShareSettings?.CredentialKey));
             NetworkShareCredentialsDialogOpened?.Invoke(dialog);
             if (dialog.ShowDialog() != true) return;
-            networkShareSettings = new() { ShareRoot = root, CredentialKey = key }; UpdateNetworkStatus(); Status.Text = "";
+            networkShareSettings = new() { ShareRoot = root, CredentialKey = key };
+            networkAccessEdited = true;
+            UpdateNetworkStatus(); Status.Text = "";
         }
         catch (Exception error) { Status.Text = error.Message; }
     }

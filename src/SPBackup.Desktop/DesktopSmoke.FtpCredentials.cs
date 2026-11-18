@@ -19,11 +19,17 @@ internal static partial class DesktopSmoke
         }
         var credentials = new WindowsFtpCredentialStore();
         var keys = new List<string>();
+        string? expectedLogin = null;
         var value = "FTP original fixture secret"; var cancel = false;
         void Fill(FtpCredentialsWindow dialog)
         {
             keys.Add(dialog.CredentialKey);
             dialog.Loaded += (_, _) => dialog.Dispatcher.BeginInvoke(() => {
+                if (expectedLogin is not null)
+                {
+                    Require(dialog.Username.Text == expectedLogin, "Existing FTP login was not offered for the same server.");
+                    Require(dialog.Password.Password.Length == 0, "A stored password was prefilled.");
+                }
                 if (cancel) { dialog.DialogResult = false; return; }
                 ((TextBox)dialog.FindName("Username")).Text = "ftp-fixture";
                 ((PasswordBox)dialog.FindName("Password")).Password = value;
@@ -86,9 +92,23 @@ internal static partial class DesktopSmoke
             {
                 await WaitUntil(() => window.SmokeReady && !window.SmokeExecutorAvailable,
                     "FTP edit did not observe the executor lock.");
+                var host = Control<TextBox>("FtpHost");
+                var port = Control<TextBox>("FtpPort");
+                var tls = Control<CheckBox>("FtpTls");
+                host.Text = "different-ftp.invalid"; Click("NextStepButton");
+                Require(Control<TextBlock>("WizardError").IsVisible, "FTP access was reused for a different host.");
+                host.Text = job.Ftp.Host;
+                port.Text = "2121"; Click("NextStepButton");
+                Require(Control<TextBlock>("WizardError").IsVisible, "FTP access was reused for a different port.");
+                port.Text = job.Ftp.Port.ToString();
+                tls.IsChecked = !job.Ftp.UseTls; Click("NextStepButton");
+                Require(Control<TextBlock>("WizardError").IsVisible, "FTP access was reused for a different protection mode.");
+                tls.IsChecked = job.Ftp.UseTls;
+                expectedLogin = "ftp-fixture";
                 cancel = true; Click("FtpCredentialsButton");
-                Require(Control<TextBox>("FtpCredentialKey").Text == originalKey, "Cancel replaced the FTP binding.");
+                Require(Control<TextBlock>("FtpAccessStatus").Text.StartsWith("Доступ задан."), "Cancel lost the saved FTP binding.");
                 cancel = false; value = "FTP replacement fixture secret"; Click("FtpCredentialsButton");
+                expectedLogin = null;
                 Require(keys[^1] != originalKey, "Editing replaced the existing FTP Vault entry.");
                 Require((await credentials.GetAsync(originalKey)).Password == "FTP original fixture secret", "FTP editing changed a running job's password.");
                 Require((await new JobStore(path).LoadAsync()).Single(j => j.Id == job.Id).Ftp!.CredentialKey == originalKey,
@@ -113,6 +133,12 @@ internal static partial class DesktopSmoke
             extra.FtpCredentialsDialogOpened = Fill;
             extra.Loaded += (_, _) => extra.Dispatcher.BeginInvoke(() => {
                 var button = FindCredentialsButton(extra);
+                var host = (TextBox)extra.FindName("FtpHost");
+                var save = (Button)extra.FindName("SaveButton");
+                host.Text = "different-ftp.invalid";
+                save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Require(extra.Result is null && extra.IsVisible, "Additional FTP reused access for a different host.");
+                host.Text = job.Ftp.Host;
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 extra.DialogResult = false;
             });

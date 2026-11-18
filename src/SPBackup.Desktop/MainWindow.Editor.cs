@@ -350,12 +350,13 @@ public partial class MainWindow
             if (Storage.SelectedValue is StorageKind.LocalDirectory or StorageKind.NetworkShare && !Path.IsPathFullyQualified(Destination.Text.Trim()))
                 return RejectWizard("Укажите полный путь к папке копий или выберите её кнопкой справа.", 1, Destination);
             var ftpPort = 21;
-            if (Storage.SelectedValue is StorageKind.Ftp && !int.TryParse(FtpPort.Text, out ftpPort)) return RejectWizard("Порт FTP должен быть числом от 1 до 65535.", 1, FtpPort);
             if (Storage.SelectedValue is StorageKind.Ftp)
             {
-                if (string.IsNullOrWhiteSpace(FtpHost.Text)) return RejectWizard("Введите адрес FTP-сервера, например ftp.example.com.", 1, FtpHost);
-                if (ftpPort is < 1 or > 65535) return RejectWizard("Порт FTP должен быть от 1 до 65535.", 1, FtpPort);
-                if (string.IsNullOrWhiteSpace(FtpCredentialKey.Text)) return RejectWizard("Нажмите «Настроить логин и пароль», чтобы сохранить доступ к FTP.", 1, FtpCredentialsButton);
+                var addressError = FtpAccessDraft.ValidateAddress(FtpHost.Text, FtpPort.Text, out ftpPort);
+                if (addressError is not null)
+                    return RejectWizard(addressError, 1, ftpPort is < 1 or > 65535 ? FtpPort : FtpHost);
+                if (FtpKeyFor(ftpPort) is null)
+                    return RejectWizard("Нажмите «Задать доступ FTP…» и введите данные для указанного сервера.", 1, FtpCredentialsButton);
             }
             var job = new BackupJob { Name = "check", Source = "check", DestinationDirectory = Destination.Text.Trim(), StorageKind = (StorageKind)Storage.SelectedValue,
                 TemporaryDirectory = temporary,
@@ -365,10 +366,10 @@ public partial class MainWindow
                 ArchiveCopies = EncryptArchive.IsChecked == true, ArchivePasswordKey = EncryptArchive.IsChecked == true ? archivePasswordKey : null,
                 AdditionalDestinations = additionalDestinations.Count == 0 ? null : additionalDestinations.ToArray(),
                 Ftp = Storage.SelectedValue is StorageKind.Ftp ? new FtpSettings { Host = FtpHost.Text.Trim(), Port = ftpPort, UseTls = FtpTls.IsChecked == true,
-                    CredentialKey = FtpCredentialKey.Text.Trim() } : null };
+                    CredentialKey = FtpKeyFor(ftpPort) ?? "" } : null };
             var errors = job.Validate();
             if (errors.Count != 0) return RejectWizard(string.Join(" ", errors), 1, Destination);
-            if (EncryptArchive.IsChecked == true && archivePasswordKey is null) return RejectWizard("Нажмите «Задать новый пароль архива», затем введите пароль дважды.", 1, ArchivePasswordButton);
+            if (EncryptArchive.IsChecked == true && archivePasswordKey is null) return RejectWizard("Нажмите «Задать пароль ZIP…», затем введите пароль дважды.", 1, ArchivePasswordButton);
             if (EncryptArchive.IsChecked == true && ArchiveCopies.IsChecked != true && !(Kind.SelectedItem is DatabaseKind.OneCFile && OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive))
                 return RejectWizard("Для защиты паролем включите архивацию в ZIP.", 1, ArchiveCopies);
         }

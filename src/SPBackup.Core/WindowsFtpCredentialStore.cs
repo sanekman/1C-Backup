@@ -65,6 +65,16 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
         return "OneCBackup/" + prefix + "/" + key;
     }
 
+    // The editor only needs the account name. Leave the stored password in Windows.
+    public string? TryReadUsername(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 512 || key.Any(char.IsControl)
+            || !Native.CredRead(Target(key), Generic, 0, out var pointer))
+            return null;
+        try { return Marshal.PtrToStringUni(Marshal.PtrToStructure<NativeCredential>(pointer).Username); }
+        finally { Native.CredFree(pointer); }
+    }
+
     public Task<NetworkCredential> GetAsync(string key, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
