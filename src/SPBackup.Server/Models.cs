@@ -12,6 +12,8 @@ public sealed record AgentRecord(Guid AgentId, string Name, DateTimeOffset Regis
     public string? ComputerName { get; init; }
     public Guid? FolderId { get; init; }
 }
+public sealed record AgentTreeEntry(Guid Id, Guid? FolderId, string Name, string? ComputerName, bool Revoked,
+    DateTimeOffset? LastSeen, DateTimeOffset? Observed);
 public sealed record AgentPage(IReadOnlyList<AgentRecord> Agents, int Total, int Page, int PageSize);
 public sealed record AgentCapabilityState(Guid AgentId, DateTimeOffset? ReceivedUtc, IReadOnlyList<string> Capabilities);
 public sealed record Invitation(Guid InvitationId, string Code, DateTimeOffset ExpiresUtc);

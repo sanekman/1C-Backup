@@ -23,9 +23,10 @@ public sealed class AgentProblemSummaryTests(ServerFixture fixture) : IClassFixt
         await fixture.Store.SaveMonitoringAsync(problem.AgentId, new(DateTimeOffset.UtcNow, "summary", jobs, null, 0), default);
         await fixture.Store.SaveMonitoringAsync(clean.AgentId, new(DateTimeOffset.UtcNow, "summary", [], null, 0), default);
         await fixture.Store.SaveRunAsync(problem.AgentId, new(Guid.NewGuid(), jobs[0].JobId, jobs[0].Name,
-            DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(-1), "PartiallySucceeded", 1, true, null, []), default);
+            DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(-1), "PartiallySucceeded", 1, true, null,
+            [new(0, true, 10, false), new(1, false, 0, false)]), default);
         await fixture.Store.SaveRunAsync(problem.AgentId, new(Guid.NewGuid(), Guid.NewGuid(), "Removed job",
-            DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(-1), "Failed", 0, false, null, []), default);
+            DateTimeOffset.UtcNow.AddMinutes(-4), DateTimeOffset.UtcNow.AddMinutes(-3), "Failed", 0, false, null, []), default);
         await fixture.Store.RevokeAsync(admin.Id, revoked.AgentId, default);
 
         var summaries = await fixture.Store.ProblemSummariesAsync([problem.AgentId, clean.AgentId, unreported.AgentId, revoked.AgentId], 120, default);
@@ -42,7 +43,13 @@ public sealed class AgentProblemSummaryTests(ServerFixture fixture) : IClassFixt
         Assert.DoesNotContain(selected.Items, p => p.JobName == "Removed job");
         Assert.Equal(17, (await fixture.Store.ProblemsAsync(1, null, null, null, false, 120, default, problem.AgentId)).Items.Count);
 
-        using var home = await fixture.Administrator.GetAsync("");
+        using var tree = await fixture.Administrator.GetAsync($"?agent={problem.AgentId}");
+        var treeHtml = WebUtility.HtmlDecode(await tree.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, tree.StatusCode);
+        Assert.Contains($"data-agent-id=\"{problem.AgentId}\"", treeHtml);
+        Assert.Contains("Частичная доставка · 1 из 2", treeHtml);
+        Assert.Contains($"agents/{problem.AgentId}#job-{jobs[0].JobId}", treeHtml);
+        using var home = await fixture.Administrator.GetAsync("?view=list");
         var html = WebUtility.HtmlDecode(await home.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.OK, home.StatusCode);
         Assert.Contains($"problems?agent={problem.AgentId}", html); Assert.Contains("Причин: 67", html);

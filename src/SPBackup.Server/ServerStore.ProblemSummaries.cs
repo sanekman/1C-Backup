@@ -15,12 +15,21 @@ public sealed partial class ServerStore
         if (agentIds.Count > 50 || agentIds.Contains(Guid.Empty) || offlineSeconds < 1)
             throw new ServerRequestException(400, "invalid_problem_filter");
         if (agentIds.Count == 0) return [];
+        return await ReadProblemSummariesAsync(agentIds.Distinct().ToArray(), offlineSeconds, token);
+    }
+
+    internal Task<IReadOnlyList<AgentProblemSummary>> TreeProblemSummariesAsync(int offlineSeconds, CancellationToken token)
+        => ReadProblemSummariesAsync(null, offlineSeconds, token);
+
+    private async Task<IReadOnlyList<AgentProblemSummary>> ReadProblemSummariesAsync(Guid[]? agentIds,
+        int offlineSeconds, CancellationToken token)
+    {
         await using var db = await source.OpenConnectionAsync(token);
         await using var query = Command(db, null, ProblemRowsSql + "\n" + """
             SELECT a.id,a.observed,p.code,count(p.code) FROM agents a
             LEFT JOIN problems p ON p.id=a.id
             GROUP BY a.id,a.observed,p.code ORDER BY a.id,p.code
-            """, ("agent_ids", agentIds.Distinct().ToArray()), ("folder", null), ("root", false), ("seconds", offlineSeconds));
+            """, ("agent_ids", agentIds), ("folder", null), ("root", false), ("seconds", offlineSeconds));
         await using var reader = await query.ExecuteReaderAsync(token);
         var rows = new List<AgentProblemSummary>();
         Guid? current = null; List<AgentProblemCount> reasons = [];

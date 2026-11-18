@@ -7,6 +7,26 @@ public sealed partial class ServerStore
 {
     public const int MaximumFolderDepth = 16;
     public const int MaximumFolders = 1000;
+    internal async Task<IReadOnlyList<AgentTreeEntry>> AgentTreeAsync(CancellationToken token)
+    {
+        await using var db = await source.OpenConnectionAsync(token);
+        await using var cmd = Command(db, null, """
+            SELECT a.id,a.folder_id,a.name,a.computer_name,a.revoked,greatest(a.received_utc,m.received_utc),m.received_utc
+            FROM server_agents a LEFT JOIN server_monitoring m ON m.agent_id=a.id
+            ORDER BY a.name,a.id
+            """);
+        await using var reader = await cmd.ExecuteReaderAsync(token);
+        var agents = new List<AgentTreeEntry>();
+        while (await reader.ReadAsync(token))
+        {
+            agents.Add(new(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetGuid(1), reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetBoolean(4),
+                reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
+                reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6)));
+        }
+        return agents;
+    }
+
     private static async Task OrganizationLockAsync(NpgsqlConnection db, NpgsqlTransaction tx, CancellationToken token)
     {
         await using var cmd = Command(db, tx, "SELECT pg_advisory_xact_lock(1731062103)");

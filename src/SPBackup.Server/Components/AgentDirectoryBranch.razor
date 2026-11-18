@@ -1,0 +1,34 @@
+<li data-agent-branch>
+    <details data-branch-key="@Branch.Key" open="@(SelectedId is { } id && Branch.Contains(id))">
+        <summary><span>@Branch.Label</span> <span class="muted">(<span data-agent-count>@Branch.Count</span>)</span></summary>
+        @if (Branch.FolderId is { } folder)
+        {
+            <details class="agent-folder-menu"><summary>Действия с папкой</summary><div class="agent-folder-actions">
+                <a href="@($"folders?parent={folder}&tree=1")">Добавить подпапку</a>
+                <a href="@($"folders?edit={folder}&tree=1")">Переименовать</a>
+            </div></details>
+        }
+        <ul>
+            @foreach (var child in Branch.Children)
+            {
+                <AgentDirectoryBranch Branch="child" SelectedId="SelectedId" />
+            }
+            @foreach (var row in Branch.Agents)
+            {
+                <li class="agent-directory-row" data-agent-leaf data-agent-id="@row.Entry.Id" data-attention="@(row.Reasons.Count > 0 ? "yes" : "no")">
+                    <a class="agent-directory-name" href="@($"?agent={row.Entry.Id}#agent-summary")"
+                       data-agent-name="@row.Entry.Name" data-computer-name="@row.Entry.ComputerName"
+                       aria-current="@(row.Entry.Id == SelectedId ? "page" : null)">@row.Entry.Name</a>
+                    <span class="badge @(row.Entry.Revoked || row.Reasons.Count > 0 ? "pending" : row.Connection == "На связи" ? "good" : "pending")">@row.Status</span>
+                    <a class="agent-move" href="@($"agents/{row.Entry.Id}/edit?tree=1")">Переместить в папку…</a>
+                </li>
+            }
+        </ul>
+        @if (Branch.Count == 0) { <p class="muted">Папка пуста.</p> }
+    </details>
+</li>
+
+@code {
+    [Parameter, EditorRequired] public AgentDirectory.BranchNode Branch { get; set; } = default!;
+    [Parameter] public Guid? SelectedId { get; set; }
+}

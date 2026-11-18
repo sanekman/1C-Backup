@@ -1,0 +1,132 @@
+@using SPBackup.Server.Monitoring
+@inject ServerStore Store
+@inject ServerOptions Settings
+@inject IHttpContextAccessor Http
+
+<div class="agent-directory-tools">
+    <div class="agent-directory-filter" data-agent-filter hidden>
+        <label>Найти агента<input type="search" maxlength="128" data-agent-search /></label>
+        <label class="agent-attention-filter"><input type="checkbox" data-agent-attention /> Требуют внимания</label>
+        <button type="button" class="secondary" data-agent-reset>Сбросить</button>
+    </div>
+    <a href="folders">Управление папками</a>
+    <a href="?view=list">Таблица агентов</a>
+</div>
+<div class="agent-directory" data-agent-directory>
+    <section class="card agent-directory-tree" aria-label="Папки и агенты">
+        <ul>
+            @foreach (var folder in Branches)
+            {
+                <AgentDirectoryBranch Branch="folder" SelectedId="AgentId" />
+            }
+        </ul>
+        <p data-agent-no-match hidden role="status">Агенты по заданным условиям не найдены.</p>
+    </section>
+    <section id="agent-summary" class="card agent-directory-summary" aria-label="Сводка агента" tabindex="-1">
+        @if (Selected is { } row)
+        {
+            <p class="muted">@FolderPath(row)</p>
+            <h2>@row.Entry.Name</h2>
+            <dl>
+                <dt>Связь</dt><dd>@row.Connection</dd>
+                <dt>Последняя связь</dt><dd>@Clock.Time(row.Entry.LastSeen)</dd>
+                <dt>Последний отчёт</dt><dd>@Clock.Time(row.Entry.Observed)</dd>
+                <dt>Доставка по отчёту</dt>
+                <dd>
+                    @if (Latest is { } run)
+                    {
+                        <span>@Delivery(run)</span>
+                        <small>@run.JobName · @Clock.Time(run.FinishedUtc)</small>
+                        <a href="@($"agents/{row.Entry.Id}#job-{run.JobId}")">Открыть задание</a>
+                    }
+                    else { <span>Данных о копировании пока нет.</span> }
+                </dd>
+            </dl>
+            @if (row.Reasons.Count > 0)
+            {
+                <ul>
+                    @foreach (var reason in row.Reasons)
+                    {
+                        <li>@ProblemText.Filters[reason.Code] <span class="muted">(@reason.Count)</span></li>
+                    }
+                </ul>
+                <p><a href="@($"problems?agent={row.Entry.Id}")">Проблемы агента →</a></p>
+            }
+            <p><a href="@($"agents/{row.Entry.Id}")">Карточка агента →</a></p>
+        }
+        else if (AgentId is not null)
+        {
+            <h2>Агент не найден</h2>
+            <p>Выберите компьютер в дереве.</p>
+        }
+        else
+        {
+            <h2>Сводка агента</h2>
+            @if (Branches.Any(folder => folder.Count > 0))
+            { <p>Выберите компьютер в дереве.</p> }
+            else
+            { <p>Агенты ещё не подключены.</p> }
+        }
+    </section>
+</div>
+<script src="agent-directory.js" defer></script>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<AgentFolderOption> Folders { get; set; } = [];
+    [Parameter] public Guid? AgentId { get; set; }
+
+    private IReadOnlyList<BranchNode> Branches = [];
+    private AgentRow? Selected;
+    private MonitoredRun? Latest;
+
+    public sealed record BranchNode(string Key, string Label, Guid? FolderId, IReadOnlyList<BranchNode> Children,
+        IReadOnlyList<AgentRow> Agents)
+    {
+        public int Count { get; } = Agents.Count + Children.Sum(child => child.Count);
+        public bool Contains(Guid id) => Agents.Any(agent => agent.Entry.Id == id) || Children.Any(child => child.Contains(id));
+    }
+
+    public sealed record AgentRow(AgentTreeEntry Entry, string Connection, string Status, IReadOnlyList<AgentProblemCount> Reasons);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var token = Http.HttpContext!.RequestAborted;
+        var entries = await Store.AgentTreeAsync(token);
+        var problems = (await Store.TreeProblemSummariesAsync(Settings.OfflineAfterSeconds, token)).ToDictionary(problem => problem.AgentId);
+        var cutoff = DateTimeOffset.UtcNow.AddSeconds(-Settings.OfflineAfterSeconds);
+        var folderIds = Folders.Select(folder => folder.Id).ToHashSet();
+        var rows = entries.Select(entry =>
+        {
+            var reasons = problems.GetValueOrDefault(entry.Id)?.Reasons.OrderBy(reason => ProblemText.Priority(reason.Code))
+                .ThenBy(reason => reason.Code, StringComparer.Ordinal).ToArray() ?? [];
+            var connection = entry.Revoked ? "Доступ отозван" : entry.LastSeen is null ? "Ожидает первого сигнала"
+                : entry.LastSeen < cutoff ? "Нет связи" : "На связи";
+            var status = reasons.Length > 0 ? ProblemText.Filters[reasons[0].Code] : connection;
+            return new AgentRow(entry, connection, status, reasons);
+        }).ToLookup(row => row.Entry.FolderId is { } id && folderIds.Contains(id) ? id : Guid.Empty);
+        var children = Folders.ToLookup(folder => folder.ParentId ?? Guid.Empty);
+        BranchNode Build(AgentFolderOption folder) => new(folder.Id.ToString(), folder.Name, folder.Id,
+            children[folder.Id].Select(Build).ToArray(), rows[folder.Id].ToArray());
+        Branches = children[Guid.Empty].Select(Build)
+            .Append(new("root", "Без папки", null, [], rows[Guid.Empty].ToArray())).ToArray();
+        Selected = AgentId is { } selected ? rows.SelectMany(group => group).FirstOrDefault(row => row.Entry.Id == selected) : null;
+        Latest = Selected is { } item ? await Store.LatestBackupRunAsync(item.Entry.Id, token) : null;
+    }
+
+    private string FolderPath(AgentRow row) => Folders.FirstOrDefault(folder => folder.Id == row.Entry.FolderId)?.Path ?? "Без папки";
+
+    private static string Delivery(MonitoredRun run)
+    {
+        var delivered = run.Destinations.Count(destination => destination.Succeeded);
+        return run.Status switch
+        {
+            "Succeeded" when run.Incomplete => "Доставлено с пропусками",
+            "Succeeded" when delivered > 0 => $"Доставлено в хранилища: {delivered}",
+            "PartiallySucceeded" => $"Частичная доставка · {delivered} из {run.Destinations.Count}",
+            "Cancelled" => "Копирование отменено",
+            "Interrupted" => "Копирование прервано",
+            "Failed" => "Ошибка копирования",
+            _ => "Доставка не подтверждена"
+        };
+    }
+}

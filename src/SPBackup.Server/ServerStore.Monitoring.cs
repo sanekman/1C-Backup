@@ -65,6 +65,18 @@ public sealed partial class ServerStore
         while (await reader.ReadAsync(token)) runs.Add(JsonSerializer.Deserialize<MonitoredRun>(reader.GetString(0),MonitoringJson)!);
         return new(runs,page,50);
     }
+    internal async Task<MonitoredRun?> LatestBackupRunAsync(Guid id, CancellationToken token)
+    {
+        await using var db = await source.OpenConnectionAsync(token);
+        await using var query = Command(db, null, """
+            SELECT document::text FROM server_runs
+            WHERE agent_id=@id AND document->>'evidence' IS NULL
+            ORDER BY finished_utc DESC,run_id LIMIT 1
+            """, ("id", id));
+        return await query.ExecuteScalarAsync(token) is string document
+            ? JsonSerializer.Deserialize<MonitoredRun>(document, MonitoringJson) : null;
+    }
+
     public async Task<IReadOnlyList<MonitoredRun>> LatestRunsAsync(Guid id, CancellationToken token)
     {
         await using var db = await source.OpenConnectionAsync(token);

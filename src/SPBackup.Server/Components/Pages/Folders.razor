@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = ServerAuthentication.Administrator)]
 @inject ServerOptions Settings
 @inject ServerStore Store
+@inject NavigationManager Navigation
 @inject IHttpContextAccessor Http
 <PageTitle>Папки агентов — @Settings.DisplayName</PageTitle>
 <a href="./">← Агенты</a>
@@ -22,7 +23,8 @@
 </select></label>
 <p class="hint">Чтобы создать подпапку, выберите её родителя. При изменении папки вместе с ней переместятся все её подпапки.</p>
 <button type="submit">@(Model.Id is null ? "Создать папку" : "Сохранить папку")</button>
-@if (Model.Id is not null) { <a class="button secondary" href="folders">Отмена</a> }
+@if (Tree) { <a class="button secondary" href="./">Отмена</a> }
+else if (Model.Id is not null) { <a class="button secondary" href="folders">Отмена</a> }
 </form>
 @if (Model.Id is { } selectedId)
 {
@@ -45,6 +47,8 @@
 }
 </section>
 @code {
+    [SupplyParameterFromQuery(Name = "tree")] public int TreeSource { get; set; }
+    private bool Tree => TreeSource == 1;
     [SupplyParameterFromQuery(Name = "edit")] public Guid? Editing { get; set; }
     [SupplyParameterFromQuery(Name = "parent")] public Guid? Parent { get; set; }
     [SupplyParameterFromForm(FormName = "folder")] public FolderForm? Model { get; set; }
@@ -67,6 +71,7 @@
             var user = ServerAuthentication.UserId(Http.HttpContext!.User);
             if (Model.Id is { } id) await Store.UpdateFolderAsync(user, id, request, Http.HttpContext.RequestAborted);
             else await Store.CreateFolderAsync(user, request, Http.HttpContext.RequestAborted);
+            if (Tree) { Navigation.NavigateTo("./"); return; }
             Notice = "Папка сохранена."; Model = new();
             Options = await Store.FoldersAsync(Http.HttpContext.RequestAborted);
         }

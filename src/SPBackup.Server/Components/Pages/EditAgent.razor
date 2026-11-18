@@ -2,10 +2,11 @@
 @attribute [Authorize(Policy = ServerAuthentication.Administrator)]
 @inject ServerOptions Settings
 @inject ServerStore Store
+@inject NavigationManager Navigation
 @inject IHttpContextAccessor Http
 <PageTitle>Имя и папка агента — @Settings.DisplayName</PageTitle>
-<a href="@($"agents/{Id}")">← Карточка агента</a>
-<h1>Имя и папка агента</h1>
+<a href="@(Tree ? TreeLink : $"agents/{Id}")">@(Tree ? "← Дерево агентов" : "← Карточка агента")</a>
+<h1>@(Tree ? "Переместить агента в папку" : "Имя и папка агента")</h1>
 @if (Agent is { } agent)
 {
 <section class="card narrow">
@@ -15,20 +16,24 @@
 @if (Saved) { <p role="status">Имя и папка сохранены. <a href="@($"agents/{Id}")">Открыть карточку агента</a></p> }
 <form method="post" @formname="agent-identity" @onsubmit="Save">
 <AntiforgeryToken />
-<label>Понятное имя агента<input name="Model.Name" value="@Model!.Name" required maxlength="128" placeholder="Например, Бухгалтерия — главный сервер" /></label>
+@if (!Tree) { <label>Понятное имя агента<input name="Model.Name" value="@Model!.Name" required maxlength="128" placeholder="Например, Бухгалтерия — главный сервер" /></label> }
 <label>Папка агента<select name="Model.FolderId"><option value="">Без папки</option>
-@foreach (var folder in Options) { <option value="@folder.Id" selected="@(Model.FolderId == folder.Id.ToString())">@folder.Path</option> }
+@foreach (var folder in Options) { <option value="@folder.Id" selected="@(Model!.FolderId == folder.Id.ToString())">@folder.Path</option> }
 </select></label>
-<details><summary>Создать новую папку внутри выбранной</summary>
-<label>Имя новой папки<input name="Model.NewFolderName" value="@Model.NewFolderName" maxlength="128" /></label>
+@if (!Tree) { <details><summary>Создать новую папку внутри выбранной</summary>
+<label>Имя новой папки<input name="Model.NewFolderName" value="@Model!.NewFolderName" maxlength="128" /></label>
 <p class="hint">Если папка не выбрана, новая папка будет на верхнем уровне. Агент будет помещён в новую папку.</p>
-</details>
-<button type="submit">Сохранить имя и папку</button>
+</details> }
+<button type="submit">@(Tree ? "Переместить" : "Сохранить имя и папку")</button>
+@if (Tree) { <a class="button secondary" href="@TreeLink">Отмена</a> }
 </form>
 </section>
 }
 else { <p>Агент не найден.</p> }
 @code {
+    [SupplyParameterFromQuery(Name = "tree")] public int TreeSource { get; set; }
+    private bool Tree => TreeSource == 1;
+    private string TreeLink => $"./?agent={Id}#agent-summary";
     [Parameter] public Guid Id { get; set; }
     [SupplyParameterFromForm] public IdentityForm? Model { get; set; }
     private AgentRecord? Agent;
@@ -48,7 +53,8 @@ else { <p>Агент не найден.</p> }
         try
         {
             await Store.UpdateAgentIdentityAsync(ServerAuthentication.UserId(Http.HttpContext!.User), Id,
-                new(Model!.Name, OrganizationText.FolderId(Model.FolderId), OrganizationText.NewFolder(Model.NewFolderName)), Http.HttpContext.RequestAborted);
+                new(Tree ? Agent.Name : Model!.Name, OrganizationText.FolderId(Model!.FolderId), Tree ? null : OrganizationText.NewFolder(Model.NewFolderName)), Http.HttpContext.RequestAborted);
+            if (Tree) { Navigation.NavigateTo(TreeLink); return; }
             Agent = await Store.AgentAsync(Id, Http.HttpContext.RequestAborted);
             Options = await Store.FoldersAsync(Http.HttpContext.RequestAborted);
             Model = new() { Name = Agent!.Name, FolderId = Agent.FolderId?.ToString() }; Saved = true;

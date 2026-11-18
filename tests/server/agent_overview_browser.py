@@ -22,6 +22,27 @@ with sync_playwright() as pw:
     page.locator('input[name="password"]').fill(Path(a.password_file).read_text().strip())
     page.get_by_role('button', name='Войти', exact=True).click()
     page.wait_for_url(a.url)
+    search = page.get_by_role('searchbox', name='Найти агента')
+    search.fill('УНФ')
+    leaf = page.locator(f'[data-agent-id="{a.agent}"]')
+    assert leaf.is_visible()
+    page.get_by_role('checkbox', name='Требуют внимания').check()
+    leaf.get_by_role('link', name='Office <УНФ>', exact=True).click()
+    summary = page.locator('#agent-summary')
+    assert 'Частичная доставка · 1 из 2' in summary.inner_text()
+    assert 'Нет связи' in summary.inner_text()
+    assert 'Последний отчёт' in summary.inner_text()
+    assert search.input_value() == 'УНФ'
+    page.get_by_role('button', name='Сбросить').click()
+    checks.append('tree-filter-selection-retains-search-and-separates-connection-and-delivery')
+    for theme in ['light', 'dark']:
+        if page.locator('html').get_attribute('data-theme') != theme:
+            page.locator('[data-theme-toggle]').click()
+        for width, height in [(900, 580), (360, 800)]:
+            page.set_viewport_size({'width': width, 'height': height})
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            page.screenshot(path=str(out / f'tree-{theme}-{width}.png'), full_page=True)
+    page.get_by_role('link', name='Таблица агентов').click()
     row = page.locator(f'tr[data-agent="{a.agent}"]')
     assert 'Нет связи' in row.inner_text()
     assert 'Отчёт:' in row.inner_text()

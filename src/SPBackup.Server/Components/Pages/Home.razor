@@ -11,6 +11,9 @@
 {
     <section class="card"><div class="summary"><strong>Мониторинг всех агентов</strong><span>Нет связи: @overview.Offline</span><span>Нет отчётов: @overview.Unreported</span><a href="problems">Ошибки, неполные и просроченные копии →</a><span>В очереди: @overview.Pending</span></div></section>
 }
+@if (ListView)
+{
+<p><a href="./">Дерево агентов</a></p>
 <div class="agents-layout">
 <aside class="card folder-sidebar" aria-label="Папки агентов">
 <h2>Папки</h2>
@@ -63,14 +66,22 @@
     <p class="muted note">«На связи» означает недавний ответ агента. Успех копирования определяется отдельным отчётом о запуске. Задания, прогресс, история и результаты доставки доступны в карточке компьютера.</p>
 }
 </div></div>
+}
+else
+{
+    <AgentDirectory Folders="Folders" AgentId="AgentId" />
+}
 @code {
     [SupplyParameterFromQuery(Name = "page")] public int Page { get; set; }
     [SupplyParameterFromQuery(Name = "folder")] public string? Folder { get; set; }
+    [SupplyParameterFromQuery(Name = "view")] public string? View { get; set; }
+    [SupplyParameterFromQuery(Name = "agent")] public Guid? AgentId { get; set; }
+    private bool ListView => View == "list" || Folder is not null || Page != 0;
     private Guid? SelectedFolder;
     private IReadOnlyList<AgentFolderOption> Folders = [];
     private string FolderTitle => Folder == "root" ? "Без папки" : SelectedFolder is { } id ? Folders.First(f => f.Id == id).Path : "Все агенты";
     private string ConnectLink => SelectedFolder is { } id ? $"connect?folderId={id}" : "connect";
-    private string PageLink(int page) => SelectedFolder is { } id ? $"?folder={id}&page={page}" : Folder == "root" ? $"?folder=root&page={page}" : $"?page={page}";
+    private string PageLink(int page) => SelectedFolder is { } id ? $"?folder={id}&page={page}" : Folder == "root" ? $"?folder=root&page={page}" : $"?view=list&page={page}";
     private ServerHealthSnapshot? HealthStatus;
     private AgentPage? Data;
     private ServerStore.Overview? Overview;
@@ -79,6 +90,7 @@
         HealthStatus = Health.Read();
         Overview = await Store.OverviewAsync(Settings.OfflineAfterSeconds,Http.HttpContext!.RequestAborted);
         Folders = await Store.FoldersAsync(Http.HttpContext!.RequestAborted);
+        if (!ListView) return;
         SelectedFolder = Folder is null or "root" ? null : OrganizationText.FolderId(Folder);
         Data = await Store.AgentsAsync(Page, Http.HttpContext!.RequestAborted, SelectedFolder, Folder == "root");
         ProblemSummaries = (await Store.ProblemSummariesAsync(Data.Agents.Select(a => a.AgentId).ToArray(), Settings.OfflineAfterSeconds, Http.HttpContext.RequestAborted)).ToDictionary(s => s.AgentId);

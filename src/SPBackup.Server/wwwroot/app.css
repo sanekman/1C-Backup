@@ -20,3 +20,29 @@ select{display:block;width:100%;font:inherit;color:inherit;background:var(--inpu
 .server-update-actions form { margin-top: 0; }
 .agent-name{min-width:140px;max-width:260px;overflow-wrap:anywhere}.agent-attention{min-width:180px;max-width:260px;overflow-wrap:anywhere}
 @media(max-width:1100px){.agents-layout{grid-template-columns:1fr}}
+
+.agent-directory-tools,.agent-directory-filter,.agent-folder-actions{display:flex;align-items:end;flex-wrap:wrap;gap:10px 16px}
+.agent-directory-tools{align-items:center}
+.agent-directory-filter label{margin:0}
+.agent-directory-filter input[type="search"]{min-width:min(250px,70vw)}
+.agent-attention-filter{display:flex;align-items:center;gap:8px;padding:10px 0}
+.agent-attention-filter input{margin:0;width:auto}
+.agent-directory{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px;align-items:start}
+.agent-directory .card{padding:18px}
+.agent-directory-tree ul{list-style:none;padding-inline-start:12px;margin:0}
+.agent-directory-tree>ul{padding:0}
+.agent-directory-tree li{min-width:0}
+.agent-directory-tree details{border:0;padding:0;margin:4px 0}
+.agent-directory-tree summary{padding:7px 0;overflow-wrap:anywhere}
+.agent-directory-tree details>ul{border-inline-start:1px solid var(--line)}
+.agent-directory-tree details.agent-folder-menu{margin-inline-start:13px;font-size:12px}
+.agent-folder-menu summary{color:var(--link);padding:2px 0}
+.agent-folder-actions{margin:2px 0 5px 13px;font-size:12px}
+.agent-directory-row{display:flex;gap:4px 10px;align-items:center;flex-wrap:wrap;padding:6px 2px}
+.agent-directory-row .badge{white-space:normal;overflow-wrap:anywhere}
+.agent-directory-name{font-weight:600;overflow-wrap:anywhere}
+.agent-move{font-size:12px;margin-inline-start:auto}
+.agent-directory-summary{overflow-wrap:anywhere}
+.agent-directory-summary h2{margin-top:0}
+.agent-directory-summary dl{gap:9px}
+@media(max-width:720px){.agent-directory{grid-template-columns:minmax(0,1fr);gap:0}.agent-directory .card{margin:10px 0}.agent-directory-tree ul{padding-inline-start:clamp(2px,1.25vw,10px)}}
