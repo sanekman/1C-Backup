@@ -137,10 +137,18 @@ internal static partial class DesktopSmoke
         Click("CopiesNavigation"); await WaitUntil(() => window.SmokeReady, "Каталог файловых копий не загрузился.");
         Control<ComboBox>("CopyJobFilter").SelectedValue = job.Id;
         var localDate = latest.CompletedUtc.ToLocalTime().Date;
-        Control<DatePicker>("CopyDateFilter").SelectedDate = localDate.AddDays(1);
+        var dateFilter = Control<ComboBox>("CopyDateFilter");
+        var dates = dateFilter.Items.OfType<KeyValuePair<DateTime?, string>>().ToArray();
+        var otherDate = localDate.AddDays(1);
+        if (dates[0].Value != "Все даты" || !dates.Any(option => option.Key == localDate)
+            || dates.Any(option => option.Key == otherDate))
+            throw new InvalidOperationException("Фильтр не предлагает реальные даты из журнала.");
+        dateFilter.ItemsSource = dates.Append(new KeyValuePair<DateTime?, string>(otherDate, "Дата без копий")).ToArray();
+        dateFilter.SelectedValue = otherDate;
         if (Control<DataGrid>("Copies").Items.Count != 0)
             throw new InvalidOperationException("Фильтр даты показал копии за другой день.");
-        Control<DatePicker>("CopyDateFilter").SelectedDate = localDate;
+        dateFilter.ItemsSource = dates;
+        dateFilter.SelectedValue = localDate;
         Control<DataGrid>("Copies").SelectedItem = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Single(row => row.Record.Id == latest.Id);
         await WaitUntil(() => window.SmokeReady && Control<Button>("RestoreFilesButton").IsEnabled, "Копии не готовы к проверке и восстановлению после обновления состояния агента.");
         window.UpdateLayout();
@@ -151,7 +159,7 @@ internal static partial class DesktopSmoke
             || !Control<Button>("ExportCopyButton").Content.ToString()!.Contains("этот архив"))
             throw new InvalidOperationException("Каталог не объясняет зависимость инкремента от цепочки.");
         screenshot("files-incremental-catalog-compact");
-        Control<DatePicker>("CopyDateFilter").SelectedDate = null;
+        dateFilter.SelectedIndex = 0;
         Click("VerifyCopyButton"); await WaitUntil(() => window.SmokeReady, "Проверка файловой цепочки не завершилась.");
         if (!Control<TextBlock>("CopyVerificationStatus").Text.Contains("Файловая цепочка проверена: архивов 2"))
             throw new InvalidOperationException("Ручная проверка не проверила всю файловую цепочку.");

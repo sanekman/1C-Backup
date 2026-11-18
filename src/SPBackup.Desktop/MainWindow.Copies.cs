@@ -32,7 +32,7 @@ public partial class MainWindow
         if (CopyDetailsScroll is not null) CopyDetailsScroll.MaxHeight = ActualHeight < 650 ? 60 : 150;
     }
 
-    private void UpdateCopyJobChoices()
+    private void UpdateCopyFilterChoices()
     {
         var selectedId = (CopyJobFilter.SelectedItem as CopyJobChoice)?.Id;
         var names = jobs.Select(job => new CopyJobChoice(job.Id, job.Name))
@@ -44,17 +44,20 @@ public partial class MainWindow
             .OrderBy(choice => choice.Label, StringComparer.CurrentCultureIgnoreCase)
             .Select(choice => duplicates.Contains(choice.Label)
                 ? choice with { Label = choice.Label + " · " + choice.Id!.Value.ToString("N")[..8] } : choice)).ToList();
+        var selectedDate = CopyDateFilter.SelectedValue as DateTime?;
+        var dates = new[] { new KeyValuePair<DateTime?, string>(null, "Все даты") }
+            .Concat(copyRows.Select(row => row.CompletedUtc.ToLocalTime().Date).Distinct().OrderDescending()
+                .Select(date => new KeyValuePair<DateTime?, string>(date, date.ToString("dd.MM.yyyy")))).ToArray();
         updatingCopyFilters = true;
         try
         {
             CopyJobFilter.ItemsSource = choices;
             CopyJobFilter.SelectedItem = choices.FirstOrDefault(choice => choice.Id == selectedId) ?? choices[0];
+            CopyDateFilter.ItemsSource = dates;
+            CopyDateFilter.SelectedItem = dates.FirstOrDefault(choice => choice.Key == selectedDate, dates[0]);
         }
         finally { updatingCopyFilters = false; }
     }
-
-    private void CopyDateValidationError(object sender, DatePickerDateValidationErrorEventArgs e)
-        => Status.Text = "Укажите дату в формате Windows или выберите её в календаре.";
 
     private void CopyFilter_Changed(object sender, RoutedEventArgs e) => ApplyCopyFilter();
 
@@ -65,7 +68,7 @@ public partial class MainWindow
         var jobId = (CopyJobFilter.SelectedItem as CopyJobChoice)?.Id;
         var storage = (CopyStorageFilter.SelectedItem as ComboBoxItem)?.Tag as string;
         var query = CopySearch.Text.Trim();
-        var date = CopyDateFilter.SelectedDate;
+        var date = CopyDateFilter.SelectedValue as DateTime?;
         bool Matches(BackupCopyRow row) => (jobId is null || row.Record.JobId == jobId)
             && (date is null || row.CompletedUtc.ToLocalTime().Date == date.Value.Date)
             && (string.IsNullOrEmpty(storage) || row.StorageCategory == storage)
@@ -88,14 +91,14 @@ public partial class MainWindow
     {
         CopyJobFilter.SelectedIndex = 0;
         CopyStorageFilter.SelectedIndex = 0;
-        CopyDateFilter.SelectedDate = null;
+        CopyDateFilter.SelectedIndex = 0;
         CopySearch.Clear();
     }
 
     private void SelectCopiesForJob(Guid jobId)
     {
         CopyStorageFilter.SelectedIndex = 0;
-        CopyDateFilter.SelectedDate = null;
+        CopyDateFilter.SelectedIndex = 0;
         CopySearch.Clear();
         CopyJobFilter.SelectedItem = CopyJobFilter.Items.OfType<CopyJobChoice>().FirstOrDefault(choice => choice.Id == jobId);
         ApplyCopyFilter();

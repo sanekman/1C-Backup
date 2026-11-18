@@ -1048,7 +1048,7 @@ public partial class MainWindow : Window
             var selectedId = (Copies.SelectedItem as BackupCopyRow)?.Record.Id;
             copyRows = rows;
             Copies.ItemsSource = rows;
-            UpdateCopyJobChoices();
+            UpdateCopyFilterChoices();
             ApplyCopyFilter();
             Copies.SelectedItem = Copies.Items.OfType<BackupCopyRow>().FirstOrDefault(row => row.Record.Id == selectedId);
         }

@@ -586,7 +586,7 @@
         <ComboBoxItem Content="Все хранилища" Tag="" /><ComboBoxItem Content="Локальный диск" Tag="local" /><ComboBoxItem Content="Сетевая папка" Tag="network" /><ComboBoxItem Content="FTP / FTPS" Tag="ftp" /><ComboBoxItem Content="Google Drive" Tag="google" />
        </ComboBox></StackPanel>
        <StackPanel Grid.Column="2" Margin="0,0,8,0"><TextBlock Text="Дата копии" Foreground="{DynamicResource MutedBrush}" />
-        <DatePicker x:Name="CopyDateFilter" SelectedDateChanged="CopyFilter_Changed" DateValidationError="CopyDateValidationError"
+        <ComboBox x:Name="CopyDateFilter" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="CopyFilter_Changed"
          AutomationProperties.Name="Дата создания копии по местному времени" />
        </StackPanel>
        <StackPanel Grid.Column="3" Margin="0,0,8,0"><TextBlock Text="Имя или путь" Foreground="{DynamicResource MutedBrush}" /><TextBox x:Name="CopySearch" TextChanged="CopyFilter_Changed" AutomationProperties.Name="Поиск копий по имени задания или пути" /></StackPanel>
