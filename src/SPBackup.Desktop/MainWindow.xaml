@@ -64,11 +64,11 @@
    </StackPanel>
    <Border Grid.Row="1" Style="{StaticResource Card}" Padding="8" Margin="0,0,0,8">
     <DockPanel>
-     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+     <StackPanel x:Name="AutomationActions" DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
       <Button x:Name="StartBackgroundButton" Content="Включить автоматически" Style="{StaticResource PrimaryButton}" Click="StartBackground_Click" IsEnabled="False" ToolTip="Выполнять сохранённые задания по расписанию даже после закрытия окна" />
       <Button x:Name="StopBackgroundButton" Content="Остановить" Click="StopBackground_Click" IsEnabled="False" Visibility="Collapsed" />
      </StackPanel>
-     <StackPanel><TextBlock Text="Автоматическое копирование" FontWeight="SemiBold" /><TextBlock x:Name="BackgroundStatus" Text="Проверка состояния…" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,0" />
+     <StackPanel><TextBlock x:Name="AutomationHeading" Text="Автоматическое копирование" FontWeight="SemiBold" /><TextBlock x:Name="BackgroundStatus" Text="Проверка состояния…" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,0" />
       <TextBlock x:Name="NextAutomaticRun" Text="" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0" />
      </StackPanel>
     </DockPanel>
@@ -609,48 +609,45 @@
    <Grid x:Name="AgentView" Grid.Row="2" Visibility="Collapsed">
     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
     <WrapPanel Margin="0,0,0,4" AutomationProperties.Name="Разделы настроек">
-     <Button x:Name="GeneralSettingsButton" FontSize="14" Content="Основное" CommandParameter="general" Tag="Active" Style="{StaticResource PrimaryButton}" Click="SettingsSection_Click" Padding="14,10" Margin="0,0,8,8" />
-     <Button x:Name="BackgroundSettingsButton" FontSize="14" Content="Фоновая работа" CommandParameter="background" Click="SettingsSection_Click" Padding="14,10" Margin="0,0,8,8" />
-     <Button x:Name="UpdatesSettingsButton" FontSize="14" Content="Обновления" CommandParameter="updates" Click="SettingsSection_Click" Padding="14,10" Margin="0,0,8,8" />
-     <Button x:Name="ConnectionsSettingsButton" FontSize="14" Content="Подключения" CommandParameter="connections" Click="SettingsSection_Click" Padding="14,10" Margin="0,0,8,8" />
-     <Button x:Name="HelpSettingsButton" FontSize="14" Content="Помощь" CommandParameter="help" Click="SettingsSection_Click" Padding="14,10" Margin="0,0,0,8" />
+     <Button x:Name="GeneralSettingsButton" Content="Основное" CommandParameter="general" Tag="Active" Style="{StaticResource PrimaryButton}" Click="SettingsSection_Click" Padding="10,6" Margin="0,0,8,8" />
+     <Button x:Name="BackgroundSettingsButton" Content="Фоновая работа" CommandParameter="background" Click="SettingsSection_Click" Padding="10,6" Margin="0,0,8,8" />
+     <Button x:Name="UpdatesSettingsButton" Content="Обновления" CommandParameter="updates" Click="SettingsSection_Click" Padding="10,6" Margin="0,0,8,8" />
+     <Button x:Name="ConnectionsSettingsButton" Content="Подключения" CommandParameter="connections" Click="SettingsSection_Click" Padding="10,6" Margin="0,0,8,8" />
+     <Button x:Name="HelpSettingsButton" Content="Помощь" CommandParameter="help" Click="SettingsSection_Click" Padding="10,6" Margin="0,0,0,8" />
     </WrapPanel>
     <ScrollViewer x:Name="SettingsContentScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
      <Border Style="{StaticResource Card}" MaxWidth="760" HorizontalAlignment="Stretch">
-      <Grid Margin="24" TextBlock.FontSize="14">
+      <Grid Margin="12" TextBlock.FontSize="14">
        <StackPanel x:Name="GeneralSettingsSection">
-        <TextBlock Text="Основные настройки" FontSize="22" FontWeight="SemiBold" />
-        <TextBlock Text="Для начала работы достаточно создать задание и выбрать папку для копий." TextWrapping="Wrap" Margin="0,8,0,20" Foreground="{DynamicResource MutedBrush}" />
         <TextBlock Text="Тема оформления" FontSize="16" FontWeight="SemiBold" />
         <ComboBox x:Name="ThemePicker" SelectedValuePath="Tag" SelectionChanged="Theme_Changed" Margin="0,8,0,20" MaxWidth="340" HorizontalAlignment="Left" MinWidth="220" AutomationProperties.Name="Тема оформления">
          <ComboBoxItem Content="Как в Windows" Tag="System" /><ComboBoxItem Content="Светлая" Tag="Light" /><ComboBoxItem Content="Тёмная" Tag="Dark" />
         </ComboBox>
-        <Button Content="Перейти к заданиям" Click="JobsNavigation_Click" HorizontalAlignment="Left" />
        </StackPanel>
        <StackPanel x:Name="BackgroundSettingsSection" Visibility="Collapsed">
-        <TextBlock Text="Копирование без открытого окна" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
-        <TextBlock Text="Выберите, когда агент должен запускаться сам." Margin="0,8,0,20" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
-        <TextBlock Text="После входа в Windows" FontSize="16" FontWeight="SemiBold" />
-        <CheckBox x:Name="AgentStartup" Content="Запускать агент при входе в Windows" Margin="0,10,0,10" />
-        <Button x:Name="SaveStartupButton" Content="Сохранить автозапуск" HorizontalAlignment="Left" Click="SaveStartup_Click" IsEnabled="False" />
-        <TextBlock x:Name="StartupStatus" Text="Агент продолжит работать после закрытия окна программы." TextWrapping="Wrap" Margin="0,10,0,20" Foreground="{DynamicResource MutedBrush}" />
-        <TextBlock Text="Без входа в Windows" FontSize="16" FontWeight="SemiBold" />
-        <TextBlock Text="Служба запускает задания даже после перезагрузки, пока никто не вошёл в систему." TextWrapping="Wrap" Margin="0,8,0,8" Foreground="{DynamicResource MutedBrush}" />
-        <TextBlock x:Name="ServiceStatus" Text="Состояние проверяется…" TextWrapping="Wrap" />
-        <Expander x:Name="ServiceSetupPanel" Header="Установить или настроить службу" Margin="0,12,0,12"><StackPanel Margin="0,10,0,0">
+        <TextBlock Text="Служба Windows" FontSize="16" FontWeight="SemiBold" />
+        <TextBlock x:Name="ServiceStatus" Text="Состояние проверяется…" TextWrapping="Wrap" Margin="0,4,0,8" />
+        <WrapPanel Margin="0,0,0,4">
+         <Button x:Name="StartServiceButton" Content="Запустить службу" IsEnabled="False" Click="StartService_Click" Margin="0,0,8,6" />
+         <Button x:Name="StopServiceButton" Content="Остановить службу" IsEnabled="False" Click="StopService_Click" Margin="0,0,0,6" />
+        </WrapPanel>
+        <Expander x:Name="ServiceSetupPanel" Header="Установить или настроить службу" Margin="0,0,0,12"><StackPanel Margin="0,8,0,0">
          <TextBlock Text="Пользователь Windows" />
          <ComboBox x:Name="ServiceAccount" IsEditable="True" IsTextSearchEnabled="False" Margin="0,6,0,10" AutomationProperties.Name="Выберите или введите пользователя службы Windows" />
          <TextBlock Text="Пароль пользователя Windows" />
          <PasswordBox x:Name="ServicePassword" MaxLength="512" Margin="0,6,0,12" AutomationProperties.Name="Пароль учётной записи Windows для службы" />
          <Button x:Name="InstallServiceButton" Content="Установить службу…" IsEnabled="False" HorizontalAlignment="Left" Click="InstallService_Click" />
-         <WrapPanel Margin="0,12,0,0"><Button x:Name="StartServiceButton" Content="Запустить" IsEnabled="False" Click="StartService_Click" Margin="0,0,8,6" />
-          <Button x:Name="StopServiceButton" Content="Остановить" IsEnabled="False" Click="StopService_Click" Margin="0,0,8,6" />
-          <Button x:Name="RemoveServiceButton" Content="Удалить службу…" IsEnabled="False" Click="RemoveService_Click" Margin="0,0,0,6" /></WrapPanel>
+         <Button x:Name="RemoveServiceButton" Content="Удалить службу…" IsEnabled="False" Click="RemoveService_Click" HorizontalAlignment="Left" Margin="0,8,0,0" />
          <Expander Header="Требования к пользователю и доступу" Margin="0,8,0,0"><StackPanel Margin="0,8,0,0">
           <TextBlock Text="Укажите пароль Windows, не PIN. Установка потребует прав администратора. Можно выбрать местного пользователя или ввести ДОМЕН\пользователь. Ему нужны права на базы, MS SQL и сетевые папки. Для сети используйте UNC-путь, например \\server\backups." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
           <TextBlock x:Name="ServiceAccountHint" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0" />
           <TextBlock Text="При смене пароля переустановите службу. Перед удалением программы удалите службу здесь. Сохранённые пароли защищены средствами Windows." TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}" />
          </StackPanel></Expander>
+        </StackPanel></Expander>
+        <Expander x:Name="StartupSettingsPanel" Header="Автозапуск при входе в Windows"><StackPanel Margin="0,8,0,0">
+         <CheckBox x:Name="AgentStartup" Content="Запускать агент при входе в Windows" Margin="0,0,0,8" />
+         <Button x:Name="SaveStartupButton" Content="Сохранить автозапуск" HorizontalAlignment="Left" Click="SaveStartup_Click" IsEnabled="False" />
+         <TextBlock x:Name="StartupStatus" Text="Настройка действует при следующем входе в Windows." TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" />
         </StackPanel></Expander>
         <Expander Header="Копировать только при открытом окне" Margin="0,8,0,0"><StackPanel Margin="0,10,0,0">
          <TextBlock Text="Этот режим работает вместо фонового агента и останавливается при закрытии окна." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
@@ -659,7 +656,7 @@
         </StackPanel></Expander>
        </StackPanel>
        <StackPanel x:Name="UpdatesSettingsSection" Visibility="Collapsed">
-        <TextBlock Text="Обновления программы" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock x:Name="InstalledVersion" FontSize="16" FontWeight="SemiBold" />
         <TextBlock x:Name="UpdateStatus" Text="Обновления ещё не проверялись." TextWrapping="Wrap" Margin="0,10,0,14" />
         <WrapPanel><Button x:Name="CheckUpdatesButton" IsEnabled="False" Content="Проверить обновления" Click="CheckUpdates_Click" Margin="0,0,8,8" />
          <Button x:Name="InstallUpdateButton" Content="Обновить и перезапустить" Click="InstallUpdate_Click" IsEnabled="False" Margin="0,0,8,8" />
@@ -682,16 +679,19 @@
         </StackPanel></Expander>
        </StackPanel>
        <StackPanel x:Name="ConnectionsSettingsSection" Visibility="Collapsed">
-        <TextBlock Text="Подключения" FontSize="22" FontWeight="SemiBold" />
-        <TextBlock Text="Дополнительные возможности. Для обычного копирования подключать сервер не нужно." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,20" />
-        <TextBlock Text="Сервер и задания" FontSize="16" FontWeight="SemiBold" />
-        <WrapPanel Margin="0,10,0,0"><Button x:Name="ConnectServerMonitoringButton" Content="Подключить по приглашению…" Click="ConnectServerMonitoring_Click"/><Button Content="Отключить" Margin="8,0,0,0" Click="DisconnectServerMonitoring_Click"/></WrapPanel>
-        <TextBlock x:Name="ServerMonitoringStatus" Text="Сервер показывает результаты и состояние компьютеров в общей панели." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,20" />
+        <TextBlock Text="Сервер управления" FontSize="16" FontWeight="SemiBold" />
+        <TextBox x:Name="ServerAddress" IsReadOnly="True" Text="Подключение проверяется…" Margin="0,4,0,6" AutomationProperties.Name="Адрес сервера управления" />
+        <WrapPanel Margin="0,0,0,6">
+         <Button x:Name="CheckServerConnectionButton" Content="Проверить ответ сервера" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Click="CheckServerConnection_Click" Margin="0,0,8,4" />
+         <Button x:Name="ConnectServerMonitoringButton" Content="Подключить по приглашению…" Click="ConnectServerMonitoring_Click" Margin="0,0,8,4" />
+         <Button x:Name="DisconnectServerMonitoringButton" Content="Отключить" IsEnabled="False" Visibility="Collapsed" Click="DisconnectServerMonitoring_Click" Margin="0,0,0,4" />
+        </WrapPanel>
+        <TextBlock x:Name="ServerConnectionCheckStatus" TextWrapping="Wrap" Margin="0,0,0,4" AutomationProperties.LiveSetting="Polite" />
+        <TextBlock x:Name="ServerMonitoringStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
         <TextBlock Text="Откуда получать задания" FontSize="16" FontWeight="SemiBold" />
-        <ComboBox x:Name="AgentModePicker" Width="360" HorizontalAlignment="Left" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="AgentMode_Changed" Margin="0,10,0,10" />
+        <ComboBox x:Name="AgentModePicker" MaxWidth="360" HorizontalAlignment="Stretch" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="AgentMode_Changed" Margin="0,4,0,6" AutomationProperties.Name="Откуда получать задания" />
         <StackPanel x:Name="ServerPanel" Visibility="Collapsed">
-         <TextBlock Text="Подключённый сервер" /><TextBox x:Name="ServerAddress" IsReadOnly="True" Margin="0,6,0,10" />
-         <TextBlock Text="Задания настраивает администратор в панели сервера. После применения режима нажмите «Включить автоматически» вверху окна." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
+         <TextBlock Text="Серверные задания меняет администратор. После применения режима включите расписание в «Фоновой работе»." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6" />
         </StackPanel>
         <Button x:Name="SaveAgentSettingsButton" Content="Применить режим" HorizontalAlignment="Left" Click="SaveAgentSettings_Click" IsEnabled="False" />
         <TextBlock Text="Локальные задания и копии сохраняются при смене режима. Для переключения остановите автоматическую работу." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,20" />
@@ -713,8 +713,6 @@
         </StackPanel></Expander>
        </StackPanel>
        <StackPanel x:Name="HelpSettingsSection" Visibility="Collapsed">
-        <TextBlock Text="Помощь и диагностика" FontSize="22" FontWeight="SemiBold" />
-        <TextBlock Text="Начните с пошаговой инструкции. При ошибке сохраните диагностику." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,14" />
         <WrapPanel><Button x:Name="OpenUserGuideButton" Content="Пошаговая инструкция" Click="OpenUserGuide_Click" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" />
          <Button x:Name="ExportDiagnosticsButton" Content="Сохранить диагностику…" Click="ExportDiagnostics_Click" Margin="0,0,8,8" />
          <Button x:Name="OpenLogsButton" Content="Открыть логи" Click="OpenLogs_Click" Margin="0,0,0,8" /></WrapPanel>

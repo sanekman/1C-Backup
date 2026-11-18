@@ -1,23 +1,73 @@
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using SPBackup.Core;
 namespace SPBackup.Desktop;
 public partial class MainWindow
 {
+    private ServerMonitoringSettings? displayedServerConnection;
+    private bool checkingServerConnection;
     private bool serverMonitoringBusy;
+
+    private void ShowServerConnection(ServerMonitoringSettings? connection)
+    {
+        displayedServerConnection = connection;
+        ServerAddress.Text = connection?.Address ?? "Сервер не подключён";
+        ServerConnectionCheckStatus.Text = "";
+        ServerMonitoringStatus.Text = connection is null ? "" : "Ожидается результат отправки состояния.";
+        ConnectServerMonitoringButton.Content = connection is null ? "Подключить по приглашению…" : "Сменить подключение…";
+        CheckServerConnectionButton.Visibility = DisconnectServerMonitoringButton.Visibility =
+            connection is null ? Visibility.Collapsed : Visibility.Visible;
+        CheckServerConnectionButton.IsEnabled = connection is not null && !checkingServerConnection;
+        DisconnectServerMonitoringButton.IsEnabled = connection is not null;
+    }
+
+    private async void CheckServerConnection_Click(object sender, RoutedEventArgs e)
+    {
+        if (checkingServerConnection || displayedServerConnection is not { } connection) return;
+        checkingServerConnection = true;
+        CheckServerConnectionButton.IsEnabled = false;
+        ServerConnectionCheckStatus.Text = "Проверяем ответ сервера из окна…";
+        string result;
+        try
+        {
+            using var client = new ServerMonitoringClient(connection);
+            result = await client.CheckReadinessAsync(notificationCancellation.Token)
+                ? "Сервер ответил и готов."
+                : "Сервер ответил, но готовность не подтверждена.";
+        }
+        catch (OperationCanceledException) when (notificationCancellation.IsCancellationRequested) { return; }
+        catch (OperationCanceledException) { result = "Сервер не ответил вовремя."; }
+        catch (HttpRequestException) { result = "Нет ответа по HTTPS. Проверьте сеть, адрес и сертификат сервера."; }
+        catch (InvalidDataException) { result = "Проверьте адрес сервера и настройки сертификата."; }
+        finally
+        {
+            checkingServerConnection = false;
+            CheckServerConnectionButton.IsEnabled = displayedServerConnection is not null;
+        }
+        if (ReferenceEquals(displayedServerConnection, connection))
+            ServerConnectionCheckStatus.Text = $"Проверка из окна в {DateTime.Now:dd.MM HH:mm}. {result}";
+    }
+
     private DateTimeOffset serverMonitoringNext;
     private async Task PollServerMonitoringAsync()
     {
         if (!ready || SmokeMode || serverMonitoringBusy || backgroundBusy || DateTimeOffset.UtcNow < serverMonitoringNext) return;
+        if (displayedServerConnection is not { } connection) return;
         serverMonitoringBusy=true;
         serverMonitoringNext=DateTimeOffset.UtcNow.AddSeconds(15);
         try
         {
-            await new ServerMonitoringDispatcher(DesktopPaths.DataDirectory,ftpCredentials).PollAsync(notificationCancellation.Token);
-            ServerMonitoringStatus.Text=File.Exists(Path.Combine(DesktopPaths.DataDirectory,"server-monitoring.json")) ? "Мониторинг подключён. Состояние передано серверу." : "Мониторинг не подключён.";
+            await new ServerMonitoringDispatcher(DesktopPaths.DataDirectory, ftpCredentials).PollAsync(notificationCancellation.Token);
+            if (ReferenceEquals(displayedServerConnection, connection))
+                ServerMonitoringStatus.Text = $"Последняя отправка из окна: {DateTime.Now:dd.MM HH:mm}.";
         }
         catch (OperationCanceledException) when (notificationCancellation.IsCancellationRequested) { }
-        catch (Exception) { ServerMonitoringStatus.Text="Сервер мониторинга недоступен. История сохранена локально; отправка будет повторена."; }
+        catch (Exception)
+        {
+            if (ReferenceEquals(displayedServerConnection, connection))
+                ServerMonitoringStatus.Text = "Отправка из окна не удалась. История хранится локально.";
+        }
         finally { serverMonitoringBusy=false; }
     }
     private async Task ExportServerMonitoringForServiceAsync()
@@ -62,7 +112,7 @@ public partial class MainWindow
         try
         {
             File.Delete(Path.Combine(DesktopPaths.DataDirectory,"server-monitoring.json"));
-            ServerAddress.Text = "Подключение не настроено";
+            ShowServerConnection(null);
             ServerMonitoringStatus.Text="Мониторинг отключён. Доступ можно отозвать в панели сервера.";
         }
         catch (Exception error) { ServerMonitoringStatus.Text=error.Message; }

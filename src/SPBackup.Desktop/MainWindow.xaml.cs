@@ -65,6 +65,7 @@ public partial class MainWindow : Window
         AppVersion.Text = ApplicationBuildInfo.Version;
         AppVersion.ToolTip = ApplicationBuildInfo.SupportText;
         BuildInfo.Text = ApplicationBuildInfo.SupportText;
+        InstalledVersion.Text = "Установлена версия " + ApplicationBuildInfo.Version;
         AdditionalStorageList.ItemsSource = additionalDestinations;
         additionalDestinations.CollectionChanged += (_, _) => AdditionalStorageOptions.Header =
             $"Копировать также в другие хранилища ({additionalDestinations.Count})";
@@ -853,9 +854,10 @@ public partial class MainWindow : Window
         {
             "history" => ("История запусков", "Результаты запусков и ошибки. Время — на этом компьютере."),
             "copies" => ("Резервные копии", "Зарегистрированные копии всех заданий, расположение файлов и проверка целостности."),
-            "agent" => ("Настройки программы", "Основное, фоновая работа, обновления, подключения и помощь."),
+            "agent" => ("Настройки", ""),
             _ => ("Задания", "Резервное копирование и наблюдение за внешними SQL-копиями")
         };
+        PageDescription.Visibility = page == "agent" ? Visibility.Collapsed : Visibility.Visible;
         UpdateAutomationLayout();
     }
 

@@ -48,6 +48,9 @@ public partial class MainWindow
             agentSettings = updated;
             AgentModePicker.SelectedValue = updated.Mode;
             await LoadEffectiveJobsAsync(); await RefreshHistoryAsync(); await RefreshServerConnectionLabelAsync();
+            Status.Text = mode == AgentMode.Managed
+                ? "Режим сохранён. Включите расписание в «Фоновой работе» для выполнения серверных заданий."
+                : "Режим сохранён. Агент использует задания с этого компьютера.";
         }
         catch (Exception error)
         {
@@ -63,10 +66,13 @@ public partial class MainWindow
         try
         {
             var connection = await ServerMonitoringDispatcher.LoadSettingsAsync(DesktopPaths.DataDirectory);
-            ServerAddress.Text = connection?.Address ?? "Подключение не настроено";
-            if (connection is null) ServerMonitoringStatus.Text = "Подключитесь по приглашению из панели сервера. Затем выберите режим работы.";
+            ShowServerConnection(connection);
         }
-        catch (Exception) { ServerAddress.Text = "Не удалось прочитать подключение"; }
+        catch (Exception)
+        {
+            ShowServerConnection(null);
+            ServerAddress.Text = "Не удалось прочитать подключение";
+        }
     }
 
     private async Task RefreshManagedJobsAsync()

@@ -58,5 +58,6 @@ public partial class MainWindow
             button.Style = active ? (Style)FindResource("PrimaryButton") : (Style)FindResource(typeof(Button));
         }
         SettingsContentScroll.ScrollToTop();
+        UpdateAutomationLayout();
     }
 }

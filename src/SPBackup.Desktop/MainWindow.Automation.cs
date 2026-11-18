@@ -6,6 +6,7 @@ namespace SPBackup.Desktop;
 
 public partial class MainWindow
 {
+    private bool automationHasWarning;
     private bool automationReadFailed;
     private AutomationService automationService;
     private bool automationAutostart;
@@ -19,8 +20,14 @@ public partial class MainWindow
     private void UpdateAutomationLayout()
     {
         if (NextAutomaticRun is null || BackgroundStatus is null) return;
-        var compact = ActualHeight < 650 && (editorOpen || CopiesView?.Visibility == Visibility.Visible || HistoryView?.Visibility == Visibility.Visible);
-        NextAutomaticRun.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        var jobsPage = JobsView?.Visibility == Visibility.Visible;
+        var backgroundPage = AgentView?.Visibility == Visibility.Visible
+            && BackgroundSettingsSection?.Visibility == Visibility.Visible;
+        var showActions = jobsPage || backgroundPage;
+        AutomationActions.Visibility = showActions ? Visibility.Visible : Visibility.Collapsed;
+        AutomationHeading.Visibility = jobsPage ? Visibility.Visible : Visibility.Collapsed;
+        var compact = !showActions || ActualHeight < 650 && editorOpen;
+        NextAutomaticRun.Visibility = compact && !automationHasWarning ? Visibility.Collapsed : Visibility.Visible;
         BackgroundStatus.TextWrapping = compact ? TextWrapping.NoWrap : TextWrapping.Wrap;
         BackgroundStatus.TextTrimming = compact ? TextTrimming.CharacterEllipsis : TextTrimming.None;
     }
@@ -43,9 +50,11 @@ public partial class MainWindow
                 : backgroundStarting || automationService == AutomationService.Starting ? "Агент подключается к серверу…"
                 : backgroundBusy && !BackgroundExecutionMatchesMode ? "Работает агент с другим режимом. Остановите и включите его снова."
                 : backgroundState?.Phase == LocalAgentPhase.Faulted ? "Агент остановлен с ошибкой. Откройте историю и включите его снова."
-                : live ? "Агент выполняет задания с сервера." : "Серверный режим настроен. Нажмите «Включить автоматически».";
-            ShowAutomationNotice(message,
-                backgroundState?.Warning is { Length: > 0 } warning && live ? revision + "\nСообщение агента: " + warning : revision);
+                : live ? automationService == AutomationService.Running
+                    ? "Служба выполняет задания с сервера после закрытия окна."
+                    : "Фоновый агент выполняет задания с сервера после закрытия окна."
+                : "Серверный режим настроен. Включите автоматическое копирование в «Фоновой работе».";
+            ShowAutomationNotice(message, revision, live ? backgroundState?.Warning : null);
             return;
         }
         var observation = new AutomationObservation(DateTimeOffset.UtcNow, backgroundBusy, backgroundState,
@@ -66,13 +75,17 @@ public partial class MainWindow
         return enabled == 0 ? "" : $"Наблюдений включено: {enabled}. Для опроса нужен работающий агент или служба.";
     }
 
-    private void ShowAutomationNotice(string message, string detail)
+    private void ShowAutomationNotice(string message, string detail, string? warning = null)
     {
-        BackgroundStatus.Text = message; NextAutomaticRun.Text = detail;
+        automationHasWarning = !string.IsNullOrWhiteSpace(warning);
+        BackgroundStatus.Text = message;
+        NextAutomaticRun.Text = automationHasWarning ? "Сообщение агента: " + warning : detail;
+        UpdateAutomationLayout();
         BackgroundStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
         var observations = ObservationAutomationNote();
         if (observations.Length > 0) NextAutomaticRun.Text += (detail.Length > 0 ? " · " : "") + observations;
-        BackgroundStatus.ToolTip = NextAutomaticRun.ToolTip = message + "\n" + detail + "\n" + observations;
+        BackgroundStatus.ToolTip = NextAutomaticRun.ToolTip = message + "\n" + detail
+            + (automationHasWarning ? "\nСообщение агента: " + warning : "") + "\n" + observations;
     }
 
     internal void RenderAutomationOverview(IReadOnlyList<BackupJob> source, AutomationObservation observation, bool autostart, bool autostartUnknown = false)
@@ -86,9 +99,11 @@ public partial class MainWindow
         var label = state.Execution switch {
             AutomationExecution.Service => "Служба работает — до входа в Windows и после закрытия программы.",
             AutomationExecution.Background => autostartUnknown ? "Фоновый агент работает. Автозапуск проверить не удалось."
-                : autostart ? "Фоновый агент работает; автозапуск при входе включён."
-                : "Фоновый агент работает. Автозапуск этой копии выключен.",
-            AutomationExecution.Window => "Расписание работает, пока запущена программа.",
+                : autostart ? "Фоновый агент работает после закрытия окна. Автозапуск при входе включён."
+                : "Фоновый агент работает после закрытия окна. Автозапуск этой копии выключен.",
+            AutomationExecution.Window => TrayVisible
+                ? "Расписание работает, пока запущена программа. Закрытие окна сворачивает её в трей."
+                : "Расписание работает, пока запущена программа.",
             AutomationExecution.Starting => "Автоматическое копирование включается…",
             AutomationExecution.Stopping => "Копирование останавливается…",
             AutomationExecution.OneRun => "Идёт разовая копия. Расписание не включено.",
@@ -123,7 +138,8 @@ public partial class MainWindow
         var warning = observation.Agent?.Warning ?? observation.Agent?.Error ?? observation.Agent?.MonitoringError;
         if (state.Execution is not (AutomationExecution.Background or AutomationExecution.Service or AutomationExecution.Faulted or AutomationExecution.OneRun)) warning = null;
         NextAutomaticRun.Text = next;
-        if (!string.IsNullOrWhiteSpace(warning))
+        automationHasWarning = !string.IsNullOrWhiteSpace(warning);
+        if (automationHasWarning)
         {
             detail += "\nПоследнее сообщение агента: " + warning;
             NextAutomaticRun.Text = "Сообщение агента: " + warning;
@@ -137,5 +153,6 @@ public partial class MainWindow
         }
         BackgroundStatus.ToolTip = detail;
         NextAutomaticRun.ToolTip = detail;
+        UpdateAutomationLayout();
     }
 }

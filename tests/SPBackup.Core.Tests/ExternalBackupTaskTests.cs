@@ -121,6 +121,17 @@ public sealed class ExternalBackupTaskTests
         Assert.Equal(1, transport.Runs);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.OK, true)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, false)]
+    [InlineData(HttpStatusCode.Redirect, false)]
+    public async Task ServerReadinessChecksTheConfiguredEndpointWithoutCredentials(HttpStatusCode status, bool ready)
+    {
+        var settings = new ServerMonitoringSettings("https://server.example/backup", agentId, "reference");
+        using var client = new ServerMonitoringClient(settings, new ReadinessServer(status));
+        Assert.Equal(ready, await client.CheckReadinessAsync());
+    }
+
     [Fact]
     public void FreshnessUsesSuccessfulCompletionAndExactDeadline()
     {
@@ -254,6 +265,18 @@ public sealed class ExternalBackupTaskTests
         Assert.True(MonitoringValidation.Valid(Snapshot(source)));
         Assert.False(MonitoringValidation.Valid(Snapshot(source with { Failed = false })));
         Assert.False(MonitoringValidation.Valid(Snapshot(source with { PollErrorCode = "Server=private;password=private" })));
+    }
+
+    private sealed class ReadinessServer(HttpStatusCode status) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal(new Uri("https://server.example/backup/health/ready"), request.RequestUri);
+            Assert.Null(request.Headers.Authorization);
+            Assert.Null(request.Content);
+            return Task.FromResult(new HttpResponseMessage(status));
+        }
     }
 
     private sealed class LegacyServer : HttpMessageHandler

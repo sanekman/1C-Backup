@@ -58,7 +58,7 @@ internal static partial class DesktopSmoke
                         throw new InvalidOperationException("Настройки показывают сразу несколько разделов.");
                 var action = section switch
                 {
-                    "General" => "ThemePicker", "Background" => "SaveStartupButton", "Updates" => "CheckUpdatesButton",
+                    "General" => "ThemePicker", "Background" => "ServiceSetupPanel", "Updates" => "CheckUpdatesButton",
                     "Connections" => "ConnectServerMonitoringButton", _ => "ExportDiagnosticsButton"
                 };
                 var element = Control<FrameworkElement>(action); var scroll = Control<ScrollViewer>("SettingsContentScroll");
@@ -76,6 +76,13 @@ internal static partial class DesktopSmoke
                 if (Control<ComboBox>("AgentModePicker").IsVisible != (section == "Connections") || Control<PasswordBox>("GitHubUpdateToken").IsVisible
                     || Control<ComboBox>("ServiceAccount").IsVisible)
                     throw new InvalidOperationException("Технические настройки открыты по умолчанию.");
+                if (section == "Background" && (!Control<StackPanel>("AutomationActions").IsVisible
+                    || Control<Button>("SaveStartupButton").IsVisible))
+                    throw new InvalidOperationException("Управление расписанием или параметры автозапуска показаны неверно.");
+                if (section == "Connections" && (Control<StackPanel>("AutomationActions").IsVisible
+                    || Control<Button>("CheckServerConnectionButton").IsEnabled
+                    || !Control<TextBox>("ServerAddress").IsVisible))
+                    throw new InvalidOperationException("Настройки подключения без сервера показаны неверно.");
                 if (section == "Help")
                 {
                     string? opened = null;

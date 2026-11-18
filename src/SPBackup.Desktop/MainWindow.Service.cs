@@ -41,7 +41,12 @@ public partial class MainWindow
     }
     private void RefreshService()
     {
-        if (SmokeMode) { ServiceStatus.Text = "Управление службой недоступно в тестовом профиле."; return; }
+        if (SmokeMode)
+        {
+            ServiceStatus.Text = "Управление службой недоступно в тестовом профиле.";
+            StartServiceButton.Visibility = StopServiceButton.Visibility = Visibility.Collapsed;
+            return;
+        }
         try
         {
             var info = WindowsAgentService.QueryInfo();
@@ -57,8 +62,17 @@ public partial class MainWindow
             RemoveServiceButton.IsEnabled = ready && !serviceManaging && owned && info!.State == 1;
             StartServiceButton.IsEnabled = ready && configurationReady && !ConfigurationWorkInProgress && !backgroundBusy && owned && info!.State == 1;
             StopServiceButton.IsEnabled = ready && !serviceManaging && owned && info!.State == 4;
+            StartServiceButton.Visibility = owned && info!.State == 1 ? Visibility.Visible : Visibility.Collapsed;
+            StopServiceButton.Visibility = owned && info!.State == 4 ? Visibility.Visible : Visibility.Collapsed;
         }
-        catch (Exception error) { automationService = AutomationService.Unavailable; ServiceStatus.Text = error.Message; }
+        catch (Exception error)
+        {
+            automationService = AutomationService.Unavailable;
+            ServiceStatus.Text = error.Message;
+            InstallServiceButton.IsEnabled = RemoveServiceButton.IsEnabled = false;
+            StartServiceButton.IsEnabled = StopServiceButton.IsEnabled = false;
+            StartServiceButton.Visibility = StopServiceButton.Visibility = Visibility.Collapsed;
+        }
     }
     private async void InstallService_Click(object sender, RoutedEventArgs e) => await ManageServiceAsync("install");
     private async void RemoveService_Click(object sender, RoutedEventArgs e) => await ManageServiceAsync("remove");

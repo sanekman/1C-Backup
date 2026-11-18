@@ -31,6 +31,12 @@ public sealed class ServerMonitoringClient : IDisposable
         client = new(transport ?? ServerHttpsTransport.Create(settings.CertificateSha256))
         { BaseAddress = new(settings.Address.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(20) };
     }
+    public async Task<bool> CheckReadinessAsync(CancellationToken token = default)
+    {
+        using var response = await client.GetAsync("health/ready", HttpCompletionOption.ResponseHeadersRead, token);
+        return response.StatusCode == HttpStatusCode.OK;
+    }
+
     public async Task<string> EnrollAsync(Guid agentId, string invitationCode, string name, CancellationToken token = default)
     {
         using var response = await client.PostAsJsonAsync("api/v1/enrollment",new { agentId,invitationCode,name },token);
