@@ -15,6 +15,7 @@ public partial class NotificationsWindow : Window
     public NotificationsWindow()
     {
         InitializeComponent();
+        Closing += (_, e) => e.Cancel = busy;
         Loaded += async (_, _) =>
         {
             try
@@ -91,5 +92,4 @@ public partial class NotificationsWindow : Window
         try { Process.Start(new ProcessStartInfo(File.Exists(local) ? local : uri) { UseShellExecute = true }); }
         catch { Result.Text = "Инструкция: " + uri; }
     }
-    private void Close_Click(object sender, RoutedEventArgs e) { if (!busy) Close(); }
 }

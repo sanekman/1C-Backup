@@ -22,12 +22,12 @@ public partial class MainWindow
         if (NetworkCredentialStatus is null || NetworkCredentialsButton is null) return;
         var key = networkShareSettings?.CredentialKey;
         NetworkCredentialsButton.Content = string.IsNullOrEmpty(key)
-            ? "Задать доступ к папке копий…" : "Изменить доступ к папке копий…";
+            ? "Задать доступ к папке копий…" : "Изменить пароль…";
         NetworkCredentialStatus.Text = NetworkUseCredentials.IsChecked != true
             ? "Вход в папку копий от имени исполнителя. Проверьте хранилище через агент или службу."
             : string.IsNullOrEmpty(key) ? "Отдельный доступ к папке копий не задан."
             : networkAccessEdited ? "Доступ задан в черновике. Применится после сохранения задания."
-            : "Отдельный доступ задан. Проверьте хранилище под фактическим исполнителем.";
+            : "Пароль сохранён. Проверьте хранилище под фактическим исполнителем.";
     }
     private void NetworkDestination_Changed(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {

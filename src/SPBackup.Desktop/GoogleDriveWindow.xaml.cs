@@ -18,7 +18,7 @@ public partial class GoogleDriveWindow : Window
     {
         this.existingFolder = existingFolder; this.credentialKey = credentialKey;
         InitializeComponent();
-        if (existingFolder is not null) ConnectButton.Content = "2. Войти и подтвердить доступ к прежней папке";
+        if (existingFolder is not null) ConnectButton.Content = "Войти и подтвердить доступ к прежней папке";
         Closed += (_, _) => cancellation.Cancel();
         if (credentialKey is not null) Loaded += async (_, _) =>
         {

@@ -83,6 +83,15 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
     // One cursor per destination + enrollment: switching servers never loses history on the new server.
     private sealed record Receipts(string Address, Guid AgentId, string CredentialKey, HashSet<Guid> Runs, Dictionary<Guid,DateTimeOffset>? RetryAfter = null);
     private readonly AgentJsonFile<Receipts> receipts = new(Path.Combine(directory,"server-monitoring-receipts.json"));
+    public static async Task<(IReadOnlySet<Guid> Sent, IReadOnlySet<Guid> Rejected)?> ReadDeliveryAsync(
+        string directory, ServerMonitoringSettings settings, CancellationToken token = default)
+    {
+        var file = new AgentJsonFile<Receipts>(Path.Combine(directory, "server-monitoring-receipts.json"));
+        var delivery = await file.ReadAsync(token);
+        if (delivery is null || delivery.Address != settings.Address || delivery.AgentId != settings.AgentId
+            || delivery.CredentialKey != settings.CredentialKey) return null;
+        return (delivery.Runs, delivery.RetryAfter?.Keys.ToHashSet() ?? []);
+    }
     public async Task RunAsync(Action<Exception?> warning, CancellationToken token=default, TimeSpan? interval=null)
     {
         using var timer=new PeriodicTimer(interval ?? TimeSpan.FromSeconds(15));

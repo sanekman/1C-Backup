@@ -441,13 +441,13 @@ public partial class MainWindow
             : latest is null ? "Первая копия ещё не создана. Нажмите «Создать копию», чтобы проверить настройки."
             : latest.Status switch
             {
-                BackupRunStatus.Succeeded when latest.Warnings?.Count > 0 => "Копия создана, есть предупреждения. Откройте «Результат».",
-                BackupRunStatus.Succeeded when latest.Destinations is not null => $"Копия доставлена во все {latest.Destinations.Count} хранилища. Откройте «Результат».",
-                BackupRunStatus.Succeeded => "Копия создана. Откройте «Последняя копия», чтобы проверить её или найти файл.",
-                BackupRunStatus.PartiallySucceeded => $"Копия доставлена в {latest.Destinations?.Count(destination => destination.Record is not null)} из {latest.Destinations?.Count} хранилищ. Откройте «Результат» для ошибок доставки.",
-                BackupRunStatus.Cancelled => "Последний запуск отменён. Откройте «Результат» перед повторным запуском.",
-                BackupRunStatus.Interrupted => "Последний запуск прерван. Откройте «Результат» перед повторным запуском.",
-                _ => "Копирование завершилось с ошибкой. Откройте «Результат», чтобы узнать причину."
+                BackupRunStatus.Succeeded when latest.Warnings?.Count > 0 => "Копия создана, есть предупреждения. Откройте «Подробнее».",
+                BackupRunStatus.Succeeded when latest.Destinations is not null => $"Копия доставлена во все {latest.Destinations.Count} хранилища. Откройте «Подробнее».",
+                BackupRunStatus.Succeeded => "Копия создана. Откройте «Открыть копию», чтобы проверить её или найти файл.",
+                BackupRunStatus.PartiallySucceeded => $"Копия доставлена в {latest.Destinations?.Count(destination => destination.Record is not null)} из {latest.Destinations?.Count} хранилищ. Откройте «Подробнее» для ошибок доставки.",
+                BackupRunStatus.Cancelled => "Последний запуск отменён. Откройте «Подробнее» перед повторным запуском.",
+                BackupRunStatus.Interrupted => "Последний запуск прерван. Откройте «Подробнее» перед повторным запуском.",
+                _ => "Копирование завершилось с ошибкой. Откройте «Подробнее», чтобы узнать причину."
             };
         if (!running && latest is not null)
         {
@@ -464,12 +464,17 @@ public partial class MainWindow
         var accessHint = job.ManagedSecrets is not null && !ManagedJobBindings.Ready(job) ? "Требуется локальный доступ.\n" : "";
         var deliveredCopy = LatestJobRuns.Delivered.GetValueOrDefault(job.Id);
         var availability = deliveredCopy is null ? "" : "\nПоследняя доставка "
-            + deliveredCopy.FinishedUtc!.Value.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.InvariantCulture) + ": "
-            + (deliveredCopy.Destinations is { } targets
-                ? string.Join(" · ", targets.Where(target => target.Record is not null).Select(target => target.Record!.Backup.Location))
+            + deliveredCopy.FinishedUtc!.Value.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.InvariantCulture) + " · "
+            + (deliveredCopy.Destinations is { } deliveredTargets
+                ? string.Join(" · ", deliveredTargets.Select(DescribeDestination))
                 : deliveredCopy.Backup!.Location);
-        SelectedJobSummary.Text = accessHint + resultText + availability + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
+        var failedDelivery = latest?.RunId != deliveredCopy?.RunId && latest?.Destinations is { Count: > 0 } latestTargets
+            ? "\nПоследний запуск · " + string.Join(" · ", latestTargets.Select(DescribeDestination)) : "";
+        SelectedJobSummary.Text = accessHint + resultText + availability + failedDelivery + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
     }
+
+    private static string DescribeDestination(DestinationResult result) =>
+        result.Destination + " — " + (result.Record is not null ? "доставлено" : "доставка не подтверждена");
 
     private async void ShowLatestCopy_Click(object sender, RoutedEventArgs e)
     {

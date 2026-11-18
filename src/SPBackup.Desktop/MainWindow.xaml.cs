@@ -1357,7 +1357,7 @@ public partial class MainWindow : Window
     private void UpdateArchivePasswordStatus()
     {
         if (ArchivePasswordStatus is null) return;
-        ArchivePasswordButton.Content = archivePasswordKey is null ? "Задать пароль ZIP…" : "Изменить пароль ZIP…";
+        ArchivePasswordButton.Content = archivePasswordKey is null ? "Задать пароль архива…" : "Изменить пароль архива…";
         ArchivePasswordStatus.Text = archivePasswordKey is null ? "Пароль архива не задан."
             : archivePasswordEdited ? "Пароль задан в черновике. После сохранения задания он будет использоваться для новых копий."
             : "Пароль задан. Прежние копии сохраняют свой пароль.";

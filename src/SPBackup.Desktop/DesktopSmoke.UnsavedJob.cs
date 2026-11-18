@@ -135,7 +135,7 @@ internal static partial class DesktopSmoke
             Require(!window.HasUnsavedJob && JsonSerializer.Serialize(await store.LoadAsync()) == beforeJobs,
                 "Отказ от сохранения изменил задание на диске.");
 
-            Click("DuplicateJobButton");
+            Control<MenuItem>("DuplicateJobButton").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             Require(window.HasUnsavedJob, "Новая копия задания не защищена до первого изменения поля.");
             Control<TextBox>("Source").Text = Path.Combine(root, "Новая папка") + Path.DirectorySeparatorChar;
             Require(Control<TextBox>("JobName").Text == "Новая папка", "Задание на основе папки сохранило прежнее название.");

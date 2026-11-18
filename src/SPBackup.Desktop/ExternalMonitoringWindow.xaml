@@ -5,15 +5,18 @@
  Title="Мониторинг внешних копий SQL" Width="1000" Height="720" MinWidth="780" MinHeight="580" SizeChanged="Window_SizeChanged">
  <DockPanel Margin="20">
   <TextBlock DockPanel.Dock="Top" Text="Мониторинг внешних резервных копий" FontSize="22" Margin="0,0,0,12" />
-  <TextBlock x:Name="Status" DockPanel.Dock="Bottom" TextWrapping="Wrap" Margin="0,12,0,0" />
+  <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+   <TextBlock x:Name="Status" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+   <TextBlock x:Name="DeliveryStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite" />
+  </StackPanel>
   <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
    <ComboBox x:Name="Sources" Width="240" DisplayMemberPath="Label" SelectedValuePath="Monitor" SelectionChanged="Source_Changed" Margin="0,0,8,4" AutomationProperties.Name="Источник для настройки и ручного опроса" />
    <Button x:Name="CollectMonitorButton" Content="Прочитать журнал копий" Click="Collect_Click" IsEnabled="False" Margin="0,0,8,4" />
-   <Button x:Name="NewMonitorButton" Content="Новое наблюдение" Click="New_Click" IsEnabled="False" Margin="0,0,0,4" />
+   <Button x:Name="NewMonitorButton" Content="Добавить источник" Click="New_Click" IsEnabled="False" Margin="0,0,0,4" />
    <Button x:Name="RefreshReportsButton" Content="Обновить историю" Click="Refresh_Click" Margin="8,0,0,4" />
    <Button x:Name="CancelCollectButton" Content="Отменить проверку" Click="CancelCollect_Click" IsEnabled="False" Visibility="Collapsed" Margin="8,0,0,4" />
   </WrapPanel>
-  <Expander x:Name="SourceSettings" DockPanel.Dock="Top" Header="Источники и настройки опроса" IsExpanded="True" Margin="0,0,0,10">
+  <Expander x:Name="SourceSettings" DockPanel.Dock="Top" Header="Настроить источник…" IsExpanded="False" Margin="0,0,0,10">
   <ScrollViewer x:Name="SourceEditorScroll" MaxHeight="280" VerticalScrollBarVisibility="Auto">
   <StackPanel x:Name="Editor" Margin="0,8,8,0">
    <WrapPanel>
@@ -100,7 +103,6 @@
     <DataGridTextColumn Header="Окончание" Binding="{Binding Observation, Converter={StaticResource ObservationLocalTimeConverter}}" Width="150"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="ToolTip" Value="Местное время компьютера" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
     <DataGridTextColumn Header="Тип" Binding="{Binding Observation.BackupTypeDescription}" Width="145"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding Observation.BackupTypeDescription}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
     <DataGridTextColumn Header="Результат" Binding="{Binding Observation.OutcomeDescription}" Width="90"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" /><Style.Triggers><DataTrigger Binding="{Binding Observation.Outcome}" Value="{x:Static core:ExternalBackupOutcome.Failed}"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" /></DataTrigger></Style.Triggers></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
-    <DataGridTextColumn Header="Отправка" Binding="{Binding DeliveryDescription}" Width="130"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding DeliveryDescription}" /></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn>
    </DataGrid.Columns>
   </DataGrid>
  </DockPanel>

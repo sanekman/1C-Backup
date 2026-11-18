@@ -23,6 +23,9 @@ public partial class ExternalMonitoringWindow : Window
     private bool ready;
     private readonly CancellationTokenSource lifetime = new();
     private bool busy;
+    private bool deliveryConnected;
+    private readonly HashSet<Guid> sentReports = [];
+    private readonly HashSet<Guid> declinedReports = [];
     private readonly bool taskMode;
     private CancellationTokenSource? collectionCancellation;
 
@@ -93,6 +96,7 @@ public partial class ExternalMonitoringWindow : Window
         var nextPolls = (await pollingStatus.ReadAsync(lifetime.Token)).OrderByDescending(p => p.PolledUtc).ToList();
         if (version != refreshVersion) return;
         var selectedId = (Reports.SelectedItem as ExternalBackupReport)?.ReportId;
+        await RefreshDeliveryAsync(nextReports);
         var selectedPoll = (PollStatuses.SelectedItem as ExternalBackupPollResult)?.MonitorId;
         var sorting = Reports.ItemsSource is null ? [] : System.Windows.Data.CollectionViewSource
             .GetDefaultView(Reports.ItemsSource).SortDescriptions.ToArray();
@@ -107,13 +111,13 @@ public partial class ExternalMonitoringWindow : Window
         PollStatuses.SelectedItem = nextPolls.FirstOrDefault(poll => poll.MonitorId == selectedPoll);
     }
 
-    private async Task RefreshSafelyAsync()
+    private async Task RefreshSafelyAsync(bool preserveStatus = false)
     {
         if (!ready || refreshing || lifetime.IsCancellationRequested) return;
         refreshing = true;
         try { await RefreshAsync(); }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-        catch (Exception ex) { Status.Text = "Ошибка чтения истории: " + ex.Message; }
+        catch (Exception ex) { if (!preserveStatus) Status.Text = "Ошибка чтения истории: " + ex.Message; }
         finally { refreshing = false; }
     }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshSafelyAsync();
@@ -145,6 +149,7 @@ public partial class ExternalMonitoringWindow : Window
         Days.Text = monitor.LookbackDays.ToString(); ReportDirectory.Text = monitor.ReportDirectory;
         FreshnessEnabled.IsChecked = monitor.MaximumBackupAgeHours is not null; FreshnessHours.Text = (monitor.MaximumBackupAgeHours ?? 26).ToString();
         MonitorEnabled.IsChecked = monitor.Enabled; PollInterval.Text = monitor.PollIntervalSeconds.ToString();
+        _ = RefreshSafelyAsync(preserveStatus: true);
     }
 
     private void New_Click(object sender, RoutedEventArgs e)
@@ -153,6 +158,7 @@ public partial class ExternalMonitoringWindow : Window
         SourceSettings.IsExpanded = true;
         ReportDetailsPanel.IsExpanded = PollStatusesPanel.IsExpanded = false;
         ClearMonitorEditor();
+        MonitorName.Focus();
     }
 
     private void ClearMonitorEditor()
@@ -210,6 +216,7 @@ public partial class ExternalMonitoringWindow : Window
         UpdateMonitorControls();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         collectionCancellation = cancellation; CancelCollectButton.IsEnabled = true; CancelCollectButton.Visibility = Visibility.Visible;
+        int? recordsRead = null;
         try
         {
             using var lease = engine.Acquire();
@@ -218,11 +225,13 @@ public partial class ExternalMonitoringWindow : Window
                 IExternalBackupSource source = monitor.Kind == ExternalBackupSourceKind.SqlServerHistory
                     ? new SqlServerBackupHistorySource() : new PostgreSqlBackupReportSource();
                 var observations = await Task.Run(() => source.ReadAsync(monitor, cancellation.Token));
+                recordsRead = observations.Count;
+                Status.Text = $"Журнал прочитан · записей: {recordsRead}. Сохраняются наблюдения…";
                 var added = await outbox.ObserveAsync(settings, monitor, observations, cancellation.Token);
                 await pollingStatus.RecordAsync(new(monitor.Id, monitor.Name, DateTimeOffset.UtcNow, observations.Count, added)
                     { SourceFingerprint = ExternalBackupSourceIdentity.Fingerprint(monitor) }, cancellation.Token);
-                await RefreshAsync();
-                Status.Text = $"Проверка завершена. Получено: {observations.Count}, новых: {added}. Это результат чтения истории, а не проверка восстановления.";
+                Status.Text = $"Журнал прочитан · записей: {observations.Count}, новых: {added}.";
+                await RefreshSafelyAsync(preserveStatus: true);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
@@ -232,7 +241,12 @@ public partial class ExternalMonitoringWindow : Window
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { Status.Text = "Проверка отменена. Полученные ранее наблюдения сохранены."; }
-        catch (Exception ex) { Status.Text = "Ошибка проверки. Прежняя история сохранена: " + ex.Message; }
+        catch (Exception ex)
+        {
+            Status.Text = recordsRead is { } count
+                ? $"Журнал прочитан · записей: {count}. Ошибка сохранения наблюдений. " + ex.Message
+                : "Ошибка чтения журнала. Прежняя история сохранена. " + ex.Message;
+        }
         finally
         {
             collectionCancellation = null; CancelCollectButton.IsEnabled = false; CancelCollectButton.Visibility = Visibility.Collapsed;
@@ -275,6 +289,35 @@ public partial class ExternalMonitoringWindow : Window
         finally { busy = false; Editor.IsEnabled = !lifetime.IsCancellationRequested; UpdateMonitorControls(); }
     }
 
+    private async Task RefreshDeliveryAsync(IReadOnlyList<ExternalBackupReport> observations)
+    {
+        var connection = await ServerMonitoringDispatcher.LoadSettingsAsync(DesktopPaths.DataDirectory, lifetime.Token);
+        var delivery = connection is null ? null : await ServerMonitoringDispatcher.ReadDeliveryAsync(
+            DesktopPaths.DataDirectory, connection, lifetime.Token);
+        deliveryConnected = connection is not null;
+        sentReports.Clear();
+        declinedReports.Clear();
+        if (delivery is { } result)
+        {
+            sentReports.UnionWith(result.Sent);
+            declinedReports.UnionWith(result.Rejected);
+        }
+        var current = observations.Where(report => SelectedMonitor is null || report.MonitorId == SelectedMonitor.Id).ToArray();
+        var sent = current.Count(report => sentReports.Contains(report.ReportId));
+        var declined = current.Count(report => declinedReports.Contains(report.ReportId));
+        var worker = connection is null ? null
+            : await new LocalAgentControlStore(DesktopPaths.DataDirectory).ReadAsync(lifetime.Token);
+        var sendError = worker is { Phase: LocalAgentPhase.Running, MonitoringError.Length: > 0 }
+            && DateTimeOffset.UtcNow - worker.UpdatedUtc < TimeSpan.FromSeconds(30);
+        DeliveryStatus.Text = connection is null ? "Отправка · сервер не подключён."
+            : current.Length == 0 ? "" : $"Отправка · подтверждено: {sent}, ожидают: {current.Length - sent - declined}, отклонено сервером: {declined}."
+            + (sendError ? " Последняя отправка агентом завершилась ошибкой." : "");
+    }
+
+    private string DeliveryOf(ExternalBackupReport report) => sentReports.Contains(report.ReportId) ? "Отправлено"
+        : declinedReports.Contains(report.ReportId) ? "Сервер отклонил отчёт. Агент повторит отправку."
+        : deliveryConnected ? "Ожидает отправки" : "Локальная история";
+
     private void Report_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (Reports.SelectedItem is not ExternalBackupReport report)
@@ -284,7 +327,7 @@ public partial class ExternalMonitoringWindow : Window
             + $"Тип копии: {observation.BackupTypeDescription}\nНачало: {new ObservationLocalTimeConverter().Convert(observation, typeof(string), "Start", System.Globalization.CultureInfo.CurrentCulture)}\n"
             + $"Окончание: {new ObservationLocalTimeConverter().Convert(observation, typeof(string), "Finish", System.Globalization.CultureInfo.CurrentCulture)}\n"
             + $"Размер: {observation.SizeBytes?.ToString() ?? "не указан"} байт\nПути: {observation.LocationDescription}\n"
-            + $"Основание результата: {observation.EvidenceDescription}\nОтправка: {report.DeliveryDescription}\n"
+            + $"Основание результата: {observation.EvidenceDescription}\nОтправка: {DeliveryOf(report)}\n"
             + $"Получено агентом: {report.ObservedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n"
             + (report.DeliveredUtc is null ? "" : $"Отправлено: {report.DeliveredUtc.Value.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n")
             + $"ID источника: {report.MonitorId}\nID наблюдения: {report.ReportId}\n" + (observation.Error is null ? "" : "Ошибка: " + observation.Error)

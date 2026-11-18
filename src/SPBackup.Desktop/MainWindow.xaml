@@ -72,7 +72,7 @@
     <DockPanel>
      <StackPanel x:Name="AutomationActions" DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
       <Button x:Name="StartBackgroundButton" Content="Включить автоматически" Style="{StaticResource PrimaryButton}" Click="StartBackground_Click" IsEnabled="False" ToolTip="Выполнять сохранённые задания по расписанию даже после закрытия окна" />
-      <Button x:Name="StopBackgroundButton" Content="Остановить" Click="StopBackground_Click" IsEnabled="False" Visibility="Collapsed" />
+      <Button x:Name="StopBackgroundButton" Content="Остановить автоматическое копирование" Click="StopBackground_Click" IsEnabled="False" Visibility="Collapsed" />
      </StackPanel>
      <StackPanel><TextBlock x:Name="AutomationHeading" Text="Автоматическое копирование" FontWeight="SemiBold" /><TextBlock x:Name="BackgroundStatus" Text="Проверка состояния…" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,0" />
       <TextBlock x:Name="NextAutomaticRun" Text="" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0" />
@@ -91,7 +91,6 @@
             Visibility="{Binding Visibility, ElementName=ManagedAccessButton}" IsEnabled="{Binding IsEnabled, ElementName=ManagedAccessButton}" />
            <MenuItem x:Name="FirstRunGuideMenuItem" Header="Первый запуск задания…" Click="FirstRunGuide_Click" />
            <Separator />
-           <MenuItem x:Name="ExportJobSettingsMenuItem" Header="Сохранить настройки выбранного задания…" Click="ExportJobSettings_Click" IsEnabled="False" />
            <MenuItem x:Name="ImportJobSettingsMenuItem" Header="Загрузить настройки из файла…" Click="ImportJobSettings_Click" IsEnabled="False" />
           </MenuItem>
          </Menu>
@@ -113,17 +112,24 @@
         <Button x:Name="RunButton" Margin="0,0,8,6" Content="Создать копию" Style="{StaticResource PrimaryButton}" IsEnabled="False" Click="Run_Click" />
         <Button x:Name="ManagedAccessButton" Content="Настроить доступ…" Click="ManagedAccess_Click" Visibility="Collapsed" IsEnabled="False" Margin="0,0,8,6" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="EditJobButton" Content="Изменить" Click="EditJob_Click" IsEnabled="False" Margin="0,0,8,6" />
-        <Button x:Name="DuplicateJobButton" Content="На основе…" Click="DuplicateJob_Click" IsEnabled="False" Margin="0,0,8,6" ToolTip="Создать новое задание с настройками выбранного. Автоматические запуски новой копии задания отключены до проверки." />
-        <Button x:Name="DeleteButton" Content="Удалить" Click="Delete_Click" IsEnabled="False" Margin="0,0,8,6" />
-        <Button x:Name="CancelRunButton" Content="Отменить" Margin="0,0,8,6" IsEnabled="False" Click="CancelRun_Click" />
-        <Button x:Name="ShowLatestCopyButton" Content="Последняя копия" Margin="0,0,8,6" IsEnabled="False" Click="ShowLatestCopy_Click" ToolTip="Открыть последнюю сохранённую копию выбранного задания" />
-        <Button x:Name="ShowLatestRunButton" Content="Результат" Margin="0,0,8,6" IsEnabled="False" Click="ShowLatestRun_Click" ToolTip="Открыть последний запуск выбранного задания, включая ошибки и предупреждения" />
+        <Button x:Name="CancelRunButton" Content="Остановить текущее задание" Margin="0,0,8,6" IsEnabled="False" Click="CancelRun_Click" />
+        <Button x:Name="ShowLatestCopyButton" Content="Открыть копию" Margin="0,0,8,6" IsEnabled="False" Click="ShowLatestCopy_Click" ToolTip="Открыть последнюю сохранённую копию выбранного задания" />
+        <Button x:Name="ShowLatestRunButton" Content="Подробнее" Margin="0,0,8,6" IsEnabled="False" Click="ShowLatestRun_Click" ToolTip="Открыть последний запуск выбранного задания, включая ошибки и предупреждения" />
         <Button x:Name="CheckSourceButton" Content="Проверить источник" Margin="0,0,8,6" IsEnabled="False" Click="CheckSource_Click" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="CheckStorageButton" Content="Проверить хранилища" Margin="0,0,8,6" IsEnabled="False" Click="CheckStorage_Click" ToolTipService.ShowOnDisabled="True" ToolTip="Проверить временную папку и запись, чтение и удаление тестового файла во всех хранилищах" />
         <Button x:Name="CheckLatestCopiesButton" Content="Проверить последние копии" Margin="0,0,8,6" IsEnabled="False" Click="CheckLatestCopies_Click" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="CancelStorageCheckButton" Content="Отменить проверку" Margin="0,0,8,6" Visibility="Collapsed" Click="CancelCopyVerification_Click" />
+        <Menu Margin="0,0,0,6" IsMainMenu="False" Background="Transparent">
+         <MenuItem Header="Ещё" Padding="8,6">
+          <MenuItem x:Name="DuplicateJobButton" Header="Создать на основе…" Click="DuplicateJob_Click" IsEnabled="False" />
+           <MenuItem x:Name="ExportJobSettingsMenuItem" Header="Сохранить настройки выбранного задания…" Click="ExportJobSettings_Click" IsEnabled="False" />
+          <Separator />
+          <MenuItem x:Name="DeleteButton" Header="Удалить" Click="Delete_Click" IsEnabled="False" />
+         </MenuItem>
+        </Menu>
        </WrapPanel>
        <ScrollViewer Grid.Row="1" x:Name="JobActionsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
+       <TextBlock x:Name="SelectedJobSummary" Text="Выберите задание, чтобы создать копию или изменить настройки." TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" />
        <Expander x:Name="SelectedSchedulePanel" Header="Расписание выбранного задания" Visibility="Collapsed" Margin="0,4,0,0" Expanded="SelectedSchedule_Expanded" Collapsed="JobDetailsExpansion_Changed">
         <StackPanel><TextBox x:Name="SelectedScheduleDetails" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="130" VerticalScrollBarVisibility="Auto" BorderThickness="0" AutomationProperties.Name="Прогноз расписания и состояние исполнителя" />
          <Button x:Name="EditSelectedScheduleButton" Content="Изменить параметры задания…" Click="EditSelectedSchedule_Click" HorizontalAlignment="Left" IsEnabled="False" />
@@ -147,7 +153,6 @@
         </StackPanel>
        </Border>
        <ProgressBar x:Name="JobProgress" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,8,0,0" AutomationProperties.Name="Создание резервной копии" />
-       <TextBlock x:Name="SelectedJobSummary" Text="Выберите задание, чтобы создать копию или изменить настройки." TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" />
        <Expander x:Name="StorageCheckResults" MaxHeight="{Binding ViewportHeight, ElementName=JobActionsScroll}" Header="Проверка хранилищ" Visibility="Collapsed" Margin="0,6,0,0" Expanded="StorageCheckResults_Expanded" Collapsed="JobDetailsExpansion_Changed">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
          <TextBlock x:Name="ReadinessReportState" TextWrapping="Wrap" Margin="6,4" />
@@ -652,8 +657,7 @@
         </ComboBox>
        </StackPanel>
        <StackPanel x:Name="BackgroundSettingsSection" Visibility="Collapsed">
-        <TextBlock Text="Служба Windows" FontSize="16" FontWeight="SemiBold" />
-        <TextBlock x:Name="ServiceStatus" Text="Состояние проверяется…" TextWrapping="Wrap" Margin="0,4,0,8" />
+        <TextBlock x:Name="ServiceStatus" FontSize="16" FontWeight="SemiBold" Text="Состояние проверяется…" TextWrapping="Wrap" Margin="0,4,0,8" />
         <WrapPanel Margin="0,0,0,4">
          <Button x:Name="StartServiceButton" Content="Запустить службу" IsEnabled="False" Click="StartService_Click" Margin="0,0,8,6" />
          <Button x:Name="StopServiceButton" Content="Остановить службу" IsEnabled="False" Click="StopService_Click" Margin="0,0,0,6" />
@@ -708,6 +712,7 @@
        <StackPanel x:Name="ConnectionsSettingsSection" Visibility="Collapsed">
         <TextBlock Text="Сервер управления" FontSize="16" FontWeight="SemiBold" />
         <TextBox x:Name="ServerAddress" IsReadOnly="True" Text="Подключение проверяется…" Margin="0,4,0,6" AutomationProperties.Name="Адрес сервера управления" />
+        <TextBlock x:Name="ServerConnectionLastSuccess" Style="{StaticResource ConnectionStatusText}" Margin="0,0,0,4" />
         <WrapPanel Margin="0,0,0,6">
          <Button x:Name="CheckServerConnectionButton" Content="Проверить ответ сервера" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Click="CheckServerConnection_Click" Margin="0,0,8,4" />
          <Button x:Name="ConnectServerMonitoringButton" Content="Подключить по приглашению…" Click="ConnectServerMonitoring_Click" Margin="0,0,8,4" />
@@ -748,7 +753,7 @@
         <WrapPanel><Button x:Name="CopyBuildInfoButton" Content="Скопировать версию для поддержки" Click="CopyBuildInfo_Click" Margin="0,0,0,8" /></WrapPanel>
         <TextBlock x:Name="BuildInfoStatus" TextWrapping="Wrap" Margin="0,0,0,8" />
         <Expander Header="Версия и сведения о сборке" Margin="0,0,0,14"><TextBox x:Name="BuildInfo" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Padding="0" Margin="0,10,0,0" AutomationProperties.Name="Версия и сведения о сборке" /></Expander>
-        <Expander Header="Завершение работы"><Button x:Name="ExitFullyButton" Content="Выйти полностью — остановить агент и закрыть окно" Click="ExitFully_Click" HorizontalAlignment="Left" Margin="0,10,0,0" /></Expander>
+        <Expander Header="Завершение работы"><Button x:Name="ExitFullyButton" Content="Выйти полностью" Click="ExitFully_Click" HorizontalAlignment="Left" Margin="0,10,0,0" /></Expander>
        </StackPanel>
       </Grid>
      </Border>

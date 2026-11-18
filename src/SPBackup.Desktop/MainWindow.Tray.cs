@@ -43,7 +43,7 @@ public partial class MainWindow
             trayStop.Click += async (_, _) => await StopFromTrayAsync(false);
             trayMenu.Items.Add(trayStop);
             trayMenu.Items.Add(new Forms.ToolStripSeparator());
-            trayExit = new Forms.ToolStripMenuItem("Выйти полностью (остановить агент)");
+            trayExit = new Forms.ToolStripMenuItem("Выйти полностью");
             trayExit.Click += async (_, _) => await StopFromTrayAsync(true);
             trayMenu.Items.Add(trayExit);
             trayIcon = new Forms.NotifyIcon { Icon = trayImage, Text = "SP Backup", ContextMenuStrip = trayMenu, Visible = true };

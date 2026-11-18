@@ -11,6 +11,8 @@ public partial class MainWindow
 
     private void ShowServerConnection(ServerMonitoringSettings? connection)
     {
+        if (displayedServerConnection != connection)
+            ServerConnectionLastSuccess.Text = connection is null ? "" : "Успешный ответ из окна ещё не получен.";
         displayedServerConnection = connection;
         ServerAddress.Text = connection?.Address ?? "Сервер не подключён";
         ServerConnectionCheckStatus.Text = "";
@@ -32,9 +34,10 @@ public partial class MainWindow
         try
         {
             using var client = new ServerMonitoringClient(connection);
-            result = await client.CheckReadinessAsync(notificationCancellation.Token)
-                ? "Сервер ответил и готов."
-                : "Сервер ответил, но готовность не подтверждена.";
+            var available = await client.CheckReadinessAsync(notificationCancellation.Token);
+            if (available && ReferenceEquals(displayedServerConnection, connection))
+                ServerConnectionLastSuccess.Text = $"Последний успешный ответ из окна: {DateTime.Now:dd.MM HH:mm}.";
+            result = available ? "Сервер ответил и готов." : "Сервер ответил, но готовность не подтверждена.";
         }
         catch (OperationCanceledException) when (notificationCancellation.IsCancellationRequested) { return; }
         catch (OperationCanceledException) { result = "Сервер не ответил вовремя."; }

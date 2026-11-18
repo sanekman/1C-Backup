@@ -18,8 +18,9 @@ public partial class MainWindow
     {
         if (FtpAccessStatus is null) return;
         var key = int.TryParse(FtpPort.Text, out var port) ? FtpKeyFor(port) : null;
-        FtpCredentialsButton.Content = key is null ? "Задать доступ FTP…" : "Изменить доступ FTP…";
-        FtpAccessStatus.Text = FtpAccessDraft.Status(ftpAccess, key, ftpAccessEdited);
+        FtpCredentialsButton.Content = key is null ? "Задать доступ FTP…" : "Изменить пароль…";
+        FtpAccessStatus.Text = FtpAccessDraft.ValidateAddress(FtpHost.Text, FtpPort.Text, out _)
+            ?? FtpAccessDraft.Status(ftpAccess, key, ftpAccessEdited);
     }
 
     private void FtpCredentials_Click(object sender, RoutedEventArgs e)

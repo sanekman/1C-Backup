@@ -39,7 +39,7 @@ public partial class MainWindow
     {
         if (PgCredentialStatus is null) return;
         var key = int.TryParse(PgPort.Text, out var port) ? PostgreSqlKeyFor(port) : null;
-        PgCredentialsButton.Content = key is null ? "Задать пароль PostgreSQL…" : "Изменить пароль PostgreSQL…";
+        PgCredentialsButton.Content = key is null ? "Задать пароль PostgreSQL…" : "Изменить пароль…";
         PgCredentialStatus.Text = key is not null
             ? postgreSqlAccessEdited ? "Пароль изменён в черновике." : "Пароль сохранён. Подключение проверяется отдельно."
             : postgreSqlAccess?.CredentialKey is not null ? "Подключение изменено. Задайте пароль для этого сервера и пользователя."

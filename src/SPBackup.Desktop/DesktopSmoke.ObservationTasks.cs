@@ -25,9 +25,9 @@ internal static partial class DesktopSmoke
         grid.SelectedItem = selected;
         window.UpdateLayout();
         if (!Control<Button>("EditJobButton").IsEnabled || !Control<Button>("ShowLatestRunButton").IsEnabled
-            || !Control<Button>("DeleteButton").IsEnabled || !Control<Button>("JobScheduleButton").IsEnabled
+            || !Control<MenuItem>("DeleteButton").IsEnabled || !Control<Button>("JobScheduleButton").IsEnabled
             || !Equals(Control<Button>("RunButton").Content, "Проверить сейчас")
-            || Control<Button>("CheckStorageButton").IsEnabled || Control<Button>("DuplicateJobButton").IsEnabled)
+            || Control<Button>("CheckStorageButton").IsEnabled || Control<MenuItem>("DuplicateJobButton").IsEnabled)
             throw new InvalidOperationException("Действия задания наблюдения смешались с копированием.");
         var column = grid.Columns.Single(column => Equals(column.Header, "Последний запуск"));
         grid.ScrollIntoView(selected, column); window.UpdateLayout();

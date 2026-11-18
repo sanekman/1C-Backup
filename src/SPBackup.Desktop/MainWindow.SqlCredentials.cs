@@ -48,10 +48,10 @@ public partial class MainWindow
         if (SqlCredentialStatus is null || SqlAuthenticationHelp is null || SqlBackupServer is null) return;
         UpdateSqlAuthenticationHelp();
         var available = SqlCredentialForServer is not null;
-        SqlCredentialsButton.Content = available ? "Изменить доступ MS SQL…" : "Задать логин и пароль MS SQL…";
+        SqlCredentialsButton.Content = available ? "Изменить пароль…" : "Задать логин и пароль MS SQL…";
         var account = sqlUsername is null ? "" : $"Логин MS SQL: {sqlUsername}. ";
         SqlCredentialStatus.Text = available
-            ? account + (sqlCredentialsChanged ? "Данные входа изменены в черновике." : "Данные входа сохранены. Проверьте источник после сохранения задания.")
+            ? account + (sqlCredentialsChanged ? "Данные входа изменены в черновике." : "Пароль сохранён. Проверьте источник после сохранения задания.")
             : sqlCredentialKey is not null ? "Сервер изменён. Задайте логин и пароль для нового сервера."
             : "Логин и пароль ещё не заданы.";
     }

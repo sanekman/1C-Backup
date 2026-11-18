@@ -102,6 +102,13 @@ internal static partial class DesktopSmoke
             void Click(string name)
             {
                 window.UpdateLayout();
+                if (window.FindName(name) is MenuItem command)
+                {
+                    if (!command.IsEnabled) throw new InvalidOperationException("Команда недоступна: " + name);
+                    command.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                    window.UpdateLayout();
+                    return;
+                }
                 var button = Control<Button>(name);
                 if (!button.IsEnabled || !button.IsVisible) throw new InvalidOperationException("Кнопка недоступна: " + name);
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -764,8 +771,11 @@ internal static partial class DesktopSmoke
             Screenshot("multiple-storage-partial-result");
             Control<TextBox>("HistorySearch").Clear();
             Click("OpenHistoryJobButton");
-            if (!Control<TextBlock>("SelectedJobSummary").Text.Contains("Последняя доставка"))
-                throw new InvalidOperationException("Из задания пропало местоположение подтверждённой доставки.");
+            var deliverySummary = Control<TextBlock>("SelectedJobSummary").Text;
+            if (!deliverySummary.Contains("Последняя доставка") || !deliverySummary.Contains("— доставлено")
+                || !deliverySummary.Contains("доставка не подтверждена"))
+                throw new InvalidOperationException("В задании не различаются подтверждённая доставка и отказ хранилища.");
+            Screenshot("jobs-compact-partial-delivery");
             Click("RunButton");
             await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Copies").Items.Count == 5,
                 "Отдельное количество копий не применилось после третьей доставки.");
