@@ -115,8 +115,7 @@ def main():
         run(installation / 'OneCBackup.Desktop.exe', '--smoke-ui', ui)
         result = json.loads((ui / 'smoke-result.json').read_text(encoding='utf-8-sig'))
         info = json.loads((ui / 'build-info.json').read_text(encoding='utf-8-sig'))
-        revision = os.environ.get('SPBACKUP_TEST_PACKAGE_REVISION', os.environ['GITHUB_SHA'])
-        assert result['success'] and info['revision'] == revision
+        assert result['success'] and info['revision'] == os.environ['GITHUB_SHA']
         expected_tray = '"' + str(installation / 'SPBackup.Desktop.exe') + '" --tray --start-agent'
         assert startup() == expected_tray, 'Owned legacy autostart was not migrated'
         checks.append('old-desktop-name-runs-new-gui-and-migrates-autostart')
@@ -133,7 +132,7 @@ def main():
         assert not (installation / 'SPBackup.Desktop.exe').exists()
         run('dotnet', new_probe, 'verify-after-uninstall', state, installation)
         checks.append('uninstall-preserves-profile-secrets-and-both-backups')
-        summary = {'success': True, 'source': revision, 'previousVersion': VERSION,
+        summary = {'success': True, 'source': os.environ['GITHUB_SHA'], 'previousVersion': VERSION,
                    'previousInstallerSha256': SHA256, 'currentVersion': version, 'checks': checks}
         (artifacts / 'windows-upgrade-result.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
         print(json.dumps(summary))

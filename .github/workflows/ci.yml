@@ -253,12 +253,20 @@ jobs:
           $os = Get-CimInstance Win32_OperatingSystem
           [ordered]@{ os = $os.Caption; build = $os.BuildNumber; version = $version; revision = $revision; installerSha256 = $env:EXPECTED_INSTALLER_SHA256 } |
             ConvertTo-Json | Set-Content artifacts/windows-target.json
-      - run: python tests/distribution/installer_smoke.py
-      - name: Upgrade the published alpha.25 installation to the published version
-        run: python tests/distribution/legacy_upgrade_smoke.py
+      - name: Verify the installed release and upgrade from published alpha.25
+        shell: pwsh
         env:
           SPBACKUP_UPGRADE_SMOKE: '1'
           GH_TOKEN: ${{ github.token }}
+        run: |
+          # The installed WPF smoke reads the tag and revision from its process environment.
+          $env:GITHUB_REF_TYPE = 'tag'
+          $env:GITHUB_REF_NAME = 'v' + (Get-Content artifacts/distribution-version.txt).Trim()
+          $env:GITHUB_SHA = $env:SPBACKUP_TEST_PACKAGE_REVISION
+          python tests/distribution/installer_smoke.py
+          if ($LASTEXITCODE -ne 0) { throw 'Published installer verification failed.' }
+          python tests/distribution/legacy_upgrade_smoke.py
+          if ($LASTEXITCODE -ne 0) { throw 'Published installer upgrade verification failed.' }
       - name: Verify the agent service from the published package against Windows SCM
         shell: pwsh
         env:
