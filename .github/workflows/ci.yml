@@ -32,6 +32,11 @@ on:
       installer_sha256:
         description: 'For published-installer: expected SHA-256 of the released EXE'
         required: false
+      published_check:
+        description: 'For published-installer: run installation/upgrade, service, or both on isolated runners'
+        type: choice
+        default: all
+        options: [all, installer, service]
 
 permissions:
   contents: read
@@ -211,6 +216,10 @@ jobs:
 
   published-installer:
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'published-installer'
+    strategy:
+      fail-fast: false
+      matrix:
+        check: ${{ fromJSON(inputs.published_check == 'installer' && '["installer"]' || inputs.published_check == 'service' && '["service"]' || '["installer","service"]') }}
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
     timeout-minutes: 20
     steps:
@@ -219,6 +228,7 @@ jobs:
         with:
           dotnet-version: 10.0.402
       - uses: actions/setup-python@v5
+        if: matrix.check == 'installer'
         with:
           python-version: '3.12'
       - name: Download and verify exact release files
@@ -254,6 +264,7 @@ jobs:
           [ordered]@{ os = $os.Caption; build = $os.BuildNumber; version = $version; revision = $revision; installerSha256 = $env:EXPECTED_INSTALLER_SHA256 } |
             ConvertTo-Json | Set-Content artifacts/windows-target.json
       - name: Verify the installed release and upgrade from published alpha.25
+        if: matrix.check == 'installer'
         shell: pwsh
         env:
           SPBACKUP_UPGRADE_SMOKE: '1'
@@ -268,6 +279,7 @@ jobs:
           python tests/distribution/legacy_upgrade_smoke.py
           if ($LASTEXITCODE -ne 0) { throw 'Published installer upgrade verification failed.' }
       - name: Verify the agent service from the published package against Windows SCM
+        if: matrix.check == 'service'
         shell: pwsh
         env:
           ONECBACKUP_NATIVE_SERVICE_TEST: '1'
@@ -283,7 +295,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: published-windows-installer-verification
+          name: published-windows-${{ matrix.check }}-verification
           path: |
             artifacts/windows-target.json
             artifacts/installer-result.json
