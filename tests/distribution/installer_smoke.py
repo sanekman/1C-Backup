@@ -95,7 +95,7 @@ def check():
         assert result['success'], 'Installed GUI smoke failed'
         info = json.loads((ui / 'build-info.json').read_text(encoding='utf-8-sig'))
         assert info['version'] == version
-        assert info['revision'] == os.environ['GITHUB_SHA']
+        assert info['revision'] == os.environ.get('SPBACKUP_TEST_PACKAGE_REVISION', os.environ['GITHUB_SHA'])
         # Uninstall must leave an autostart pointing at a different portable copy alone.
         foreign = '"C:\\Portable\\SPBackup.Agent.exe" --run --quiet'
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_path) as key:

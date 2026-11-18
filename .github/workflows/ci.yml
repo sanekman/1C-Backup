@@ -22,17 +22,23 @@ on:
         required: false
         default: ''
       scope:
-        description: 'Full, management, or packaging after OS-matching source/UI verification passed'
+        description: 'Full, management, packaging, or verification of an exact published installer'
         type: choice
         default: full
-        options: [full, management, packaging]
+        options: [full, management, packaging, published-installer]
+      published_version:
+        description: 'For published-installer: agent version without v (for example 0.2.0-alpha.39)'
+        required: false
+      installer_sha256:
+        description: 'For published-installer: expected SHA-256 of the released EXE'
+        required: false
 
 permissions:
   contents: read
 
 jobs:
   verify:
-    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'packaging' || inputs.platform != 'windows'
+    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'published-installer' && (inputs.scope != 'packaging' || inputs.platform != 'windows'))
     strategy:
       fail-fast: false
       matrix:
@@ -97,7 +103,7 @@ jobs:
           retention-days: 14
 
   native-sql:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management' && inputs.scope != 'packaging')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope == 'full')
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
     timeout-minutes: 20
     env:
@@ -128,7 +134,7 @@ jobs:
           retention-days: 14
 
   native-smb:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management' && inputs.scope != 'packaging')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope == 'full')
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
     timeout-minutes: 10
     env:
@@ -150,7 +156,7 @@ jobs:
           retention-days: 14
 
   native-agent-service:
-    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'linux'
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'published-installer')
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
     timeout-minutes: 10
     env:
@@ -181,7 +187,7 @@ jobs:
           retention-days: 14
 
   native-volume:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'management' && inputs.scope != 'packaging')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope == 'full')
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
     timeout-minutes: 10
     env:
@@ -201,6 +207,84 @@ jobs:
         with:
           name: native-windows-volume-verification
           path: artifacts/native-volumes/volume-result.json
+          retention-days: 14
+
+  published-installer:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'published-installer'
+    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download and verify exact release files
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISHED_VERSION: ${{ inputs.published_version }}
+          EXPECTED_INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
+        run: |
+          $version = $env:PUBLISHED_VERSION
+          if ($version -cnotmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$' -or $env:EXPECTED_INSTALLER_SHA256 -notmatch '^[0-9a-f]{64}$') {
+            throw 'Published installer verification requires a version and the expected EXE SHA-256.'
+          }
+          $tag = "v$version"
+          $revision = gh api "repos/$env:GITHUB_REPOSITORY/commits/$tag" --jq .sha
+          if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-f]{40}$') { throw 'Cannot resolve the version tag.' }
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or !$release -or $release.draft) { throw 'Cannot read the published release.' }
+          $base = "SP-Backup-$version-windows-x64"
+          $installer = "$base-setup.exe"
+          $zip = "$base.zip"
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern $installer --pattern $zip --dir artifacts
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download the published package.' }
+          foreach ($name in @($installer, $zip)) {
+            $digest = @($release.assets | Where-Object name -ceq $name).digest
+            $hash = (Get-FileHash "artifacts/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($digest -cne "sha256:$hash") { throw "Published SHA-256 mismatch for $name." }
+            if ($name -eq $installer -and $hash -ne $env:EXPECTED_INSTALLER_SHA256) { throw 'Expected EXE SHA-256 mismatch.' }
+          }
+          Set-Content artifacts/distribution-version.txt -Value $version -Encoding ascii
+          Add-Content $env:GITHUB_ENV "SPBACKUP_TEST_PACKAGE_REVISION=$revision"
+          $os = Get-CimInstance Win32_OperatingSystem
+          [ordered]@{ os = $os.Caption; build = $os.BuildNumber; version = $version; revision = $revision; installerSha256 = $env:EXPECTED_INSTALLER_SHA256 } |
+            ConvertTo-Json | Set-Content artifacts/windows-target.json
+      - run: python tests/distribution/installer_smoke.py
+      - name: Upgrade the published alpha.25 installation to the published version
+        run: python tests/distribution/legacy_upgrade_smoke.py
+        env:
+          SPBACKUP_UPGRADE_SMOKE: '1'
+          GH_TOKEN: ${{ github.token }}
+      - name: Verify the agent service from the published package against Windows SCM
+        shell: pwsh
+        env:
+          ONECBACKUP_NATIVE_SERVICE_TEST: '1'
+        run: |
+          $version = (Get-Content artifacts/distribution-version.txt).Trim()
+          Expand-Archive "artifacts/SP-Backup-$version-windows-x64.zip" artifacts/published-package
+          $agent = Join-Path $PWD 'artifacts/published-package/SP-Backup/OneCBackup.Agent.exe'
+          $report = Join-Path $PWD 'artifacts/native-agent'
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- $agent $report
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows agent service verification failed' }
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release --no-build -- $agent $report --verify-service-switch
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows service account switch verification failed' }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-windows-installer-verification
+          path: |
+            artifacts/windows-target.json
+            artifacts/installer-result.json
+            artifacts/installed-ui/smoke-result.json
+            artifacts/windows-upgrade-result.json
+            artifacts/windows-upgrade-failure.json
+            artifacts/native-agent/service-result.json
+            artifacts/native-agent/service-switch-result.json
+            artifacts/native-agent/failure-context.json
           retention-days: 14
 
   package:

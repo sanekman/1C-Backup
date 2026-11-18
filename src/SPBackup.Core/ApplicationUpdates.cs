@@ -133,9 +133,9 @@ public sealed class GitHubApplicationUpdates(HttpClient client)
             throw new TransferInterrupted($"Временная ошибка GitHub (HTTP {(int)response.StatusCode}).");
         if (!response.IsSuccessStatusCode) throw new IOException($"Не удалось получить обновление с GitHub (HTTP {(int)response.StatusCode}).");
     }
-    private Task<byte[]> ReadSmallAsync(string path, string? secret, bool raw, CancellationToken token, IProgress<UpdateRetryNotice>? retry)
+    private Task<(byte[] Bytes, bool HasNextPage)> ReadSmallAsync(string path, string? secret, bool raw, CancellationToken token, IProgress<UpdateRetryNotice>? retry)
         => RetryAsync(() => ReadSmallOnceAsync(path, secret, raw, token), UpdateRequestPhase.Checking, retry, token);
-    private async Task<byte[]> ReadSmallOnceAsync(string path, string? secret, bool raw, CancellationToken token)
+    private async Task<(byte[] Bytes, bool HasNextPage)> ReadSmallOnceAsync(string path, string? secret, bool raw, CancellationToken token)
     {
         using var request = Request(path, secret, raw);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
@@ -150,32 +150,38 @@ public sealed class GitHubApplicationUpdates(HttpClient client)
         }
         if (response.Content.Headers.ContentLength is long expected && output.Length != expected)
             throw new TransferInterrupted("Ответ GitHub получен не полностью.");
-        return output.ToArray();
+        // GitHub reports whether more releases exist. Its Link URLs never supply request destinations.
+        var hasNextPage = !raw && response.Headers.TryGetValues("Link", out var links)
+            && links.Any(link => Regex.IsMatch(link, "(?:^|,)\\s*<[^>]*>\\s*;\\s*rel=\"next\"(?:\\s*,|\\s*$)"));
+        return (output.ToArray(), hasNextPage);
     }
     public async Task<ApplicationUpdate?> CheckAsync(string currentVersion, bool includePreview, string? secret = null, CancellationToken token = default, IProgress<UpdateRetryNotice>? retry = null)
     {
         var current = ApplicationReleaseVersion.Parse(currentVersion);
-        using var releases = JsonDocument.Parse(await ReadSmallAsync("releases?per_page=50", secret, false, token, retry));
-        var candidates = new List<(string Version, string Branch, ApplicationReleaseVersion Order)>();
-        foreach (var release in releases.RootElement.EnumerateArray())
+        (string Version, string Branch, ApplicationReleaseVersion Order)? latest = null;
+        for (var page = 1; ; page++)
         {
-            if (release.GetProperty("draft").GetBoolean() || !includePreview && release.GetProperty("prerelease").GetBoolean()) continue;
-            var tag = release.GetProperty("tag_name").GetString() ?? "";
-            if (!tag.StartsWith('v')) continue;
-            ApplicationReleaseVersion version;
-            try { version = ApplicationReleaseVersion.Parse(tag[1..]); } catch (FormatException) { continue; }
-            if (version.CompareTo(current) <= 0 || !includePreview && version.IsPreview) continue;
-            var pointer = Regex.Match(release.GetProperty("body").GetString() ?? "",
-                @"<!-- onec-update-manifest: (distribution/windows-x64-[A-Za-z0-9.\-]+) -->");
-            if (!pointer.Success) continue;
-            candidates.Add((tag[1..], pointer.Groups[1].Value, version));
+            var (pageBytes, hasNextPage) = await ReadSmallAsync($"releases?per_page=10&page={page}", secret, false, token, retry);
+            using var releases = JsonDocument.Parse(pageBytes);
+            foreach (var release in releases.RootElement.EnumerateArray())
+            {
+                if (release.GetProperty("draft").GetBoolean() || !includePreview && release.GetProperty("prerelease").GetBoolean()) continue;
+                var tag = release.GetProperty("tag_name").GetString() ?? "";
+                if (!tag.StartsWith('v')) continue;
+                ApplicationReleaseVersion version;
+                try { version = ApplicationReleaseVersion.Parse(tag[1..]); } catch (FormatException) { continue; }
+                if (version.CompareTo(latest?.Order ?? current) <= 0 || !includePreview && version.IsPreview) continue;
+                var pointer = Regex.Match(release.GetProperty("body").GetString() ?? "",
+                    @"<!-- onec-update-manifest: (distribution/windows-x64-[A-Za-z0-9.\-]+) -->");
+                if (pointer.Success) latest = (tag[1..], pointer.Groups[1].Value, version);
+            }
+            if (!hasNextPage) break;
         }
-        var latest = candidates.OrderByDescending(candidate => candidate.Order).FirstOrDefault();
-        if (latest.Order is null) return null;
-        var bytes = await ReadSmallAsync("contents/windows/update-manifest.json?ref=" + Uri.EscapeDataString(latest.Branch), secret, true, token, retry);
+        if (latest is not { } selected) return null;
+        var (bytes, _) = await ReadSmallAsync("contents/windows/update-manifest.json?ref=" + Uri.EscapeDataString(selected.Branch), secret, true, token, retry);
         var manifest = JsonSerializer.Deserialize<UpdateManifest>(bytes, Json) ?? throw new InvalidDataException("Нет сведений об обновлении.");
-        manifest.Validate(latest.Version);
-        return new(manifest, latest.Branch);
+        manifest.Validate(selected.Version);
+        return new(manifest, selected.Branch);
     }
 
     public async Task<string> DownloadAsync(ApplicationUpdate update, string directory, string? secret = null,

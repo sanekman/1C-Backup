@@ -20,8 +20,8 @@ public sealed class ApplicationUpdateTests : IDisposable
     }
     private static HttpResponseMessage Json(object value) => new(HttpStatusCode.OK)
     { Content = new StringContent(JsonSerializer.Serialize(value), Encoding.UTF8, "application/json") };
-    private static object Release(string version, bool draft = false, bool preview = true) => new
-    { tag_name = "v" + version, draft, prerelease = preview, body = "<!-- onec-update-manifest: distribution/windows-x64-" + version + " -->" };
+    private static object Release(string version, bool draft = false, bool preview = true, string notes = "") => new
+    { tag_name = "v" + version, draft, prerelease = preview, body = "<!-- onec-update-manifest: distribution/windows-x64-" + version + " -->\n" + notes };
 
     [Theory]
     [InlineData("0.1.0-preview.9", "0.1.0-preview.10", -1)]
@@ -55,6 +55,59 @@ public sealed class ApplicationUpdateTests : IDisposable
         var found = await new GitHubApplicationUpdates(client).CheckAsync("0.1.0-preview.40", true, "ghp_fixture");
         Assert.Equal("0.1.0-preview.42", found!.Manifest.Version);
         Assert.Equal(2, requests);
+    }
+
+    [Theory]
+    [InlineData(false, "0.1.2")]
+    [InlineData(true, "0.2.0-preview.42")]
+    public async Task SelectsHighestEligibleReleaseAcrossPagesWhoseCombinedSizeExceedsTheLimit(bool includePreview, string expected)
+    {
+        var queries = new List<string>();
+        var notes = new string('x', 400_000);
+        using var client = new HttpClient(new Handler((request, _) =>
+        {
+            var uri = request.RequestUri!;
+            Assert.Equal("api.github.com", uri.Host);
+            Assert.StartsWith("/repositories/1413316996/", uri.AbsolutePath);
+            Assert.Equal("ghp_fixture", request.Headers.Authorization!.Parameter);
+            queries.Add(uri.Query);
+            var response = uri.Query switch
+            {
+                "?per_page=10&page=1" => Json(new[] { Release("0.1.1", preview: false, notes: notes) }),
+                "?per_page=10&page=2" => Json(new[] { Release("0.2.0-preview.42", notes: notes) }),
+                "?per_page=10&page=3" => Json(new[] { Release("0.1.2", preview: false, notes: notes), Release("0.3.0", draft: true) }),
+                _ => Json(Manifest(expected))
+            };
+            if (queries.Count < 3)
+                response.Headers.Add("Link", "<https://untrusted.example/rewind>; rel=\"prev\", <https://untrusted.example/skip>; rel=\"next\"");
+            else if (queries.Count == 3)
+                response.Headers.Add("Link", "<https://untrusted.example/rewind>; rel=\"prev\"");
+            return Task.FromResult(response);
+        }));
+
+        var update = await new GitHubApplicationUpdates(client).CheckAsync("0.1.0", includePreview, "ghp_fixture");
+
+        Assert.Equal(expected, update!.Manifest.Version);
+        Assert.Equal(["?per_page=10&page=1", "?per_page=10&page=2", "?per_page=10&page=3",
+            "?ref=distribution%2Fwindows-x64-" + expected], queries);
+    }
+
+    [Fact]
+    public async Task OversizedLaterPageFailsWithoutFetchingAnEarlierCandidateManifest()
+    {
+        var requests = new List<string>();
+        using var client = new HttpClient(new Handler((request, _) =>
+        {
+            requests.Add(request.RequestUri!.Query);
+            if (requests.Count == 2)
+                return Task.FromResult(Json(new[] { Release("0.2.0-preview.44", notes: new string('x', 1024 * 1024)) }));
+            var response = Json(new[] { Release("0.2.0-preview.42") });
+            response.Headers.Add("Link", "<https://api.github.com/repositories/1413316996/releases?per_page=10&page=2>; rel=\"next\"");
+            return Task.FromResult(response);
+        }));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => new GitHubApplicationUpdates(client).CheckAsync("0.1.0", true));
+        Assert.Equal(["?per_page=10&page=1", "?per_page=10&page=2"], requests);
     }
 
     [Theory]
