@@ -17,9 +17,10 @@
 
 - Рабочая ветка: `feature/local-backup-agent`. PR №2 остаётся черновиком.
 - Последние опубликованные версии по сохранённым отчётам: Windows
-  **v0.2.0-alpha.35**, Server **v0.1.0-preview.11**.
+  **v0.2.0-alpha.35**, Server **v0.1.0-preview.12**.
   [Публикация alpha.35, SHA-256 и проверка обновления](windows-alpha35-publication.md).
-  [Публикация Server preview.11 и приёмка кнопки на CT 107](server-preview11-publication.md).
+  [Публикация Server preview.12](server-agent-ui-plan.md#публикация-preview12).
+  [Приёмка кнопки на CT 107 при переходе на preview.11](server-preview11-publication.md).
 - Этапы **1–3 завершены**; **5 завершён для поддерживаемых файловых серверных
   планов**, **6 завершён для штатной Windows-установки**.
 - Этап **4 принят частично**. Пропуски 1С и отсутствие удалённого SQL-стенда
