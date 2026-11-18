@@ -72,7 +72,7 @@ internal static partial class DesktopSmoke
             Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(item => item.Id == job.Id);
             Click("EditJobButton");
             if (Control<ComboBox>("SqlAuthenticationPicker").SelectedValue is not SqlServerAuthentication.SqlServer
-                || !Control<TextBlock>("SqlCredentialStatus").Text.Contains("сохранены"))
+                || !Control<TextBlock>("SqlCredentialStatus").Text.Contains("Пароль сохранён"))
                 throw new InvalidOperationException("Редактор не восстановил сохранённый способ входа SQL.");
             window.SqlCredentialsDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(() =>
             {
@@ -109,7 +109,7 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Импорт другого сервера изменил пароль исходного задания.");
             Click("CancelEditorButton");
             await Import(export);
-            if (!Control<TextBlock>("SqlCredentialStatus").Text.Contains("сохранены"))
+            if (!Control<TextBlock>("SqlCredentialStatus").Text.Contains("Пароль сохранён"))
                 throw new InvalidOperationException("Импорт того же известного SQL-сервера потерял доступную привязку.");
             Click("CancelEditorButton");
             store.Delete(key);

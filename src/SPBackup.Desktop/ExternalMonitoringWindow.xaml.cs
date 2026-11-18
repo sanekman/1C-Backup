@@ -96,7 +96,14 @@ public partial class ExternalMonitoringWindow : Window
         var nextPolls = (await pollingStatus.ReadAsync(lifetime.Token)).OrderByDescending(p => p.PolledUtc).ToList();
         if (version != refreshVersion) return;
         var selectedId = (Reports.SelectedItem as ExternalBackupReport)?.ReportId;
-        await RefreshDeliveryAsync(nextReports);
+        try { await RefreshDeliveryAsync(nextReports); }
+        catch (Exception error) when (error is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+        {
+            sentReports.Clear();
+            declinedReports.Clear();
+            deliveryConnected = true;
+            DeliveryStatus.Text = "Статус отправки недоступен. Локальная история загружена.";
+        }
         var selectedPoll = (PollStatuses.SelectedItem as ExternalBackupPollResult)?.MonitorId;
         var sorting = Reports.ItemsSource is null ? [] : System.Windows.Data.CollectionViewSource
             .GetDefaultView(Reports.ItemsSource).SortDescriptions.ToArray();
@@ -307,11 +314,13 @@ public partial class ExternalMonitoringWindow : Window
         var declined = current.Count(report => declinedReports.Contains(report.ReportId));
         var worker = connection is null ? null
             : await new LocalAgentControlStore(DesktopPaths.DataDirectory).ReadAsync(lifetime.Token);
-        var sendError = worker is { Phase: LocalAgentPhase.Running, MonitoringError.Length: > 0 }
+        var activeWorker = worker is { Phase: LocalAgentPhase.Running }
             && DateTimeOffset.UtcNow - worker.UpdatedUtc < TimeSpan.FromSeconds(30);
+        var sendError = activeWorker ? !string.IsNullOrEmpty(worker!.MonitoringError)
+            : (Owner as MainWindow)?.MonitoringSendFailedInWindow == true;
         DeliveryStatus.Text = connection is null ? "Отправка · сервер не подключён."
             : current.Length == 0 ? "" : $"Отправка · подтверждено: {sent}, ожидают: {current.Length - sent - declined}, отклонено сервером: {declined}."
-            + (sendError ? " Последняя отправка агентом завершилась ошибкой." : "");
+            + (sendError ? " Последняя отправка завершилась ошибкой." : "");
     }
 
     private string DeliveryOf(ExternalBackupReport report) => sentReports.Contains(report.ReportId) ? "Отправлено"

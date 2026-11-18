@@ -8,11 +8,15 @@ public partial class MainWindow
     private ServerMonitoringSettings? displayedServerConnection;
     private bool checkingServerConnection;
     private bool serverMonitoringBusy;
+    internal bool MonitoringSendFailedInWindow { get; private set; }
 
     private void ShowServerConnection(ServerMonitoringSettings? connection)
     {
         if (displayedServerConnection != connection)
+        {
+            MonitoringSendFailedInWindow = false;
             ServerConnectionLastSuccess.Text = connection is null ? "" : "Успешный ответ из окна ещё не получен.";
+        }
         displayedServerConnection = connection;
         ServerAddress.Text = connection?.Address ?? "Сервер не подключён";
         ServerConnectionCheckStatus.Text = "";
@@ -63,13 +67,19 @@ public partial class MainWindow
         {
             await new ServerMonitoringDispatcher(DesktopPaths.DataDirectory, ftpCredentials).PollAsync(notificationCancellation.Token);
             if (ReferenceEquals(displayedServerConnection, connection))
+            {
+                MonitoringSendFailedInWindow = false;
                 ServerMonitoringStatus.Text = $"Последняя отправка из окна: {DateTime.Now:dd.MM HH:mm}.";
+            }
         }
         catch (OperationCanceledException) when (notificationCancellation.IsCancellationRequested) { }
         catch (Exception)
         {
             if (ReferenceEquals(displayedServerConnection, connection))
+            {
+                MonitoringSendFailedInWindow = true;
                 ServerMonitoringStatus.Text = "Отправка из окна не удалась. История хранится локально.";
+            }
         }
         finally { serverMonitoringBusy=false; }
     }
