@@ -123,3 +123,27 @@ Linux-архива для CT 107 — 0.1.0-preview.13. Приёмка рабоч
 и сохранение выбора после перезагрузки страницы. Пакеты Windows и Linux
 прошли проверку для `03aaa86`.
 [CI серверных пакетов](https://github.com/sanekman/1C-Backup/actions/runs/44311822812).
+
+
+## Публикация preview.14
+
+Опубликован [Server preview.14](https://github.com/sanekman/1C-Backup/releases/tag/server-v0.1.0-preview.14)
+из `d8bfc5344e348b9f6ec6abb7d0b32d18af23d7a1`. Windows, Linux и нативный
+сценарий Proxmox на тестовом Debian 13 прошли выпускные проверки.
+Цвета связи, ошибок и предупреждений, значки темы и переключение
+с клавиатуры проверены в Chromium на коде `03aaa86`. Изменения между
+`03aaa86` и тегом относятся к документации.
+[Выпускной CI](https://github.com/sanekman/1C-Backup/actions/runs/44313653595).
+
+Размеры и SHA-256 трёх пакетов совпадают с публичным манифестом.
+Из сохранившейся ревизии обновлятора CT 107 `bed546d` проверена
+доступность preview.14 в каталоге. Из опубликованного Linux-архива сверены
+версия, runtime 10.0.13 и код переключателя темы. Приёмка на рабочем
+CT 107 ведётся по [сценарию](windows-stage75-beta-readiness.md#ct-107).
+[Публичный манифест](https://github.com/sanekman/1C-Backup/blob/distribution/server-0.1.0-preview.14/server-release.json).
+
+До публикации в описании preview.10 оставлена сводка этого выпуска со
+ссылкой на историю в теге. Объём списка обновлений после публикации
+preview.14 составляет 1 021 017 байт при лимите клиента Windows 1 МиБ.
+Штатный клиент Windows после публикации скачал alpha.39 с проверкой SHA-256.
+[Прогон обновления Windows](https://github.com/sanekman/1C-Backup/actions/runs/44316319941).
