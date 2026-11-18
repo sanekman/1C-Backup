@@ -1,7 +1,6 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using Microsoft.Win32;
 using SPBackup.Core;
 
 namespace SPBackup.Desktop;
@@ -32,18 +31,8 @@ public partial class MainWindow
         JobEditor.Margin = new Thickness(20, compactSource || wizardStep == 3 ? 8 : 16, 20, compactSource || wizardStep == 3 ? 8 : 16);
     }
     private async void RestoreFiles_Click(object sender, RoutedEventArgs e)
-    {
-        if (!RestoreFilesButton.IsEnabled || Copies.SelectedItem is not BackupCopyRow row) return;
-        string? password = null;
-        if (row.Record.Backup.ArchivePasswordKey is not null)
-        {
-            var passwordDialog = new ArchivePasswordWindow(restoring: true, restoreAction: "Восстановить файлы") { Owner = this };
-            if (passwordDialog.ShowDialog() != true) return;
-            password = passwordDialog.PasswordOverride;
-        }
-        var dialog = new OpenFolderDialog { Title = "Выберите папку: файлы будут восстановлены в новый подкаталог" };
-        if (dialog.ShowDialog(this) == true) await RestoreSelectedFilesAsync(dialog.FolderName, password);
-    }
+        => await ShowRestoreCopyAsync(files: true);
+
     internal async Task RestoreSelectedFilesAsync(string parentDirectory, string? passwordOverride = null)
     {
         if (!RestoreFilesButton.IsEnabled || Copies.SelectedItem is not BackupCopyRow row) return;

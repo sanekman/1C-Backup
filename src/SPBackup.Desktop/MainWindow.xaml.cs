@@ -665,8 +665,15 @@ public partial class MainWindow : Window
                 CanExtractCopy(extractable.Record, job));
         var isFileSnapshot = Copies.SelectedItem is BackupCopyRow fileCopy && fileCopy.Record.Backup.FileSnapshot is not null;
         RestoreFilesButton.Visibility = isFileSnapshot ? Visibility.Visible : Visibility.Collapsed;
-        ExtractOneCButton.Visibility = isFileSnapshot ? Visibility.Collapsed : Visibility.Visible;
-        RestoreFilesButton.IsEnabled = isFileSnapshot && VerifyCopyButton.IsEnabled;
+        ExtractOneCButton.Visibility = Copies.SelectedItem is BackupCopyRow oneCCopy
+            && jobs.Any(job => job.Id == oneCCopy.Record.JobId && CanExtractCopy(oneCCopy.Record, job))
+            ? Visibility.Visible : Visibility.Collapsed;
+        var restoreAvailable = !preparingCopyRestore && !copiesRefreshing;
+        ExtractOneCButton.IsEnabled &= restoreAvailable;
+        RestoreFilesButton.IsEnabled = isFileSnapshot && restoreAvailable && VerifyCopyButton.IsEnabled && copyRestoreChainError is null;
+        RestoreFilesButton.ToolTip = copyRestoreChainError ?? (!engineAvailable || schedulingTask is not null
+            ? "Остановите фоновую работу, чтобы восстановить выбранную копию."
+            : "Восстановить выбранную копию в новый подкаталог.");
         var isIncrement = Copies.SelectedItem is BackupCopyRow { Record.Backup.FileSnapshot.IsFull: false };
         ExportCopyButton.Content = isIncrement ? "Сохранить этот архив…" : "Сохранить копию…";
         if (isIncrement) ExportCopyButton.ToolTip += " Это только изменения: для восстановления нужны полная основа и все предшествующие архивы. Кнопка «Восстановить файлы…» собирает цепочку автоматически.";
@@ -1071,6 +1078,7 @@ public partial class MainWindow : Window
             ? (fileSnapshot.IsIncomplete ? "Неполная копия · " : "") + (fileSnapshot.IsFull ? "Полная копия · 1 архив"
                 : $"Инкрементная копия · архивов для восстановления: {fileSnapshot.Depth + 1}") + " · " + selectedCopy.DisplayLocation
             : selectedCopy.DisplayLocation : "";
+        UpdateCopyRestoreChain(Copies.SelectedItem as BackupCopyRow);
         CopyDetails.Text = Copies.SelectedItem is BackupCopyRow row
             ? $"{row.JobName}\n{row.DisplayLocation}\nРазмер: {row.Record.Backup.Length} байт\nШифрование: {row.EncryptionDescription}\nSHA256: {row.Sha256}\n{FileSnapshotDetails(row.Record.Backup.FileSnapshot)}\n{row.CheckHelp}" : "";
         UpdateRunControls();
@@ -1125,18 +1133,7 @@ public partial class MainWindow : Window
     }
 
     private async void ExtractOneC_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ExtractOneCButton.IsEnabled) return;
-        string? passwordOverride = null;
-        if (Copies.SelectedItem is BackupCopyRow { Record.Backup.ArchivePasswordKey: not null })
-        {
-            var passwordDialog = new ArchivePasswordWindow(restoring: true) { Owner = this };
-            if (passwordDialog.ShowDialog() != true) return;
-            passwordOverride = passwordDialog.PasswordOverride;
-        }
-        var dialog = new OpenFolderDialog { Title = "Выберите родительский каталог: база будет извлечена в новую папку" };
-        if (dialog.ShowDialog(this) == true) await ExtractSelectedCopyAsync(dialog.FolderName, passwordOverride);
-    }
+        => await ShowRestoreCopyAsync(files: false);
 
     internal async Task ExtractSelectedCopyAsync(string parentDirectory, string? passwordOverride = null)
     {

@@ -580,22 +580,26 @@
        <TextBlock x:Name="CopiesSummary" Text="Загрузка списка…" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,12,0" />
       </DockPanel>
       <Grid Margin="0,6,0,0">
-       <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+       <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="125" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
        <StackPanel Margin="0,0,8,0"><TextBlock Text="Задание" Foreground="{DynamicResource MutedBrush}" /><ComboBox x:Name="CopyJobFilter" DisplayMemberPath="Label" SelectedValuePath="Id" SelectionChanged="CopyFilter_Changed" AutomationProperties.Name="Фильтр копий по заданию" /></StackPanel>
        <StackPanel Grid.Column="1" Margin="0,0,8,0"><TextBlock Text="Хранилище" Foreground="{DynamicResource MutedBrush}" /><ComboBox x:Name="CopyStorageFilter" SelectedIndex="0" SelectionChanged="CopyFilter_Changed" AutomationProperties.Name="Фильтр копий по типу хранилища">
         <ComboBoxItem Content="Все хранилища" Tag="" /><ComboBoxItem Content="Локальный диск" Tag="local" /><ComboBoxItem Content="Сетевая папка" Tag="network" /><ComboBoxItem Content="FTP / FTPS" Tag="ftp" /><ComboBoxItem Content="Google Drive" Tag="google" />
        </ComboBox></StackPanel>
-       <StackPanel Grid.Column="2" Margin="0,0,8,0"><TextBlock Text="Поиск по имени или пути" Foreground="{DynamicResource MutedBrush}" /><TextBox x:Name="CopySearch" TextChanged="CopyFilter_Changed" AutomationProperties.Name="Поиск копий по имени задания или пути" /></StackPanel>
-       <Button Grid.Column="3" x:Name="ResetCopyFiltersButton" Content="Сбросить" VerticalAlignment="Bottom" Click="ResetCopyFilters_Click" ToolTip="Показать копии всех заданий и хранилищ" />
+       <StackPanel Grid.Column="2" Margin="0,0,8,0"><TextBlock Text="Дата копии" Foreground="{DynamicResource MutedBrush}" />
+        <DatePicker x:Name="CopyDateFilter" SelectedDateChanged="CopyFilter_Changed" DateValidationError="CopyDateValidationError"
+         AutomationProperties.Name="Дата создания копии по местному времени" />
+       </StackPanel>
+       <StackPanel Grid.Column="3" Margin="0,0,8,0"><TextBlock Text="Имя или путь" Foreground="{DynamicResource MutedBrush}" /><TextBox x:Name="CopySearch" TextChanged="CopyFilter_Changed" AutomationProperties.Name="Поиск копий по имени задания или пути" /></StackPanel>
+       <Button Grid.Column="4" x:Name="ResetCopyFiltersButton" Content="Сбросить" VerticalAlignment="Bottom" Click="ResetCopyFilters_Click" ToolTip="Показать копии всех заданий и хранилищ" />
       </Grid></StackPanel>
      </Border>
      <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0">
       <StackPanel>
        <WrapPanel>
-        <Button x:Name="VerifyCopyButton" Content="Проверить целостность" Style="{StaticResource PrimaryButton}" Click="VerifyCopy_Click" IsEnabled="False" Margin="0,0,8,8" />
+        <Button x:Name="VerifyCopyButton" Content="Проверить целостность" Click="VerifyCopy_Click" IsEnabled="False" Margin="0,0,8,8" />
+        <Button x:Name="ExtractOneCButton" Content="Извлечь 1Cv8.1CD…" Click="ExtractOneC_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Margin="0,0,8,8" ToolTip="Извлечь файловую базу из проверенного ZIP в новую папку" />
+        <Button x:Name="RestoreFilesButton" Content="Восстановить файлы…" Click="RestoreFiles_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Margin="0,0,8,8" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="ExportCopyButton" Content="Сохранить копию…" Click="ExportCopy_Click" IsEnabled="False" Margin="0,0,8,8" ToolTipService.ShowOnDisabled="True" />
-        <Button x:Name="ExtractOneCButton" Content="Извлечь 1Cv8.1CD" Click="ExtractOneC_Click" IsEnabled="False" Margin="0,0,8,8" ToolTip="Извлечь файловую базу из проверенного ZIP в новую папку. Доступно для локальных и сетевых копий." />
-        <Button x:Name="RestoreFilesButton" Content="Восстановить файлы…" Click="RestoreFiles_Click" IsEnabled="False" Visibility="Collapsed" Margin="0,0,8,8" ToolTip="Восстановить выбранную полную или инкрементную копию в новую папку. Нужна вся цепочка в этом хранилище." />
         <Button x:Name="CancelCopyVerificationButton" Content="Отменить операцию" Click="CancelCopyVerification_Click" IsEnabled="False" Margin="0,0,8,8" />
         <Button x:Name="OpenCopyDirectoryButton" Content="Открыть папку" Click="OpenCopyDirectory_Click" IsEnabled="False" Margin="0,0,0,8" />
        </WrapPanel>
@@ -605,6 +609,7 @@
         </StackPanel>
        </Border>
        <TextBlock x:Name="SelectedCopyPath" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,4" />
+       <TextBlock x:Name="CopyRestoreReadiness" Visibility="Collapsed" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,4" />
        <TextBlock x:Name="CopyVerificationStatus" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}">
         <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed" /></Trigger></Style.Triggers></Style></TextBlock.Style>
        </TextBlock>

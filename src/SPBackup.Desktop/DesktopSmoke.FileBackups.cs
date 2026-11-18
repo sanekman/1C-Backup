@@ -8,7 +8,7 @@ namespace SPBackup.Desktop;
 
 internal static partial class DesktopSmoke
 {
-    private static async Task VerifyFileBackupsAsync(MainWindow window, Action<string> screenshot)
+    private static async Task VerifyFileBackupsAsync(MainWindow window, Action<string> screenshot, Action<string, Window> screenshotDialog)
     {
         T Control<T>(string name) where T : FrameworkElement => (T)window.FindName(name);
         void Click(string name)
@@ -136,6 +136,11 @@ internal static partial class DesktopSmoke
         var beforeCatalog = JsonSerializer.Serialize(await catalog.ReadAsync()); var beforeHistory = JsonSerializer.Serialize(await history.ReadAsync());
         Click("CopiesNavigation"); await WaitUntil(() => window.SmokeReady, "Каталог файловых копий не загрузился.");
         Control<ComboBox>("CopyJobFilter").SelectedValue = job.Id;
+        var localDate = latest.CompletedUtc.ToLocalTime().Date;
+        Control<DatePicker>("CopyDateFilter").SelectedDate = localDate.AddDays(1);
+        if (Control<DataGrid>("Copies").Items.Count != 0)
+            throw new InvalidOperationException("Фильтр даты показал копии за другой день.");
+        Control<DatePicker>("CopyDateFilter").SelectedDate = localDate;
         Control<DataGrid>("Copies").SelectedItem = Control<DataGrid>("Copies").Items.OfType<BackupCopyRow>().Single(row => row.Record.Id == latest.Id);
         await WaitUntil(() => window.SmokeReady && Control<Button>("RestoreFilesButton").IsEnabled, "Копии не готовы к проверке и восстановлению после обновления состояния агента.");
         window.UpdateLayout();
@@ -146,6 +151,7 @@ internal static partial class DesktopSmoke
             || !Control<Button>("ExportCopyButton").Content.ToString()!.Contains("этот архив"))
             throw new InvalidOperationException("Каталог не объясняет зависимость инкремента от цепочки.");
         screenshot("files-incremental-catalog-compact");
+        Control<DatePicker>("CopyDateFilter").SelectedDate = null;
         Click("VerifyCopyButton"); await WaitUntil(() => window.SmokeReady, "Проверка файловой цепочки не завершилась.");
         if (!Control<TextBlock>("CopyVerificationStatus").Text.Contains("Файловая цепочка проверена: архивов 2"))
             throw new InvalidOperationException("Ручная проверка не проверила всю файловую цепочку.");
@@ -162,6 +168,28 @@ internal static partial class DesktopSmoke
         }
         finally { window.CopyExportDialogOverride = null; }
         var parent = Path.Combine(fixture, "ordinary-restores"); Directory.CreateDirectory(parent);
+        var missing = first.Backup.Location + ".unavailable";
+        File.Move(first.Backup.Location, missing);
+        var dialogOpened = false;
+        window.CopyRestoreDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(() =>
+        {
+            dialogOpened = true;
+            dialog.DialogResult = false;
+        });
+        try
+        {
+            Click("RestoreFilesButton");
+            await WaitUntil(() => dialogOpened || Control<TextBlock>("CopyVerificationStatus").Text.Contains("Не найден архив"),
+                "Проверка наличия полной основы не завершилась.");
+            if (dialogOpened || !Control<TextBlock>("CopyVerificationStatus").Text.Contains(first.Backup.Location)
+                || Directory.GetFileSystemEntries(parent).Length != 0)
+                throw new InvalidOperationException("Восстановление начато без полной основы.");
+        }
+        finally
+        {
+            window.CopyRestoreDialogOpened = null;
+            File.Move(missing, first.Backup.Location);
+        }
         var restoreProgress = new List<FileRestoreProgress>();
         var progressCaptured = false;
         window.FileRestoreProgressObserved = value =>
@@ -170,8 +198,31 @@ internal static partial class DesktopSmoke
             if (!progressCaptured && value.Phase == FileRestorePhase.VerifyingFiles)
             { progressCaptured = true; screenshot("files-restore-progress-compact"); }
         };
-        try { await window.RestoreSelectedFilesAsync(parent); }
-        finally { window.FileRestoreProgressObserved = null; }
+        window.CopyRestoreDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(() =>
+        {
+            var restore = (Button)dialog.FindName("RestoreButton");
+            if (restore.IsEnabled || !((TextBlock)dialog.FindName("ChainStatus")).Text.Contains("(2)")
+                || !((TextBlock)dialog.FindName("PasswordHint")).Text.Contains("не требуется"))
+                throw new InvalidOperationException("Окно восстановления не показывает состояние цепочки или требует лишний пароль.");
+            dialog.PickFolderOverride = picker => { picker.FolderName = parent; return true; };
+            ((Button)dialog.FindName("PickFolderButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            if (!restore.IsEnabled || ((TextBox)dialog.FindName("TargetFolder")).Text != parent)
+                throw new InvalidOperationException("Папка восстановления не видна до подтверждения.");
+            dialog.UpdateLayout();
+            screenshotDialog("files-restore-confirm", dialog);
+            restore.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        });
+        try
+        {
+            Click("RestoreFilesButton");
+            await WaitUntil(() => window.SmokeReady && Control<TextBlock>("CopyVerificationStatus").Text.StartsWith("Восстановлено файлов"),
+                "Восстановление через диалог не завершилось.");
+        }
+        finally
+        {
+            window.FileRestoreProgressObserved = null;
+            window.CopyRestoreDialogOpened = null;
+        }
         if (!Control<TextBlock>("CopyVerificationStatus").Text.Contains("Восстановлено файлов: 3; архивов в цепочке: 2"))
             throw new InvalidOperationException(Control<TextBlock>("CopyVerificationStatus").Text);
         if (!restoreProgress.Any(value => value.Phase == FileRestorePhase.TransferringArchive)

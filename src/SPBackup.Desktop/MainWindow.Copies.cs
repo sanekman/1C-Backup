@@ -53,16 +53,21 @@ public partial class MainWindow
         finally { updatingCopyFilters = false; }
     }
 
+    private void CopyDateValidationError(object sender, DatePickerDateValidationErrorEventArgs e)
+        => Status.Text = "Укажите дату в формате Windows или выберите её в календаре.";
+
     private void CopyFilter_Changed(object sender, RoutedEventArgs e) => ApplyCopyFilter();
 
     private void ApplyCopyFilter()
     {
         if (updatingCopyFilters || Copies is null || CopySearch is null || CopyJobFilter is null
-            || CopyStorageFilter is null || CopiesSummary is null || Copies.ItemsSource is null) return;
+            || CopyStorageFilter is null || CopyDateFilter is null || CopiesSummary is null || Copies.ItemsSource is null) return;
         var jobId = (CopyJobFilter.SelectedItem as CopyJobChoice)?.Id;
         var storage = (CopyStorageFilter.SelectedItem as ComboBoxItem)?.Tag as string;
         var query = CopySearch.Text.Trim();
+        var date = CopyDateFilter.SelectedDate;
         bool Matches(BackupCopyRow row) => (jobId is null || row.Record.JobId == jobId)
+            && (date is null || row.CompletedUtc.ToLocalTime().Date == date.Value.Date)
             && (string.IsNullOrEmpty(storage) || row.StorageCategory == storage)
             && (query.Length == 0 || row.JobName.Contains(query, StringComparison.OrdinalIgnoreCase)
                 || row.DisplayLocation.Contains(query, StringComparison.OrdinalIgnoreCase)
@@ -83,12 +88,14 @@ public partial class MainWindow
     {
         CopyJobFilter.SelectedIndex = 0;
         CopyStorageFilter.SelectedIndex = 0;
+        CopyDateFilter.SelectedDate = null;
         CopySearch.Clear();
     }
 
     private void SelectCopiesForJob(Guid jobId)
     {
         CopyStorageFilter.SelectedIndex = 0;
+        CopyDateFilter.SelectedDate = null;
         CopySearch.Clear();
         CopyJobFilter.SelectedItem = CopyJobFilter.Items.OfType<CopyJobChoice>().FirstOrDefault(choice => choice.Id == jobId);
         ApplyCopyFilter();
