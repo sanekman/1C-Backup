@@ -101,6 +101,13 @@ Proxmox прошли [полный выпускной прогон](https://gith
 текущий прогресс, завершённый запуск, две темы и компактное окно.
 
 На изменении `1ac1bcb` локально прошёл 181 интеграционный тест с PostgreSQL
-и 15 браузерных проверок в Chromium. Для выпуска preview.13 запущен полный
+и 15 браузерных проверок в Chromium. Для выпуска preview.13 прошёл полный
 профиль Windows, Linux и Proxmox.
 [Выпускной прогон](https://github.com/sanekman/1C-Backup/actions/runs/44260214222).
+
+
+Опубликован [Server preview.13](https://github.com/sanekman/1C-Backup/releases/tag/server-v0.1.0-preview.13).
+Размер и SHA-256 трёх публичных пакетов совпадают с манифестом. Версия
+Linux-архива для CT 107 — 0.1.0-preview.13. Приёмка рабочего CT выполняется
+пользователем через «Настройки → Обновление сервера».
+[Публичный манифест](https://github.com/sanekman/1C-Backup/blob/distribution/server-0.1.0-preview.13/server-release.json).

@@ -17,10 +17,10 @@
 
 - Рабочая ветка: `feature/local-backup-agent`. PR №2 остаётся черновиком.
 - Последние опубликованные версии по сохранённым отчётам: Windows
-  **v0.2.0-alpha.39**, Server **v0.1.0-preview.12**.
+  **v0.2.0-alpha.39**, Server **v0.1.0-preview.13**.
   [Публикация alpha.39](windows-agent-ui-plan.md#публикация-alpha39).
   [Предыдущий отчёт alpha.35](windows-alpha35-publication.md).
-  [Публикация Server preview.12](server-agent-ui-plan.md#публикация-preview12).
+  [Публикация Server preview.13](server-agent-ui-plan.md#двухпанельный-dashboard).
   [Приёмка кнопки на CT 107 при переходе на preview.11](server-preview11-publication.md).
 - Этапы **1–3 завершены**; **5 завершён для поддерживаемых файловых серверных
   планов**, **6 завершён для штатной Windows-установки**.
