@@ -19,6 +19,7 @@ public sealed class WindowsSqlServerCredentialStore : ISqlServerCredentialStore
         catch (InvalidOperationException error)
         { throw new InvalidOperationException("Не удалось прочитать сохранённые данные входа MS SQL. Откройте задание или источник мониторинга в программе владельца, задайте логин и пароль заново и сохраните настройки.", error); }
     }
+    public string? TryReadUsername(string? key) => store.TryReadUsername(key);
     public void Save(string key, string username, string password)
     {
         if (string.IsNullOrWhiteSpace(username) || username.Length > 128 || username.Any(char.IsControl))

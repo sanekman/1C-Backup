@@ -43,7 +43,10 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Мастер пропустил SQL-логин без сохранённых учётных данных.");
             window.SqlCredentialsDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(() =>
             {
-                key = ((TextBlock)dialog.FindName("BindingName")).Text.Split(':', 2)[1].Trim();
+                key = dialog.CredentialKey;
+                if (!((TextBlock)dialog.FindName("BindingName")).Text.Contains("sql.example")
+                    || (string)((Button)dialog.FindName("CredentialSaveButton")).Content != "Применить к черновику")
+                    throw new InvalidOperationException("SQL-диалог не показывает сервер и применение к черновику.");
                 ((TextBox)dialog.FindName("Username")).Text = "fixture-backup-user";
                 ((PasswordBox)dialog.FindName("Password")).Password = secret;
                 ((Button)dialog.FindName("CredentialSaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -71,6 +74,22 @@ internal static partial class DesktopSmoke
             if (Control<ComboBox>("SqlAuthenticationPicker").SelectedValue is not SqlServerAuthentication.SqlServer
                 || !Control<TextBlock>("SqlCredentialStatus").Text.Contains("сохранены"))
                 throw new InvalidOperationException("Редактор не восстановил сохранённый способ входа SQL.");
+            window.SqlCredentialsDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(() =>
+            {
+                if (((TextBox)dialog.FindName("Username")).Text != "fixture-backup-user"
+                    || ((PasswordBox)dialog.FindName("Password")).Password.Length != 0)
+                    throw new InvalidOperationException("При замене SQL-пароля не восстановлен логин или раскрыт пароль.");
+                dialog.DialogResult = false;
+            });
+            Click("SqlCredentialsButton");
+            if (window.HasUnsavedJob) throw new InvalidOperationException("Отмена SQL-диалога изменила задание.");
+            Control<TextBox>("SqlBackupServer").Text = "other-sql.example";
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WizardError").IsVisible || !Control<TextBlock>("SqlCredentialStatus").Text.Contains("нового сервера"))
+                throw new InvalidOperationException("Сохранённый SQL-доступ предложен для другого сервера.");
+            Control<TextBox>("SqlBackupServer").Text = "sql.example";
+            if (!Control<TextBlock>("SqlCredentialStatus").Text.Contains("fixture-backup-user") || window.HasUnsavedJob)
+                throw new InvalidOperationException("Возврат к исходному серверу не восстановил доступ.");
             Click("CancelEditorButton");
             await BackupJobTransfer.ExportAsync(job, export);
             async Task Import(string path)

@@ -9,18 +9,24 @@ public partial class FtpCredentialsWindow : Window
     private readonly string key;
     internal string CredentialKey => key;
     private readonly Action<string, string, string> save;
-    private bool storageDraft;
+    private bool jobDraft;
     public FtpCredentialsWindow(string key, WindowsFtpCredentialStore store)
         : this(key, store.Save, "Логин и пароль FTP")
     {
     }
 
     internal void DescribeStorageDraft(string address, string? username)
+        => DescribeJobDraft(address, username, "Логин",
+            "Пароль хранится в Windows. Новый доступ применяется после сохранения задания. Затем проверьте хранилище.");
+
+    internal void DescribeJobDraft(string address, string? username, string loginLabel, string explanation)
     {
-        storageDraft = true;
+        jobDraft = true;
         BindingName.Text = address;
         Username.Text = username ?? "";
-        CredentialExplanation.Text = "Пароль хранится в Windows. Новый доступ применяется после сохранения задания. Затем проверьте хранилище.";
+        UsernameLabel.Text = loginLabel;
+        System.Windows.Automation.AutomationProperties.SetName(Username, loginLabel);
+        CredentialExplanation.Text = explanation;
         EmptyPassword.Visibility = Visibility.Visible;
         CredentialSaveButton.Content = "Применить к черновику";
         Loaded += (_, _) => { if (!string.IsNullOrEmpty(Username.Text)) Password.Focus(); };
@@ -37,7 +43,7 @@ public partial class FtpCredentialsWindow : Window
         try
         {
             var password = Password.Password;
-            if (storageDraft)
+            if (jobDraft)
             {
                 var useEmptyPassword = EmptyPassword.IsChecked == true;
                 if (password.Length == 0 && !useEmptyPassword)

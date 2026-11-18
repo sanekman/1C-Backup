@@ -43,8 +43,10 @@ public partial class MainWindow
                 report = await Task.Run(() => checker.CheckAsync(job, cancellation.Token));
             }
             readinessOutcome = report.Cancelled ? ReadinessOutcome.Cancelled : report.Succeeded ? ReadinessOutcome.Success : ReadinessOutcome.Failed;
-            StorageCheckResults.Header = report.Cancelled ? "Проверка источника отменена: " + job.Name
-                : report.Succeeded ? "Источник доступен: " + job.Name : "Источник не прошёл проверку: " + job.Name;
+            var verifiedSource = report.Succeeded && job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.PlatformDump
+                ? "Папка и параметры выгрузки DT проверены" : "Источник доступен";
+            StorageCheckResults.Header = (report.Cancelled ? "Проверка источника отменена"
+                : report.Succeeded ? verifiedSource : "Источник не прошёл проверку") + ": " + job.Name;
             StorageCheckDetails.Text = "Задание: " + job.Name + "\nИсточник: " + job.Source
                 + (throughAgent ? "\nПроверка через агента. Пользователь исполнителя: " : "\nПроверка из окна программы. Пользователь: ") + (report.ExecutionIdentity?.Account ?? "не определён")
                 + "\n" + ReadinessTime(report.StartedUtc, report.FinishedUtc)

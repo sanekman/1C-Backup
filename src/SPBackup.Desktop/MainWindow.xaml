@@ -313,7 +313,7 @@
    </StackPanel>
    <StackPanel x:Name="SqlBackupPanel" Visibility="Collapsed">
     <TextBlock Text="Подключение к MS SQL" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,10" />
-    <TextBlock Text="Адрес сервера или имя экземпляра" /><TextBox x:Name="SqlBackupServer" Margin="0,4,0,10" />
+    <TextBlock Text="Адрес сервера или имя экземпляра" /><TextBox x:Name="SqlBackupServer" TextChanged="SqlServer_Changed" Margin="0,4,0,10" />
     <Expander Header="Как указать сервер и имя базы?" Margin="0,0,0,12"><StackPanel Margin="12,8,0,0">
      <TextBlock Text="Укажите адрес, который используете в SQL Server Management Studio (SSMS):" TextWrapping="Wrap" />
      <TextBlock Text="• SQL-SERVER — обычный экземпляр на другом компьютере;&#xA;• SQL-SERVER\SQLEXPRESS — именованный экземпляр;&#xA;• 192.168.1.10,1433 — IP-адрес и порт через запятую;&#xA;• localhost — MS SQL на компьютере агента." TextWrapping="Wrap" Margin="0,8,0,8" />

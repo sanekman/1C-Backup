@@ -52,9 +52,22 @@ internal static partial class DesktopSmoke
             Require(cache.Read("OneCInfobase",key!)?.Password==secret,"Сохранение нового задания не подготовило пароль ИБ для настроенной службы.");
             Require(!(await File.ReadAllTextAsync(path+".protected.json")).Contains(secret),"Пароль ИБ попал в JSON.");
             Click("EditJobButton");Require(Control<TextBlock>("OneCCredentialStatus").Text.Contains("ib-admin"),"Вход ИБ потерян после открытия задания.");
+            window.OneCCredentialsDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(() =>
+            {
+                Require(((TextBlock)dialog.FindName("BindingName")).Text.Contains(root)
+                    && ((TextBox)dialog.FindName("Username")).Text == "ib-admin"
+                    && ((PasswordBox)dialog.FindName("Password")).Password.Length == 0,
+                    "Диалог 1С не показывает исходную базу и пользователя с пустым полем пароля.");
+                dialog.DialogResult = false;
+            });
+            Click("OneCCredentialsButton");
+            Require(!window.HasUnsavedJob, "Отмена диалога 1С изменила реквизиты задания.");
             Control<TextBox>("Source").Text=Path.Combine(root,"different-base");
             Require(Control<TextBlock>("OneCCredentialStatus").Text.Contains("заново"),"Пароль прежней базы повторно использован для другого источника.");
             Click("NextStepButton");Require(Control<TextBlock>("WizardError").IsVisible,"Изменённая привязка ИБ сохранена без нового пароля.");
+            Control<TextBox>("Source").Text = root;
+            Require(Control<TextBlock>("OneCCredentialStatus").Text.Contains("ib-admin") && !window.HasUnsavedJob,
+                "Возврат к прежней базе 1С потерял исходный доступ.");
             Click("CancelEditorButton");
         }
         finally { WindowsFtpCredentialStore.SetServiceCache(null);window.OneCCredentialsDialogOpened=null;if(key is not null)store.Delete(key);Directory.Delete(root,true); }

@@ -308,6 +308,10 @@ public partial class MainWindow
             }
             if (Kind.SelectedItem is DatabaseKind.OneCFile && OneCMethodPicker.SelectedValue is OneCBackupMethod.PlatformDump)
             {
+                if (!Path.IsPathFullyQualified(Source.Text.Trim()))
+                    return RejectWizard("Укажите полный путь к базе 1С.", 0, Source);
+                if (oneCUsername is not null && OneCCredentialForSource is null)
+                    return RejectWizard("Задайте пользователя и пароль для этой базы 1С заново.", 0, OneCCredentialsButton);
                 if (AutoOneCPlatform.IsChecked != true && string.IsNullOrWhiteSpace(OneCExecutable.Text)) return RejectWizard("Для выгрузки .dt выберите программу 1С (1cv8.exe). Для ZIP файла базы платформа не нужна.", 0, OneCExecutable);
                 if (!int.TryParse(OneCTimeout.Text, out var timeout)) return RejectWizard("Время ожидания должно быть целым числом минут.", 0, OneCTimeout);
                 var errors = ReadOneCSettings(timeout).Validate();
@@ -317,8 +321,10 @@ public partial class MainWindow
                 return RejectWizard("Укажите полный путь к базе, например D:\\Bases\\Accounting, или выберите папку кнопкой справа.", 0, Source);
             if (Kind.SelectedItem is DatabaseKind.SqlServer)
             {
+                if (string.IsNullOrWhiteSpace(SqlBackupServer.Text))
+                    return RejectWizard("Укажите сервер или экземпляр MS SQL.", 0, SqlBackupServer);
                 if (!int.TryParse(SqlBackupTimeout.Text, out var timeout)) return RejectWizard("Время ожидания должно быть целым числом минут.", 0, SqlBackupTimeout);
-                if (SelectedSqlAuthentication == SqlServerAuthentication.SqlServer && string.IsNullOrWhiteSpace(sqlCredentialKey))
+                if (SelectedSqlAuthentication == SqlServerAuthentication.SqlServer && string.IsNullOrWhiteSpace(SqlCredentialForServer))
                     return RejectWizard("Нажмите «Задать логин и пароль MS SQL…» и сохраните данные входа.", 0, SqlCredentialsButton);
                 var errors = ReadSqlSettings(timeout).Validate();
                 if (errors.Count != 0) return RejectWizard(string.Join(" ", errors), 0, SqlBackupServer);

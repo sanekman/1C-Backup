@@ -11,6 +11,7 @@ namespace SPBackup.Desktop;
 public partial class MainWindow
 {
     private bool serviceManaging;
+    private string? serviceExecutionAccount;
     private string ServiceExecutable => Path.Combine(AppContext.BaseDirectory, "SPBackup.Agent.exe");
     private WindowsAgentServiceInfo? OwnService()
     {
@@ -54,6 +55,7 @@ public partial class MainWindow
             automationService = info is null ? AutomationService.None : !owned ? AutomationService.OtherProfile
                 : info.State switch { 1 => AutomationService.Stopped, 2 => AutomationService.Starting, 3 => AutomationService.Stopping,
                     4 => AutomationService.Running, _ => AutomationService.Unavailable };
+            serviceExecutionAccount = owned ? info!.Account : null;
             ServiceStatus.Text = info is null ? "Служба не установлена." : owned ? "Служба: " + info.Description + " · " + info.Account
                 : "Служба установлена для другой папки программы или профиля.";
             if (info is null && !ApplicationUpdateHandoff.IsInstalled())
@@ -68,11 +70,13 @@ public partial class MainWindow
         catch (Exception error)
         {
             automationService = AutomationService.Unavailable;
+            serviceExecutionAccount = null;
             ServiceStatus.Text = error.Message;
             InstallServiceButton.IsEnabled = RemoveServiceButton.IsEnabled = false;
             StartServiceButton.IsEnabled = StopServiceButton.IsEnabled = false;
             StartServiceButton.Visibility = StopServiceButton.Visibility = Visibility.Collapsed;
         }
+        if (editorOpen && Kind.SelectedItem is DatabaseKind.SqlServer) UpdateSqlAuthenticationHelp();
     }
     private async void InstallService_Click(object sender, RoutedEventArgs e) => await ManageServiceAsync("install");
     private async void RemoveService_Click(object sender, RoutedEventArgs e) => await ManageServiceAsync("remove");
