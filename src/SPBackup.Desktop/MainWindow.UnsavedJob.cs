@@ -25,7 +25,7 @@ public partial class MainWindow
             ArchiveCopies.IsChecked, EncryptArchive.IsChecked, Enabled.IsChecked,
             Mon.IsChecked, Tue.IsChecked, Wed.IsChecked, Thu.IsChecked, Fri.IsChecked, Sat.IsChecked, Sun.IsChecked },
         ftpAccess, additionalDestinations, googleDriveSettings, googleDriveFolder, remoteGatewaySettings,
-        archivePasswordKey, webDavCredentialKey, sqlCredentialKey, sqlCredentialServer, postgreSqlCredentialKey, oneCCredentialKey, oneCUsername, oneCCredentialSource, networkShareSettings, NetworkUseCredentials.IsChecked
+        archivePasswordKey, webDavCredentialKey, webDavCredentialSource, sqlCredentialKey, sqlCredentialServer, postgreSqlAccess, oneCCredentialKey, oneCUsername, oneCCredentialSource, networkShareSettings, NetworkUseCredentials.IsChecked
     });
 
     private void RememberEditorDraft()

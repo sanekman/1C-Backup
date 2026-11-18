@@ -241,7 +241,7 @@ public partial class MainWindow : Window
             OneCMethod = oneCMethod,
             AllowOpenOneCDatabase = AllowOpenOneCDatabase.IsChecked == true,
             SqlServer = sql, PostgreSql = postgres,
-            WebDav = Kind.SelectedItem is DatabaseKind.WebDav ? new WebDavSettings { CredentialKey = webDavCredentialKey ?? "", TimeoutMinutes = int.TryParse(WebDavTimeout.Text, out var davTimeout) ? davTimeout : 120 } : null,
+            WebDav = Kind.SelectedItem is DatabaseKind.WebDav ? new WebDavSettings { CredentialKey = WebDavKeyForSource ?? "", TimeoutMinutes = int.TryParse(WebDavTimeout.Text, out var davTimeout) ? davTimeout : 120 } : null,
             Ftp = storageKind == StorageKind.Ftp ? new FtpSettings
             {
                 Host = FtpHost.Text.Trim(), Port = ftpPort, UseTls = FtpTls.IsChecked == true,
@@ -286,6 +286,11 @@ public partial class MainWindow : Window
             foreach (var key in updated.Where(job => job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.PlatformDump)
                 .Select(job => job.OneC?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal).Where(key => !knownOneCKeys.Contains(key)))
                 await new WindowsOneCCredentialStore().ExportForServiceAsync(key);
+            var knownDavKeys = jobs.Where(job => job.Kind == DatabaseKind.WebDav)
+                .Select(job => job.WebDav?.CredentialKey).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            foreach (var key in updated.Where(job => job.Kind == DatabaseKind.WebDav)
+                .Select(job => job.WebDav?.CredentialKey).OfType<string>().Distinct(StringComparer.Ordinal).Where(key => !knownDavKeys.Contains(key)))
+                await new WindowsWebDavCredentialStore().ExportForServiceAsync(key);
             var knownNetworkKeys = jobs.SelectMany(job => job.StorageJobs).Select(job => job.NetworkShare?.CredentialKey)
                 .OfType<string>().ToHashSet(StringComparer.Ordinal);
             foreach (var key in updated.SelectMany(job => job.StorageJobs).Select(job => job.NetworkShare?.CredentialKey)
@@ -406,11 +411,17 @@ public partial class MainWindow : Window
         PgUsername.Text = job.PostgreSql?.Username ?? "postgres";
         PgDumpPath.Text = job.PostgreSql?.PgDumpPath ?? ""; PgRestorePath.Text = job.PostgreSql?.PgRestorePath ?? "";
         PgTimeout.Text = (job.PostgreSql?.TimeoutMinutes ?? 120).ToString();
-        postgreSqlCredentialKey = job.PostgreSql?.CredentialKey;
-        PgAuthenticationPicker.SelectedIndex = postgreSqlCredentialKey is null ? 1 : 0; UpdatePostgreSqlCredentialStatus();
-        webDavCredentialKey = job.WebDav?.CredentialKey;
-        WebDavTimeout.Text = (job.WebDav?.TimeoutMinutes ?? 120).ToString(); UpdateWebDavCredentialStatus();
+        postgreSqlAccess = job.PostgreSql;
+        postgreSqlAccessEdited = false;
+        PgAuthenticationPicker.SelectedIndex = postgreSqlAccess?.CredentialKey is null ? 1 : 0;
+        UpdatePostgreSqlCredentialStatus();
+        webDavCredentialKey = string.IsNullOrWhiteSpace(job.WebDav?.CredentialKey) ? null : job.WebDav.CredentialKey;
+        webDavCredentialSource = job.WebDav is not null ? WebDavAddress(job.Source) : null;
+        webDavUsername = new WindowsWebDavCredentialStore().TryReadUsername(webDavCredentialKey);
+        webDavAccessEdited = false;
+        WebDavTimeout.Text = (job.WebDav?.TimeoutMinutes ?? 120).ToString();
         JobName.Text = job.Name; Kind.SelectedItem = job.Kind; Source.Text = job.Source;
+        UpdateWebDavCredentialStatus();
         oneCCredentialKey = job.OneC?.CredentialKey;
         oneCUsername = job.OneC?.Username;
         oneCCredentialSource = job.Source.Trim();
@@ -455,7 +466,9 @@ public partial class MainWindow : Window
         selectionBeforeEdit = Jobs.SelectedItem as BackupJob;
         JobSearch.Clear();
         Jobs.SelectedItem = null; editingId = null;
-        webDavCredentialKey = null; WebDavTimeout.Text = "120"; UpdateWebDavCredentialStatus();
+        webDavCredentialKey = webDavCredentialSource = webDavUsername = null;
+        webDavAccessEdited = false;
+        WebDavTimeout.Text = "120"; UpdateWebDavCredentialStatus();
         JobName.Clear(); Source.Clear(); Destination.Clear(); Kind.SelectedItem = DatabaseKind.OneCFile;
         TemporaryFolder.Clear();
         FileBackupModePicker.SelectedValue = FileBackupMode.Full; FullBackupDayPicker.SelectedValue = -1; FullBackupEvery.Text = "7";
@@ -477,7 +490,7 @@ public partial class MainWindow : Window
         UpdateSqlCredentialStatus();
         PgTlsRequired.IsChecked = false; PgTlsRootCertificate.Text = "";
         PgHost.Text = "localhost"; PgPort.Text = "5432"; PgUsername.Text = "postgres";
-        postgreSqlCredentialKey = null; PgAuthenticationPicker.SelectedIndex = 0; UpdatePostgreSqlCredentialStatus();
+        postgreSqlAccess = null; postgreSqlAccessEdited = false; PgAuthenticationPicker.SelectedIndex = 0; UpdatePostgreSqlCredentialStatus();
         ResetPostgreSqlTools(); PgDumpPath.Clear(); PgRestorePath.Clear(); PgTimeout.Text = "120";
         DailyAt.Text = "23:00"; KeepLast.Text = "7"; Enabled.IsChecked = true;
         archivePasswordKey = null; archivePasswordEdited = false; EncryptArchive.IsChecked = false;
@@ -574,8 +587,17 @@ public partial class MainWindow : Window
         PreviousStepButton.IsEnabled = ready && canSave && idle && wizardStep > 0;
         NextStepButton.IsEnabled = CancelEditorButton.IsEnabled = ready && canSave && idle;
         JobsSummary.Text = $"Всего: {jobs.Count + observationTasks.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}" + (observationTasks.Count == 0 ? "" : $" · Наблюдений: {observationTasks.Count}");
-        ManagedAccessMenuItem.IsEnabled = ready && agentSettings?.Mode == AgentMode.Managed && idle && engineAvailable
-            && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob { ManagedSecrets: not null };
+        var managedAccessJob = agentSettings?.Mode == AgentMode.Managed && scheduledJob?.ManagedSecrets is not null ? scheduledJob : null;
+        ManagedAccessButton.Visibility = managedAccessJob is null ? Visibility.Collapsed : Visibility.Visible;
+        ManagedAccessButton.IsEnabled = ready && idle && engineAvailable && automationService is not
+            (AutomationService.Starting or AutomationService.Running or AutomationService.Stopping)
+            && schedulingTask is null && !editorOpen && managedAccessJob is not null;
+        ManagedAccessButton.Content = managedAccessJob is not null && ManagedJobBindings.Ready(managedAccessJob)
+            ? "Изменить доступ…" : "Настроить доступ…";
+        ManagedAccessButton.ToolTip = !engineAvailable || schedulingTask is not null || automationService is
+            AutomationService.Starting or AutomationService.Running or AutomationService.Stopping
+            ? "Остановите агент или службу в «Фоновой работе», чтобы изменить доступ серверного задания."
+            : !idle ? "Дождитесь завершения текущей операции." : "Настроить локальный пароль ZIP и сетевой вход для выбранного задания.";
         UpdateManualRunControl();
         var canInspectLocally = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
         CheckStorageButton.IsEnabled = ready && idle && !editorOpen && Jobs.SelectedItem is BackupJob

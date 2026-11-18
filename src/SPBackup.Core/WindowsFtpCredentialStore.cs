@@ -13,7 +13,7 @@ public sealed class WindowsFtpCredentialStore : IFtpCredentialStore
 {
     private readonly string prefix;
     private readonly bool exportNewSecrets;
-    private string CredentialLabel => prefix switch { "SqlServer" => "MS SQL", "PostgreSQL" => "PostgreSQL", "OneCInfobase" => "пользователя ИБ 1С", "NetworkShare" => "сетевого хранилища", _ => "FTP" };
+    private string CredentialLabel => prefix switch { "WebDAV" => "WebDAV", "SqlServer" => "MS SQL", "PostgreSQL" => "PostgreSQL", "OneCInfobase" => "пользователя ИБ 1С", "NetworkShare" => "сетевого хранилища", _ => "FTP" };
     private static WindowsServiceCredentialCache? serviceCache;
     public static void SetServiceCache(WindowsServiceCredentialCache? cache) => serviceCache = cache;
     private bool HasServiceCache => (prefix is "FTP" or "Archive" or "WebDAV" or "GoogleDrive" or "Notifications" or "RemoteGateway" or "SqlServer" or "PostgreSQL" or "OneCInfobase" or "NetworkShare") && serviceCache is not null;

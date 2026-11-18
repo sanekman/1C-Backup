@@ -85,7 +85,8 @@
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
          <Menu Background="Transparent" VerticalAlignment="Center" Margin="0,0,8,0" IsMainMenu="False" ToolTip="Перенос настроек задания через файл">
           <MenuItem Header="Файл" Padding="8,6">
-           <MenuItem x:Name="ManagedAccessMenuItem" Header="Доступ серверного задания…" Click="ManagedAccess_Click" IsEnabled="False" />
+           <MenuItem Header="Доступ серверного задания…" Click="ManagedAccess_Click"
+            Visibility="{Binding Visibility, ElementName=ManagedAccessButton}" IsEnabled="{Binding IsEnabled, ElementName=ManagedAccessButton}" />
            <MenuItem x:Name="FirstRunGuideMenuItem" Header="Первый запуск задания…" Click="FirstRunGuide_Click" />
            <Separator />
            <MenuItem x:Name="ExportJobSettingsMenuItem" Header="Сохранить настройки выбранного задания…" Click="ExportJobSettings_Click" IsEnabled="False" />
@@ -108,6 +109,7 @@
        <Grid x:Name="JobActionsContainer"><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
        <WrapPanel Grid.Row="0" x:Name="JobActions" Margin="0,0,0,2">
         <Button x:Name="RunButton" Margin="0,0,8,6" Content="Создать копию" Style="{StaticResource PrimaryButton}" IsEnabled="False" Click="Run_Click" />
+        <Button x:Name="ManagedAccessButton" Content="Настроить доступ…" Click="ManagedAccess_Click" Visibility="Collapsed" IsEnabled="False" Margin="0,0,8,6" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="EditJobButton" Content="Изменить" Click="EditJob_Click" IsEnabled="False" Margin="0,0,8,6" />
         <Button x:Name="DuplicateJobButton" Content="На основе…" Click="DuplicateJob_Click" IsEnabled="False" Margin="0,0,8,6" ToolTip="Создать новое задание с настройками выбранного. Автоматические запуски новой копии задания отключены до проверки." />
         <Button x:Name="DeleteButton" Content="Удалить" Click="Delete_Click" IsEnabled="False" Margin="0,0,8,6" />

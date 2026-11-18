@@ -86,7 +86,7 @@ public partial class MainWindow
             await new AgentConfigurationCache(profile.CachePath).SaveAsync(new(managed.NormalizedServerAddress,
                 new(managed.AgentId, 12, [protectedJob]), DateTimeOffset.UtcNow));
             await LoadEffectiveJobsAsync(); Jobs.SelectedItem = jobs.Single(); UpdateRunControls();
-            Require(ManagedAccessMenuItem.IsEnabled && !ManagedJobBindings.Ready(jobs.Single()), "Managed access is not available for an unbound protected job.");
+            Require(ManagedAccessButton.IsVisible && ManagedAccessButton.IsEnabled && !ManagedJobBindings.Ready(jobs.Single()), "Managed access is not available for an unbound protected job.");
             ManagedAccessConfirmation = _ => true;
             ManagedArchiveDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(new Action(() =>
             {
@@ -95,6 +95,12 @@ public partial class MainWindow
             }));
             await ConfigureManagedAccessAsync();
             Require(ManagedJobBindings.Ready(jobs.Single()) && !string.IsNullOrEmpty(jobs.Single().ArchivePasswordKey), "Managed archive access was not bound locally.");
+            var savedPassword = jobs.Single().ArchivePasswordKey!;
+            ManagedArchiveDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(new Action(() => dialog.DialogResult = false));
+            await ConfigureManagedAccessAsync();
+            Require(jobs.Single().ArchivePasswordKey == savedPassword
+                && (await profile.Bindings.ResolveAsync(protectedJob)).ArchivePasswordKey == savedPassword,
+                "Cancelled access setup changed the saved server job binding.");
             var cachedText = await File.ReadAllTextAsync(profile.CachePath);
             Require(!cachedText.Contains(jobs.Single().ArchivePasswordKey!) && !cachedText.Contains("Managed UI temporary archive password"), "Local access leaked into the accepted server document.");
             ShowPage("jobs"); UpdateLayout(); screenshot("managed-local-access");

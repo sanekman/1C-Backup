@@ -91,8 +91,25 @@ internal static partial class DesktopSmoke
             Click("NextStepButton"); Click("NextStepButton"); Click("NextStepButton"); Click("SaveButton");
             await WaitUntil(() => window.SmokeReady && Control<Border>("JobListCard").IsVisible, "Возврат прежнего подключения не сохранился.");
             Click("EditJobButton");
-            Control<TextBox>("PgHost").Text = "other.example";
-            RequireNewPassword();
+            window.PostgreSqlCredentialsDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(() =>
+            {
+                Require(((TextBlock)dialog.FindName("BindingName")).Text.Contains("pg.example:5433")
+                    && (string)((Button)dialog.FindName("CredentialSaveButton")).Content == "Применить к черновику"
+                    && ((PasswordBox)dialog.FindName("Password")).Password.Length == 0,
+                    "Диалог PostgreSQL не показывает назначение, момент применения и пустое поле пароля.");
+                dialog.DialogResult = false;
+            });
+            Click("PgCredentialsButton");
+            Require(!window.HasUnsavedJob, "Отмена окна PostgreSQL изменила задание.");
+            foreach (var (field, original, changed) in new[] {
+                ("PgHost", "pg.example", "other.example"), ("PgPort", "5433", "5434"), ("PgUsername", "fixture-user", "other-user") })
+            {
+                Control<TextBox>(field).Text = changed;
+                RequireNewPassword();
+                Control<TextBox>(field).Text = original;
+                Require(!window.HasUnsavedJob && Control<TextBlock>("PgCredentialStatus").Text.Contains("сохранён"),
+                    "Возврат параметров PostgreSQL не восстановил пароль.");
+            }
             Click("CancelEditorButton");
             await BackupJobTransfer.ExportAsync(job, export);
             var json = await File.ReadAllTextAsync(export);

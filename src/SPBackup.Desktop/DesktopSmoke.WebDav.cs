@@ -1,4 +1,6 @@
 using System.IO;
+using System.Security.Principal;
+using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Controls;
 using SPBackup.Core;
@@ -17,6 +19,10 @@ internal static partial class DesktopSmoke
             button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); window.UpdateLayout();
         }
         var credentialStore = new WindowsWebDavCredentialStore(); string? credentialKey = null;
+        var fixture = Path.GetDirectoryName(DesktopPaths.DataDirectory)!;
+        var transfer = Path.Combine(fixture, "webdav-job-transfer.json");
+        var cache = new WindowsServiceCredentialCache(Path.Combine(fixture, "webdav-service-profile"), WindowsIdentity.GetCurrent().User!.Value);
+        WindowsFtpCredentialStore.SetServiceCache(cache);
         try
         {
             await WaitUntil(() => window.SmokeReady && Control<Button>("NewJobButton").IsEnabled, "Мастер WebDAV не готов.");
@@ -34,7 +40,7 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Мастер WebDAV пропустил сохранение учётных данных.");
             window.WebDavCredentialsDialogOpened = dialog =>
             {
-                credentialKey = ((TextBlock)dialog.FindName("BindingName")).Text.Split(':', 2)[1].Trim();
+                credentialKey = dialog.CredentialKey;
                 dialog.Dispatcher.BeginInvoke(() =>
                 {
                     ((TextBox)dialog.FindName("Username")).Text = "fixture-user";
@@ -43,6 +49,8 @@ internal static partial class DesktopSmoke
                 });
             };
             Click("WebDavCredentialsButton"); window.WebDavCredentialsDialogOpened = null;
+            if (cache.Read("WebDAV", credentialKey!) is not null)
+                throw new InvalidOperationException("Несохранённый WebDAV-доступ передан службе.");
             Control<ComboBox>("FileBackupModePicker").SelectedValue = FileBackupMode.Incremental;
             Control<TextBox>("FullBackupEvery").Text = "7";
             window.Width = 900; window.Height = 580; window.UpdateLayout();
@@ -55,7 +63,6 @@ internal static partial class DesktopSmoke
                     throw new InvalidOperationException("Настройка WebDAV не видна в компактном мастере: " + name);
             }
             screenshot("webdav-source-compact"); Click("NextStepButton");
-            var fixture = Path.GetDirectoryName(DesktopPaths.DataDirectory)!;
             Control<TextBox>("Destination").Text = Path.Combine(fixture, "dav-copies");
             Control<TextBox>("TemporaryFolder").Text = Path.Combine(fixture, "dav-HDD");
             Click("NextStepButton"); Control<CheckBox>("Enabled").IsChecked = false; Click("NextStepButton");
@@ -71,14 +78,52 @@ internal static partial class DesktopSmoke
             var credential = await credentialStore.GetAsync(credentialKey);
             if (credential.UserName != "fixture-user" || credential.Password != "fixture-webdav-app-password")
                 throw new InvalidOperationException("WebDAV не сохранил пароль в защищённом хранилище Windows.");
+            if (cache.Read("WebDAV", credentialKey)?.UserName != "fixture-user")
+                throw new InvalidOperationException("Сохранённый WebDAV-доступ не подготовлен для службы.");
             var json = await File.ReadAllTextAsync(Path.Combine(DesktopPaths.DataDirectory, "jobs.json"));
             if (json.Contains("fixture-webdav-app-password")) throw new InvalidOperationException("Пароль WebDAV попал в настройки.");
             Control<DataGrid>("Jobs").SelectedItem = Control<DataGrid>("Jobs").Items.OfType<BackupJob>().Single(item => item.Id == job.Id);
             Click("EditJobButton");
             if (!Control<TextBox>("Source").Text.StartsWith("https://") || !Control<TextBlock>("WebDavCredentialStatus").Text.Contains("сохранены"))
                 throw new InvalidOperationException("Редактирование потеряло настройки WebDAV.");
+            window.WebDavCredentialsDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(() =>
+            {
+                if (!((TextBlock)dialog.FindName("BindingName")).Text.Contains("https://dav.example/data/")
+                    || ((TextBox)dialog.FindName("Username")).Text != "fixture-user"
+                    || ((PasswordBox)dialog.FindName("Password")).Password.Length != 0)
+                    throw new InvalidOperationException("Редактор WebDAV не показывает адрес и известный логин с пустым полем пароля.");
+                dialog.DialogResult = false;
+            });
+            Click("WebDavCredentialsButton");
+            if (window.HasUnsavedJob) throw new InvalidOperationException("Отмена диалога WebDAV изменила реквизиты.");
+            Control<TextBox>("Source").Text = "https://dav.example/other/";
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WebDavCredentialStatus").Text.Contains("Адрес изменён") || !Control<TextBlock>("WizardError").IsVisible)
+                throw new InvalidOperationException("Мастер WebDAV принял прежний пароль для другой папки.");
+            Control<TextBox>("Source").Text = "https://dav.example/data/";
+            if (window.HasUnsavedJob || !Control<TextBlock>("WebDavCredentialStatus").Text.Contains("fixture-user"))
+                throw new InvalidOperationException("Возврат адреса WebDAV не восстановил привязку.");
+            Click("CancelEditorButton");
+
+            await BackupJobTransfer.ExportAsync(job, transfer);
+            var imported = JsonNode.Parse(await File.ReadAllTextAsync(transfer))!;
+            imported["Job"]!["Source"] = "https://other.example/data/";
+            await File.WriteAllTextAsync(transfer, imported.ToJsonString());
+            window.JobImportDialogOverride = dialog => { dialog.FileName = transfer; return true; };
+            Control<MenuItem>("ImportJobSettingsMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            await WaitUntil(() => window.SmokeReady && Control<Border>("EditorCard").IsVisible, "Импорт WebDAV не открыл мастер.");
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WizardError").IsVisible || !Control<TextBlock>("WizardError").Text.Contains("Логин и пароль"))
+                throw new InvalidOperationException("Импорт WebDAV принял сохранённый пароль для другого сервера.");
             Click("CancelEditorButton");
         }
-        finally { window.WebDavCredentialsDialogOpened = null; if (credentialKey is not null) credentialStore.Delete(credentialKey); }
+        finally
+        {
+            window.WebDavCredentialsDialogOpened = null;
+            window.JobImportDialogOverride = null;
+            if (credentialKey is not null) credentialStore.Delete(credentialKey);
+            WindowsFtpCredentialStore.SetServiceCache(null);
+            File.Delete(transfer);
+        }
     }
 }

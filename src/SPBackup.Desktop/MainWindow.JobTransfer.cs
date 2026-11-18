@@ -71,10 +71,18 @@ public partial class MainWindow
                 try { await new WindowsArchivePasswordStore().GetAsync(imported.ArchivePasswordKey); }
                 catch { passwordUnavailable = true; }
             }
-            if (imported.Kind == DatabaseKind.WebDav && imported.WebDav is not null)
+            if (imported.Kind == DatabaseKind.WebDav && imported.WebDav is { } dav)
             {
-                try { await new WindowsWebDavCredentialStore().GetAsync(imported.WebDav.CredentialKey); }
-                catch { imported = imported with { WebDav = imported.WebDav with { CredentialKey = "" } }; }
+                var address = WebDavAddress(imported.Source);
+                var known = address is not null && jobs.Any(local => local.Kind == DatabaseKind.WebDav
+                    && local.WebDav?.CredentialKey == dav.CredentialKey && WebDavAddress(local.Source) == address);
+                var available = false;
+                if (known)
+                {
+                    try { await new WindowsWebDavCredentialStore().GetAsync(dav.CredentialKey); available = true; }
+                    catch { /* The saved entry is unavailable on this computer. */ }
+                }
+                if (!available) imported = imported with { WebDav = dav with { CredentialKey = "" } };
             }
             if (imported.SqlServer is { Authentication: SqlServerAuthentication.SqlServer } sql)
             {

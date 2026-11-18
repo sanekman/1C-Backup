@@ -28,7 +28,9 @@ public sealed record WebDavSettings
 [SupportedOSPlatform("windows")]
 public sealed class WindowsWebDavCredentialStore : IFtpCredentialStore
 {
-    private readonly WindowsFtpCredentialStore store = new("WebDAV");
+    private readonly WindowsFtpCredentialStore store = new("WebDAV", exportNewSecrets: false);
+    public string? TryReadUsername(string? key) => store.TryReadUsername(key);
+    public Task ExportForServiceAsync(string key, CancellationToken token = default) => store.ExportForServiceAsync(key, token);
     public async Task<NetworkCredential> GetAsync(string key, CancellationToken cancellationToken = default)
     {
         try { return await store.GetAsync(key, cancellationToken); }

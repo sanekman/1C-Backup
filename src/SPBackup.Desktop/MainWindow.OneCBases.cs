@@ -58,6 +58,11 @@ public partial class MainWindow
     {
         if (Source is null || JobName is null) return;
         UpdateOneCCredentialStatus();
+        if (Kind?.SelectedItem is DatabaseKind.WebDav)
+        {
+            UpdateWebDavCredentialStatus();
+            EditorFieldChanged(sender, e);
+        }
         UpdateCopiedSourceName();
         if (changingOneCBasePicker || OneCPlatformVersion is null || OneCBasePicker?.SelectedItem is not OneCUserBase selected || selected.Directory.Length == 0) return;
         if (!Source.Text.Equals(selected.Directory, StringComparison.OrdinalIgnoreCase))

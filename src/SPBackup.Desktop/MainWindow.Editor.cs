@@ -299,7 +299,7 @@ public partial class MainWindow
             {
                 var errors = WebDavSettings.ValidateSource(Source.Text.Trim());
                 if (errors.Count != 0) return RejectWizard(string.Join(" ", errors), 0, Source);
-                if (string.IsNullOrEmpty(webDavCredentialKey)) return RejectWizard("Нажмите «Логин и пароль…» и сохраните подключение WebDAV.", 0, WebDavCredentialsButton);
+                if (WebDavKeyForSource is null) return RejectWizard("Нажмите «Логин и пароль…» и сохраните подключение WebDAV.", 0, WebDavCredentialsButton);
                 if (!int.TryParse(WebDavTimeout.Text, out var timeout) || timeout is < 1 or > 1440)
                     return RejectWizard("Время ожидания WebDAV: от 1 до 1440 минут.", 0, WebDavTimeout);
                 if (FileBackupModePicker.SelectedValue is FileBackupMode.Incremental && SelectedFullBackupDay is null
@@ -331,7 +331,13 @@ public partial class MainWindow
             }
             if (Kind.SelectedItem is DatabaseKind.PostgreSql)
             {
-                if (UseSavedPostgreSqlPassword && postgreSqlCredentialKey is null)
+                if (string.IsNullOrWhiteSpace(PgHost.Text))
+                    return RejectWizard("Укажите сервер PostgreSQL.", 0, PgHost);
+                if (!int.TryParse(PgPort.Text, out var port) || port is < 1 or > 65535)
+                    return RejectWizard("Порт PostgreSQL должен быть числом от 1 до 65535.", 0, PgPort);
+                if (string.IsNullOrWhiteSpace(PgUsername.Text))
+                    return RejectWizard("Укажите пользователя PostgreSQL.", 0, PgUsername);
+                if (UseSavedPostgreSqlPassword && PostgreSqlKeyFor(port) is null)
                     return RejectWizard("Нажмите «Задать пароль PostgreSQL…» и сохраните пароль выбранного пользователя.", 0, PgCredentialsButton);
                 if (string.IsNullOrWhiteSpace(PgDumpPath.Text) || string.IsNullOrWhiteSpace(PgRestorePath.Text))
                     return RejectWizard("Нажмите «Найти PostgreSQL на этом компьютере» или выберите pg_dump и pg_restore вручную.", 0, FindPostgreSqlToolsButton);
@@ -339,7 +345,6 @@ public partial class MainWindow
                     return RejectWizard("Выберите установленный pg_dump.exe или укажите полный путь к нему.", 0, PgDumpPath);
                 if (!Path.IsPathFullyQualified(PgRestorePath.Text.Trim()))
                     return RejectWizard("Выберите установленный pg_restore.exe или укажите полный путь к нему.", 0, PgRestorePath);
-                if (!int.TryParse(PgPort.Text, out var port)) return RejectWizard("Порт PostgreSQL должен быть числом от 1 до 65535.", 0, PgPort);
                 if (!int.TryParse(PgTimeout.Text, out var timeout)) return RejectWizard("Время ожидания должно быть целым числом минут.", 0, PgTimeout);
                 var settings = ReadPostgreSqlSettings(port, timeout);
                 var errors = (new BackupJob { Name = JobName.Text.Trim(), Source = Source.Text.Trim(), Kind = DatabaseKind.PostgreSql,
@@ -456,7 +461,8 @@ public partial class MainWindow
                 ? "Инкрементная · Полная: " + CultureInfo.GetCultureInfo("ru-RU").DateTimeFormat.GetDayName(day)
                     + "; при пропуске — при ближайшем запуске"
                 : $"Инкрементная · до {job.FullBackupEvery} архивов в цепочке";
-        SelectedJobSummary.Text = resultText + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
+        var accessHint = job.ManagedSecrets is not null && !ManagedJobBindings.Ready(job) ? "Требуется локальный доступ.\n" : "";
+        SelectedJobSummary.Text = accessHint + resultText + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
     }
 
     private async void ShowLatestCopy_Click(object sender, RoutedEventArgs e)

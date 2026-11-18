@@ -6,7 +6,12 @@ namespace SPBackup.Desktop;
 
 public partial class MainWindow
 {
-    private string? postgreSqlCredentialKey;
+    private PostgreSqlBackupSettings? postgreSqlAccess;
+    private bool postgreSqlAccessEdited;
+    private string? PostgreSqlKeyFor(int port) => postgreSqlAccess is { } access && access.Port == port
+        && string.Equals(access.Host.Trim(), PgHost.Text.Trim(), StringComparison.OrdinalIgnoreCase)
+        && string.Equals(access.Username.Trim(), PgUsername.Text.Trim(), StringComparison.Ordinal)
+        ? access.CredentialKey : null;
     internal Action<FtpCredentialsWindow>? PostgreSqlCredentialsDialogOpened { get; set; }
     private bool UseSavedPostgreSqlPassword => PgAuthenticationPicker.SelectedIndex == 0;
     private PostgreSqlBackupSettings ReadPostgreSqlSettings(int port, int timeout) => new()
@@ -15,7 +20,7 @@ public partial class MainWindow
         PgDumpPath = PgDumpPath.Text.Trim(), PgRestorePath = PgRestorePath.Text.Trim(), TimeoutMinutes = timeout,
         Tls = PgTlsRequired.IsChecked == true ? new PostgreSqlTlsSettings
         { RootCertificatePath = string.IsNullOrWhiteSpace(PgTlsRootCertificate.Text) ? null : PgTlsRootCertificate.Text.Trim() } : null,
-        CredentialKey = UseSavedPostgreSqlPassword ? postgreSqlCredentialKey : null
+        CredentialKey = UseSavedPostgreSqlPassword ? PostgreSqlKeyFor(port) : null
     };
     private void BrowsePostgreSqlCertificate_Click(object sender, RoutedEventArgs e)
     {
@@ -28,32 +33,47 @@ public partial class MainWindow
         PgCredentialsPanel.Visibility = UseSavedPostgreSqlPassword ? Visibility.Visible : Visibility.Collapsed;
         PgExternalAuthenticationHint.Visibility = UseSavedPostgreSqlPassword ? Visibility.Collapsed : Visibility.Visible;
         UpdatePostgreSqlCredentialStatus();
+        EditorFieldChanged(sender, e);
     }
     private void UpdatePostgreSqlCredentialStatus()
     {
-        PgCredentialStatus.Text = postgreSqlCredentialKey is null
-            ? "Пароль ещё не сохранён. Укажите пользователя и нажмите «Задать пароль»."
-            : "Пароль сохранён в Windows. Подключение проверяется отдельно после сохранения задания.";
+        if (PgCredentialStatus is null) return;
+        var key = int.TryParse(PgPort.Text, out var port) ? PostgreSqlKeyFor(port) : null;
+        PgCredentialsButton.Content = key is null ? "Задать пароль PostgreSQL…" : "Изменить пароль PostgreSQL…";
+        PgCredentialStatus.Text = key is not null
+            ? postgreSqlAccessEdited ? "Пароль изменён в черновике." : "Пароль сохранён. Подключение проверяется отдельно."
+            : postgreSqlAccess?.CredentialKey is not null ? "Подключение изменено. Задайте пароль для этого сервера и пользователя."
+            : "Пароль не задан.";
     }
+
     private void PgConnection_Changed(object sender, TextChangedEventArgs e)
     {
-        if (!editorOpen || postgreSqlCredentialKey is null) return;
-        postgreSqlCredentialKey = null;
         UpdatePostgreSqlCredentialStatus();
-        PgCredentialStatus.Text = "Подключение изменено. Задайте пароль для выбранного сервера и пользователя заново.";
+        EditorFieldChanged(sender, e);
     }
+
     private void PgCredentials_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(PgUsername.Text))
-        { RejectWizard("Сначала укажите пользователя PostgreSQL.", 0, PgUsername); return; }
+        var host = PgHost.Text.Trim();
+        var username = PgUsername.Text.Trim();
+        var hostError = host.Length == 0 ? "Укажите сервер PostgreSQL." : BackupSetupGuidance.DatabaseServerError(DatabaseKind.PostgreSql, host);
+        if (hostError is not null) { RejectWizard(hostError, 0, PgHost); return; }
+        if (!int.TryParse(PgPort.Text, out var port) || port is < 1 or > 65535)
+        { RejectWizard("Укажите порт PostgreSQL от 1 до 65535.", 0, PgPort); return; }
+        if (username.Length == 0) { RejectWizard("Укажите пользователя PostgreSQL.", 0, PgUsername); return; }
         var key = Guid.NewGuid().ToString("N");
         var dialog = new FtpCredentialsWindow(key, new WindowsPostgreSqlCredentialStore().Save, "Пароль PostgreSQL") { Owner = this };
-        ((TextBlock)dialog.FindName("BindingName")).Text = "Сервер: " + PgHost.Text.Trim() + ":" + PgPort.Text.Trim() + " · база: " + Source.Text.Trim();
-        var username = (TextBox)dialog.FindName("Username"); username.Text = PgUsername.Text.Trim(); username.IsReadOnly = true;
+        var address = host.Contains(':') ? $"[{host.Trim('[', ']')}]:{port}" : $"{host}:{port}";
+        dialog.DescribeJobDraft($"Сервер PostgreSQL: {address} · база: {Source.Text.Trim()}", username, "Пользователь PostgreSQL",
+            "Пароль применяется после сохранения задания. Затем нажмите «Проверить источник» от имени нужного исполнителя.");
+        ((TextBox)dialog.FindName("Username")).IsReadOnly = true;
         PostgreSqlCredentialsDialogOpened?.Invoke(dialog);
         if (dialog.ShowDialog() == true)
         {
-            postgreSqlCredentialKey = key; UpdatePostgreSqlCredentialStatus(); EditorFieldChanged(sender, e);
+            postgreSqlAccess = new() { Host = host, Port = port, Username = username, CredentialKey = key };
+            postgreSqlAccessEdited = true;
+            UpdatePostgreSqlCredentialStatus();
+            EditorFieldChanged(sender, e);
         }
     }
 }

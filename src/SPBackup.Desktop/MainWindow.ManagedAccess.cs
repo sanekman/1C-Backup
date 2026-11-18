@@ -9,9 +9,9 @@ public partial class MainWindow
     private async void ManagedAccess_Click(object sender, RoutedEventArgs e) => await ConfigureManagedAccessAsync();
     private async Task ConfigureManagedAccessAsync()
     {
-        if (agentSettings?.Mode != AgentMode.Managed || Jobs.SelectedItem is not BackupJob { ManagedSecrets: { } required } job
+        if (!ManagedAccessButton.IsEnabled || agentSettings?.Mode != AgentMode.Managed || Jobs.SelectedItem is not BackupJob { ManagedSecrets: { } required } job
             || !RequireConfigurationIdle()) return;
-        using var lease = AcquireEngineOrReport();
+        var lease = AcquireEngineOrReport();
         if (lease is null) return;
         var archive = new WindowsArchivePasswordStore();
         var network = new WindowsNetworkShareCredentialStore();
@@ -20,26 +20,46 @@ public partial class MainWindow
         var saved = false;
         try
         {
-            if (!(ManagedAccessConfirmation?.Invoke(job) ?? (MessageBox.Show(this, $"Задание: {job.Name}\nИсточник: {job.Source}\nХранилища:\n" + string.Join("\n", job.StorageJobs.Select(j => j.DestinationDirectory))
-                + "\n\nДоступ будет привязан к этим адресам. Пароли сохранятся в Windows и будут доступны настроенной службе SP Backup. Продолжить?",
-                "Доступ серверного задания", MessageBoxButton.OKCancel, MessageBoxImage.Information) == MessageBoxResult.OK))) return;
+            changingAgentConfiguration = true;
+            UpdateRunControls();
+            var requirements = required.NetworkDestinations.Select(index => "Логин и пароль NAS для " + job.StorageJobs[index].DestinationDirectory);
+            if (required.ArchivePassword) requirements = requirements.Prepend("Пароль ZIP для новых архивов");
+            var summary = $"Задание: {job.Name}\nИсточник: {job.Source}\n\n" + string.Join("\n", requirements)
+                + "\n\nДоступ хранится на этом компьютере и применяется после подтверждения всех окон.";
+            if (!(ManagedAccessConfirmation?.Invoke(job) ?? (MessageBox.Show(this, summary,
+                "Настроить доступ серверного задания", MessageBoxButton.OKCancel, MessageBoxImage.Information) == MessageBoxResult.OK)))
+            {
+                Status.Text = "Настройка доступа отменена.";
+                return;
+            }
             if (required.ArchivePassword)
             {
                 var dialog = new ArchivePasswordWindow { Owner = this };
+                dialog.Instructions.Text = $"Задание «{job.Name}». Пароль применяется к новым архивам после подтверждения всех окон. Ранее созданные архивы открываются со своими паролями.";
+                dialog.ApplyButton.Content = "Подтвердить пароль";
                 ManagedArchiveDialogOpened?.Invoke(dialog);
-                if (dialog.ShowDialog() != true) return;
+                if (dialog.ShowDialog() != true)
+                {
+                    Status.Text = "Настройка доступа отменена.";
+                    return;
+                }
                 passwordKey = dialog.NewKey;
             }
             foreach (var index in required.NetworkDestinations)
             {
                 var target = job.StorageJobs[index];
                 var key = "managed-smb-" + Guid.NewGuid().ToString("N");
-                var dialog = new FtpCredentialsWindow(key, network.Save, $"Сетевой вход — хранилище {index + 1}")
-                    { Owner = this, SizeToContent = SizeToContent.Height };
-                dialog.BindingName.Text = target.DestinationDirectory;
-                dialog.CredentialExplanation.Text = "Логин и пароль будут сохранены в Windows для этого задания и общей папки. Панель сервера их не получает.";
+                var dialog = new FtpCredentialsWindow(key, network.Save, $"Сетевой вход — хранилище {index + 1}") { Owner = this };
+                dialog.DescribeJobDraft("Папка копий: " + target.DestinationDirectory,
+                    network.TryReadUsername(target.NetworkShare?.CredentialKey), "Логин NAS",
+                    "Доступ сохранится на этом компьютере после подтверждения всех окон. Затем запустите исполнителя и проверьте хранилища.");
+                dialog.CredentialSaveButton.Content = "Подтвердить доступ";
                 NetworkShareCredentialsDialogOpened?.Invoke(dialog);
-                if (dialog.ShowDialog() != true) return;
+                if (dialog.ShowDialog() != true)
+                {
+                    Status.Text = "Настройка доступа отменена.";
+                    return;
+                }
                 keys.Add(index, key);
             }
             var profile = new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings);
@@ -52,9 +72,13 @@ public partial class MainWindow
             saved = true;
             await LoadEffectiveJobsAsync();
             Jobs.SelectedItem = jobs.FirstOrDefault(j => j.Id == job.Id);
-            Status.Text = "Доступ сохранён в Windows. Включите агент/службу и проверьте хранилища. Серверный план и прежние копии сохранены.";
+            Status.Text = "Локальный доступ сохранён. Включите агент или службу и нажмите «Проверить хранилища», чтобы проверить запись от имени исполнителя.";
         }
-        catch (Exception) { Status.Text = "Доступ не применён полностью. Проверьте настройки службы и повторите настройку доступа выбранного задания."; }
+        catch (Exception)
+        {
+            Status.Text = saved ? "Доступ сохранён. Обновите список заданий, чтобы увидеть результат."
+                : "Не удалось сохранить доступ. Проверьте настройки службы и повторите настройку выбранного задания.";
+        }
         finally
         {
             if (!saved)
@@ -62,6 +86,9 @@ public partial class MainWindow
                 if (passwordKey is not null) try { archive.Delete(passwordKey); } catch (Exception) { }
                 foreach (var key in keys.Values) try { network.Delete(key); } catch (Exception) { }
             }
+            changingAgentConfiguration = false;
+            lease.Dispose();
+            UpdateRunControls();
         }
     }
 }
