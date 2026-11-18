@@ -398,6 +398,8 @@ public partial class MainWindow
     }
 
 
+    private (Guid JobId, Guid? RunId, BackupRunStatus? Status) shownJobSummary;
+
     private void UpdateSelectedJobSummary()
     {
         if (SelectedJobSummary is null) return;
@@ -419,6 +421,12 @@ public partial class MainWindow
         if (Jobs.SelectedItem is ExternalBackupTask task) { SelectedJobSummary.Text = task.ResultDetails + (task.Enabled ? "\nАвтоматический опрос включён; должен работать агент или служба." : "\nАвтоматический опрос выключен."); return; }
         if (Jobs.SelectedItem is not BackupJob job) { SelectedJobSummary.Text = "Выберите задание, чтобы создать копию или изменить настройки."; return; }
         var latest = LatestJobRuns.Runs?.GetValueOrDefault(job.Id);
+        var summaryKey = (job.Id, latest?.RunId, latest?.Status);
+        if (summaryKey != shownJobSummary)
+        {
+            shownJobSummary = summaryKey;
+            JobActionsScroll.ScrollToTop();
+        }
         var running = activeJobId == job.Id || latest?.Status == BackupRunStatus.Running;
         JobProgress.Visibility = running && BackupProgressPanel.Visibility != Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
         DateTimeOffset? next;
@@ -471,7 +479,12 @@ public partial class MainWindow
                 : deliveredCopy.Backup!.Location);
         var failedDelivery = latest?.RunId != deliveredCopy?.RunId && latest?.Destinations is { Count: > 0 } latestTargets
             ? "\nПоследний запуск · " + string.Join(" · ", latestTargets.Select(DescribeDestination)) : "";
-        var summary = accessHint + resultText + availability + failedDelivery + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
+        var result = !running && latest is { Status: BackupRunStatus.PartiallySucceeded, Destinations: { } targets }
+            && latest.RunId == deliveredCopy?.RunId
+            ? $"Последняя доставка {(latest.FinishedUtc ?? latest.StartedUtc).ToLocalTime():dd.MM HH:mm} · в {targets.Count(target => target.Record is not null)} из {targets.Count} хранилищ\n"
+                + string.Join(" · ", targets.Select(DescribeDestination))
+            : resultText + availability + failedDelivery;
+        var summary = accessHint + result + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
         SelectedJobSummary.Text = summary;
         SelectedJobSummary.ToolTip = summary;
     }

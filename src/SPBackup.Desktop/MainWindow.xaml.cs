@@ -376,6 +376,7 @@ public partial class MainWindow : Window
     private void Jobs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (editorOpen) { UpdateRunControls(); return; }
+        JobActionsScroll?.ScrollToTop();
         UpdateReadinessReportVisibility();
         if (Jobs.SelectedItem is not BackupJob job) { UpdateRunControls(); return; }
         LoadJobEditor(job);
@@ -892,6 +893,7 @@ public partial class MainWindow : Window
     private void ShowPage(string page)
     {
         JobsView.Visibility = page == "jobs" ? Visibility.Visible : Visibility.Collapsed;
+        if (page == "jobs") JobActionsScroll.ScrollToTop();
         HistoryView.Visibility = page == "history" ? Visibility.Visible : Visibility.Collapsed;
         CopiesView.Visibility = page == "copies" ? Visibility.Visible : Visibility.Collapsed;
         AgentView.Visibility = page == "agent" ? Visibility.Visible : Visibility.Collapsed;

@@ -775,7 +775,17 @@ internal static partial class DesktopSmoke
             if (!deliverySummary.Contains("Последняя доставка") || !deliverySummary.Contains("— доставлено")
                 || !deliverySummary.Contains("доставка не подтверждена"))
                 throw new InvalidOperationException("В задании не различаются подтверждённая доставка и отказ хранилища.");
+            var originalJobsWidth = window.Width;
+            var originalJobsHeight = window.Height;
+            window.Width = 900;
+            window.Height = 580;
+            window.UpdateLayout();
+            await WaitUntil(() => Control<ScrollViewer>("JobActionsScroll").VerticalOffset < 1,
+                "После возврата из истории сводка доставки осталась за прокруткой.");
             Screenshot("jobs-compact-partial-delivery");
+            window.Width = originalJobsWidth;
+            window.Height = originalJobsHeight;
+            window.UpdateLayout();
             Click("RunButton");
             await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Copies").Items.Count == 5,
                 "Отдельное количество копий не применилось после третьей доставки.");

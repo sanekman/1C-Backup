@@ -39,7 +39,12 @@ public partial class MainWindow
         UpdateJobActionsLayout();
     }
 
-    private void JobDetailsExpansion_Changed(object sender, RoutedEventArgs e) => UpdateJobActionsLayout();
+    private void JobDetailsExpansion_Changed(object sender, RoutedEventArgs e)
+    {
+        UpdateJobActionsLayout();
+        if (e.OriginalSource is System.Windows.Controls.Expander { IsExpanded: false })
+            JobActionsScroll?.ScrollToTop();
+    }
 
     private void UpdateJobActionsLayout()
     {
