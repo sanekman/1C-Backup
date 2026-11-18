@@ -44,6 +44,26 @@ with sync_playwright() as pw:
     for theme in ['light', 'dark']:
         if page.locator('html').get_attribute('data-theme') != theme:
             page.locator('[data-theme-toggle]').click()
+        # An online agent must stay green even when the last run requires attention.
+        def color(element, token):
+            hex_color = page.locator('html').evaluate(
+                '(root, token) => getComputedStyle(root).getPropertyValue(token).trim()', token)
+            red, green, blue = bytes.fromhex(hex_color.lstrip('#'))
+            expect(element).to_have_css('color', f'rgb({red}, {green}, {blue})')
+
+        for name, reason, result, token in [
+            ('Цвет ошибки', 'Ошибки копирования', 'Ошибка копирования', '--bad-text'),
+            ('Цвет предупреждения', 'Предупреждения', 'Доставлено с предупреждениями · 1', '--pending-text'),
+            ('Цвет частичной доставки', 'Частичная доставка', 'Частичная доставка · 1 из 2', '--pending-text'),
+        ]:
+            colored_row = page.locator(f'[data-dashboard-row][data-agent-name="{name}"]')
+            color(colored_row.get_by_text('На связи', exact=True), '--good-text')
+            color(colored_row.get_by_text(reason, exact=True), token)
+            color(colored_row.get_by_text(result, exact=True), token)
+        offline_row = page.locator(f'[data-dashboard-row][data-agent-id="{a.agent}"]')
+        color(offline_row.get_by_text('Нет связи', exact=True), '--bad-text')
+        color(offline_row.get_by_text('Частичная доставка', exact=True), '--pending-text')
+        checks.append(f'dashboard-{theme}-connection-failure-and-warning-colors')
         for width, height in [(900, 580), (360, 800)]:
             page.set_viewport_size({'width': width, 'height': height})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')

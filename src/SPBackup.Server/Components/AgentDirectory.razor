@@ -43,8 +43,8 @@
                             data-attention="@(row.Reasons.Count != 0 ? "yes" : "no")" draggable="true"
                             class="@(row.Entry.Id == AgentId ? "dashboard-selected" : null)">
                             <td><a href="@($"?agent={row.Entry.Id}#agent-summary")">@row.Entry.Name</a><small>@FolderPath(row)</small></td>
-                            <td><strong class="dashboard-state @(row.Reasons.Count == 0 && row.Connection == "На связи" ? "dashboard-good" : "dashboard-warn")">@row.Connection</strong>
-                                @if (row.Status != row.Connection) { <small>@row.Status</small> }
+                            <td><strong class="@row.ConnectionColor">@row.Connection</strong>
+                                @if (row.PrimaryReason is { } reason) { <small class="@ProblemColor(reason.Code)">@ProblemText.Filters[reason.Code]</small> }
                                 else if (row.Entry.LastSeen is { } seen) { <small title="@Clock.Time(seen)">@Clock.Time(seen, "dd.MM HH:mm")</small> }
                             </td>
                             <td>
@@ -56,7 +56,7 @@
                             </td>
                             <td>
                                 @if (row.Entry.LatestRun is { } run)
-                                { <strong>@run.JobName</strong><small title="@Clock.Time(run.FinishedUtc)">@Delivery(run) · @Clock.Time(run.FinishedUtc, "dd.MM HH:mm")</small> }
+                                { <strong>@run.JobName</strong><small title="@Clock.Time(run.FinishedUtc)"><span class="@DeliveryColor(run)">@Delivery(run)</span> · @Clock.Time(run.FinishedUtc, "dd.MM HH:mm")</small> }
                                 else { <span class="muted">—</span> }
                             </td>
                             <td><button type="button" class="dashboard-text-button" data-agent-move aria-label="@($"Переместить {row.Entry.Name} в папку")" title="Переместить в папку">⇄</button></td>
@@ -75,14 +75,14 @@
             <p class="muted">@FolderPath(row)</p>
             <h2>@row.Entry.Name</h2>
             <dl>
-                <dt>Связь</dt><dd>@row.Connection</dd>
+                <dt>Связь</dt><dd class="@row.ConnectionColor">@row.Connection</dd>
                 <dt>Последняя связь</dt><dd>@Clock.Time(row.Entry.LastSeen)</dd>
                 <dt>Последний отчёт</dt><dd>@Clock.Time(row.Entry.Observed)</dd>
                 <dt>Доставка по отчёту</dt>
                 <dd>
                     @if (Latest is { } run)
                     {
-                        <span>@Delivery(run)</span>
+                        <span class="@DeliveryColor(run)">@Delivery(run)</span>
                         <small>@run.JobName · @Clock.Time(run.FinishedUtc)</small>
                         @if (HasCurrentJob)
                         { <a href="@($"agents/{row.Entry.Id}#job-{run.JobId}")">Открыть задание</a> }
@@ -97,7 +97,7 @@
                 <ul>
                     @foreach (var reason in row.Reasons)
                     {
-                        <li>@ProblemText.Filters[reason.Code] <span class="muted">(@reason.Count)</span></li>
+                        <li><span class="@ProblemColor(reason.Code)">@ProblemText.Filters[reason.Code]</span> <span class="muted">(@reason.Count)</span></li>
                     }
                 </ul>
                 <p><a href="@($"problems?agent={row.Entry.Id}")">Проблемы агента →</a></p>
@@ -105,7 +105,7 @@
             <h3>Недавние завершённые задания</h3>
             <ul class="dashboard-history">
                 @foreach (var completed in Recent)
-                { <li><strong>@completed.JobName</strong> · @Delivery(completed) · @Clock.Time(completed.FinishedUtc)</li> }
+                { <li><strong>@completed.JobName</strong> · <span class="@DeliveryColor(completed)">@Delivery(completed)</span> · @Clock.Time(completed.FinishedUtc)</li> }
             </ul>
             <p><a href="@($"agents/{row.Entry.Id}")">Карточка агента и вся история →</a></p>
         }
@@ -139,8 +139,9 @@
         public bool ContainsBranch(string key) => Key == key || Children.Any(child => child.ContainsBranch(key));
     }
 
-    public sealed record AgentRow(AgentTreeEntry Entry, string Connection, string Status, IReadOnlyList<AgentProblemCount> Reasons, MonitoredProgress? Current)
+    public sealed record AgentRow(AgentTreeEntry Entry, string Connection, string ConnectionColor, IReadOnlyList<AgentProblemCount> Reasons, MonitoredProgress? Current)
     {
+        public AgentProblemCount? PrimaryReason => Reasons.FirstOrDefault(reason => reason.Code != "Offline");
         public string CurrentJob { get; set; } = "Копирование";
     }
 
@@ -155,13 +156,14 @@
         {
             var reasons = problems.GetValueOrDefault(entry.Id)?.Reasons.OrderBy(reason => ProblemText.Priority(reason.Code))
                 .ThenBy(reason => reason.Code, StringComparer.Ordinal).ToArray() ?? [];
-            var connection = entry.Revoked ? "Доступ отозван" : entry.LastSeen is null ? "Ожидает первого сигнала"
-                : entry.LastSeen < cutoff ? "Нет связи" : "На связи";
-            var status = reasons.Length > 0 ? ProblemText.Filters[reasons[0].Code] : connection;
+            var (connection, color) = entry.Revoked ? ("Доступ отозван", "dashboard-error")
+                : entry.LastSeen is null ? ("Ожидает первого сигнала", "dashboard-warn")
+                : entry.LastSeen < cutoff ? ("Нет связи", "dashboard-error")
+                : ("На связи", "dashboard-good");
             var current = !entry.Revoked && entry.Observed >= cutoff && entry.Progress is { } progress
                 && (entry.LatestRun is not { } latest || latest.JobId != progress.JobId || latest.FinishedUtc < progress.UpdatedUtc)
                 ? progress : null;
-            return new AgentRow(entry, connection, status, reasons, current) { CurrentJob = entry.ProgressJob ?? "Копирование" };
+            return new AgentRow(entry, connection, color, reasons, current) { CurrentJob = entry.ProgressJob ?? "Копирование" };
         }).ToLookup(row => row.Entry.FolderId is { } id && folderIds.Contains(id) ? id : Guid.Empty);
         var children = Folders.ToLookup(folder => folder.ParentId ?? Guid.Empty);
         BranchNode Build(AgentFolderOption folder) => new(folder.Id.ToString(), folder.Name, folder.Id,
@@ -194,12 +196,26 @@
         return progress.Percent is { } percent ? $"{stage} · {percent}%" : stage;
     }
 
+    private static string ProblemColor(string code) => code switch
+    {
+        "Offline" or "Failed" or "PollFailed" or "AccessRequired" or "PlanRejected" or "ExecutorUnavailable" => "dashboard-error",
+        _ => "dashboard-warn"
+    };
+
+    private static string DeliveryColor(MonitoredRun run) => run.Status switch
+    {
+        "Failed" or "Interrupted" => "dashboard-error",
+        "Succeeded" when !run.Incomplete && run.WarningCount == 0 && run.Destinations.Any(destination => destination.Succeeded) => "dashboard-good",
+        _ => "dashboard-warn"
+    };
+
     private static string Delivery(MonitoredRun run)
     {
         var delivered = run.Destinations.Count(destination => destination.Succeeded);
         return run.Status switch
         {
             "Succeeded" when run.Incomplete => "Доставлено с пропусками",
+            "Succeeded" when run.WarningCount > 0 && delivered > 0 => $"Доставлено с предупреждениями · {delivered}",
             "Succeeded" when delivered > 0 => $"Доставлено в хранилища: {delivered}",
             "PartiallySucceeded" => $"Частичная доставка · {delivered} из {run.Destinations.Count}",
             "Cancelled" => "Копирование отменено",

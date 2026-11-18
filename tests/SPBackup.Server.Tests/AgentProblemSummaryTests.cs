@@ -66,6 +66,20 @@ public sealed class AgentProblemSummaryTests(ServerFixture fixture) : IClassFixt
         Assert.True(summary.ObservedUtc < DateTimeOffset.UtcNow.AddMinutes(-50));
         if (Environment.GetEnvironmentVariable("ONECBACKUP_OVERVIEW_BROWSER_OUTPUT") is { } output)
         {
+            foreach (var (name, status, warnings, destinations) in new (string, string, int, MonitoredDestination[])[]
+            {
+                ("Цвет ошибки", "Failed", 0, []),
+                ("Цвет предупреждения", "Succeeded", 1, [new(0, true, 10, false)]),
+                ("Цвет частичной доставки", "PartiallySucceeded", 0, [new(0, true, 10, false), new(1, false, 0, false)])
+            })
+            {
+                var agent = await fixture.EnrollAsync();
+                var job = new MonitoredJob(Guid.NewGuid(), name, "FilesAndFolders", true, "Daily", null, Math.Max(1, destinations.Length));
+                await fixture.Store.UpdateAgentIdentityAsync(admin.Id, agent.AgentId, new(name, null, null));
+                await fixture.Store.SaveMonitoringAsync(agent.AgentId, new(DateTimeOffset.UtcNow, "colors", [job], null, 0), default);
+                await fixture.Store.SaveRunAsync(agent.AgentId, new(Guid.NewGuid(), job.JobId, job.Name,
+                    DateTimeOffset.UtcNow.AddSeconds(-10), DateTimeOffset.UtcNow.AddSeconds(-1), status, warnings, false, null, destinations), default);
+            }
             var credentials = Path.Combine(fixture.Root, "browser-password.txt");
             await File.WriteAllTextAsync(credentials, fixture.Password);
             if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(credentials, UnixFileMode.UserRead | UnixFileMode.UserWrite);

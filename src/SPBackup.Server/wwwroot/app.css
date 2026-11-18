@@ -69,6 +69,7 @@ details[open]>.dashboard-folder::before{content:"−"}
 .dashboard-table tr:hover{background:var(--input)}
 .dashboard-good{color:var(--good-text)}
 .dashboard-warn{color:var(--pending-text)}
+.dashboard-error{color:var(--bad-text)}
 .dashboard-text-button{background:transparent;color:var(--link);padding:2px 6px}
 .dashboard-text-button:hover{background:var(--input)}
 .dashboard-table-scroll>p{padding:5px 12px}
