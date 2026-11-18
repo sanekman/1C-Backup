@@ -55,7 +55,7 @@ public partial class MainWindow
             // details temporarily receive more room, with primary actions still fixed.
             JobActionsContainer.MaxHeight = expanded
                 ? Math.Max(buttons + 100, Math.Min(viewHeight * 0.65, viewHeight - 150))
-                : Math.Max(buttons + 72, Math.Min(viewHeight * 0.44, viewHeight - 180));
+                : Math.Max(buttons + 32, Math.Min(viewHeight * 0.35, viewHeight - 210));
         }
         else JobActionsContainer.MaxHeight = Math.Max(buttons + 100, Math.Min(viewHeight * 0.55, viewHeight - 180));
     }

@@ -401,6 +401,7 @@ public partial class MainWindow
     private void UpdateSelectedJobSummary()
     {
         if (SelectedJobSummary is null) return;
+        SelectedJobSummary.ToolTip = null;
         JobProgress.Visibility = Visibility.Collapsed;
         System.Windows.Automation.AutomationProperties.SetName(JobProgress, checkingLatestCopies ? "Проверка последних копий" : checkingSource ? "Проверка источника" : checkingStorages ? "Проверка хранилищ" : "Создание резервной копии");
         if (checkingStorages)
@@ -470,11 +471,20 @@ public partial class MainWindow
                 : deliveredCopy.Backup!.Location);
         var failedDelivery = latest?.RunId != deliveredCopy?.RunId && latest?.Destinations is { Count: > 0 } latestTargets
             ? "\nПоследний запуск · " + string.Join(" · ", latestTargets.Select(DescribeDestination)) : "";
-        SelectedJobSummary.Text = accessHint + resultText + availability + failedDelivery + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
+        var summary = accessHint + resultText + availability + failedDelivery + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
+        SelectedJobSummary.Text = summary;
+        SelectedJobSummary.ToolTip = summary;
     }
 
     private static string DescribeDestination(DestinationResult result) =>
-        result.Destination + " — " + (result.Record is not null ? "доставлено" : "доставка не подтверждена");
+        ShortDestination(result.Destination) + " — " + (result.Record is not null ? "доставлено" : "доставка не подтверждена");
+
+    private static string ShortDestination(string destination)
+    {
+        if (destination.Length <= 38) return destination;
+        var end = destination.TrimEnd('/', '\\').Split('/', '\\').Last();
+        return end.Length is > 0 and <= 30 ? "…/" + end : destination[..17] + "…" + destination[^15..];
+    }
 
     private async void ShowLatestCopy_Click(object sender, RoutedEventArgs e)
     {
