@@ -1,4 +1,4 @@
-# SP Backup 0.2.0-alpha.37 — Windows x64
+# SP Backup 0.2.0-alpha.39 — Windows x64
 
 Предварительный выпуск без Authenticode-подписи. SDK **10.0.402**, встроенный runtime **10.0.13**.
 

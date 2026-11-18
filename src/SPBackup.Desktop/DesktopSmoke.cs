@@ -773,7 +773,7 @@ internal static partial class DesktopSmoke
             Click("OpenHistoryJobButton");
             var deliverySummary = Control<TextBlock>("SelectedJobSummary").Text;
             if (!deliverySummary.Contains("Последняя доставка") || !deliverySummary.Contains("— доставлено")
-                || !deliverySummary.Contains("доставка не подтверждена"))
+                || !deliverySummary.Contains("доставка не подтверждена") || deliverySummary.Contains(" · копий: "))
                 throw new InvalidOperationException("В задании не различаются подтверждённая доставка и отказ хранилища.");
             var originalJobsWidth = window.Width;
             var originalJobsHeight = window.Height;

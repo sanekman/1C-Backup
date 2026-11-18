@@ -494,9 +494,15 @@ public partial class MainWindow
 
     private static string ShortDestination(string destination)
     {
-        if (destination.Length <= 38) return destination;
+        const string inheritedRetention = " · как в основном хранилище";
+        var separator = destination.LastIndexOf(" · копий: ", StringComparison.Ordinal);
+        if (destination.EndsWith(inheritedRetention, StringComparison.Ordinal))
+            destination = destination[..^inheritedRetention.Length];
+        else if (separator >= 0)
+            destination = destination[..separator];
+        if (destination.Length <= 28) return destination;
         var end = destination.TrimEnd('/', '\\').Split('/', '\\').Last();
-        return end.Length is > 0 and <= 30 ? "…/" + end : destination[..17] + "…" + destination[^15..];
+        return end.Length is > 0 and <= 24 ? "…/" + end : destination[..12] + "…" + destination[^12..];
     }
 
     private async void ShowLatestCopy_Click(object sender, RoutedEventArgs e)
