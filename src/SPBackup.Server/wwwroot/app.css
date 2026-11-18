@@ -46,3 +46,7 @@ select{display:block;width:100%;font:inherit;color:inherit;background:var(--inpu
 .agent-directory-summary h2{margin-top:0}
 .agent-directory-summary dl{gap:9px}
 @media(max-width:720px){.agent-directory{grid-template-columns:minmax(0,1fr);gap:0}.agent-directory .card{margin:10px 0}.agent-directory-tree ul{padding-inline-start:clamp(2px,1.25vw,10px)}}
+
+.agent-health-notice{margin:8px 0 12px}
+.agent-totals{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 16px;color:var(--muted)}
+.agent-directory-filter button:disabled{background:var(--input);color:var(--muted);border:1px solid var(--border);cursor:default}

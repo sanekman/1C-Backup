@@ -5,11 +5,28 @@
 @inject ServerHealth Health
 @inject IHttpContextAccessor Http
 <PageTitle>Агенты — @Settings.DisplayName</PageTitle>
-<div class="heading"><div><h1>Агенты</h1><p class="muted">Компьютеры, подключённые к этому серверу.</p></div><a class="button" href="@ConnectLink">Подключить агент</a></div>
-@if (HealthStatus is { } healthStatus) { <ServerHealthNotices Snapshot="healthStatus" Compact="true" /> }
+<div class="heading"><h1>Агенты</h1><a class="button" href="@ConnectLink">Подключить агент</a></div>
+@if (HealthStatus is { HasWarnings: true } healthStatus)
+{
+    if (ListView || healthStatus.DiskState == DataDiskState.Critical
+        || healthStatus.CertificateState is ServerCertificateState.Expired or ServerCertificateState.NotYetValid)
+    {
+        <ServerHealthNotices Snapshot="healthStatus" Compact="true" />
+    }
+    else
+    {
+        <p class="agent-health-notice">
+            <a href="system">@(healthStatus.CertificateState == ServerCertificateState.Expiring
+                ? "HTTPS-сертификат скоро истекает" : "Сервер: требуется внимание")</a>
+        </p>
+    }
+}
 @if (Overview is { } overview)
 {
-    <section class="card"><div class="summary"><strong>Мониторинг всех агентов</strong><span>Нет связи: @overview.Offline</span><span>Нет отчётов: @overview.Unreported</span><a href="problems">Ошибки, неполные и просроченные копии →</a><span>В очереди: @overview.Pending</span></div></section>
+    <section class="agent-totals" aria-label="Мониторинг всех агентов">
+        <span>Нет связи: @overview.Offline</span><span>Нет отчётов: @overview.Unreported</span>
+        <span>В очереди: @overview.Pending</span><a href="problems">Проблемы всех агентов →</a>
+    </section>
 }
 @if (ListView)
 {

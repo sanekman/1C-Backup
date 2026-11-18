@@ -34,7 +34,11 @@ with sync_playwright() as pw:
     assert 'Последний отчёт' in summary.inner_text()
     assert search.input_value() == 'УНФ'
     page.get_by_role('button', name='Сбросить').click()
-    checks.append('tree-filter-selection-retains-search-and-separates-connection-and-delivery')
+    assert not leaf.is_visible()
+    root_summary = page.get_by_text('Без папки', exact=True).first
+    root_summary.click()
+    assert leaf.is_visible()
+    checks.append('tree-filter-selection-restores-disclosures-and-separates-connection-and-delivery')
     for theme in ['light', 'dark']:
         if page.locator('html').get_attribute('data-theme') != theme:
             page.locator('[data-theme-toggle]').click()

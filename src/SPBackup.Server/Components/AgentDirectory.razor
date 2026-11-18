@@ -37,7 +37,10 @@
                     {
                         <span>@Delivery(run)</span>
                         <small>@run.JobName · @Clock.Time(run.FinishedUtc)</small>
-                        <a href="@($"agents/{row.Entry.Id}#job-{run.JobId}")">Открыть задание</a>
+                        @if (HasCurrentJob)
+                        { <a href="@($"agents/{row.Entry.Id}#job-{run.JobId}")">Открыть задание</a> }
+                        else
+                        { <a href="@($"agents/{row.Entry.Id}#run-history")">История запусков</a> }
                     }
                     else { <span>Данных о копировании пока нет.</span> }
                 </dd>
@@ -78,6 +81,7 @@
     private IReadOnlyList<BranchNode> Branches = [];
     private AgentRow? Selected;
     private MonitoredRun? Latest;
+    private bool HasCurrentJob;
 
     public sealed record BranchNode(string Key, string Label, Guid? FolderId, IReadOnlyList<BranchNode> Children,
         IReadOnlyList<AgentRow> Agents)
@@ -111,6 +115,8 @@
             .Append(new("root", "Без папки", null, [], rows[Guid.Empty].ToArray())).ToArray();
         Selected = AgentId is { } selected ? rows.SelectMany(group => group).FirstOrDefault(row => row.Entry.Id == selected) : null;
         Latest = Selected is { } item ? await Store.LatestBackupRunAsync(item.Entry.Id, token) : null;
+        HasCurrentJob = Selected is { } current && Latest is { } run
+            && (await Store.MonitoringAsync(current.Entry.Id, token))?.Snapshot.Jobs.Any(job => job.JobId == run.JobId) == true;
     }
 
     private string FolderPath(AgentRow row) => Folders.FirstOrDefault(folder => folder.Id == row.Entry.FolderId)?.Path ?? "Без папки";

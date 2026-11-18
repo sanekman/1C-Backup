@@ -19,14 +19,15 @@
     let saved = {};
     try { saved = JSON.parse(sessionStorage.getItem(key) ?? '{}') ?? {}; } catch { /* Storage can be disabled. */ }
 
-    const expanded = new Set(Array.isArray(saved.open) ? saved.open : []);
-    for (const { details } of branches) {
-        if (details.open) expanded.add(details.dataset.branchKey);
-        details.open = expanded.has(details.dataset.branchKey);
-    }
     search.value = typeof saved.query === 'string' ? saved.query : '';
     attention.checked = saved.attention === true;
     const filtering = () => search.value.trim() !== '' || attention.checked;
+    const expanded = new Set(Array.isArray(saved.open) ? saved.open : []);
+    if (!filtering()) {
+        for (const { details } of branches) {
+            if (details.open) expanded.add(details.dataset.branchKey);
+        }
+    }
     const save = () => {
         try {
             sessionStorage.setItem(key, JSON.stringify({ open: [...expanded], query: search.value, attention: attention.checked }));
