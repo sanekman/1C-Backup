@@ -1,7 +1,23 @@
+using System.Globalization;
 using System.Windows;
+using System.Windows.Data;
 using SPBackup.Core;
 
 namespace SPBackup.Desktop;
+
+public sealed class RunDeliveryConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture) => value is BackupRun run
+        ? run.Destinations switch
+        {
+            { Count: 1 } targets => targets[0].Destination,
+            { Count: > 1 } targets => $"Сохранено в {targets.Count(target => target.Record is not null)} из {targets.Count}",
+            _ => run.Backup?.Location ?? run.Error ?? "—"
+        } : "—";
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
 
 public partial class MainWindow
 {

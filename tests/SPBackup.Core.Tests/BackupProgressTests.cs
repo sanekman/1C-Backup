@@ -60,6 +60,8 @@ public sealed class BackupProgressTests : IDisposable
         Assert.Equal(BackupStage.PartiallySucceeded, last.Progress.Stage);
         Assert.Null(last.Progress.Percent);
         Assert.Equal(100, last.Destinations[0].Progress.Percent);
+        Assert.Equal(Path.Combine(root, "copies"), last.Destinations[0].Destination);
+        Assert.Equal(Path.Combine(root, "second"), last.Destinations[1].Destination);
         Assert.Equal(BackupStage.Failed, last.Destinations[1].Progress.Stage);
         Assert.Null(last.Destinations[1].Progress.Percent);
         Assert.Equal(events.Count, events.Select(e => e.Sequence).Distinct().Count());

@@ -563,9 +563,13 @@ public partial class MainWindow : Window
         ImportJobSettingsMenuItem.IsEnabled = NewJobButton.IsEnabled && !editorOpen;
         FirstRunGuideMenuItem.IsEnabled = ready && !editorOpen && Jobs.SelectedItem is BackupJob;
         ExportJobSettingsMenuItem.IsEnabled = ready && !jobFileTransfer && !persisting && !editorOpen && Jobs.SelectedItem is BackupJob;
-        FirstJobButton.Visibility = jobs.Count + observationTasks.Count == 0 && JobSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        FirstCopyGuideButton.Visibility = FirstJobButton.Visibility;
-        JobActions.Visibility = jobs.Count + observationTasks.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        var empty = jobs.Count + observationTasks.Count == 0;
+        var firstJob = empty && agentSettings?.Mode != AgentMode.Managed && JobSearch.Text.Length == 0;
+        FirstJobButton.Visibility = FirstCopyGuideButton.Visibility = firstJob ? Visibility.Visible : Visibility.Collapsed;
+        NewJobButton.Visibility = NewBackupTaskMenuItem.Visibility = firstJob ? Visibility.Collapsed : Visibility.Visible;
+        JobSearchPanel.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+        JobActions.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+        UpdateJobScheduleTime();
         EditJobButton.IsEnabled = ready && idle && !editorOpen && (canSave && Jobs.SelectedItem is BackupJob || Jobs.SelectedItem is ExternalBackupTask);
         NewObservationTaskButton.IsEnabled = NewTaskOptionsButton.IsEnabled = ready && idle && !editorOpen;
         NewBackupTaskMenuItem.IsEnabled = NewJobButton.IsEnabled;
@@ -828,8 +832,12 @@ public partial class MainWindow : Window
             };
             view.Refresh();
         }
-        JobsEmptyTitle.Text = query.Length == 0 ? "Добавьте первое задание" : "Задания не найдены";
-        JobsEmptyHint.Text = query.Length == 0 ? "Начните с пробной копии обычной папки.\nИнструкция поможет создать задание и проверить восстановление." : "Измените или очистите строку поиска.";
+        var managed = agentSettings?.Mode == AgentMode.Managed;
+        JobsEmptyTitle.Text = query.Length != 0 ? "Задания не найдены"
+            : managed ? "Нет серверных заданий" : "Добавьте первое задание";
+        JobsEmptyHint.Text = query.Length != 0 ? "Измените или очистите строку поиска."
+            : managed ? "Назначенные задания появятся после получения настроек с сервера."
+            : "Начните с пробной копии обычной папки.";
         UpdateRunControls();
     }
 
@@ -936,7 +944,9 @@ public partial class MainWindow : Window
                 _ => true
             }) && (query.Length == 0 || run.JobName.Contains(query, StringComparison.CurrentCultureIgnoreCase)
                 || run.Details.Contains(query, StringComparison.CurrentCultureIgnoreCase)
-                || run.WorkDirectory.Contains(query, StringComparison.CurrentCultureIgnoreCase));
+                || run.WorkDirectory.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                || run.Destinations?.Any(target => JobRunOverview.DestinationDetails(target)
+                    .Contains(query, StringComparison.CurrentCultureIgnoreCase)) == true);
             view.Refresh();
         }
         if (RunHistory.SelectedItem is BackupRun selected && !RunHistory.Items.Contains(selected)) RunHistory.SelectedItem = null;
@@ -956,9 +966,10 @@ public partial class MainWindow : Window
             $"Задание: {run.JobName}\nРезультат: {run.StatusDescription}\n"
             + (run.Error is null ? "" : "Ошибка: " + run.Error + "\n")
             + (run.Warnings?.Count > 0 ? "Предупреждения:\n" + string.Join("\n", run.Warnings) + "\n" : "")
-            + (run.Destinations is null ? "" : "Доставка по хранилищам:\n" + string.Join("\n", run.Destinations.Select(destination =>
-                destination.Destination + ": " + (destination.Record is null ? destination.Error : "Сохранено · " + destination.Record.Backup.Location))) + "\n")
-            + (run.Backup is null ? "" : $"Копия: {run.Backup.Location}\nРазмер: {run.Backup.Length} байт\n")
+            + (run.Destinations is not { Count: > 0 } ? "" : "Доставка по хранилищам:\n"
+                + string.Join("\n", run.Destinations.Select(JobRunOverview.DestinationDetails)) + "\n")
+            + (run.Backup is null ? "" : (run.Destinations is { Count: > 0 } ? "" : $"Копия: {run.Backup.Location}\n")
+                + $"Размер основной копии: {run.Backup.Length} байт\n")
             + $"Начало: {run.StartedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}\n"
             + $"Окончание: {run.FinishedUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss") ?? "ещё выполняется"}\n"
             + $"Рабочая папка: {run.WorkDirectory}\nID запуска: {run.RunId}\n"

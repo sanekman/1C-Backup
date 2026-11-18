@@ -64,10 +64,12 @@ internal static partial class DesktopSmoke
             }
             window.RenderBackupProgress(new(progressRun, Guid.NewGuid(), "Тест прогресса", Environment.ProcessId, 2, DateTimeOffset.UtcNow,
                 new(BackupStage.CopyingToStorage), [new(1, StorageKind.LocalDirectory, new(BackupStage.CopyingToStorage, 20, 100)),
-                    new(2, StorageKind.Ftp, new(BackupStage.CopyingToStorage, 80, 100))]));
+                    new BackupDestinationProgress(2, StorageKind.Ftp, new(BackupStage.CopyingToStorage, 80, 100)) { Destination = "ftp.example:21 · /backups" }]));
             window.UpdateLayout();
             var destinations = (ItemsControl)window.FindName("BackupDestinationProgressList");
-            if (destinations.Items.Count != 2 || !progressBar.IsIndeterminate)
+            if (destinations.Items.Count != 2 || !progressBar.IsIndeterminate
+                || destinations.Items[1].GetType().GetProperty("Label")?.GetValue(destinations.Items[1]) is not string label
+                || !label.Contains("ftp.example:21 · /backups"))
                 throw new InvalidOperationException("Независимый прогресс хранилищ не отображается.");
             // Check the instantiated templates, not just the source items: Value defaults
             // to TwoWay and must never write into the read-only progress projection.
@@ -304,8 +306,8 @@ internal static partial class DesktopSmoke
                 if (!element.IsVisible || position.Y < 0 || position.Y + element.ActualHeight > guideScroll.ViewportHeight + 1)
                     throw new InvalidOperationException("Начальная инструкция обрезана в компактном окне: " + name);
             }
-            if (Control<WrapPanel>("JobActions").IsVisible)
-                throw new InvalidOperationException("Пустой экран заданий перегружен недоступными действиями.");
+            if (Control<WrapPanel>("JobActions").IsVisible || Control<Button>("NewJobButton").IsVisible)
+                throw new InvalidOperationException("Пустой экран дублирует создание задания или показывает недоступные действия.");
             Screenshot("jobs-first-copy-guide-compact");
             window.Width = firstGuideWidth; window.Height = firstGuideHeight;
             Click("FirstJobButton");
@@ -752,8 +754,19 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Частичная ошибка не попала в фильтр проблем или потеряла результаты доставки.");
             if (!Control<TextBlock>("RunNextStep").Text.Contains("новую копию для всех хранилищ"))
                 throw new InvalidOperationException("Частичная доставка не объясняет повторный запуск.");
+            Control<TextBox>("HistorySearch").Text = blockedDirectory;
+            if (Control<DataGrid>("RunHistory").Items.Count != 1)
+                throw new InvalidOperationException("Поиск в истории не находит недоставленное назначение.");
+            Control<DataGrid>("RunHistory").SelectedIndex = 0;
+            if (!Control<TextBox>("RunDetails").Text.Contains("Доставка не подтверждена")
+                || !Control<TextBox>("RunDetails").Text.Contains("Сохранено"))
+                throw new InvalidOperationException("История не различает доставленную копию и сбой назначения.");
             Screenshot("multiple-storage-partial-result");
-            Click("JobsNavigation"); Click("RunButton");
+            Control<TextBox>("HistorySearch").Clear();
+            Click("OpenHistoryJobButton");
+            if (!Control<TextBlock>("SelectedJobSummary").Text.Contains("Последняя доставка"))
+                throw new InvalidOperationException("Из задания пропало местоположение подтверждённой доставки.");
+            Click("RunButton");
             await WaitUntil(() => window.SmokeReady && Control<DataGrid>("Copies").Items.Count == 5,
                 "Отдельное количество копий не применилось после третьей доставки.");
             if (Directory.GetFiles(Path.Combine(DesktopPaths.DataDirectory, "copies")).Length != 3

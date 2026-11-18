@@ -462,7 +462,13 @@ public partial class MainWindow
                     + "; при пропуске — при ближайшем запуске"
                 : $"Инкрементная · до {job.FullBackupEvery} архивов в цепочке";
         var accessHint = job.ManagedSecrets is not null && !ManagedJobBindings.Ready(job) ? "Требуется локальный доступ.\n" : "";
-        SelectedJobSummary.Text = accessHint + resultText + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
+        var deliveredCopy = LatestJobRuns.Delivered.GetValueOrDefault(job.Id);
+        var availability = deliveredCopy is null ? "" : "\nПоследняя доставка "
+            + deliveredCopy.FinishedUtc!.Value.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.InvariantCulture) + ": "
+            + (deliveredCopy.Destinations is { } targets
+                ? string.Join(" · ", targets.Where(target => target.Record is not null).Select(target => target.Record!.Backup.Location))
+                : deliveredCopy.Backup!.Location);
+        SelectedJobSummary.Text = accessHint + resultText + availability + "\n" + nextText + (filePlan.Length == 0 ? "" : "\n" + filePlan);
     }
 
     private async void ShowLatestCopy_Click(object sender, RoutedEventArgs e)

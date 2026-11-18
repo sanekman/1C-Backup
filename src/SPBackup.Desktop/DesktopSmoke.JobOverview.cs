@@ -24,25 +24,33 @@ internal static partial class DesktopSmoke
             BackupRun Run(int index, BackupRunStatus status) => new(Guid.NewGuid(), jobs[index].Id, "Историческое название",
                 now.AddMinutes(-index), status == BackupRunStatus.Running ? null : now, status, "fixture",
                 Error: status == BackupRunStatus.Failed ? "Ошибка только первой базы" : null);
-            var runs = new[] { Run(0, BackupRunStatus.Failed), Run(1, BackupRunStatus.PartiallySucceeded),
+            var local = new StoredBackup(@"D:\Fixture\latest.zip", 42, "fixture");
+            var partial = Run(1, BackupRunStatus.PartiallySucceeded) with
+            {
+                Destinations = [new(@"D:\Fixture", new BackupRecord(Guid.NewGuid(), jobs[1].Id, "local", now, local), null),
+                    new(@"\\NAS\Backup", null, "NAS недоступен")]
+            };
+            var runs = new[] { Run(0, BackupRunStatus.Failed), partial,
                 Run(2, BackupRunStatus.Succeeded) with { Warnings = ["Не удалена старая копия"] },
                 Run(4, BackupRunStatus.Running), Run(5, BackupRunStatus.Cancelled), Run(6, BackupRunStatus.Interrupted),
-                Run(7, BackupRunStatus.Succeeded), Run(0, BackupRunStatus.Succeeded) with { StartedUtc = now.AddDays(-1) } };
+                Run(7, BackupRunStatus.Succeeded), Run(0, BackupRunStatus.Succeeded) with { StartedUtc = now.AddDays(-1),
+                    FinishedUtc = now.AddDays(-1), Backup = local with { Location = @"D:\Fixture\older.zip" } } };
             var overview = JobRunOverview.From(runs.Reverse()); // Input ordering must not decide the latest run.
             grid.ItemsSource = jobs;
             grid.SelectedItem = jobs[1];
             window.LatestJobRuns = overview;
             window.UpdateLayout();
             var column = grid.Columns.Single(column => Equals(column.Header, "Последний запуск"));
-            JobRunBadge Cell(int index)
+            JobRunBadge Cell(int index, DataGridColumn? target = null)
             {
-                grid.ScrollIntoView(jobs[index], column);
+                target ??= column;
+                grid.ScrollIntoView(jobs[index], target);
                 window.UpdateLayout();
-                var element = column.GetCellContent(jobs[index]);
+                var element = target.GetCellContent(jobs[index]);
                 var content = element is null ? null : FindDescendant<ContentControl>(element);
                 return content?.Content as JobRunBadge ?? throw new InvalidOperationException("Последний запуск не привязался к строке задания.");
             }
-            var labels = new[] { "Ошибка", "Частично", "Предупреждения", "Не запускалось", "Выполняется", "Отменено", "Прервано", "Успешно" };
+            var labels = new[] { "Ошибка", "Частично · 1 из 2", "Предупреждения", "Не запускалось", "Выполняется", "Отменено", "Прервано", "Успешно" };
             for (var index = 0; index < jobs.Length; index++)
             {
                 var cell = Cell(index);
@@ -52,6 +60,10 @@ internal static partial class DesktopSmoke
             }
             if (!Cell(0).Help.Contains("Ошибка только первой базы") || !Cell(2).Help.Contains("Не удалена старая копия"))
                 throw new InvalidOperationException("Подсказка потеряла ошибку или предупреждение.");
+            var copyColumn = grid.Columns.Single(column => Equals(column.Header, "Последняя копия"));
+            if (!Cell(0, copyColumn).Help.Contains("older.zip") || !Cell(1, copyColumn).Help.Contains(local.Location)
+                || !Cell(1).Help.Contains("NAS недоступен") || Cell(3, copyColumn).Label != "—")
+                throw new InvalidOperationException("Последняя доставка потеряна после ошибки или неверно показана для частичного результата.");
             window.LatestJobRuns = JobRunOverview.Unavailable;
             if (Cell(7).Label != "Нет данных" || !ReferenceEquals(grid.SelectedItem, jobs[1]))
                 throw new InvalidOperationException("Ошибка чтения оставила ложный успех или сбросила выбор.");

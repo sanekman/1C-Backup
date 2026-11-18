@@ -8,6 +8,8 @@
  <Window.Resources>
   <local:LocalTimeConverter x:Key="LocalTimeConverter" />
   <local:JobRunOverviewConverter x:Key="JobRunOverviewConverter" />
+  <local:JobNextRunConverter x:Key="JobNextRunConverter" />
+  <local:RunDeliveryConverter x:Key="RunDeliveryConverter" />
   <DataTemplate x:Key="DatabaseKindLabel">
    <TextBlock TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}">
     <TextBlock.Style><Style TargetType="TextBlock">
@@ -163,24 +165,44 @@
       </StackPanel></ScrollViewer></Grid></Border>
       <Grid>
        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-       <DockPanel Margin="12,4"><TextBlock Text="Поиск" Foreground="{DynamicResource MutedBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
+       <DockPanel x:Name="JobSearchPanel" Margin="12,4"><TextBlock Text="Поиск" Foreground="{DynamicResource MutedBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
         <TextBox x:Name="JobSearch" TextChanged="JobSearch_TextChanged" ToolTip="Поиск по названию задания или источнику" AutomationProperties.Name="Поиск по названию задания или источнику" />
        </DockPanel>
   <DataGrid Grid.Row="1" x:Name="Jobs" RowHeight="30" ColumnHeaderHeight="30" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
    SelectionChanged="Jobs_SelectionChanged" MouseDoubleClick="Jobs_DoubleClick" CanUserAddRows="False">
    <DataGrid.Columns>
-    <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" MinWidth="160">
+    <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" MinWidth="128">
      <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding Name}" /></Style></DataGridTextColumn.ElementStyle>
     </DataGridTextColumn>
-    <DataGridTemplateColumn Header="Тип" Width="125">
+    <DataGridTemplateColumn Header="Тип" Width="106">
      <DataGridTemplateColumn.CellTemplate><DataTemplate>
       <ContentControl Content="{Binding Kind}" ContentTemplate="{StaticResource DatabaseKindLabel}" />
      </DataTemplate></DataGridTemplateColumn.CellTemplate>
     </DataGridTemplateColumn>
-    <DataGridTextColumn Header="Расписание" Binding="{Binding ScheduleDescription}" Width="145">
-     <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding ScheduleDescription}" /></Style></DataGridTextColumn.ElementStyle>
-    </DataGridTextColumn>
-    <DataGridTemplateColumn Header="Последний запуск" Width="150">
+    <DataGridTemplateColumn Header="Следующий" Width="102">
+     <DataGridTemplateColumn.CellTemplate><DataTemplate>
+      <TextBlock TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}">
+       <TextBlock.Text><MultiBinding Converter="{StaticResource JobNextRunConverter}">
+        <Binding /><Binding Path="JobScheduleTime" RelativeSource="{RelativeSource AncestorType={x:Type local:MainWindow}}" />
+       </MultiBinding></TextBlock.Text>
+      </TextBlock>
+     </DataTemplate></DataGridTemplateColumn.CellTemplate>
+    </DataGridTemplateColumn>
+    <DataGridTemplateColumn Header="Последняя копия" Width="126">
+     <DataGridTemplateColumn.CellTemplate><DataTemplate>
+      <ContentControl>
+       <ContentControl.Content><MultiBinding Converter="{StaticResource JobRunOverviewConverter}" ConverterParameter="copy">
+        <Binding /><Binding Path="LatestJobRuns" RelativeSource="{RelativeSource AncestorType={x:Type local:MainWindow}}" />
+       </MultiBinding></ContentControl.Content>
+       <ContentControl.ContentTemplate><DataTemplate>
+        <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis">
+         <TextBlock.ToolTip><ToolTip MaxWidth="520"><TextBlock Text="{Binding Help}" TextWrapping="Wrap" /></ToolTip></TextBlock.ToolTip>
+        </TextBlock>
+       </DataTemplate></ContentControl.ContentTemplate>
+      </ContentControl>
+     </DataTemplate></DataGridTemplateColumn.CellTemplate>
+    </DataGridTemplateColumn>
+    <DataGridTemplateColumn Header="Последний запуск" Width="148">
      <DataGridTemplateColumn.CellTemplate><DataTemplate>
       <ContentControl>
        <ContentControl.Content><MultiBinding Converter="{StaticResource JobRunOverviewConverter}">
@@ -194,14 +216,6 @@
       </ContentControl>
      </DataTemplate></DataGridTemplateColumn.CellTemplate>
     </DataGridTemplateColumn>
-    <DataGridTemplateColumn Header="Авто" Width="50"><DataGridTemplateColumn.CellTemplate><DataTemplate>
-     <TextBlock ToolTip="Разрешены запуски по расписанию. Для выполнения включите автоматическое копирование.">
-      <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="Да" /><Style.Triggers>
-       <DataTrigger Binding="{Binding Enabled}" Value="False"><Setter Property="Text" Value="Нет" /></DataTrigger>
-       <DataTrigger Binding="{Binding ScheduleKind}" Value="{x:Static core:ScheduleKind.Manual}"><Setter Property="Text" Value="Нет" /></DataTrigger>
-      </Style.Triggers></Style></TextBlock.Style>
-     </TextBlock>
-    </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
    </DataGrid.Columns>
   </DataGrid>
 
@@ -521,7 +535,6 @@
     <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1">
      <StackPanel>
       <DockPanel>
-       <Button x:Name="ExportHistoryButton" DockPanel.Dock="Right" Content="Экспорт JSON" Click="ExportHistory_Click" IsEnabled="False" Margin="8,0,0,0" />
        <Button x:Name="RefreshHistoryButton" DockPanel.Dock="Right" Content="Обновить" Click="RefreshHistory_Click" IsEnabled="False" Margin="8,0,0,0" />
        <ComboBox x:Name="HistoryStatusFilter" DockPanel.Dock="Right" Width="160" SelectionChanged="HistoryFilter_Changed" Margin="8,0,0,0" SelectedIndex="0">
         <ComboBoxItem Content="Все результаты" Tag="all" />
@@ -537,6 +550,7 @@
     <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0">
      <StackPanel>
       <DockPanel Margin="0,0,0,8">
+       <Button x:Name="ExportHistoryButton" DockPanel.Dock="Right" Content="Экспорт JSON" Click="ExportHistory_Click" IsEnabled="False" Margin="8,0,0,0" ToolTip="Экспортировать все записи, показанные текущим фильтром" />
        <Button x:Name="OpenRunDirectoryButton" DockPanel.Dock="Right" Content="Рабочая папка" Click="OpenRunDirectory_Click" IsEnabled="False" Padding="10,5" />
        <Button x:Name="OpenHistoryJobButton" DockPanel.Dock="Right" Content="К заданию" Click="OpenHistoryJob_Click" IsEnabled="False" Padding="10,5" Margin="0,0,8,0" ToolTipService.ShowOnDisabled="True" />
        <TextBlock Text="Подробности выбранного запуска" FontWeight="SemiBold" VerticalAlignment="Center" />
@@ -550,7 +564,9 @@
      <DataGridTextColumn Header="Начало" Binding="{Binding StartedUtc, Converter={StaticResource LocalTimeConverter}}" Width="145" />
      <DataGridTextColumn Header="Задание" Binding="{Binding JobName}" Width="170" />
      <DataGridTextColumn Header="Результат" Binding="{Binding StatusDescription}" Width="115" />
-     <DataGridTextColumn Header="Копия / ошибка" Binding="{Binding Details}" Width="*" MinWidth="160" />
+     <DataGridTextColumn Header="Доставка" Binding="{Binding Converter={StaticResource RunDeliveryConverter}}" Width="*" MinWidth="140">
+      <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis" /><Setter Property="ToolTip" Value="{Binding Text, RelativeSource={RelativeSource Self}}" /></Style></DataGridTextColumn.ElementStyle>
+     </DataGridTextColumn>
      <DataGridTextColumn Header="Рабочий каталог" Binding="{Binding WorkDirectory}" Visibility="Collapsed" />
     </DataGrid.Columns>
    </DataGrid>

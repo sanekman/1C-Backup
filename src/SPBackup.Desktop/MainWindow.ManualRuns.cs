@@ -121,6 +121,7 @@ public partial class MainWindow
                 continue;
             }
             manualReceiptWarnings.Remove(request.RequestId);
+            if (receipt?.Phase == LocalManualRunPhase.Accepted) acceptedManualRequests.Add(request.RequestId);
             if (receipt is { Phase: not LocalManualRunPhase.Accepted })
             {
                 backgroundManualRuns.Remove(request.RequestId);
@@ -137,6 +138,7 @@ public partial class MainWindow
             }
         }
         manualReceiptWarnings.IntersectWith(backgroundManualRuns.Keys);
+        acceptedManualRequests.IntersectWith(backgroundManualRuns.Keys);
         UpdateManualQueueOverview();
     }
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace SPBackup.Core;
 
@@ -7,7 +8,11 @@ public sealed record BackupStageProgress(BackupStage Stage, long Completed = 0, 
 {
     public int? Percent => Total > 0 ? (int)Math.Clamp(100d * Completed / Total, 0, 100) : Stage == BackupStage.Completed ? 100 : null;
 }
-public sealed record BackupDestinationProgress(int Index, StorageKind Kind, BackupStageProgress Progress);
+public sealed record BackupDestinationProgress(int Index, StorageKind Kind, BackupStageProgress Progress)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Destination { get; init; }
+}
 public sealed record BackupProgressSnapshot(Guid RunId, Guid JobId, string JobName, int ProcessId, long Sequence,
     DateTimeOffset UpdatedUtc, BackupStageProgress Progress, IReadOnlyList<BackupDestinationProgress> Destinations)
 {
@@ -59,6 +64,7 @@ public static class BackupProgressContext
         private readonly object gate = new();
         private BackupStageProgress progress = new(BackupStage.ConnectingSource);
         private readonly Dictionary<int, BackupDestinationProgress> destinations = new();
+        private readonly IReadOnlyList<BackupJob> targets = job.StorageJobs;
         private long sequence;
         private DateTimeOffset last;
         public bool Finished { get; private set; }
@@ -70,7 +76,18 @@ public static class BackupProgressContext
                 var changed = destination is int index
                     ? !destinations.TryGetValue(index, out var prior) || prior.Progress.Stage != value.Stage
                     : progress.Stage != value.Stage;
-                if (destination is int i) destinations[i] = new(i, job.StorageJobs[i - 1].StorageKind, value);
+                if (destination is int i)
+                {
+                    var target = targets[i - 1];
+                    var address = destinations.GetValueOrDefault(i)?.Destination ?? target.StorageKind switch
+                    {
+                        StorageKind.Ftp when target.Ftp is { } ftp => $"{ftp.Host}:{ftp.Port} · {target.DestinationDirectory}",
+                        StorageKind.GoogleDrive => target.GoogleDrive?.FolderName,
+                        StorageKind.RemoteGateway => target.RemoteGateway?.GatewayId.ToString("N")[..8],
+                        _ => target.DestinationDirectory
+                    };
+                    destinations[i] = new(i, target.StorageKind, value) { Destination = address };
+                }
                 else progress = value;
                 Finished = progress.Stage is BackupStage.Completed or BackupStage.Cancelled or BackupStage.Failed or BackupStage.PartiallySucceeded;
                 var now = DateTimeOffset.UtcNow;
