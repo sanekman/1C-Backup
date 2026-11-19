@@ -110,7 +110,8 @@ try
         await source.ReadAsync(mismatchMonitor);
         throw new InvalidDataException("Optional encryption accepted an invalid certificate on a server requiring TLS.");
     }
-    catch (IOException error) when (ExternalBackupPollErrors.Classify(error) == "Certificate") { }
+    catch (IOException error) when (ExternalBackupPollErrors.Classify(error) == "Certificate"
+        || error.Message.Contains("0x80090322", StringComparison.Ordinal)) { }
     var tlsStore = new ExternalBackupMonitorStore(Path.Combine(root, "monitor-tls.json"));
     await tlsStore.SaveAsync([mismatchMonitor with { TrustServerCertificate = true }]);
     var trusted = (await tlsStore.LoadAsync()).Single();

@@ -241,7 +241,10 @@ exit $code
     New-Item -ItemType Directory -Path $Output | Out-Null
     Copy-Item -LiteralPath (Join-Path $workspace 'report\sql-engine-result.json') -Destination $Output
     $provenance | ConvertTo-Json | Set-Content (Join-Path $Output 'sql-media-provenance.json') -Encoding UTF8
-    if ($probeExit -ne 0) { throw 'Full SQL engine verification failed; see the sanitized result JSON.' }
+    if ($probeExit -ne 0) {
+        $probeResult = Get-Content -LiteralPath (Join-Path $Output 'sql-engine-result.json') -Raw | ConvertFrom-Json
+        throw ('Full SQL engine verification failed after {0} checks: {1}' -f @($probeResult.checks).Count, ([string]$probeResult.error).Replace($password,'[redacted]'))
+    }
 } catch {
     $setupError = $_
     $startupErrors = @()
