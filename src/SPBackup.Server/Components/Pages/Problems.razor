@@ -4,7 +4,8 @@
 @inject ServerOptions Settings
 @inject IHttpContextAccessor Http
 <PageTitle>Проблемы копирования — @Settings.DisplayName</PageTitle>
-<div class="heading"><div><h1>Что требует внимания</h1><p class="muted">Связь, задания, копии и применение плана.</p></div><a href="@Link(Page)">Обновить</a></div>
+<div class="heading"><div><h1>Что требует внимания</h1><p class="muted">Связь, задания, копии и применение плана.</p></div><div class="actions"><a href="@Link(Page)">Обновить</a>
+<a href="@Link(0, previousView: !PreviousView)">@(PreviousView ? "Группировать по заданиям" : "Показать список причин")</a></div></div>
 <section class="card">
 @if (SelectedAgent is { } selected)
 {
@@ -12,6 +13,7 @@
 }
 <form method="get" action="problems" class="actions">
 @if (Agent is not null) { <input type="hidden" name="agent" value="@Agent" /> }
+@if (PreviousView) { <input type="hidden" name="previousView" value="true" /> }
 <label>Папка<select name="folder"><option value="">Все агенты</option><option value="root" selected="@(Folder == "root")">Без папки</option>
 @foreach (var item in Folders) { <option value="@item.Id" selected="@(Folder == item.Id.ToString())">@item.Path</option> }
 </select></label>
@@ -22,17 +24,63 @@
     при отсутствии связи состояние самого агента может отличаться. Одно задание может иметь несколько причин.</p>
 @if (Data is { } data)
 {
-<p>Найдено причин: @data.Total · Страница @(data.Page + 1)</p>
-<div class="table-scroll"><table><thead><tr><th>Агент / задание</th><th>Проблема и действие</th><th>Последняя связь / отчёт</th></tr></thead><tbody>
-@foreach (var item in data.Items)
+<p>Агентов: @data.AffectedAgents · Заданий: @data.AffectedJobs · Причин: @data.Total · Страница @(data.Page + 1)</p>
+@if (PreviousView)
 {
-<tr><td><a href="@($"agents/{item.AgentId}")">@item.AgentName</a>@if (item.JobName is not null) { <small><a href="@($"agents/{item.AgentId}#job-{item.JobId}")">@item.JobName</a></small> }</td>
-<td><strong>@ProblemText.Filters[item.Code]</strong><small>@ProblemText.Action(item.Code)</small></td>
-<td>@Clock.Time(item.LastSeenUtc)<small>Отчёт: @Clock.Time(item.ObservedUtc)</small></td></tr>
+    <div class="table-scroll"><table><thead><tr><th>Агент / задание</th><th>Проблема и действие</th><th>Последняя связь / отчёт</th></tr></thead><tbody>
+    @foreach (var item in data.Items)
+    {
+        <tr><td><a href="@($"agents/{item.AgentId}")">@item.AgentName</a>
+            @if (item.JobId is { } jobId) { <small><a href="@($"agents/{item.AgentId}#job-{jobId}")">@item.JobName</a></small> }
+        </td><td><strong>@ProblemText.Filters[item.Code]</strong><small>@ProblemText.Action(item.Code)</small></td>
+        <td>@Clock.Time(item.LastSeenUtc)<small>Отчёт @Clock.Time(item.ObservedUtc)</small></td></tr>
+    }
+    </tbody></table></div>
 }
-</tbody></table></div>
-@if (data.Total == 0) { <p>По выбранным фильтрам проблем не найдено.</p> }
-<div class="pagination">@if (Page > 0) { <a href="@Link(Page-1)">← Назад</a> } @if ((Page+1L)*data.PageSize < data.Total) { <a href="@Link(Page+1)">Далее →</a> }</div>
+else
+{
+@foreach (var agentGroup in data.Items.GroupBy(item => item.AgentId))
+{
+    var agent = agentGroup.First();
+    <section class="job-summary">
+        <h2><a href="@($"agents/{agent.AgentId}")">@agent.AgentName</a></h2>
+        <p class="muted">Последняя связь @Clock.Time(agent.LastSeenUtc) · Отчёт @Clock.Time(agent.ObservedUtc)</p>
+        @foreach (var jobGroup in agentGroup.GroupBy(item => item.JobId))
+        {
+            var job = jobGroup.First();
+            <details>
+                <summary>@(job.JobName is null ? "" : job.JobName + " · ")@ProblemText.Filters[job.Code]
+                    @if (jobGroup.Count() > 1) { <small> · Причин @jobGroup.Count()</small> }
+                </summary>
+                <ul>
+                @foreach (var reason in jobGroup)
+                {
+                    <li>
+                        <strong>@ProblemText.Filters[reason.Code]</strong>
+                        @if (reason.RunId is { } run)
+                        {
+                            <span> · @Clock.Time(reason.RunFinishedUtc)</span>
+                            <a href="@($"agents/{reason.AgentId}?runId={run}#run-history")">Результат запуска</a>
+                        }
+                        <small>@ProblemText.Action(reason.Code)</small>
+                    </li>
+                }
+                </ul>
+                @if (job.JobId is { } id) { <p><a href="@($"agents/{job.AgentId}#job-{id}")">Открыть задание</a></p> }
+            </details>
+        }
+    </section>
+}
+}
+@if (data.Total == 0)
+{
+    <p>По выбранным фильтрам проблем не найдено.</p>
+    @if (!string.IsNullOrWhiteSpace(Search) || Kind is not (null or "all"))
+    {
+        <a href="@FilterResetLink">Сбросить поиск и тип проблемы</a>
+    }
+}
+<div class="pagination">@if (Page > 0) { <a href="@Link(Page-1)">← Назад</a> } @if ((Page+1L)*data.PageSize < data.PageItems) { <a href="@Link(Page+1)">Далее →</a> }</div>
 }
 </section>
 @code {
@@ -41,10 +89,14 @@
     [SupplyParameterFromQuery] public string? Kind { get; set; }
     [SupplyParameterFromQuery] public string? Search { get; set; }
     [SupplyParameterFromQuery] public string? Agent { get; set; }
+    [SupplyParameterFromQuery] public bool PreviousView { get; set; }
     private AgentRecord? SelectedAgent;
     private IReadOnlyList<AgentFolderOption> Folders = [];
     private AgentProblemPage? Data;
-    private string Link(int page, bool clearAgent = false) => $"problems?page={page}&folder={Uri.EscapeDataString(Folder ?? "")}&kind={Uri.EscapeDataString(Kind ?? "all")}&search={Uri.EscapeDataString(Search ?? "")}" + (clearAgent || Agent is null ? "" : $"&agent={Uri.EscapeDataString(Agent)}");
+    private string FilterResetLink => $"problems?folder={Uri.EscapeDataString(Folder ?? "")}"
+        + (Agent is null ? "" : $"&agent={Uri.EscapeDataString(Agent)}") + ViewParameter(PreviousView);
+    private static string ViewParameter(bool previousView) => previousView ? "&previousView=true" : "";
+    private string Link(int page, bool clearAgent = false, bool? previousView = null) => $"problems?page={page}&folder={Uri.EscapeDataString(Folder ?? "")}&kind={Uri.EscapeDataString(Kind ?? "all")}&search={Uri.EscapeDataString(Search ?? "")}" + (clearAgent || Agent is null ? "" : $"&agent={Uri.EscapeDataString(Agent)}") + ViewParameter(previousView ?? PreviousView);
     protected override async Task OnParametersSetAsync()
     {
         Folders = await Store.FoldersAsync(Http.HttpContext!.RequestAborted);
@@ -57,6 +109,6 @@
             SelectedAgent = await Store.AgentAsync(id, Http.HttpContext.RequestAborted) ?? throw new ServerRequestException(404, "agent_not_found");
         }
         else SelectedAgent = null;
-        Data = await Store.ProblemsAsync(Page, Kind, Search, folder, Folder == "root", Settings.OfflineAfterSeconds, Http.HttpContext.RequestAborted, agentId);
+        Data = await Store.ProblemsAsync(Page, Kind, Search, folder, Folder == "root", Settings.OfflineAfterSeconds, Http.HttpContext.RequestAborted, agentId, groupByJob: !PreviousView);
     }
 }

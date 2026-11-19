@@ -72,11 +72,11 @@ with sync_playwright() as pw:
         ]:
             colored_row = page.locator(f'[data-dashboard-row][data-agent-name="{name}"]')
             color(colored_row.get_by_text('На связи', exact=True), '--good-text')
-            color(colored_row.get_by_text(reason, exact=True), token)
+            expect(colored_row.get_by_text(reason, exact=True)).to_have_count(0)
             color(colored_row.get_by_text(result, exact=True), token)
         offline_row = page.locator(f'[data-dashboard-row][data-agent-id="{a.agent}"]')
         color(offline_row.get_by_text('Нет связи', exact=True), '--bad-text')
-        color(offline_row.get_by_text('Частичная доставка', exact=True), '--pending-text')
+        color(offline_row.get_by_text('Частичная доставка · 1 из 2', exact=True), '--pending-text')
         checks.append(f'dashboard-{theme}-connection-failure-and-warning-colors')
         for width, height in [(900, 580), (360, 800)]:
             page.set_viewport_size({'width': width, 'height': height})
@@ -102,11 +102,15 @@ with sync_playwright() as pw:
     page.keyboard.press('Enter')
     page.wait_for_url('**/problems?agent=' + a.agent)
     assert page.locator('input[name="agent"]').input_value() == a.agent
-    assert 'Найдено причин: 68' in page.inner_text('body')
+    assert 'Причин: 68' in page.inner_text('body')
     page.get_by_role('link', name='Далее →', exact=True).click()
     assert ('agent=' + a.agent) in page.url
     page.get_by_role('link', name='← Назад', exact=True).click()
-    page.locator(f'a[href="agents/{a.agent}#job-{a.job}"]').first.click()
+    job_link = page.locator(f'a[href="agents/{a.agent}#job-{a.job}"]').first
+    page.locator('details').filter(has=job_link).locator('summary').click()
+    page.get_by_role('link', name='Результат запуска', exact=True).first.wait_for()
+    page.screenshot(path=str(out / 'problems-grouped.png'), full_page=True)
+    job_link.click()
     expect(page.locator(f'[id="job-{a.job}"]')).to_be_visible()
     checks.append('keyboard-drilldown-pagination-retains-agent-and-job-anchor')
     first_use(pw, page, a.url, out, checks)

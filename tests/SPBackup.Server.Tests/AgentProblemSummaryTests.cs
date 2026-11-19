@@ -22,7 +22,8 @@ public sealed class AgentProblemSummaryTests(ServerFixture fixture) : IClassFixt
             "FilesAndFolders", true, "Daily", null, 1) { MaximumBackupAgeHours = 24 }).ToArray();
         await fixture.Store.SaveMonitoringAsync(problem.AgentId, new(DateTimeOffset.UtcNow, "summary", jobs, null, 0), default);
         await fixture.Store.SaveMonitoringAsync(clean.AgentId, new(DateTimeOffset.UtcNow, "summary", [], null, 0), default);
-        await fixture.Store.SaveRunAsync(problem.AgentId, new(Guid.NewGuid(), jobs[0].JobId, jobs[0].Name,
+        var runId = Guid.NewGuid();
+        await fixture.Store.SaveRunAsync(problem.AgentId, new(runId, jobs[0].JobId, jobs[0].Name,
             DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(-1), "PartiallySucceeded", 1, true, null,
             [new(0, true, 10, false), new(1, false, 0, false)]), default);
         await fixture.Store.SaveRunAsync(problem.AgentId, new(Guid.NewGuid(), Guid.NewGuid(), "Removed job",
@@ -43,6 +44,20 @@ public sealed class AgentProblemSummaryTests(ServerFixture fixture) : IClassFixt
         Assert.DoesNotContain(selected.Items, p => p.JobName == "Removed job");
         Assert.Equal(17, (await fixture.Store.ProblemsAsync(1, null, null, null, false, 120, default, problem.AgentId)).Items.Count);
 
+        var grouped = await fixture.Store.ProblemsAsync(0, null, null, null, false, 120, default, problem.AgentId, groupByJob: true);
+        Assert.Equal(64, grouped.PageItems);
+        Assert.Equal(1, grouped.AffectedAgents);
+        Assert.Equal(64, grouped.AffectedJobs);
+        Assert.Equal(53, grouped.Items.Count);
+        Assert.Equal(runId, Assert.Single(grouped.Items, reason => reason.Code == "Partial").RunId);
+        Assert.Equal(14, (await fixture.Store.ProblemsAsync(1, null, null, null, false, 120, default, problem.AgentId, groupByJob: true)).Items.Count);
+        var problems = WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync($"problems?agent={problem.AgentId}"));
+        Assert.Contains("Агентов: 1 · Заданий: 64 · Причин: 67", problems);
+        Assert.Contains($"?runId={runId}#run-history", problems);
+        var previousView = WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync($"problems?agent={problem.AgentId}&previousView=true"));
+        Assert.Contains("Агент / задание", previousView);
+        Assert.DoesNotContain($"?runId={runId}#run-history", previousView);
+
         using var tree = await fixture.Administrator.GetAsync($"?agent={problem.AgentId}");
         var treeHtml = WebUtility.HtmlDecode(await tree.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.OK, tree.StatusCode);
@@ -58,7 +73,7 @@ public sealed class AgentProblemSummaryTests(ServerFixture fixture) : IClassFixt
         html = WebUtility.HtmlDecode(await filtered.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.OK, filtered.StatusCode); Assert.Contains("Office <УНФ>", html);
         Assert.Contains($"name=\"agent\" value=\"{problem.AgentId}\"", html);
-        Assert.Contains($"&agent={problem.AgentId}", html); Assert.Contains("Найдено причин: 64", html);
+        Assert.Contains($"&agent={problem.AgentId}", html); Assert.Contains("Причин: 64", html);
 
         await fixture.ExecuteAsync("UPDATE server_monitoring SET received_utc=now()-interval '1 hour' WHERE agent_id=@id", ("id", problem.AgentId));
         summary = Assert.Single(await fixture.Store.ProblemSummariesAsync([problem.AgentId], 120, default));
