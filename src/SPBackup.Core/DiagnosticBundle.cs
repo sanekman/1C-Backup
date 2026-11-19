@@ -86,13 +86,15 @@ public sealed class DiagnosticBundle(string profileDirectory, string version, st
                     try
                     {
                         var historyPath = Path.Combine(profile, "runs.json");
-                        var history = await new BackupRunHistory(historyPath).ReadBoundedAsync(32 * 1024 * 1024, token);
-                        var selected = history.OrderByDescending(run => run.StartedUtc).Take(1000).ToArray(); runs = selected.Length;
+                        var history = await new BackupRunHistory(historyPath).ReadRecentForDiagnosticsAsync(1000, 64L * 1024 * 1024, token);
+                        var selected = history ?? [];
+                        runs = selected.Count;
                         runSummary = selected.Select(run => new { run.RunId, run.JobId, run.StartedUtc, run.FinishedUtc, run.Status,
                             DurationMilliseconds = run.FinishedUtc is { } end ? (long?)(end - run.StartedUtc).TotalMilliseconds : null,
                             BackupBytes = run.Backup?.Length, Destinations = run.Destinations?.Count,
                             FailedDestinations = run.Destinations?.Count(item => item.Error is not null), Warnings = run.Warnings?.Count ?? 0 });
-                        historyStatus = "Available";
+                        historyStatus = history is null ? "SizeLimitExceeded" : "Available";
+                        if (history is null) skipped++;
                     }
                     catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or JsonException)
                     { runSummary = Array.Empty<object>(); historyStatus = "Unavailable"; skipped++; }

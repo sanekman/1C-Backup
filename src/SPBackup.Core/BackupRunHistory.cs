@@ -36,16 +36,23 @@ public sealed class BackupRunHistory(string path)
         finally { gate.Release(); }
     }
 
-    internal async Task<IReadOnlyList<BackupRun>> ReadBoundedAsync(long maximumBytes, CancellationToken token)
+    internal async Task<IReadOnlyList<BackupRun>?> ReadRecentForDiagnosticsAsync(int count, long maximumBytes, CancellationToken token)
     {
-        await gate.WaitAsync(token);
-        try
+        await using var stream = await AtomicProfileFile.OpenReadAsync(path, token);
+        if (stream is null) return [];
+        AgentJsonFile<List<BackupRun>>.ValidateReadPath(path, stream);
+        if (stream.Length > maximumBytes) return null;
+        var recent = new PriorityQueue<BackupRun, (DateTimeOffset Time, int Order)>();
+        var ids = new HashSet<Guid>();
+        await foreach (var run in System.Text.Json.JsonSerializer.DeserializeAsyncEnumerable<BackupRun>(stream,
+            AgentJsonFile<List<BackupRun>>.Options, token))
         {
-            var runs = await file.ReadBoundedAsync(maximumBytes, token) ?? [];
-            Validate(runs);
-            return runs;
+            if (!ValidRun(run) || !ids.Add(run!.RunId)) throw new InvalidDataException("История содержит некорректные или повторяющиеся запуски.");
+            var priority = (run.StartedUtc, -ids.Count);
+            if (recent.Count < count) recent.Enqueue(run, priority);
+            else recent.EnqueueDequeue(run, priority);
         }
-        finally { gate.Release(); }
+        return recent.UnorderedItems.OrderByDescending(item => item.Priority).Select(item => item.Element).ToArray();
     }
 
     public async Task SaveAsync(BackupRun run, CancellationToken cancellationToken = default)
@@ -87,13 +94,13 @@ public sealed class BackupRunHistory(string path)
         return runs;
     }
 
+    private static bool ValidRun(BackupRun? run) => run is not null && run.RunId != Guid.Empty && run.JobId != Guid.Empty
+        && run.Configuration is not { Valid: false } && Enum.IsDefined(run.Status) && !string.IsNullOrWhiteSpace(run.WorkDirectory)
+        && (run.Status == BackupRunStatus.Running) == (run.FinishedUtc is null);
+
     private static void Validate(List<BackupRun> runs)
     {
-        if (runs.Any(r => r is null || r.RunId == Guid.Empty || r.JobId == Guid.Empty ||
-            r.Configuration is { Valid: false } ||
-            !Enum.IsDefined(r.Status) || string.IsNullOrWhiteSpace(r.WorkDirectory) ||
-            (r.Status == BackupRunStatus.Running) != (r.FinishedUtc is null)) ||
-            runs.Select(r => r.RunId).Distinct().Count() != runs.Count)
+        if (runs.Any(run => !ValidRun(run)) || runs.Select(run => run.RunId).Distinct().Count() != runs.Count)
             throw new InvalidDataException("История содержит некорректные или повторяющиеся запуски.");
     }
 }

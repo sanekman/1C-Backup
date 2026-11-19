@@ -5,7 +5,7 @@ namespace SPBackup.Core;
 
 internal sealed class AgentJsonFile<T>(string path) where T : class
 {
-    private static readonly JsonSerializerOptions Options = new()
+    internal static JsonSerializerOptions Options { get; } = new()
     {
         WriteIndented = true,
         Converters = { new JsonStringEnumConverter() }
@@ -21,14 +21,19 @@ internal sealed class AgentJsonFile<T>(string path) where T : class
         {
             // Validate the opened snapshot, not a name briefly replaced by another process.
             if (stream.Length > limit) throw new InvalidDataException("Файл команды или результата слишком велик.");
-            FileBackupPaths.RejectReparse(Path.GetDirectoryName(Path.GetFullPath(path))!);
-            try { FileBackupPaths.RejectReparse(path); }
-            catch (FileNotFoundException) { /* Replacement hid the name; the opened snapshot is still valid. */ }
-            if (File.GetAttributes(stream.SafeFileHandle).HasFlag(FileAttributes.ReparsePoint))
-                throw new InvalidDataException("Чтение команды или результата через ссылку запрещено.");
+            ValidateReadPath(path, stream);
         }
         return await JsonSerializer.DeserializeAsync<T>(stream, Options, cancellationToken)
             ?? throw new InvalidDataException("Файл конфигурации агента содержит null.");
+    }
+
+    internal static void ValidateReadPath(string path, FileStream stream)
+    {
+        FileBackupPaths.RejectReparse(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        try { FileBackupPaths.RejectReparse(path); }
+        catch (FileNotFoundException) { /* The opened file still identifies the snapshot. */ }
+        if (File.GetAttributes(stream.SafeFileHandle).HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("Чтение команды или результата через ссылку запрещено.");
     }
 
     public async Task WriteAsync(T value, CancellationToken cancellationToken)

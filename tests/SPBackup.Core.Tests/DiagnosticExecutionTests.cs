@@ -141,15 +141,37 @@ public sealed class DiagnosticExecutionTests : IDisposable
     public async Task OversizedHistoryDoesNotPreventExportOrReplaceTheOriginalHistory()
     {
         var path = Path.Combine(Profile, "runs.json");
-        const long length = 32 * 1024 * 1024 + 1;
+        const long length = 64 * 1024 * 1024 + 1;
         await using (var file = File.Create(path)) file.SetLength(length);
         var (execution, info) = await Export();
         using (execution) using (info)
         {
-            Assert.Equal("Unavailable", info.RootElement.GetProperty("HistoryStatus").GetString());
+            Assert.Equal("SizeLimitExceeded", info.RootElement.GetProperty("HistoryStatus").GetString());
             Assert.Equal(1, info.RootElement.GetProperty("Skipped").GetInt32());
         }
         Assert.Equal(length, new FileInfo(path).Length);
+    }
+
+    [Fact]
+    public async Task LargeValidHistoryExportsTheLatestThousandRuns()
+    {
+        var start = DateTimeOffset.UtcNow.AddDays(-30);
+        var jobId = Guid.NewGuid();
+        var detail = new string('x', 3500);
+        var history = Enumerable.Range(0, 10950).Select(index => new BackupRun(Guid.NewGuid(), jobId, Secret,
+            start.AddMinutes(index), start.AddMinutes(index + 1), BackupRunStatus.Failed, Secret, Error: detail)).ToArray();
+        await Write("runs.json", history.Reverse().ToArray());
+        Assert.True(new FileInfo(Path.Combine(Profile, "runs.json")).Length > 32 * 1024 * 1024);
+
+        var selected = await new BackupRunHistory(Path.Combine(Profile, "runs.json"))
+            .ReadRecentForDiagnosticsAsync(1000, 64L * 1024 * 1024, default);
+        Assert.Equal(history.Reverse().Take(1000).Select(run => run.RunId), selected!.Select(run => run.RunId));
+        var (execution, info) = await Export();
+        using (execution) using (info)
+        {
+            Assert.Equal("Available", info.RootElement.GetProperty("HistoryStatus").GetString());
+            Assert.Equal(1000, info.RootElement.GetProperty("Runs").GetInt32());
+        }
     }
 
     [Fact]
