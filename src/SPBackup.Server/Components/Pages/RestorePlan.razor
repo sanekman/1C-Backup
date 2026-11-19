@@ -126,7 +126,7 @@ else
         {
             context.Response.StatusCode = e.Status;
             StaleComparison = e.Status == 412;
-            Error = StaleComparison ? "Текущий план изменился. Обновите сравнение перед публикацией."
+            Error = StaleComparison ? "Текущий план уже изменён. Обновите сравнение перед публикацией."
                 : "Возврат не выполнен. Проверьте актуальность ревизии, сеанс и доступ агента.";
         }
     }
