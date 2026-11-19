@@ -11,8 +11,12 @@ internal static class BackupDeliveryJournal
     private static AgentJsonFile<Entry> FileFor(string directory, int index) =>
         new(Path.Combine(directory, index.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".json"));
 
-    internal static void Prepare(string workDirectory, Guid runId) =>
-        PrivateBackupDirectory.Create(DirectoryFor(workDirectory, runId));
+    internal static void Prepare(string workDirectory, Guid runId)
+    {
+        // Like the work directory, receipts inherit access for the profile owner
+        // and the configured executor. They contain catalog metadata only.
+        Directory.CreateDirectory(DirectoryFor(workDirectory, runId));
+    }
 
     internal static Task WriteAsync(string stagingDirectory, Guid? runId, BackupJob target, int index, BackupRecord? receipt, string? archiveName = null)
     {
