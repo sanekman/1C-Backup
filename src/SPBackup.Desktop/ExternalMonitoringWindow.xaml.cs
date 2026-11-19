@@ -152,6 +152,7 @@ public partial class ExternalMonitoringWindow : Window
         }
         finally { loadingSqlSource = false; }
         SqlTrustServerCertificate.IsChecked = monitor.TrustServerCertificate;
+        SqlAllowUnencrypted.IsChecked = monitor.AllowUnencryptedConnection;
         Database.Text = monitor.DatabaseName;
         Days.Text = monitor.LookbackDays.ToString(); ReportDirectory.Text = monitor.ReportDirectory;
         FreshnessEnabled.IsChecked = monitor.MaximumBackupAgeHours is not null; FreshnessHours.Text = (monitor.MaximumBackupAgeHours ?? 26).ToString();
@@ -172,6 +173,7 @@ public partial class ExternalMonitoringWindow : Window
     {
         editingId = null; Sources.SelectedItem = null; MonitorName.Clear(); SqlServer.Clear(); Database.Clear();
         SqlTrustServerCertificate.IsChecked = false;
+        SqlAllowUnencrypted.IsChecked = false;
         sqlCredentialKey = null; sqlCredentialServer = null;
         SqlAuthentication.SelectedValue = SqlServerAuthentication.Windows; UpdateSqlCredentialStatus();
         ReportDirectory.Clear(); Days.Text = "30";
@@ -193,6 +195,7 @@ public partial class ExternalMonitoringWindow : Window
                 SqlAuthentication = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory ? SelectedSqlAuthentication : SqlServerAuthentication.Windows,
                 SqlCredentialKey = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory && SelectedSqlAuthentication == SqlServerAuthentication.SqlServer ? sqlCredentialKey : null,
                 TrustServerCertificate = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory && SqlTrustServerCertificate.IsChecked == true,
+                AllowUnencryptedConnection = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory && SqlAllowUnencrypted.IsChecked == true,
                 SqlServer = SqlServer.Text.Trim(), DatabaseName = Database.Text.Trim(),
                 TimeZoneId = monitors.FirstOrDefault(value => value.Id == editingId)?.TimeZoneId ?? TimeZoneInfo.Local.Id,
                 LookbackDays = int.TryParse(Days.Text, out var days) ? days : 0, ReportDirectory = ReportDirectory.Text.Trim(),

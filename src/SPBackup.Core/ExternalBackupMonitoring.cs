@@ -23,6 +23,8 @@ public sealed record ExternalBackupMonitor
     public int PollIntervalSeconds { get; init; } = 60;
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool TrustServerCertificate { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AllowUnencryptedConnection { get; init; }
     public int? MaximumBackupAgeHours { get; init; }
 
     public void Validate()

@@ -353,6 +353,7 @@
     <Expander Header="Сертификат и защита подключения" Margin="0,0,0,12"><StackPanel Margin="12,8,0,0">
      <TextBlock Text="Обычно здесь ничего менять не нужно: соединение шифруется, сертификат сервера проверяется. Если сервер использует самоподписанный сертификат, можно разрешить подключение без его проверки." TextWrapping="Wrap" Margin="0,0,0,8" />
     <CheckBox x:Name="SqlTrustServerCertificate" Content="Подключаться без проверки сертификата MS SQL" Click="SqlTrustServerCertificate_Click" Margin="0,0,0,10" />
+    <CheckBox x:Name="SqlAllowUnencrypted" Content="Разрешить подключение без шифрования" Click="SqlAllowUnencrypted_Click" Margin="0,0,0,10" />
     </StackPanel></Expander>
     <TextBlock Text="Где MS SQL создаст временный файл копии" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,8,0,10" />
     <TextBlock Text="Два пути ниже должны вести в одну и ту же папку. MS SQL записывает туда .bak, затем агент читает его и отправляет в выбранное хранилище." TextWrapping="Wrap" Margin="0,0,0,12" />

@@ -18,13 +18,21 @@ public partial class MainWindow
         Server = SqlBackupServer.Text.Trim(), ServerBackupDirectory = SqlServerDirectory.Text.Trim(),
         AgentReadDirectory = SqlAgentDirectory.Text.Trim(), TimeoutMinutes = timeout,
         TrustServerCertificate = SqlTrustServerCertificate.IsChecked == true,
+        AllowUnencryptedConnection = SqlAllowUnencrypted.IsChecked == true,
         Authentication = SelectedSqlAuthentication,
         CredentialKey = SelectedSqlAuthentication == SqlServerAuthentication.SqlServer ? SqlCredentialForServer : null
     };
 
+    private void SqlAllowUnencrypted_Click(object sender, RoutedEventArgs e)
+    {
+        if (SqlAllowUnencrypted.IsChecked == true && !SqlCertificateWarning.ConfirmOptionalEncryption(this))
+            SqlAllowUnencrypted.IsChecked = false;
+        EditorFieldChanged(sender, e);
+    }
+
     private void SqlTrustServerCertificate_Click(object sender, RoutedEventArgs e)
     {
-        if (SqlTrustServerCertificate.IsChecked == true && !SqlCertificateWarning.Confirm(this))
+        if (SqlTrustServerCertificate.IsChecked == true && !SqlCertificateWarning.Confirm(this, SqlAllowUnencrypted.IsChecked == true))
             SqlTrustServerCertificate.IsChecked = false;
         EditorFieldChanged(sender, e);
     }

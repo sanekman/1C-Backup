@@ -17,6 +17,8 @@ public sealed record SqlServerBackupSettings
     public string? CredentialKey { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool TrustServerCertificate { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AllowUnencryptedConnection { get; init; }
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
@@ -95,7 +97,7 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
         var errors = settings.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
         return await SqlServerConnectionFactory.CreateAsync(settings.Server, settings.Authentication,
-            settings.CredentialKey, "master", "SP Backup", credentials, token, settings.TrustServerCertificate);
+            settings.CredentialKey, "master", "SP Backup", credentials, token, settings.TrustServerCertificate, settings.AllowUnencryptedConnection);
     }
 
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)

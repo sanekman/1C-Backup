@@ -48,6 +48,33 @@ public sealed class SqlAuthenticationTests
         Assert.Equal(SqlConnectionEncryptOption.Mandatory, builder.Encrypt);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OptionalEncryptionIsExplicitAndPreservesCertificateChoiceForBothSqlConnections(bool trust)
+    {
+        var configured = Job with
+        {
+            SqlServer = Job.SqlServer! with { AllowUnencryptedConnection = true, TrustServerCertificate = trust }
+        };
+        var savedJob = JsonSerializer.Deserialize<BackupJob>(JsonSerializer.Serialize(configured))!;
+        var monitor = new ExternalBackupMonitor
+        {
+            Name = "External SQL", SqlServer = Job.SqlServer!.Server,
+            AllowUnencryptedConnection = true, TrustServerCertificate = trust
+        };
+        var savedMonitor = JsonSerializer.Deserialize<ExternalBackupMonitor>(JsonSerializer.Serialize(monitor))!;
+
+        await using var backup = await SqlServerBackupExecutor.CreateConnectionAsync(savedJob);
+        await using var observation = await SqlServerBackupHistorySource.CreateConnectionAsync(savedMonitor);
+        foreach (var connection in new[] { backup, observation })
+        {
+            var settings = new SqlConnectionStringBuilder(connection.ConnectionString);
+            Assert.Equal(SqlConnectionEncryptOption.Optional, settings.Encrypt);
+            Assert.Equal(trust, settings.TrustServerCertificate);
+        }
+    }
+
     [Fact]
     public async Task LegacySettingsKeepWindowsAuthenticationAndNeverReadSqlPasswords()
     {

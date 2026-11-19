@@ -399,6 +399,7 @@ public partial class MainWindow : Window
         SqlAgentDirectory.Text = job.SqlServer?.AgentReadDirectory ?? "";
         SqlBackupTimeout.Text = (job.SqlServer?.TimeoutMinutes ?? 120).ToString();
         SqlTrustServerCertificate.IsChecked = job.SqlServer?.TrustServerCertificate == true;
+        SqlAllowUnencrypted.IsChecked = job.SqlServer?.AllowUnencryptedConnection == true;
         sqlCredentialKey = job.SqlServer?.CredentialKey;
         sqlCredentialServer = job.SqlServer?.Server.Trim();
         sqlUsername = new WindowsSqlServerCredentialStore().TryReadUsername(sqlCredentialKey);
@@ -485,6 +486,7 @@ public partial class MainWindow : Window
         _ = RefreshOneCBasesAsync();
         SqlBackupServer.Clear(); SqlServerDirectory.Clear(); SqlAgentDirectory.Clear(); SqlBackupTimeout.Text = "120";
         SqlTrustServerCertificate.IsChecked = false;
+        SqlAllowUnencrypted.IsChecked = false;
         sqlCredentialKey = sqlCredentialServer = sqlUsername = null;
         sqlCredentialsChanged = false;
         SqlAuthenticationPicker.SelectedValue = SqlServerAuthentication.Windows;

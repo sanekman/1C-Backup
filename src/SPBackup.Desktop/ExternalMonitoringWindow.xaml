@@ -43,6 +43,7 @@
     <Expander Header="Сертификат и защита подключения" Margin="0,0,0,12"><StackPanel Margin="12,8,0,0">
      <TextBlock Text="Обычно здесь ничего менять не нужно: соединение шифруется, сертификат сервера проверяется. Если сервер использует самоподписанный сертификат, можно разрешить подключение без его проверки." TextWrapping="Wrap" Margin="0,0,0,8" />
     <CheckBox x:Name="SqlTrustServerCertificate" Content="Подключаться без проверки сертификата MS SQL" Click="SqlTrustServerCertificate_Click" Margin="0,0,0,10" />
+    <CheckBox x:Name="SqlAllowUnencrypted" Content="Разрешить подключение без шифрования" Click="SqlAllowUnencrypted_Click" Margin="0,0,0,10" />
     </StackPanel></Expander>
     <WrapPanel>
      <StackPanel Width="300"><TextBlock Text="Читать историю за последние (дней)" /><TextBox x:Name="Days" Text="30" Margin="0,4,0,10" /></StackPanel>

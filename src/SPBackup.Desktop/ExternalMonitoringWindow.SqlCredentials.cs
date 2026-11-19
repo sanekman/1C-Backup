@@ -12,9 +12,15 @@ public partial class ExternalMonitoringWindow
     private SqlServerAuthentication SelectedSqlAuthentication => SqlAuthentication.SelectedValue is SqlServerAuthentication value
         ? value : SqlServerAuthentication.Windows;
 
+    private void SqlAllowUnencrypted_Click(object sender, RoutedEventArgs e)
+    {
+        if (SqlAllowUnencrypted.IsChecked == true && !SqlCertificateWarning.ConfirmOptionalEncryption(this))
+            SqlAllowUnencrypted.IsChecked = false;
+    }
+
     private void SqlTrustServerCertificate_Click(object sender, RoutedEventArgs e)
     {
-        if (SqlTrustServerCertificate.IsChecked == true && !SqlCertificateWarning.Confirm(this))
+        if (SqlTrustServerCertificate.IsChecked == true && !SqlCertificateWarning.Confirm(this, SqlAllowUnencrypted.IsChecked == true))
             SqlTrustServerCertificate.IsChecked = false;
     }
 

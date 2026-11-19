@@ -25,7 +25,8 @@ internal static class SqlServerConnectionFactory
     }
 
     internal static async Task<DbConnection> CreateAsync(string server, SqlServerAuthentication authentication,
-        string? key, string database, string application, ISqlServerCredentialStore? credentials, CancellationToken token, bool trustServerCertificate = false)
+        string? key, string database, string application, ISqlServerCredentialStore? credentials, CancellationToken token,
+        bool trustServerCertificate = false, bool allowUnencryptedConnection = false)
     {
         var errors = ValidateAuthentication(authentication, key);
         if (ValidateServer(server) is { } serverError) throw new InvalidDataException(serverError);
@@ -35,7 +36,8 @@ internal static class SqlServerConnectionFactory
         var builder = new SqlConnectionStringBuilder
         {
             DataSource = server, InitialCatalog = database, IntegratedSecurity = !sqlLogin,
-            Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = trustServerCertificate, ConnectTimeout = 15,
+            Encrypt = allowUnencryptedConnection ? SqlConnectionEncryptOption.Optional : SqlConnectionEncryptOption.Mandatory,
+            TrustServerCertificate = trustServerCertificate, ConnectTimeout = 15,
             ApplicationName = application, Pooling = !sqlLogin
         };
         if (!sqlLogin) return new SqlConnection(builder.ConnectionString);

@@ -212,7 +212,8 @@ public partial class MainWindow
             if (Kind.SelectedItem is DatabaseKind.SqlServer)
                 WizardSummary.Text += "\nВход в MS SQL: " + (SelectedSqlAuthentication == SqlServerAuthentication.Windows
                     ? "учётная запись Windows исполнителя" : "сохранённый логин MS SQL")
-                    + "\nСертификат MS SQL: " + (SqlTrustServerCertificate.IsChecked == true ? "проверка отключена (соединение зашифровано)" : "проверка включена")
+                    + "\nСертификат MS SQL: " + (SqlTrustServerCertificate.IsChecked == true ? "проверка отключена" : "проверка включена")
+                    + "\nШифрование MS SQL: " + (SqlAllowUnencrypted.IsChecked == true ? "по требованию сервера" : "обязательно")
                     + "\nПапка на MS SQL: " + SqlServerDirectory.Text.Trim()
                     + "\nТа же папка для агента: " + SqlAgentDirectory.Text.Trim();
             if (Kind.SelectedItem is DatabaseKind.PostgreSql)
