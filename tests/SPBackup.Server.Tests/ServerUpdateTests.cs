@@ -31,6 +31,7 @@ internal sealed class UpdateBrokerFixture : IAsyncDisposable
     public string Phase = "available";
     public bool Malformed;
     public string? RawResponse;
+    public long? CheckedUtc;
     public ServerUpdateResult? LastResult;
     public UpdateBrokerFixture(string path)
     {
@@ -54,7 +55,7 @@ internal sealed class UpdateBrokerFixture : IAsyncDisposable
                 if (command == "start") Phase = "queued";
                 var result = RawResponse ?? (Malformed ? "{bad" : JsonSerializer.Serialize(new { phase = Phase,
                     currentVersion = "0.1.0-preview.9", latestVersion = "0.1.0-preview.10",
-                    targetVersion = command == "start" ? "0.1.0-preview.10" : null, checkedUtc = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), lastResult = LastResult }));
+                    targetVersion = command == "start" ? "0.1.0-preview.10" : null, checkedUtc = CheckedUtc ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds(), lastResult = LastResult }));
                 await stream.WriteAsync(Encoding.UTF8.GetBytes(result + "\n"), stop.Token);
             }
         }
@@ -136,11 +137,18 @@ public sealed class ServerUpdateAdministrationTests(ServerFixture fixture) : ICl
         broker.LastResult=new("updated","old-job","0.1.0-preview.9",DateTimeOffset.UtcNow.ToUnixTimeSeconds(),"/var/backups/fixture");
         using var page=await fixture.Administrator.GetAsync("settings");page.EnsureSuccessStatusCode();
         var html=WebUtility.HtmlDecode(await page.Content.ReadAsStringAsync());Assert.Contains("Настройки сервера",html);Assert.Contains("Обновить до 0.1.0-preview.10",html);
+        broker.CheckedUtc = DateTimeOffset.UtcNow.AddMinutes(-31).ToUnixTimeSeconds();
+        var stale = WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync("settings"));
+        Assert.Contains("Перед установкой нужна свежая проверка.", stale);
+        Assert.Contains(">Проверить снова</button>", stale);
+        Assert.DoesNotContain(">Обновить до", stale);
+        broker.CheckedUtc = null;
+
         using var start=await fixture.Administrator.PostAsync("management/server-update/start",new FormUrlEncodedContent(new Dictionary<string,string>{{"version","0.1.0-preview.10"}}));
         Assert.EndsWith("/settings",start.Headers.Location!.OriginalString);
         await fixture.RestartAsync();
         using var running=await fixture.Administrator.GetAsync("settings");
-        var busy=WebUtility.HtmlDecode(await running.Content.ReadAsStringAsync());Assert.Contains("Обновление выполняется",busy);Assert.DoesNotContain(">Обновить до",busy);
+        var busy=WebUtility.HtmlDecode(await running.Content.ReadAsStringAsync());Assert.Contains("Установка в очереди",busy);Assert.DoesNotContain(">Обновить до",busy);
         Assert.Contains("data-update-phase=\"queued\"",busy);
         Assert.Contains("Последнее обновление",busy);Assert.Contains("/var/backups/fixture",busy);
         broker.Phase="rolledBack";

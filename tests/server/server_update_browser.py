@@ -77,7 +77,7 @@ def main():
         install=page.get_by_role('button',name='Обновить до 0.1.0-preview.10');install.wait_for(timeout=12000)
         checks.append('check-status-polls-and-reloads-to-available-without-manual-refresh')
         install.focus();page.keyboard.press('Enter')
-        page.get_by_text('Обновление выполняется.',exact=False).first.wait_for()
+        page.get_by_text('Установка в очереди.',exact=True).wait_for()
         assert page.get_by_role('button',name='Обновить до',exact=False).count()==0
         page.get_by_role('button',name='Включить тёмную тему',exact=True).click()
         page.set_viewport_size({'width':900,'height':580})

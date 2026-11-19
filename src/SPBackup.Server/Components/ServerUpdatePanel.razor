@@ -2,7 +2,8 @@
 <section class="card narrow" data-server-update data-update-phase="@State.Phase" aria-busy="@State.Busy.ToString().ToLowerInvariant()">
 <h2>Обновление сервера</h2>
 <p>Установлена версия <strong>@State.CurrentVersion</strong>.</p>
-<p role="status" aria-live="polite" data-update-message>@State.Message</p>
+<p role="status" aria-live="polite" data-update-message>@StatusMessage</p>
+<p role="status" aria-live="polite" data-update-connection hidden></p>
 @if (State.Phase is "notConfigured" or "unsupported")
 {
     @if (OperatingSystem.IsLinux())
@@ -17,13 +18,17 @@
 }
 else
 {
-    @if (State.CheckedUtc is { } checkedUtc) { <p class="muted">Последняя проверка: @Clock.Time(DateTimeOffset.FromUnixTimeSeconds((long)checkedUtc)).</p> }
-    @if (State.TargetVersion is { } target && State.Busy) { <p>Устанавливается версия <strong>@target</strong>. Обновление продолжится, даже если закрыть эту страницу.</p> }
-    @if (State.BackupDirectory is { } backup) { <p>Комплект возврата на сервере: <code class="break-path">@backup</code></p> }
+    @if (State.CheckedUtc is { } checkedUtc) { <p class="muted">Поиск версии: @Clock.Time(DateTimeOffset.FromUnixTimeSeconds((long)checkedUtc)).</p> }
+    @if (State.TargetVersion is { } target)
+    {
+        <p>Целевая версия <strong>@target</strong>. @if (State.Busy) { <span>Страницу можно закрыть.</span> }</p>
+    }
+    @if (State.FinishedUtc is { } finishedUtc) { <p class="muted">Последняя попытка завершена @Clock.Time(DateTimeOffset.FromUnixTimeSeconds((long)finishedUtc)).</p> }
+    @if (State.BackupDirectory is { } backup) { <UpdateBackupPath Path="@backup" /> }
     @if (State.Phase is not "interrupted" and not "recoveryRequired")
     {
         <div class="actions server-update-actions">
-        <form action="management/server-update/check" method="post"><AntiforgeryToken /><button type="submit" class="quiet" disabled="@State.Busy">Проверить обновления</button></form>
+        <form action="management/server-update/check" method="post"><AntiforgeryToken /><button type="submit" class="quiet" disabled="@State.Busy">@(State.Phase == "available" && !State.CanStart ? "Проверить снова" : "Проверить обновления")</button></form>
         @if (State.CanStart)
         {
             <form action="management/server-update/start" method="post"><AntiforgeryToken /><input type="hidden" name="version" value="@State.LatestVersion" /><button type="submit">Обновить до @State.LatestVersion</button></form>
@@ -35,7 +40,7 @@ else
         <div class="job-summary"><h3>Последнее обновление</h3><p>@last.Message</p>
         @if (last.TargetVersion is { } previous) { <p>Версия: @previous.</p> }
         @if (last.FinishedUtc is { } finished) { <p class="muted">@Clock.Time(DateTimeOffset.FromUnixTimeSeconds((long)finished))</p> }
-        @if (last.BackupDirectory is { } previousBackup) { <p>Комплект возврата: <code class="break-path">@previousBackup</code></p> }
+        @if (last.BackupDirectory is { } previousBackup) { <UpdateBackupPath Path="@previousBackup" /> }
         </div>
     }
     <p class="muted">Перед установкой сохраняются программа, база, настройки и данные. Панель временно перезапустится; при обычной ошибке обновлятор вернёт прежнюю версию вместе с данными. Агенты продолжают выполнять принятые расписания.</p>
@@ -44,5 +49,8 @@ else
 <script src="server-update.js" defer></script>
 @code {
     private ServerUpdateState State = new("idle", ServerUpdates.BuildVersion);
+    private string StatusMessage => State.Phase == "available" && !State.CanStart
+        ? $"Версия {State.LatestVersion} была доступна. Перед установкой нужна свежая проверка."
+        : State.Message;
     protected override async Task OnInitializedAsync() => State = await Updates.ReadAsync();
 }

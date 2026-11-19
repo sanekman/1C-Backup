@@ -1,0 +1,9 @@
+<div data-update-backup>
+    <p>Комплект возврата на сервере <code class="break-path" data-update-backup-path>@Path</code></p>
+    <button type="button" class="quiet" data-update-copy hidden>Скопировать путь</button>
+    <span role="status" data-update-copy-status></span>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Path { get; set; } = "";
+}
