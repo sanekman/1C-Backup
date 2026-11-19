@@ -140,7 +140,7 @@ public partial class MainWindow : Window
                 SyncInterval.Text = agentSettings.SyncIntervalSeconds.ToString();
                 await LoadEffectiveJobsAsync();
                 await RefreshServerConnectionLabelAsync();
-                try { using var lease = engine.Acquire(); await history.RecoverInterruptedAsync(); }
+                try { using var lease = engine.Acquire(); await history.RecoverInterruptedDeliveriesAsync(jobs, EffectiveWorkDirectory, EffectiveCatalog, backupStorage); }
                 catch (BackupEngineBusyException) { /* The background owner recovers its own history. */ }
                 await RefreshHistoryAsync();
                 SaveAgentSettingsButton.IsEnabled = true;

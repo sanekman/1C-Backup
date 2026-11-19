@@ -17,20 +17,27 @@ public sealed class BackupCatalog(string path)
         finally { gate.Release(); }
     }
 
-    public async Task<BackupRecord> RegisterAsync(BackupJob job, StoredBackup backup, DateTimeOffset completedUtc,
-        CancellationToken cancellationToken = default)
+    public Task<BackupRecord> RegisterAsync(BackupJob job, StoredBackup backup, DateTimeOffset completedUtc,
+        CancellationToken cancellationToken = default) =>
+        RegisterAsync(job, CreateRecord(job, backup, completedUtc), cancellationToken);
+
+    internal static BackupRecord CreateRecord(BackupJob job, StoredBackup backup, DateTimeOffset completedUtc) =>
+        new(Guid.NewGuid(), job.Id, StorageAddress.Identity(job), completedUtc.ToUniversalTime(), backup);
+
+    internal async Task<BackupRecord> RegisterAsync(BackupJob job, BackupRecord record, CancellationToken cancellationToken)
     {
-        if (job.Validate().Count != 0) throw new ArgumentException("Некорректное задание.", nameof(job));
-        StorageAddress.ValidateLocation(job, backup);
+        if (job.Validate().Count != 0 || record.JobId != job.Id || record.StorageIdentity != StorageAddress.Identity(job))
+            throw new ArgumentException("Некорректное задание или принадлежность копии.", nameof(job));
+        StorageAddress.ValidateLocation(job, record.Backup);
         await gate.WaitAsync(cancellationToken);
         try
         {
             var records = await ReadCoreAsync(cancellationToken);
             var comparison = OperatingSystem.IsWindows() && (job.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare)
                 ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            if (records.Any(r => string.Equals(r.Backup.Location, backup.Location, comparison)))
+            if (records.Contains(record)) return record;
+            if (records.Any(r => string.Equals(r.Backup.Location, record.Backup.Location, comparison)))
                 throw new InvalidDataException("Копия с этим расположением уже зарегистрирована.");
-            var record = new BackupRecord(Guid.NewGuid(), job.Id, StorageAddress.Identity(job), completedUtc.ToUniversalTime(), backup);
             records.Add(record);
             await SaveCoreAsync(records, cancellationToken);
             return record;

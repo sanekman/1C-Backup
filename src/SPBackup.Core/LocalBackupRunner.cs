@@ -70,10 +70,11 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                     if (skipped.Count > 100) warnings.Add("Полный список пропусков: onec-backup-manifest.json внутри архива.");
                 }
                 issueStage = "Storage";
+                BackupDeliveryJournal.Prepare(work, id);
                 if (job.AdditionalDestinations?.Count > 0)
                 {
                     var completed = await completion.CompleteManyAsync(job, dump, Path.Combine(work, "archive"),
-                        (timeProvider ?? TimeProvider.System).GetUtcNow(), cancellationToken);
+                        (timeProvider ?? TimeProvider.System).GetUtcNow(), cancellationToken, runId: id);
                     var copies = completed.Destinations.Where(result => result.Record is not null).ToArray();
                     var failures = completed.Destinations.Where(result => result.Error is not null).ToArray();
                     warnings.AddRange(completed.Destinations.SelectMany(result => (result.Warnings ?? [])
@@ -90,7 +91,7 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                 else
                 {
                     var completed = await completion.CompleteAsync(job, dump, Path.Combine(work, "archive"),
-                        (timeProvider ?? TimeProvider.System).GetUtcNow(), cancellationToken);
+                        (timeProvider ?? TimeProvider.System).GetUtcNow(), cancellationToken, runId: id);
                     warnings.AddRange(completed.Retention.Failures.Select(f => "Очистка: " + f.Error.Message));
                     warnings.AddRange(completed.Retention.Warnings);
                     run = run with { Status = BackupRunStatus.Succeeded, Backup = completed.Record.Backup };
@@ -100,7 +101,6 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
                     try { await fileSnapshots.SaveAsync(job.Id, fileManifest, CancellationToken.None); }
                     catch (Exception ex) { log.Write(DiagnosticEvent.SnapshotCacheFailed, DiagnosticLevel.Warning, ex); BackupRunIssueContext.Report("SnapshotIndexNotSaved", "SnapshotIndex"); warnings.Add("Индекс инкрементной копии не сохранён. При следующем запуске программа попробует восстановить его по проверенным архивам в хранилищах задания: " + ex.Message); }
                 }
-                // Own working files are removed only after verified delivery and registration.
                 if (run.Status == BackupRunStatus.Succeeded)
                 {
                     try { Directory.Delete(work, recursive: true); }
@@ -120,6 +120,12 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             log.Write(DiagnosticEvent.RunFinished, run.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded ? DiagnosticLevel.Error : run.Warnings?.Count > 0 ? DiagnosticLevel.Warning : DiagnosticLevel.Info,
                 outcome: run.Status, values: new(Count: run.Warnings?.Count ?? 0, Bytes: run.Backup?.Length, Milliseconds: clock.ElapsedMilliseconds));
             BackupProgressContext.Report(run.Status switch { BackupRunStatus.Succeeded => BackupStage.Completed, BackupRunStatus.Cancelled => BackupStage.Cancelled, BackupRunStatus.PartiallySucceeded => BackupStage.PartiallySucceeded, _ => BackupStage.Failed });
+            if (run.Status == BackupRunStatus.Succeeded)
+            {
+                try { BackupDeliveryJournal.Remove(work, id); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                { log.Write(DiagnosticEvent.WorkCleanupFailed, DiagnosticLevel.Warning, ex); }
+            }
             return run;
         }
         finally { gate.Release(); }

@@ -194,7 +194,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
     }
 
     public async Task<CompletedBackup> CompleteAsync(BackupJob job, string completedBackupPath, string stagingDirectory,
-        DateTimeOffset completedUtc, CancellationToken cancellationToken = default)
+        DateTimeOffset completedUtc, CancellationToken cancellationToken = default, Guid? runId = null)
     {
         if (job.AdditionalDestinations?.Count > 0)
             throw new InvalidOperationException("Для нескольких хранилищ используйте CompleteManyAsync.");
@@ -202,9 +202,14 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
         try
         {
             DiagnosticLog.Current.Write(DiagnosticEvent.DestinationDeliveryStarted, jobId: job.Id, storageKind: job.StorageKind, destinationIndex: 1);
-            var stored = await new BackupDelivery(storage, passwords).DeliverAsync(job, completedBackupPath, stagingDirectory, cancellationToken);
+            using var prepared = await new BackupDelivery(storage, passwords).PrepareFileAsync(job, completedBackupPath, stagingDirectory, cancellationToken);
+            await BackupDeliveryJournal.WriteAsync(stagingDirectory, runId, job, 0, null, Path.GetFileName(prepared.Path));
+            var stored = (await storage.StoreAsync(prepared.Path, job, cancellationToken)) with
+            { ArchivePasswordKey = job.ArchivePasswordKey, FileSnapshot = prepared.FileSnapshot, FileCount = prepared.FileCount };
             DiagnosticLog.Current.Write(DiagnosticEvent.DestinationStored, jobId: job.Id, storageKind: job.StorageKind, destinationIndex: 1, values: new(Bytes: stored.Length));
-            var record = await catalog.RegisterAsync(job, stored, completedUtc, cancellationToken);
+            var receipt = BackupCatalog.CreateRecord(job, stored, completedUtc);
+            await BackupDeliveryJournal.WriteAsync(stagingDirectory, runId, job, 0, receipt);
+            var record = await catalog.RegisterAsync(job, receipt, CancellationToken.None);
             DiagnosticLog.Current.Write(DiagnosticEvent.DestinationRegistered, jobId: job.Id, storageKind: job.StorageKind, destinationIndex: 1);
             var retentionService = new BackupRetention(catalog, storage);
             var verified = await retentionService.VerifyDeliveryAsync(job, record, cancellationToken);
@@ -225,7 +230,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
     }
 
     public async Task<MultipleBackupCompletion> CompleteManyAsync(BackupJob job, string completedBackupPath,
-        string stagingDirectory, DateTimeOffset completedUtc, CancellationToken cancellationToken = default)
+        string stagingDirectory, DateTimeOffset completedUtc, CancellationToken cancellationToken = default, Guid? runId = null)
     {
         var errors = job.Validate();
         if (errors.Count != 0) throw new InvalidDataException(string.Join(" ", errors));
@@ -261,11 +266,14 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                     await storage.PrepareAsync(target, cancellationToken);
                     var repaired = await new FileBackupChainRepair(storage, catalog, passwords).EnsureAsync(job, target, prepared.FileSnapshot,
                         Path.GetDirectoryName(Path.GetFullPath(stagingDirectory))!, cancellationToken);
+                    await BackupDeliveryJournal.WriteAsync(stagingDirectory, runId, target, index - 1, null, Path.GetFileName(prepared.Path));
                     var stored = (await storage.StoreAsync(prepared.Path, target, cancellationToken))
                         with { ArchivePasswordKey = job.ArchivePasswordKey, FileSnapshot = prepared.FileSnapshot, FileCount = prepared.FileCount };
                     // A delivered file must enter the ledger even if cancellation was requested meanwhile.
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationStored, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index, values: new(Bytes: stored.Length));
-                    record = await catalog.RegisterAsync(target, stored, completedUtc, CancellationToken.None);
+                    var receipt = BackupCatalog.CreateRecord(target, stored, completedUtc);
+                    await BackupDeliveryJournal.WriteAsync(stagingDirectory, runId, target, index - 1, receipt);
+                    record = await catalog.RegisterAsync(target, receipt, CancellationToken.None);
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationRegistered, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
                     var retentionService = new BackupRetention(catalog, storage);
                     var verified = await retentionService.VerifyDeliveryAsync(target, record, cancellationToken);

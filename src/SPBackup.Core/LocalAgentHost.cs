@@ -128,7 +128,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                     settings ??= await new AgentSettingsStore(Path.Combine(directory, "agent.json")).LoadAsync(lifetime.Token);
                     if (settings.Mode == AgentMode.Managed && managedProfile is null)
                         throw new InvalidDataException("Настройки серверного режима восстановлены. Перезапустите агент для подключения без подстановки локальных заданий.");
-                    await history.RecoverInterruptedAsync(lifetime.Token);
+                    await history.RecoverInterruptedDeliveriesAsync(source, workRoot, catalog, storage, lifetime.Token);
                     var revision = managedConfiguration is null ? null : await managedConfiguration.GetActiveRevisionAsync(settings, lifetime.Token);
                     lock (stateGate) Volatile.Write(ref state, state with { ExecutionMode = settings.Mode, ConfigurationRevision = revision, CanUpdateLocalJobs = managedProfile is null && settings.Mode == AgentMode.Standalone });
                     warnings.Set("Настройки агента", null); warnings.Set("История запусков", null);

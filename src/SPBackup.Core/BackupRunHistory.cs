@@ -69,19 +69,64 @@ public sealed class BackupRunHistory(string path)
         finally { gate.Release(); }
     }
 
-    public async Task RecoverInterruptedAsync(CancellationToken cancellationToken = default)
+    public Task RecoverInterruptedAsync(CancellationToken cancellationToken = default) =>
+        RecoverInterruptedCoreAsync(null, cancellationToken);
+
+    public Task RecoverInterruptedDeliveriesAsync(IEnumerable<BackupJob> jobs, string workRoot, BackupCatalog catalog,
+        IBackupStorage storage, CancellationToken cancellationToken = default)
+    {
+        var configured = jobs.ToDictionary(job => job.Id);
+        return RecoverInterruptedCoreAsync((run, token) =>
+            configured.TryGetValue(run.JobId, out var job) && job.ExecutionConfiguration == run.Configuration
+                ? BackupDeliveryJournal.ReconcileAsync(run, job, workRoot, catalog, storage, token)
+                : Task.FromResult<IReadOnlyList<DestinationResult>>([]), cancellationToken);
+    }
+
+    internal Task RecoverInterruptedDeliveriesAsync(IBackupJobSource source, string workRoot, BackupCatalog catalog,
+        IBackupStorage storage, CancellationToken cancellationToken)
+    {
+        IReadOnlyDictionary<Guid, BackupJob>? configured = null;
+        return RecoverInterruptedCoreAsync(async (run, token) =>
+        {
+            if (configured is null)
+            {
+                try { configured = (await source.LoadAsync(token)).ToDictionary(job => job.Id); }
+                catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
+                {
+                    DiagnosticLog.Current.Write(DiagnosticEvent.AgentWarning, DiagnosticLevel.Warning, error);
+                    configured = new Dictionary<Guid, BackupJob>();
+                }
+            }
+            return configured.TryGetValue(run.JobId, out var job) && job.ExecutionConfiguration == run.Configuration
+                ? await BackupDeliveryJournal.ReconcileAsync(run, job, workRoot, catalog, storage, token) : [];
+        }, cancellationToken);
+    }
+
+    private async Task RecoverInterruptedCoreAsync(Func<BackupRun, CancellationToken, Task<IReadOnlyList<DestinationResult>>>? reconcile,
+        CancellationToken cancellationToken)
     {
         await gate.WaitAsync(cancellationToken);
         try
         {
             var runs = await ReadCoreAsync(cancellationToken);
-            if (!runs.Any(r => r.Status == BackupRunStatus.Running)) return;
-            foreach (var interrupted in runs.Where(run => run.Status == BackupRunStatus.Running))
-                DiagnosticLog.Current.Write(DiagnosticEvent.RunInterrupted, DiagnosticLevel.Warning, jobId: interrupted.JobId, runId: interrupted.RunId);
-            runs = runs.Select(r => r.Status == BackupRunStatus.Running
-                ? r with { Status = BackupRunStatus.Interrupted, FinishedUtc = DateTimeOffset.UtcNow,
+            if (!runs.Any(run => run.Status == BackupRunStatus.Running)) return;
+            for (var index = 0; index < runs.Count; index++)
+            {
+                var run = runs[index];
+                if (run.Status != BackupRunStatus.Running) continue;
+                DiagnosticLog.Current.Write(DiagnosticEvent.RunInterrupted, DiagnosticLevel.Warning, jobId: run.JobId, runId: run.RunId);
+                var recovered = reconcile is null ? [] : await reconcile(run, cancellationToken);
+                var finished = DateTimeOffset.UtcNow;
+                runs[index] = run with
+                {
+                    Status = BackupRunStatus.Interrupted,
+                    FinishedUtc = finished < run.StartedUtc ? run.StartedUtc : finished,
                     Issues = [new("Interrupted", "Error", "Backup")],
-                    Error = "Предыдущее исполнение не завершилось. Проверьте рабочий каталог и журнал платформы." } : r).ToList();
+                    Error = "Предыдущее исполнение не завершилось. Проверьте рабочий каталог и результаты по хранилищам.",
+                    Destinations = recovered.Count == 0 ? run.Destinations : recovered,
+                    Backup = recovered.FirstOrDefault(item => item.Record is not null)?.Record?.Backup ?? run.Backup
+                };
+            }
             await file.WriteAsync(runs, cancellationToken);
         }
         finally { gate.Release(); }
