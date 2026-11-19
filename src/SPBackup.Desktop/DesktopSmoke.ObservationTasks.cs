@@ -91,8 +91,17 @@ internal static partial class DesktopSmoke
             Control<ComboBox>("Sources").SelectedValue = saved;
             if (Control<CheckBox>("FreshnessEnabled").IsChecked != true || Control<TextBox>("FreshnessHours").Text != "26" || Control<CheckBox>("SqlTrustServerCertificate").IsChecked != true)
                 throw new InvalidOperationException("Редактор не восстановил сохранённый срок копии.");
+            Control<CheckBox>("SqlAllowUnencrypted").IsChecked = true;
+            Control<Button>("CollectMonitorButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            if (!Control<TextBlock>("Status").Text.Contains("Параметры сертификата или шифрования изменены"))
+                throw new InvalidOperationException("Проверка SQL началась с прежними параметрами подключения.");
+            Control<Button>("SaveMonitorButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitUntil(() => editor.SmokeReady, "Параметры шифрования не сохранились.");
+            if (!(await store.LoadAsync()).Single(task => task.Id == saved.Id).AllowUnencryptedConnection)
+                throw new InvalidOperationException("Настройка необязательного шифрования потерялась при сохранении.");
             Control<Button>("NewMonitorButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            if (Control<CheckBox>("FreshnessEnabled").IsChecked == true || Control<CheckBox>("SqlTrustServerCertificate").IsChecked == true)
+            if (Control<CheckBox>("FreshnessEnabled").IsChecked == true || Control<CheckBox>("SqlTrustServerCertificate").IsChecked == true
+                || Control<CheckBox>("SqlAllowUnencrypted").IsChecked == true)
                 throw new InvalidOperationException("Новое наблюдение унаследовало настройки прежнего задания.");
             editor.Close();
             await owner.SmokeRefreshObservationTasksAsync();

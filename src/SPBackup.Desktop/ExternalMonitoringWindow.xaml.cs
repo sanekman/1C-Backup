@@ -222,6 +222,14 @@ public partial class ExternalMonitoringWindow : Window
     private async void Collect_Click(object sender, RoutedEventArgs e)
     {
         if (!ready || busy || SelectedMonitor is not { } monitor) return;
+        if (monitor.Kind == ExternalBackupSourceKind.SqlServerHistory
+            && (monitor.TrustServerCertificate != (SqlTrustServerCertificate.IsChecked == true)
+                || monitor.AllowUnencryptedConnection != (SqlAllowUnencrypted.IsChecked == true)))
+        {
+            SourceSettings.IsExpanded = true;
+            Status.Text = "Параметры сертификата или шифрования изменены. Нажмите «Сохранить задание», затем «Прочитать журнал копий».";
+            return;
+        }
         busy = true; Editor.IsEnabled = false; Status.Text = "Чтение сведений о внешних копиях…";
         UpdateMonitorControls();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);

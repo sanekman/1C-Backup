@@ -23,7 +23,7 @@ public sealed class SqlServerBackupHistorySource(Func<ExternalBackupMonitor, DbC
         CancellationToken cancellationToken = default)
     {
         try { return await ReadCoreAsync(monitor, cancellationToken); }
-        catch (Exception ex) when (SqlServerErrorHints.Describe(ex) is { } hint)
+        catch (Exception ex) when (SqlServerErrorHints.Describe(ex, monitor.TrustServerCertificate) is { } hint)
         { throw new IOException(hint, ex); }
     }
 

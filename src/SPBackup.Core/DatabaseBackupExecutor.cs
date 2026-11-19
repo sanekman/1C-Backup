@@ -151,7 +151,7 @@ public sealed class SqlServerBackupExecutor(Func<BackupJob, DbConnection>? conne
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { throw new TimeoutException("Превышено время копирования MS SQL."); }
-        catch (Exception ex) when (SqlServerErrorHints.Describe(ex) is { } hint)
+        catch (Exception ex) when (SqlServerErrorHints.Describe(ex, settings.TrustServerCertificate) is { } hint)
         { throw new IOException(hint, ex); }
     }
 

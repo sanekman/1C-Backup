@@ -119,6 +119,20 @@ public sealed class SqlServerErrorHintsTests
     }
 
     [Fact]
+    public async Task MonitoringExplainsCertificateFailureWithAnExplicitTrustOverride()
+    {
+        var error = new Win32Exception(unchecked((int)0x80090325), PrivateText);
+        var source = new SqlServerBackupHistorySource(_ => new FailingConnection(error));
+        var monitor = new ExternalBackupMonitor { Name = "SQL", SqlServer = "sql.example", TrustServerCertificate = true };
+        var failure = await Assert.ThrowsAsync<IOException>(() => source.ReadAsync(monitor));
+        Assert.Contains("В задании разрешено подключение без проверки сертификата", failure.Message);
+        Assert.Contains("0x80090325", failure.Message);
+        Assert.DoesNotContain("Проверка сертификата остаётся включённой", failure.Message);
+        Assert.DoesNotContain(PrivateText, failure.Message);
+        Assert.Equal("Certificate", ExternalBackupPollErrors.Classify(failure));
+    }
+
+    [Fact]
     public async Task HistoryAndAutomaticPollingUseSameExplanationWithoutDiscardingPreviousHistory()
     {
         var root = Path.Combine(Path.GetTempPath(), "OneCBackup-monitor-hints-" + Guid.NewGuid()); Directory.CreateDirectory(root);

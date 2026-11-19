@@ -48,7 +48,7 @@ public sealed class SourceReadinessChecker(IBackupProcessRunner processRunner, s
         catch (OperationCanceledException)
         { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Warning, jobId: job.Id, sourceKind: job.Kind, values: new(Code: 3)); return Complete(new(false, "Время проверки источника превысило 30 секунд. Проверьте подключение и доступ.")); }
         catch (Exception ex)
-        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Error, ex, jobId: job.Id, sourceKind: job.Kind); return Complete(new(false, job.Kind == DatabaseKind.SqlServer ? SqlServerErrorHints.Describe(ex) ?? ex.Message : ex.Message)); }
+        { DiagnosticLog.Current.Write(DiagnosticEvent.SourceCheckFailed, DiagnosticLevel.Error, ex, jobId: job.Id, sourceKind: job.Kind); return Complete(new(false, job.Kind == DatabaseKind.SqlServer ? SqlServerErrorHints.Describe(ex, job.SqlServer?.TrustServerCertificate == true) ?? ex.Message : ex.Message)); }
     }
 
     private async Task<SourceCheckReport> CheckOneCAsync(BackupJob job, CancellationToken token)

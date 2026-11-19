@@ -7,7 +7,7 @@ namespace SPBackup.Core;
 /// <summary>Stable provider/native codes only: localized driver messages can contain connection details.</summary>
 internal static class SqlServerErrorHints
 {
-    internal static string? Describe(Exception error)
+    internal static string? Describe(Exception error, bool trustServerCertificate = false)
     {
         if (error is OperationCanceledException) return null;
         var errors = new List<Exception>();
@@ -25,12 +25,17 @@ internal static class SqlServerErrorHints
         var native = errors.SelectMany(item => item is Win32Exception win
             ? new[] { item.HResult, win.NativeErrorCode } : new[] { item.HResult }).Concat(numbers).ToHashSet();
         // Certificate errors take priority over the generic provider/network error that often wraps them.
+        var certificatePolicy = trustServerCertificate
+            ? "В задании разрешено подключение без проверки сертификата. Попросите администратора проверить политику TLS на экземпляре MS SQL и его сертификат."
+            : "Проверка сертификата остаётся включённой.";
         foreach (var (code, hint) in CertificateErrors)
-            if (native.Contains(code)) return hint + $" Код сертификата: 0x{unchecked((uint)code):X8}.";
+            if (native.Contains(code))
+                return (trustServerCertificate ? "При подключении к MS SQL возникла ошибка сертификата. " + certificatePolicy : hint)
+                    + $" Код сертификата: 0x{unchecked((uint)code):X8}.";
         if (native.Contains(unchecked((int)0x80090322)))
-            return "Не подтверждено имя сервера MS SQL. Попросите администратора проверить имя подключения, сертификат и настройки аутентификации сервера. Проверка сертификата остаётся включённой. Код Windows: 0x80090322.";
+            return "Не подтверждено имя сервера MS SQL. Попросите администратора проверить имя подключения, сертификат и настройки аутентификации сервера. " + certificatePolicy + " Код Windows: 0x80090322.";
         if (errors.Any(item => item is AuthenticationException))
-            return "Не удалось подтвердить подлинность подключения к MS SQL. Попросите администратора проверить имя сервера, способ входа, сертификат и настройки TLS. Проверка сертификата остаётся включённой.";
+            return "Не удалось подтвердить подлинность подключения к MS SQL. Попросите администратора проверить имя сервера и способ входа. " + certificatePolicy;
         foreach (var code in new[] { 4060, 18487, 18488, 18456, 18452, 18470, 229, -2, 258, 26, 40, 53, 64, 233, 10060, 10061, 10054, 11001 })
         {
             if (!numbers.Contains(code)) continue;

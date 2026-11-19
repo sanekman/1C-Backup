@@ -104,6 +104,21 @@ try
     var observed = await source.ReadAsync(monitor);
     Require(new[] { "D", "I", "L" }.All(type => observed.Any(item => item.BackupType == type && item.SizeBytes > 0 && item.Outcome == ExternalBackupOutcome.Completed)),
         "Real full/differential/log history was not observed.");
+    var mismatchMonitor = monitor with { SqlServer = mismatchServer, AllowUnencryptedConnection = true };
+    try
+    {
+        await source.ReadAsync(mismatchMonitor);
+        throw new InvalidDataException("Optional encryption accepted an invalid certificate on a server requiring TLS.");
+    }
+    catch (IOException error) when (ExternalBackupPollErrors.Classify(error) == "Certificate") { }
+    var tlsStore = new ExternalBackupMonitorStore(Path.Combine(root, "monitor-tls.json"));
+    await tlsStore.SaveAsync([mismatchMonitor with { TrustServerCertificate = true }]);
+    var trusted = (await tlsStore.LoadAsync()).Single();
+    Require((await source.ReadAsync(trusted)).Count == observed.Count,
+        "Both saved switches did not permit reading msdb on the server requiring TLS.");
+    Require((await source.ReadAsync(trusted with { AllowUnencryptedConnection = false })).Count == observed.Count,
+        "The explicit certificate exception did not work with required encryption.");
+    checks.Add("msdb-forced-tls-optional-encryption-does-not-bypass-certificate-but-both-saved-switches-connect");
     var agentId = Guid.NewGuid(); var evaluated = DateTimeOffset.UtcNow;
     var tracked = monitor with { MaximumBackupAgeHours = 1 };
     var monitorStore = new ExternalBackupMonitorStore(Path.Combine(root, "monitors.json"));
