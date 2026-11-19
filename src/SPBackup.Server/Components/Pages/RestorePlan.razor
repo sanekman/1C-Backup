@@ -10,7 +10,11 @@
 @if (Saved is { } saved)
 {
     <section class="card" role="status"><h2>План опубликован новой ревизией @saved</h2>
-        <p>Ожидается получение и проверка настроек агентом. Это ещё не результат копирования.</p>
+        <p>На сервере сохранена ревизия @saved из плана @Revision. Ожидается подтверждение агента.</p>
+        @if (LastAccepted is { } accepted)
+        {
+            <p>Последняя подтверждённая ревизия @accepted.Revision · @Clock.Time(accepted.ReceivedUtc).</p>
+        }
         <a href="@($"agents/{Id}")">Проверить принятие и результаты</a>
     </section>
 }
@@ -20,7 +24,17 @@ else
     @if (Plan is { } plan && Current is { } current && Agent is { } agent)
     {
         <p>@agent.Name. Сейчас сохранена ревизия @current.Revision; в выбранном плане заданий: @plan.Jobs.Count.</p>
+        @if (Revision < current.Revision)
+        {
+            <p><a href="@ComparisonLink(!PreviousView)">@(PreviousView ? "Показать сравнение" : "Показать прежний вид")</a></p>
+            @if (!PreviousView)
+            {
+                <PlanRestoreComparison Current="current" Plan="plan" />
+            }
+        }
         @if (plan.Jobs.Count == 0) { <p>Этот план пустой: после принятия агентом серверных заданий не останется.</p> }
+        <details open="@(PreviousView || Revision >= current.Revision)">
+        <summary>Полный план ревизии @Revision</summary>
         @foreach (var job in plan.Jobs)
         {
             <section class="card"><h2>@job.Name</h2><dl>
@@ -44,6 +58,7 @@ else
                 @if (job.Kind == "OneCFile") { <dt>Открытая база</dt><dd>@(job.AllowOpenOneCDatabase ? "Архивирование разрешено, если база открыта" : "База должна быть закрыта")</dd> }
             </dl></section>
         }
+        </details>
         @if (!agent.Revoked && Revision < current.Revision)
         {
             <section class="card narrow"><h2>Вернуть этот план?</h2>
@@ -51,10 +66,14 @@ else
                     Проверьте расписания: ранее включённые задания снова смогут запускаться автоматически.
                     Уже начатые копии продолжатся; архивы и история копирования не удаляются.</p>
                 <p>Текущих заданий: @current.Jobs.Count. В возвращаемом плане: @plan.Jobs.Count.
-                    Сначала сравните <a href="@($"agents/{Id}/jobs")" target="_blank" rel="noopener">текущие задания</a>.</p>
+                    @if (PreviousView) { <a href="@($"agents/{Id}/jobs")" target="_blank" rel="noopener">Сравнить с текущими заданиями</a> }</p>
+                @if (StaleComparison)
+                {
+                    <p><a href="@ComparisonLink(PreviousView)">Обновить сравнение</a></p>
+                }
                 <form method="post" @formname="restore-plan" @onsubmit="Restore">
                     <AntiforgeryToken /><input type="hidden" name="Expected" value="@Expected" />
-                    @if (Error is null) { <button type="submit">Опубликовать этот план новой ревизией</button> }
+                    @if (Error is null) { <button type="submit">@(plan.Jobs.Count == 0 ? "Опубликовать пустой план" : $"Опубликовать план из ревизии {Revision}")</button> }
                 </form>
             </section>
         }
@@ -72,6 +91,11 @@ else
     private ManagedFileConfiguration? Current;
     private string? Error;
     private long? Saved;
+    private ConfigurationDecision? LastAccepted;
+    private bool StaleComparison;
+    [SupplyParameterFromQuery(Name = "previousView")] public bool PreviousView { get; set; }
+
+    private string ComparisonLink(bool previous) => $"agents/{Id}/jobs/history/{Revision}" + (previous ? "?previousView=true" : "");
     protected override async Task OnParametersSetAsync()
     {
         var context = Http.HttpContext!;
@@ -82,6 +106,7 @@ else
             Plan = await Store.ReadFileConfigurationRevisionAsync(Id, Revision, context.RequestAborted);
             Current = await Store.ReadFileConfigurationAsync(Id, context.RequestAborted);
             if (context.Request.Method == "GET") Expected = Current.Revision.ToString(CultureInfo.InvariantCulture);
+            else LastAccepted = (await Store.ConfigurationDecisionsAsync(Id, context.RequestAborted)).LastAccepted;
         }
         catch (ServerRequestException e)
         {
@@ -100,7 +125,8 @@ else
         catch (ServerRequestException e)
         {
             context.Response.StatusCode = e.Status;
-            Error = e.Status == 412 ? "План уже изменён в другой вкладке. Возврат не выполнен. Откройте историю заново и сравните настройки."
+            StaleComparison = e.Status == 412;
+            Error = StaleComparison ? "Текущий план изменился. Обновите сравнение перед публикацией."
                 : "Возврат не выполнен. Проверьте актуальность ревизии, сеанс и доступ агента.";
         }
     }

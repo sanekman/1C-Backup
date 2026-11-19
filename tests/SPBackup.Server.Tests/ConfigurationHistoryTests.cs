@@ -32,6 +32,34 @@ public sealed class ConfigurationHistoryTests(ServerFixture fixture) : IClassFix
     private async Task<int> RestoredAudits(Guid id) => (await fixture.Store.AuditPageAsync(0)).Entries.Count(e => e.AgentId == id && e.Event == "ConfigurationRestored");
 
     [ServerFact]
+    public async Task HistoryPageComparesByJobIdAndOffersThePreviousView()
+    {
+        var agent = await fixture.EnrollAsync();
+        var historical = Job() with { MaximumBackupAgeHours = 24, Name = "Previous name" };
+        await Publish(agent.AgentId, 1, historical, Job() with { Name = "Historical only" });
+        await Publish(agent.AgentId, 2, historical with { Name = "Current name", KeepLast = 14, MaximumBackupAgeHours = null },
+            Job() with { Name = "Current only" });
+        var path = $"agents/{agent.AgentId}/jobs/history/2";
+
+        var comparison = WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync(path));
+        Assert.Contains("Что изменится после принятия плана агентом", comparison);
+        Assert.Contains("Current name · Название", comparison);
+        Assert.Contains("Previous name", comparison);
+        Assert.Contains("Вне нового плана", comparison);
+        Assert.Contains("Вне текущего плана", comparison);
+        Assert.Contains("Контроль свежести", comparison);
+        Assert.Contains("лимит 14", comparison);
+
+        var previous = WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync(path + "?previousView=true"));
+        Assert.DoesNotContain("Что изменится после принятия плана агентом", previous);
+        Assert.Contains("Сравнить с текущими заданиями", previous);
+
+        var empty = WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync($"agents/{agent.AgentId}/jobs/history/1"));
+        Assert.Contains("Опубликовать пустой план", empty);
+        Assert.Equal(3, (await fixture.Store.ReadFileConfigurationAsync(agent.AgentId, default)).Revision);
+    }
+
+    [ServerFact]
     public async Task RestorePublishesTheExactHistoricalPlanAsANewRevisionAndSurvivesRestart()
     {
         var agent = await fixture.EnrollAsync(); var job = Job(); await Publish(agent.AgentId, 1, job);
