@@ -191,6 +191,64 @@ public sealed class FileFolderBackupTests : IDisposable
         Assert.Equal("second", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "a.txt")));
     }
 
+    [Fact]
+    public async Task MissingAncestorWithCachedIndexPreservesPreviousIndependentRestorePoint()
+    {
+        var job = Job with { FullBackupEvery = 2, KeepLast = 2 };
+        var sourceFile = Path.Combine(Source, "a.txt");
+        await File.WriteAllTextAsync(sourceFile, "original");
+        var original = await Run(job);
+        await File.WriteAllTextAsync(sourceFile, "first change");
+        await Run(job);
+        var nextBasis = await Run(job);
+        File.Delete(nextBasis.Backup.Location);
+
+        await File.WriteAllTextAsync(sourceFile, "second change");
+        var result = await Runner().RunAsync(job);
+
+        Assert.Equal(BackupRunStatus.Failed, result.Status);
+        Assert.True(Directory.Exists(result.WorkDirectory));
+        var restored = await Restorer().RestoreAsync(original, job, RestoreParent);
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "a.txt")));
+    }
+
+    [Theory]
+    [InlineData(FileBackupMode.Full)]
+    [InlineData(FileBackupMode.Incremental)]
+    public async Task EmptySourcePreservesPreviousFileThroughTheNextFullBackup(FileBackupMode mode)
+    {
+        var job = Job with { FileBackupMode = mode, FullBackupEvery = 2 };
+        var file = Path.Combine(Source, "a.txt");
+        await File.WriteAllTextAsync(file, "original");
+        var original = await Run(job);
+        File.Delete(file);
+        await Run(job);
+        var current = await Run(job);
+
+        Assert.True(current.Backup.FileSnapshot!.IsFull);
+        Assert.Equal(0, current.Backup.FileCount);
+        Assert.Empty(Directory.GetFiles((await Restorer().RestoreAsync(current, job, RestoreParent)).Directory));
+        var restored = await Restorer().RestoreAsync(original, job, RestoreParent);
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "a.txt")));
+    }
+
+    [Fact]
+    public async Task ChangedSourceHasNoCurrentAuditUntilCopiedAndKeepsPreviousPoint()
+    {
+        await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "original");
+        var original = await Run();
+        var replacement = Directory.CreateDirectory(Path.Combine(root, "new-source")).FullName;
+        var job = Job with { Source = replacement };
+        var audit = new LatestBackupAudit(storage, catalog);
+        Assert.Equal(BackupAuditStatus.Missing, Assert.Single((await audit.CheckAsync(job)).Destinations).Status);
+
+        var newPoint = await Run(job);
+
+        Assert.Equal(newPoint, Assert.Single((await audit.CheckAsync(job)).Destinations).Record);
+        var restored = await Restorer().RestoreAsync(original, job, RestoreParent);
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "a.txt")));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -323,10 +381,34 @@ public sealed class FileFolderBackupTests : IDisposable
         var state = Path.Combine(root, "file-snapshots", Job.Id.ToString("N") + ".json"); var old = await File.ReadAllBytesAsync(state);
         clock.Set("2026-10-25T09:00:00Z"); await File.WriteAllTextAsync(file, "new");
         var second = await runner.RunAsync(job); Assert.False(second.Backup!.FileSnapshot!.IsFull);
+        var audit = await new LatestBackupAudit(storage, catalog).CheckAsync(job);
+        Assert.Equal(second.Backup, Assert.Single(audit.Destinations).Record!.Backup);
         await File.WriteAllBytesAsync(state, old); // Disk cache predates the archive registered with an earlier wall clock.
         var third = await runner.RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, third.Status);
         Assert.False(third.Backup!.FileSnapshot!.IsFull);
         Assert.Equal(second.Backup.FileSnapshot.SnapshotId, third.Backup.FileSnapshot.ParentSnapshotId);
+    }
+
+    [Fact]
+    public async Task FullCopiesKeepTheImmediatePredecessorWhenTheClockMovesBack()
+    {
+        var clock = new BackupTestClock("2026-10-25T10:00:00Z");
+        var job = Job with { FileBackupMode = FileBackupMode.Full, KeepLast = 2 };
+        var file = Path.Combine(Source, "a.txt");
+        var runner = new LocalBackupRunner(new NoDatabase(), new BackupCompletion(storage, catalog), history,
+            Path.Combine(root, "default-work"), timeProvider: clock);
+        var cases = new[] { ("10:00", "A"), ("09:00", "B"), ("09:01", "C"), ("09:02", "D") };
+        foreach (var (time, content) in cases)
+        {
+            clock.Set($"2026-10-25T{time}:00Z");
+            await File.WriteAllTextAsync(file, content);
+            Assert.Equal(BackupRunStatus.Succeeded, (await runner.RunAsync(job)).Status);
+        }
+
+        var restored = new List<string>();
+        foreach (var record in await catalog.ReadAsync())
+            restored.Add(await File.ReadAllTextAsync(Path.Combine((await Restorer().RestoreAsync(record, job, RestoreParent)).Directory, "a.txt")));
+        Assert.Equal(new[] { "C", "D" }, restored.Order());
     }
 
     [Fact]
@@ -447,7 +529,12 @@ public sealed class FileFolderBackupTests : IDisposable
         Assert.Single(partial.Destinations!, result => result.Record is not null);
         Assert.False(partial.Backup!.FileSnapshot!.IsFull); Assert.True(File.Exists(extraBasis.Backup.Location));
         Assert.True(Directory.Exists(partial.WorkDirectory));
-        routed.Failing = false; var recovered = await runner.RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, recovered.Status);
+        routed.Failing = false;
+        var audit = await new LatestBackupAudit(routed, catalog).CheckAsync(job);
+        Assert.All(audit.Destinations, result => Assert.Equal(BackupAuditStatus.Verified, result.Status));
+        Assert.False(audit.Destinations[0].OlderThanLatestPoint);
+        Assert.True(audit.Destinations[1].OlderThanLatestPoint);
+        var recovered = await runner.RunAsync(job); Assert.Equal(BackupRunStatus.Succeeded, recovered.Status);
         Assert.All(recovered.Destinations!, destination => Assert.False(destination.Record!.Backup.FileSnapshot!.IsFull));
         Assert.Equal(partial.Backup.FileSnapshot.FullSnapshotId, recovered.Backup!.FileSnapshot!.FullSnapshotId);
         Assert.Contains(recovered.Warnings!, warning => warning.Contains("Доставлены пропущенные"));

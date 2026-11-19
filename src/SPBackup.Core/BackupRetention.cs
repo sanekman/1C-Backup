@@ -8,17 +8,34 @@ public sealed record RetentionResult(IReadOnlyList<Guid> Deleted, IReadOnlyList<
 
 public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storage)
 {
-    public async Task<RetentionResult> ApplyAsync(BackupJob job, BackupRecord newest,
-        CancellationToken cancellationToken = default, int? destinationIndex = null)
+    public Task<RetentionResult> ApplyAsync(BackupJob job, BackupRecord newest,
+        CancellationToken cancellationToken = default, int? destinationIndex = null) =>
+        ApplyCoreAsync(job, newest, null, cancellationToken, destinationIndex);
+
+    internal async Task<HashSet<Guid>> VerifyDeliveryAsync(BackupJob job, BackupRecord newest, CancellationToken token)
+    {
+        var records = await catalog.ReadAsync(token);
+        ValidateNewest(job, newest, records);
+        var verified = new HashSet<Guid>();
+        await VerifyChainAsync(job, newest, records, verified, token);
+        return verified;
+    }
+
+    internal Task<RetentionResult> ApplyVerifiedAsync(BackupJob job, BackupRecord newest, HashSet<Guid> verified,
+        CancellationToken token, int destinationIndex) =>
+        ApplyCoreAsync(job, newest, verified, token, destinationIndex);
+
+    private async Task<RetentionResult> ApplyCoreAsync(BackupJob job, BackupRecord newest, HashSet<Guid>? verified,
+        CancellationToken cancellationToken, int? destinationIndex)
     {
         BackupProgressContext.Report(BackupStage.Retention);
         if (job.KeepLast < 1) throw new ArgumentException("Нужно сохранять хотя бы одну копию.", nameof(job));
         DiagnosticLog.Current.Write(DiagnosticEvent.RetentionStarted, jobId: job.Id, storageKind: job.StorageKind, values: new(Count: job.KeepLast));
         var identity = StorageAddress.Identity(job);
         var records = await catalog.ReadAsync(cancellationToken);
-        if (newest.JobId != job.Id || newest.StorageIdentity != identity || !records.Contains(newest))
-            throw new InvalidDataException("Очистка разрешена только после регистрации новой успешной копии этого задания.");
-        await storage.VerifyAsync(newest.Backup, job, cancellationToken);
+        ValidateNewest(job, newest, records);
+        verified ??= [];
+        await VerifyChainAsync(job, newest, records, verified, cancellationToken);
         // A partial source must never trigger deletion of earlier recoverable data.
         if (newest.Backup.FileSnapshot?.IsIncomplete == true)
         {
@@ -26,8 +43,18 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
             return new([], []) { Warnings = ["Очистка пропущена: новая копия неполная. Прежние копии сохранены."] };
         }
         var owned = records.Where(r => r.JobId == job.Id && r.StorageIdentity == identity).ToArray();
-        var keep = owned.Where(r => r.Id != newest.Id && r.Backup.FileSnapshot?.IsIncomplete != true).OrderByDescending(r => r.CompletedUtc).ThenByDescending(r => r.Id)
-            .Take(job.KeepLast - 1).Select(r => r.Id).Append(newest.Id).ToHashSet();
+        var sourceIdentity = newest.Backup.FileSnapshot?.SourceIdentity;
+        var sameSource = owned.Where(record => record.Backup.FileSnapshot?.SourceIdentity == sourceIdentity);
+        var preceding = BackupPointOrder.NewestFirst(sameSource.Where(record =>
+                record.Id != newest.Id && record.Backup.FileSnapshot?.IsIncomplete != true),
+                records.Where(record => record.JobId == job.Id)).ToArray();
+        var keep = preceding.Take(job.KeepLast - 1).Select(record => record.Id).Append(newest.Id).ToHashSet();
+        // An older catalog may not know the file count. Protect its latest candidate too.
+        var previousWithFiles = newest.Backup.FileCount == 0
+            ? preceding.FirstOrDefault(record => record.Backup.FileCount != 0) : null;
+        if (previousWithFiles is not null) keep.Add(previousWithFiles.Id);
+        var previousSources = owned.Where(record => record.Backup.FileSnapshot?.SourceIdentity != sourceIdentity).ToArray();
+        keep.UnionWith(previousSources.Select(record => record.Id));
         // Partial archives do not consume the successful-copy quota; removal is explicit.
         foreach (var partial in owned.Where(r => r.Backup.FileSnapshot?.IsIncomplete == true)) keep.Add(partial.Id);
         var deleted = new List<Guid>();
@@ -37,6 +64,10 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
             foreach (var ancestor in FileBackupChains.Resolve(record, owned)) keep.Add(ancestor.Id);
         var partialCount = owned.Count(record => record.Backup.FileSnapshot?.IsIncomplete == true);
         var warnings = new List<string>();
+        if (previousWithFiles is not null)
+            warnings.Add("В новом снимке 0 файлов. Предыдущая точка сохранена.");
+        if (previousSources.Length > 0)
+            warnings.Add($"Копии прежнего источника сохранены: {previousSources.Length}.");
         if (keep.Count - partialCount > job.KeepLast && owned.Any(record => record.Backup.FileSnapshot is not null))
         {
             BackupRunIssueContext.Report("RetentionChainPreserved", "Retention", destinationIndex: destinationIndex);
@@ -46,6 +77,19 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
         {
             BackupRunIssueContext.Report("RetentionIncompletePreserved", "Retention", destinationIndex: destinationIndex);
             warnings.Add($"Неполные копии сохранены вне лимита: {partialCount}. При необходимости удалите их вручную.");
+        }
+        if (owned.Any(record => !keep.Contains(record.Id)))
+        {
+            foreach (var point in sameSource.Where(record => keep.Contains(record.Id) && record.Backup.FileSnapshot is not null))
+            {
+                try { await VerifyChainAsync(job, point, owned, verified, cancellationToken); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception error)
+                {
+                    BackupRunIssueContext.Report(error, "Retention", destinationIndex: destinationIndex);
+                    return new([], [new(point.Id, error)]) { Warnings = warnings };
+                }
+            }
         }
         foreach (var record in owned.Where(r => !keep.Contains(r.Id)).OrderByDescending(r => r.Backup.FileSnapshot?.Depth ?? 0).ThenBy(r => r.CompletedUtc))
         {
@@ -70,6 +114,28 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
         DiagnosticLog.Current.Write(DiagnosticEvent.RetentionCompleted, jobId: job.Id, storageKind: job.StorageKind, values: new(Count: deleted.Count, Code: failures.Count));
         return new RetentionResult(deleted, failures) { Warnings = warnings };
     }
+    private static void ValidateNewest(BackupJob job, BackupRecord newest, IReadOnlyList<BackupRecord> records)
+    {
+        if (newest.JobId != job.Id || newest.StorageIdentity != StorageAddress.Identity(job) || !records.Contains(newest))
+            throw new InvalidDataException("Очистка разрешена только после регистрации новой успешной копии этого задания.");
+    }
+
+    private async Task VerifyChainAsync(BackupJob job, BackupRecord point, IReadOnlyList<BackupRecord> records,
+        HashSet<Guid> verified, CancellationToken token)
+    {
+        var chain = point.Backup.FileSnapshot is null ? [point] : FileBackupChains.Resolve(point, records);
+        foreach (var archive in chain)
+        {
+            if (verified.Contains(archive.Id)) continue;
+            try { await storage.VerifyAsync(archive.Backup, job, token); }
+            catch (Exception error) when (point.Backup.FileSnapshot is not null && error is not OperationCanceledException)
+            {
+                throw new IOException($"Не прошёл проверку архив цепочки в {job.DestinationDirectory}: {archive.Backup.Location}. {error.Message}", error);
+            }
+            verified.Add(archive.Id);
+        }
+    }
+
 }
 
 public sealed record CompletedBackup(BackupRecord Record, RetentionResult Retention);
@@ -105,8 +171,20 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
             DiagnosticLog.Current.Write(DiagnosticEvent.DestinationStored, jobId: job.Id, storageKind: job.StorageKind, destinationIndex: 1, values: new(Bytes: stored.Length));
             var record = await catalog.RegisterAsync(job, stored, completedUtc, cancellationToken);
             DiagnosticLog.Current.Write(DiagnosticEvent.DestinationRegistered, jobId: job.Id, storageKind: job.StorageKind, destinationIndex: 1);
-            var retention = await new BackupRetention(catalog, storage).ApplyAsync(job, record, cancellationToken, destinationIndex: 0);
-            return new CompletedBackup(record, retention);
+            var retentionService = new BackupRetention(catalog, storage);
+            var verified = await retentionService.VerifyDeliveryAsync(job, record, cancellationToken);
+            try
+            {
+                var retention = await retentionService.ApplyVerifiedAsync(job, record, verified, cancellationToken, 0);
+                return new CompletedBackup(record, retention);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception error)
+            {
+                DiagnosticLog.Current.Write(DiagnosticEvent.RetentionFailed, DiagnosticLevel.Warning, error, jobId: job.Id, storageKind: job.StorageKind);
+                BackupRunIssueContext.Report(error, "Retention", destinationIndex: 0);
+                return new CompletedBackup(record, new([], [new(record.Id, error)]));
+            }
         }
         finally { gate.Release(); }
     }
@@ -137,6 +215,7 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                 BackupProgressContext.Report(BackupStage.Waiting);
                 BackupRecord? record = null;
                 var acquired = false;
+                var deliveryVerified = false;
                 try
                 {
                     await deliveries.WaitAsync(cancellationToken);
@@ -148,12 +227,15 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                     var repaired = await new FileBackupChainRepair(storage, catalog, passwords).EnsureAsync(job, target, prepared.FileSnapshot,
                         Path.GetDirectoryName(Path.GetFullPath(stagingDirectory))!, cancellationToken);
                     var stored = (await storage.StoreAsync(prepared.Path, target, cancellationToken))
-                        with { ArchivePasswordKey = job.ArchivePasswordKey, FileSnapshot = prepared.FileSnapshot };
+                        with { ArchivePasswordKey = job.ArchivePasswordKey, FileSnapshot = prepared.FileSnapshot, FileCount = prepared.FileCount };
                     // A delivered file must enter the ledger even if cancellation was requested meanwhile.
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationStored, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index, values: new(Bytes: stored.Length));
                     record = await catalog.RegisterAsync(target, stored, completedUtc, CancellationToken.None);
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationRegistered, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
-                    var retention = await new BackupRetention(catalog, storage).ApplyAsync(target, record, cancellationToken, destinationIndex: index - 1);
+                    var retentionService = new BackupRetention(catalog, storage);
+                    var verified = await retentionService.VerifyDeliveryAsync(target, record, cancellationToken);
+                    deliveryVerified = true;
+                    var retention = await retentionService.ApplyVerifiedAsync(target, record, verified, cancellationToken, index - 1);
                     BackupProgressContext.Report(BackupStage.Completed);
                     return (new DestinationResult(destination, record, null,
                         retention.Failures.Select(f => "Очистка: " + f.Error.Message).Concat(retention.Warnings)
@@ -168,14 +250,15 @@ public sealed class BackupCompletion(IBackupStorage storage, BackupCatalog catal
                 }
                 catch (Exception ex)
                 {
-                    BackupRunIssueContext.Report(ex, record is null ? "Storage" : "Retention",
-                        record is null ? "Error" : "Warning", index - 1);
+                    BackupRunIssueContext.Report(ex, deliveryVerified ? "Retention" : "Storage",
+                        deliveryVerified ? "Warning" : "Error", index - 1);
                     DiagnosticLog.Current.Write(DiagnosticEvent.DestinationFailed, DiagnosticLevel.Error, ex, jobId: job.Id, storageKind: target.StorageKind, destinationIndex: index);
                     BackupProgressContext.Report(BackupStage.Failed);
                     var error = ex is IOException && (target.StorageKind is StorageKind.LocalDirectory or StorageKind.NetworkShare) && File.Exists(target.DestinationDirectory)
                         ? "Вместо папки копий указан файл. Выберите другую папку в настройках хранилища." : ex.Message;
-                    return (new DestinationResult(destination, record, record is null ? error : null,
-                        record is null ? null : ["Копия сохранена; очистка: " + ex.Message]), false);
+                    return (deliveryVerified
+                        ? new DestinationResult(destination, record, null, ["Копия сохранена, очистка: " + ex.Message])
+                        : new DestinationResult(destination, null, error), false);
                 }
                 finally { if (acquired) deliveries.Release(); }
             }

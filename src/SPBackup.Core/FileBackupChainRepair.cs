@@ -64,7 +64,7 @@ internal sealed class FileBackupChainRepair(IBackupStorage storage, BackupCatalo
                 var stored = await storage.StoreAsync(path, target, token);
                 if (stored.Length != source.Backup.Length || !stored.Sha256.Equals(source.Backup.Sha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Доставленный предшествующий архив не совпадает с проверенным источником.");
-                stored = stored with { FileSnapshot = source.Backup.FileSnapshot, ArchivePasswordKey = source.Backup.ArchivePasswordKey };
+                stored = stored with { FileSnapshot = source.Backup.FileSnapshot, ArchivePasswordKey = source.Backup.ArchivePasswordKey, FileCount = source.Backup.FileCount };
                 // Preserve original full-copy time: catch-up must not shift the weekly full-copy date.
                 await catalog.RegisterAsync(target, stored, source.CompletedUtc, CancellationToken.None);
                 copied++; File.Delete(path);

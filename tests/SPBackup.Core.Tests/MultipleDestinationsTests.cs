@@ -87,6 +87,30 @@ public sealed class MultipleDestinationsTests : IDisposable
         Assert.Empty(await Catalog.ReadAsync());
     }
 
+    [Theory]
+    [InlineData(false, BackupRunStatus.PartiallySucceeded)]
+    [InlineData(true, BackupRunStatus.Failed)]
+    public async Task VerificationFailurePreservesThePreviousCopiesAndDoesNotReportDelivery(bool failBoth, BackupRunStatus expected)
+    {
+        var storage = new Storage();
+        var runner = Runner(new Executor(), storage);
+        Assert.Equal(BackupRunStatus.Succeeded, (await runner.RunAsync(Job)).Status);
+        var previous = await Catalog.ReadAsync();
+        storage.DamageStoredCopy = job => failBoth || job.DestinationDirectory == Job.AdditionalDestinations![0].DestinationDirectory;
+
+        var run = await runner.RunAsync(Job);
+
+        Assert.Equal(expected, run.Status);
+        Assert.True(Directory.Exists(run.WorkDirectory));
+        var reports = ServerMonitoringDispatcher.ToReport(run).Destinations;
+        Assert.Equal(!failBoth, reports[0].Succeeded);
+        Assert.False(reports[1].Succeeded);
+        Assert.True(File.Exists(previous.Single(record =>
+            Path.GetDirectoryName(record.Backup.Location) == Job.AdditionalDestinations![0].DestinationDirectory).Backup.Location));
+        if (failBoth)
+            Assert.All(previous, record => Assert.True(File.Exists(record.Backup.Location)));
+    }
+
     [Fact]
     public async Task MissingFtpCredentialDoesNotPreventLocalCopy()
     {
@@ -293,12 +317,14 @@ public sealed class MultipleDestinationsTests : IDisposable
         public string? FailedDirectory { get; set; }
         public bool FailAll { get; set; }
         public Action? AfterStore { get; init; }
+        public Func<BackupJob, bool>? DamageStoredCopy { get; set; }
         public System.Collections.Concurrent.ConcurrentBag<string> Paths { get; } = [];
         public async Task<StoredBackup> StoreAsync(string path, BackupJob job, CancellationToken cancellationToken = default)
         {
             Paths.Add(path);
             if (FailAll || job.DestinationDirectory == FailedDirectory) throw new IOException("unavailable destination");
             var result = await files.StoreAsync(path, job, cancellationToken);
+            if (DamageStoredCopy?.Invoke(job) == true) await File.AppendAllTextAsync(result.Location, "changed", cancellationToken);
             AfterStore?.Invoke();
             return result;
         }

@@ -8,7 +8,7 @@ public sealed class BackupDelivery(IBackupStorage storage, IArchivePasswordStore
     {
         using var prepared = await PrepareFileAsync(job, completedBackupPath, stagingDirectory, cancellationToken);
         return (await storage.StoreAsync(prepared.Path, job, cancellationToken)) with
-        { ArchivePasswordKey = job.ArchivePasswordKey, FileSnapshot = prepared.FileSnapshot };
+        { ArchivePasswordKey = job.ArchivePasswordKey, FileSnapshot = prepared.FileSnapshot, FileCount = prepared.FileCount };
     }
 
     internal async Task<PreparedBackup> PrepareFileAsync(BackupJob job, string completedBackupPath,
@@ -20,7 +20,7 @@ public sealed class BackupDelivery(IBackupStorage storage, IArchivePasswordStore
             if (job.IsFileSnapshot)
             {
                 var manifest = await FileBackupZip.ReadManifestAsync(completedBackupPath, password, cancellationToken);
-                return new PreparedBackup(completedBackupPath, null) { FileSnapshot = manifest.GetSnapshot() };
+                return new PreparedBackup(completedBackupPath, null) { FileSnapshot = manifest.GetSnapshot(), FileCount = manifest.Files.Count };
             }
             if (password is not null && !(job.Kind == DatabaseKind.OneCFile && job.OneCMethod == OneCBackupMethod.FileArchive))
                 throw new InvalidDataException("Для шифрования требуется архивация в ZIP.");
@@ -54,5 +54,6 @@ public sealed class BackupDelivery(IBackupStorage storage, IArchivePasswordStore
 internal sealed record PreparedBackup(string Path, string? OwnedDirectory) : IDisposable
 {
     internal FileBackupSnapshot? FileSnapshot { get; init; }
+    internal int? FileCount { get; init; }
     public void Dispose() { if (OwnedDirectory is not null) Directory.Delete(OwnedDirectory, recursive: true); }
 }
