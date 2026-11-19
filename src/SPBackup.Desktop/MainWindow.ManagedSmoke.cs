@@ -80,8 +80,8 @@ public partial class MainWindow
             Require(run.JobName == serverJob.Name && run.Configuration?.Revision == 11 && File.Exists(run.Backup!.Location),
                 "Manual UI backup used another profile or lost its configuration revision.");
             ShowPage("jobs"); UpdateLayout(); screenshot("managed-manual-offline");
-            stop.Cancel(); Require(await host.WaitAsync(TimeSpan.FromSeconds(10)) == 0, "Managed host did not stop."); host = null;
-            await RefreshBackgroundStateAsync();
+            await WaitAsync(async () => { await RefreshBackgroundStateAsync(); return CanChangeManagedAccessInBackground; },
+                "Managed host did not become available for live binding updates.");
             var protectedJob = serverJob with { ManagedSecrets = new(true, []) };
             await new AgentConfigurationCache(profile.CachePath).SaveAsync(new(managed.NormalizedServerAddress,
                 new(managed.AgentId, 12, [protectedJob]), DateTimeOffset.UtcNow));
@@ -101,10 +101,26 @@ public partial class MainWindow
             Require(jobs.Single().ArchivePasswordKey == savedPassword
                 && (await profile.Bindings.ResolveAsync(protectedJob)).ArchivePasswordKey == savedPassword,
                 "Cancelled access setup changed the saved server job binding.");
+            var firstBinding = jobs.Single();
+            ManagedArchiveDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                dialog.Password.Password = dialog.Confirmation.Password = "Updated archive password for the smoke test";
+                dialog.ApplyButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            }));
+            await ConfigureManagedAccessAsync();
+            var updatedPassword = jobs.Single().ArchivePasswordKey!;
+            Require(CanChangeManagedAccessInBackground && !host.IsCompleted && savedPassword != updatedPassword,
+                "Changing protected access restarted the host or reused the prior key.");
+            Require(firstBinding.ArchivePasswordKey == savedPassword
+                && await new WindowsArchivePasswordStore().GetAsync(savedPassword) == "Managed UI temporary archive password",
+                "The earlier archive binding was changed or removed.");
             var cachedText = await File.ReadAllTextAsync(profile.CachePath);
             Require(!cachedText.Contains(jobs.Single().ArchivePasswordKey!) && !cachedText.Contains("Managed UI temporary archive password"), "Local access leaked into the accepted server document.");
             ShowPage("jobs"); UpdateLayout(); screenshot("managed-local-access");
-            new WindowsArchivePasswordStore().Delete(jobs.Single().ArchivePasswordKey!);
+            new WindowsArchivePasswordStore().Delete(updatedPassword);
+            new WindowsArchivePasswordStore().Delete(savedPassword);
+            stop.Cancel(); Require(await host.WaitAsync(TimeSpan.FromSeconds(10)) == 0, "Managed host did not stop."); host = null;
+            await RefreshBackgroundStateAsync();
             ManagedAccessConfirmation = null; ManagedArchiveDialogOpened = null;
             await File.WriteAllTextAsync(Path.Combine(root, "server-monitoring.json"), "broken enrollment");
             AgentModePicker.SelectedValue = AgentMode.Standalone;

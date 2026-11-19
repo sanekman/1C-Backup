@@ -26,6 +26,23 @@ public sealed class ManagedJobBindingsTests : IDisposable
         Assert.DoesNotContain("smb-key", JsonSerializer.Serialize(job));
     }
     [Fact]
+    public async Task ResolvingNewAccessDoesNotMutateAnAlreadyAdmittedJob()
+    {
+        var bindings = new ManagedJobBindings(root);
+        var scope = ManagedJobBindings.Scope(job);
+        await bindings.SaveAsync(job, new(job.Id, scope, "old-archive", new Dictionary<int, string> { [0] = "old-network" }));
+        var runningJob = await bindings.ResolveAsync(job);
+
+        await bindings.SaveAsync(job, new(job.Id, scope, "new-archive", new Dictionary<int, string> { [0] = "new-network" }));
+        var nextJob = await bindings.ResolveAsync(job);
+
+        Assert.Equal("old-archive", runningJob.ArchivePasswordKey);
+        Assert.Equal("old-network", runningJob.NetworkShare!.CredentialKey);
+        Assert.Equal("new-archive", nextJob.ArchivePasswordKey);
+        Assert.Equal("new-network", nextJob.NetworkShare!.CredentialKey);
+    }
+
+    [Fact]
     public async Task OtherEnrollmentAndCorruptBindingCannotInheritAccess()
     {
         var store = new ManagedJobBindings(root);

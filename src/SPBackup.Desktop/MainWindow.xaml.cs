@@ -596,15 +596,16 @@ public partial class MainWindow : Window
         JobsSummary.Text = $"Всего: {jobs.Count + observationTasks.Count} · По расписанию: {jobs.Count(job => job.Enabled && job.ScheduleKind != ScheduleKind.Manual)}" + (observationTasks.Count == 0 ? "" : $" · Наблюдений: {observationTasks.Count}");
         var managedAccessJob = agentSettings?.Mode == AgentMode.Managed && scheduledJob?.ManagedSecrets is not null ? scheduledJob : null;
         ManagedAccessButton.Visibility = managedAccessJob is null ? Visibility.Collapsed : Visibility.Visible;
-        ManagedAccessButton.IsEnabled = ready && idle && engineAvailable && automationService is not
-            (AutomationService.Starting or AutomationService.Running or AutomationService.Stopping)
+        var managedAccessAvailable = CanChangeManagedAccessInBackground || engineAvailable && automationService is not
+            (AutomationService.Starting or AutomationService.Running or AutomationService.Stopping);
+        ManagedAccessButton.IsEnabled = ready && idle && managedAccessAvailable
             && schedulingTask is null && !editorOpen && managedAccessJob is not null;
         ManagedAccessButton.Content = managedAccessJob is not null && ManagedJobBindings.Ready(managedAccessJob)
             ? "Изменить доступ…" : "Настроить доступ…";
-        ManagedAccessButton.ToolTip = !engineAvailable || schedulingTask is not null || automationService is
-            AutomationService.Starting or AutomationService.Running or AutomationService.Stopping
-            ? "Остановите агент или службу в «Фоновой работе», чтобы изменить доступ серверного задания."
-            : !idle ? "Дождитесь завершения текущей операции." : "Настроить локальный пароль ZIP и сетевой вход для выбранного задания.";
+        ManagedAccessButton.ToolTip = !managedAccessAvailable
+            ? "Дождитесь готовности фонового агента в режиме «Задания с сервера»."
+            : !idle ? "Дождитесь завершения текущей операции в окне."
+            : "Изменить пароль ZIP и сетевой вход для следующего запуска выбранного задания.";
         UpdateManualRunControl();
         var canInspectLocally = ready && idle && engineAvailable && schedulingTask is null && !editorOpen && Jobs.SelectedItem is BackupJob;
         CheckStorageButton.IsEnabled = ready && idle && !editorOpen && Jobs.SelectedItem is BackupJob
