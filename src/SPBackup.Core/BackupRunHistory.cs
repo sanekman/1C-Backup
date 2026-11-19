@@ -7,6 +7,8 @@ public sealed record BackupRun(Guid RunId, Guid JobId, string JobName, DateTimeO
     StoredBackup? Backup = null, string? Error = null, IReadOnlyList<string>? Warnings = null)
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public long? DurationMilliseconds { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public BackupConfigurationStamp? Configuration { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<Monitoring.MonitoredIssue>? Issues { get; init; }

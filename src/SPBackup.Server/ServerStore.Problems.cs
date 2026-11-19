@@ -91,7 +91,7 @@ public sealed partial class ServerStore
             )
             SELECT p.id,p.name,p.job_id,p.job_name,p.code,p.seen,p.observed,t.total,
                 CASE WHEN @grouped THEN t.group_count ELSE t.total END page_items,t.agent_count,t.job_count,
-                (j.run->>'runId')::uuid, (j.run->>'finishedUtc')::timestamptz
+                (j.run->>'runId')::uuid, coalesce(j.run#>>'{timing,observedFinishedUtc}', j.run->>'finishedUtc')::timestamptz
             FROM counted t
             LEFT JOIN LATERAL (
                 SELECT * FROM ranked

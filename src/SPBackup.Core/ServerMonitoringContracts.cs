@@ -30,10 +30,15 @@ public sealed record MonitoredJob(Guid JobId, string Name, string SourceKind, bo
     public bool? LocalAccessReady { get; init; }
 }
 public sealed record MonitoredDestination(int Index, bool Succeeded, long Bytes, bool Incomplete);
+public sealed record MonitoredRunTiming(long? DurationMilliseconds, DateTimeOffset? ObservedFinishedUtc);
 public sealed record MonitoredRun(Guid RunId, Guid JobId, string JobName, DateTimeOffset StartedUtc,
     DateTimeOffset FinishedUtc, string Status, int WarningCount, bool Incomplete, string? CopyKind,
     IReadOnlyList<MonitoredDestination> Destinations, string? Evidence = null)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public MonitoredRunTiming? Timing { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTimeOffset DisplayFinishedUtc => Timing?.ObservedFinishedUtc ?? FinishedUtc;
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public long? ConfigurationRevision { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -117,10 +122,17 @@ public static class MonitoringValidation
         && r.ConfigurationRevision is null or > 0
         && Text(r.JobName,256) && r.StartedUtc != default && r.FinishedUtc >= r.StartedUtc
         && r.StartedUtc.Offset == TimeSpan.Zero && r.FinishedUtc.Offset == TimeSpan.Zero
+        && (r.Timing is null || r.Evidence is null && ValidTiming(r))
         && r.Status is "Succeeded" or "Failed" or "Cancelled" or "Interrupted" or "PartiallySucceeded"
         && r.Evidence is null or "SqlServerMsdbHistory" or "PgRestoreCatalogChecked" or "PostgreSqlScriptFailure" or "ExternalReport"
         && r.WarningCount >= 0 && (r.CopyKind is null or "Full" or "Incremental")
         && (r.Issues is null || r.Issues.Count <= 256 && r.Issues.All(MonitoredIssueCodes.Valid))
         && r.Destinations is { Count: <= 100 } && r.Destinations.All(d=> d is not null && d.Index >= 0 && d.Bytes >= 0)
         && r.Destinations.Select(d=>d.Index).Distinct().Count() == r.Destinations.Count;
+
+    private static bool ValidTiming(MonitoredRun run) => run.Timing is { } timing
+        && (timing.DurationMilliseconds is not null || timing.ObservedFinishedUtc is not null)
+        && (timing.DurationMilliseconds is not { } duration || duration >= 0 && duration <= TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerMillisecond)
+        && (timing.ObservedFinishedUtc is not { } observed || observed != default && observed.Offset == TimeSpan.Zero
+            && observed < run.StartedUtc && run.FinishedUtc == run.StartedUtc);
 }

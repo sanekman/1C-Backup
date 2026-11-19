@@ -136,6 +136,81 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
         Assert.Equal("ConnectingStorage",retrying.Stage); Assert.Null(retrying.Percent);
     }
     [ServerFact]
+    public async Task ClockRollbackKeepsTheRunAndBothCopiesThroughReportRetry()
+    {
+        var agent = await server.EnrollAsync();
+        var root = Path.Combine(server.Root, Guid.NewGuid().ToString("N"));
+        var source = Directory.CreateDirectory(Path.Combine(root, "source")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(source, "fixture.txt"), "Backup after a wall-clock correction");
+        var job = new BackupJob
+        {
+            Name = "Files", Kind = DatabaseKind.FilesAndFolders, Source = source, ScheduleKind = ScheduleKind.Manual,
+            DestinationDirectory = Path.Combine(root, "copies"), AdditionalDestinations = [new() { DestinationDirectory = Path.Combine(root, "second") }]
+        };
+        await new JobStore(Path.Combine(root, "jobs.json"), true).SaveAsync([job]);
+        var history = new BackupRunHistory(Path.Combine(root, "runs.json"));
+        var started = DateTimeOffset.UtcNow;
+        var finished = started.AddHours(-1);
+        var clock = new BackupWallClock(started);
+        var runner = new LocalBackupRunner(new UnusedBackupExecutor(),
+            new BackupCompletion(new FileBackupStorage(), new BackupCatalog(Path.Combine(root, "copies.json"))),
+            history, Path.Combine(root, "work"), progress: item =>
+            {
+                if (item.Progress.Stage == BackupStage.CreatingBackup) clock.UtcNow = finished;
+            }, timeProvider: clock);
+        var run = await runner.RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, run.Status);
+        Assert.Equal(started, run.StartedUtc);
+        Assert.Equal(finished, run.FinishedUtc);
+        Assert.True(run.DurationMilliseconds is >= 0);
+        Assert.Equal(run.DurationMilliseconds, Assert.Single(await history.ReadAsync()).DurationMilliseconds);
+
+        using var cert = X509CertificateLoader.LoadPkcs12FromFile(Path.Combine(server.Root, "certificate.pfx"),
+            File.ReadAllText(Path.Combine(server.Root, "certificate-password.txt")));
+        var settings = new ServerMonitoringSettings(server.Address.ToString(), agent.AgentId, "monitor", Convert.ToHexString(SHA256.HashData(cert.RawData)));
+        await ServerMonitoringDispatcher.SaveSettingsAsync(root, settings);
+        var secrets = new Credentials { Value = "invalid-token" };
+        var dispatcher = new ServerMonitoringDispatcher(root, secrets);
+        var unavailable = await Assert.ThrowsAsync<HttpRequestException>(() => dispatcher.PollAsync());
+        Assert.Equal(HttpStatusCode.Unauthorized, unavailable.StatusCode);
+        Assert.Empty((await server.Store.RunsAsync(agent.AgentId, 0, default)).Runs);
+
+        var report = ServerMonitoringDispatcher.ToReport(run);
+        using var client = new ServerMonitoringClient(settings);
+        // The same report may already exist without optional timing after an older server handled it.
+        await client.SendRunAsync(settings, agent.Token, report with { Timing = null });
+        secrets.Value = agent.Token;
+        await dispatcher.PollAsync();
+        await dispatcher.PollAsync();
+        await client.SendRunAsync(settings, agent.Token, report with { Timing = null });
+
+        var saved = Assert.Single((await server.Store.RunsAsync(agent.AgentId, 0, default)).Runs);
+        Assert.Equal(run.RunId, saved.RunId);
+        Assert.Equal(started, saved.FinishedUtc);
+        Assert.Equal(finished, saved.DisplayFinishedUtc);
+        Assert.Equal(run.DurationMilliseconds, saved.Timing!.DurationMilliseconds);
+        Assert.Equal(2, saved.Destinations.Count);
+        Assert.All(saved.Destinations, destination => Assert.True(destination.Succeeded));
+        var monitoring = (await server.Store.MonitoringAsync(agent.AgentId, default))!.Snapshot;
+        Assert.Equal(0, monitoring.PendingRuns);
+        Assert.Equal(0, monitoring.CollectionWarnings);
+        using var page = await server.Administrator.GetAsync($"agents/{agent.AgentId}?runId={run.RunId}");
+        page.EnsureSuccessStatusCode();
+        Assert.Contains("часы агента были переведены назад", WebUtility.HtmlDecode(await page.Content.ReadAsStringAsync()));
+    }
+
+    private sealed class BackupWallClock(DateTimeOffset utcNow) : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = utcNow;
+        public override DateTimeOffset GetUtcNow() => UtcNow;
+    }
+
+    private sealed class UnusedBackupExecutor : IBackupExecutor
+    {
+        public Task<string> CreateAsync(BackupJob job, string work, CancellationToken token) => throw new InvalidOperationException();
+    }
+
+    [ServerFact]
     public async Task PinnedTlsAcceptsOnlyTheSpecifiedServerCertificate()
     {
         var id=Guid.NewGuid(); var invitation=await server.InviteAsync(id);

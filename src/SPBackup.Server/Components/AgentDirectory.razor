@@ -58,7 +58,7 @@
                             </td>
                             <td>
                                 @if (row.Entry.LatestRun is { } run)
-                                { <strong>@run.JobName</strong><small title="@Clock.Time(run.FinishedUtc)"><span class="@DeliveryColor(run)">@Delivery(run)</span> · @Clock.Time(run.FinishedUtc, "dd.MM HH:mm")</small> }
+                                { <strong>@run.JobName</strong><small title="@Clock.Time(run.DisplayFinishedUtc)"><span class="@DeliveryColor(run)">@Delivery(run)</span> · @Clock.Time(run.DisplayFinishedUtc, "dd.MM HH:mm")</small> }
                                 else { <span class="muted">—</span> }
                             </td>
                             <td><button type="button" class="dashboard-text-button" data-agent-move aria-label="@($"Переместить {row.Entry.Name} в папку")" title="Переместить в папку">⇄</button></td>
@@ -85,7 +85,7 @@
                     @if (Latest is { } run)
                     {
                         <span class="@DeliveryColor(run)">@Delivery(run)</span>
-                        <small>@run.JobName · @Clock.Time(run.FinishedUtc)</small>
+                        <small>@run.JobName · @Clock.Time(run.DisplayFinishedUtc)</small>
                         @if (HasCurrentJob)
                         { <a href="@($"agents/{row.Entry.Id}#job-{run.JobId}")">Открыть задание</a> }
                         else
@@ -107,7 +107,7 @@
             <h3>Недавние завершённые задания</h3>
             <ul class="dashboard-history">
                 @foreach (var completed in Recent)
-                { <li><strong>@completed.JobName</strong> · <span class="@DeliveryColor(completed)">@Delivery(completed)</span> · @Clock.Time(completed.FinishedUtc)</li> }
+                { <li><strong>@completed.JobName</strong> · <span class="@DeliveryColor(completed)">@Delivery(completed)</span> · @Clock.Time(completed.DisplayFinishedUtc)</li> }
             </ul>
             <p><a href="@($"agents/{row.Entry.Id}")">Карточка агента и вся история →</a></p>
         }

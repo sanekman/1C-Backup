@@ -52,8 +52,15 @@ public sealed partial class ServerStore
     {
         if (!MonitoringValidation.Valid(run)) throw new ServerRequestException(400,"invalid_run_report");
         await using var db = await source.OpenConnectionAsync(token);
-        // A duplicate is acknowledged only if the immutable payload agrees. Lost replies can be retried safely.
-        await using var cmd = Command(db,null,"INSERT INTO server_runs(agent_id,run_id,job_id,finished_utc,document) VALUES(@id,@run,@job,@finished,@doc::jsonb) ON CONFLICT(agent_id,run_id) DO UPDATE SET run_id=excluded.run_id WHERE server_runs.document=excluded.document",
+        // A retry can fill timing omitted by a legacy peer. The result and known timing stay immutable.
+        await using var cmd = Command(db, null, """
+            INSERT INTO server_runs(agent_id,run_id,job_id,finished_utc,document)
+            VALUES(@id,@run,@job,@finished,@doc::jsonb)
+            ON CONFLICT(agent_id,run_id) DO UPDATE SET document=server_runs.document||excluded.document
+            WHERE server_runs.document - 'timing'=excluded.document - 'timing'
+                AND (NOT (server_runs.document ? 'timing') OR NOT (excluded.document ? 'timing')
+                    OR server_runs.document->'timing'=excluded.document->'timing')
+            """,
             ("id",agentId),("run",run.RunId),("job",run.JobId),("finished",run.FinishedUtc),("doc",JsonSerializer.Serialize(run,MonitoringJson)));
         if (await cmd.ExecuteNonQueryAsync(token)!=1) throw new ServerRequestException(409,"run_report_conflict");
     }

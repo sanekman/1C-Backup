@@ -113,12 +113,17 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
             { log.Write(DiagnosticEvent.RunCancelled); BackupRunIssueContext.Report("Cancelled", "Backup"); run = run with { Status = BackupRunStatus.Cancelled, Error = "Операция отменена. Рабочие файлы сохранены." }; }
             catch (Exception ex)
             { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); BackupRunIssueContext.Report(ex, issueStage, "Error", issueStage == "Storage" && job.AdditionalDestinations?.Count is not > 0 ? 0 : null); run = run with { Status = BackupRunStatus.Failed, Error = ex.Message }; }
-            run = run with { FinishedUtc = (timeProvider ?? TimeProvider.System).GetUtcNow(), Issues = issues.Snapshot() };
+            run = run with
+            {
+                FinishedUtc = (timeProvider ?? TimeProvider.System).GetUtcNow(),
+                DurationMilliseconds = clock.ElapsedMilliseconds,
+                Issues = issues.Snapshot()
+            };
             // Cancellation must not discard the terminal report.
             try { await history.SaveAsync(run, CancellationToken.None); }
             catch (Exception ex) { log.Write(DiagnosticEvent.RunFailed, DiagnosticLevel.Error, ex); throw; }
             log.Write(DiagnosticEvent.RunFinished, run.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded ? DiagnosticLevel.Error : run.Warnings?.Count > 0 ? DiagnosticLevel.Warning : DiagnosticLevel.Info,
-                outcome: run.Status, values: new(Count: run.Warnings?.Count ?? 0, Bytes: run.Backup?.Length, Milliseconds: clock.ElapsedMilliseconds));
+                outcome: run.Status, values: new(Count: run.Warnings?.Count ?? 0, Bytes: run.Backup?.Length, Milliseconds: run.DurationMilliseconds));
             BackupProgressContext.Report(run.Status switch { BackupRunStatus.Succeeded => BackupStage.Completed, BackupRunStatus.Cancelled => BackupStage.Cancelled, BackupRunStatus.PartiallySucceeded => BackupStage.PartiallySucceeded, _ => BackupStage.Failed });
             if (run.Status == BackupRunStatus.Succeeded)
             {

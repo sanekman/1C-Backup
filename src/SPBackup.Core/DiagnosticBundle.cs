@@ -90,7 +90,8 @@ public sealed class DiagnosticBundle(string profileDirectory, string version, st
                         var selected = history ?? [];
                         runs = selected.Count;
                         runSummary = selected.Select(run => new { run.RunId, run.JobId, run.StartedUtc, run.FinishedUtc, run.Status,
-                            DurationMilliseconds = run.FinishedUtc is { } end ? (long?)(end - run.StartedUtc).TotalMilliseconds : null,
+                            DurationMilliseconds = run.DurationMilliseconds ?? (run.FinishedUtc is { } end && end >= run.StartedUtc
+                                ? (long?)(end - run.StartedUtc).TotalMilliseconds : null),
                             BackupBytes = run.Backup?.Length, Destinations = run.Destinations?.Count,
                             FailedDestinations = run.Destinations?.Count(item => item.Error is not null), Warnings = run.Warnings?.Count ?? 0 });
                         historyStatus = history is null ? "SizeLimitExceeded" : "Available";

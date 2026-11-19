@@ -202,10 +202,17 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
     public static MonitoredRun ToReport(BackupRun r)
     {
         var snapshot = r.Backup?.FileSnapshot ?? r.Destinations?.Select(d=>d.Record?.Backup.FileSnapshot).FirstOrDefault(s=>s is not null);
-        return new(r.RunId,r.JobId,Label(r.JobName),r.StartedUtc,r.FinishedUtc ?? throw new InvalidDataException("Запуск ещё выполняется."),r.Status.ToString(),r.Warnings?.Count ?? 0,
+        var finished = r.FinishedUtc ?? throw new InvalidDataException("Запуск ещё выполняется.");
+        var clockMovedBack = finished < r.StartedUtc;
+        // Protocol v1 peers require an ordered interval. Preserve the observed time in optional metadata.
+        return new(r.RunId,r.JobId,Label(r.JobName),r.StartedUtc,clockMovedBack ? r.StartedUtc : finished,r.Status.ToString(),r.Warnings?.Count ?? 0,
             snapshot?.IsIncomplete == true,snapshot is null ? null : snapshot.IsFull ? "Full" : "Incremental",r.Destinations?.Select((d,i)=>new MonitoredDestination(i,d.Record is not null,d.Record?.Backup.Length ?? 0,d.Record?.Backup.FileSnapshot?.IsIncomplete == true)).ToArray()
                 ?? (r.Backup is { } backup ? [new(0,true,backup.Length,backup.FileSnapshot?.IsIncomplete == true)] : []))
-        { ConfigurationRevision = r.Configuration?.Revision, BackupScope = r.Configuration?.JobScope, Issues = r.Issues };
+        {
+            ConfigurationRevision = r.Configuration?.Revision, BackupScope = r.Configuration?.JobScope, Issues = r.Issues,
+            Timing = r.DurationMilliseconds is not null || clockMovedBack
+                ? new(r.DurationMilliseconds, clockMovedBack ? finished : null) : null
+        };
     }
     public static Task SaveSettingsAsync(string directory, ServerMonitoringSettings settings, CancellationToken token = default)
     { settings.Validate(); return new AgentJsonFile<ServerMonitoringSettings>(Path.Combine(directory,"server-monitoring.json")).WriteAsync(settings,token); }

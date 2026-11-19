@@ -40,7 +40,7 @@
                 @if (job.MaximumBackupAgeHours is { } jobMaximumAge) { <small>Допустимый возраст копии: @jobMaximumAge ч.</small> }
                 @if (job.LocalAccessReady == false) { <small class="error">Не задан локальный доступ. В Windows-программе: «Файл → Доступ серверного задания…».</small> }
             </td>
-            <td>@(observation && poll?.ObservationStatus is { } currentStatus ? ObservationStatus(currentStatus) : poll?.Failed == true ? "Ошибка опроса" : observation && last?.Status == "Failed" ? "Ошибка внешней копии" : poll?.FreshnessWarning == true ? "Нет свежей копии" : last is null ? observation ? "Копии пока не обнаружены" : "Результатов ещё нет" : Status(last))<small>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LatestFinishedUtc : last?.FinishedUtc)</small>
+            <td>@(observation && poll?.ObservationStatus is { } currentStatus ? ObservationStatus(currentStatus) : poll?.Failed == true ? "Ошибка опроса" : observation && last?.Status == "Failed" ? "Ошибка внешней копии" : poll?.FreshnessWarning == true ? "Нет свежей копии" : last is null ? observation ? "Копии пока не обнаружены" : "Результатов ещё нет" : Status(last))<small>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LatestFinishedUtc : last?.DisplayFinishedUtc)</small>
             @if (observation)
             { <small>Последний опрос: @Clock.Time(poll?.PolledUtc). @(matchingHistory && last?.Evidence is { } evidence ? Evidence(evidence) : "")</small> }
             @if (observation && poll?.LatestReportId is not null && poll.ObservationStatus is not null && last is null)
@@ -62,7 +62,7 @@
             @if (matchingHistory && last is not null && (last.WarningCount > 0 || last.Incomplete || last.Status != "Succeeded" || last.Issues is { Count: > 0 }))
             { <details><summary>Причины и что делать</summary><RunIssueDetails Run="last" /></details> }
             </td>
-            <td>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LastSuccessfulUtc : Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.FinishedUtc)</td>
+            <td>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LastSuccessfulUtc : Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.DisplayFinishedUtc)</td>
             <td>@(job.NextRunUtc is null ? observation ? job.Enabled ? "Автоматический опрос" : "Опрос выключен" : "По событию / вручную" : Clock.Time(job.NextRunUtc))</td></tr>
         }
         </tbody></table></div>
@@ -80,8 +80,10 @@
     {
         @foreach (var run in history.Runs)
         {
-            <details open="@(RunId == run.RunId)"><summary>@run.JobName · @Status(run) · @Clock.Time(run.FinishedUtc)</summary>
-            <p>Начало: @Clock.Time(run.StartedUtc). Конец: @Clock.Time(run.FinishedUtc). Предупреждений: @run.WarningCount.</p>
+            <details open="@(RunId == run.RunId)"><summary>@run.JobName · @Status(run) · @Clock.Time(run.DisplayFinishedUtc)</summary>
+            <p>Начало: @Clock.Time(run.StartedUtc). Конец: @Clock.Time(run.DisplayFinishedUtc). Предупреждений: @run.WarningCount.</p>
+            @if (run.Timing?.DurationMilliseconds is { } duration) { <p>Длительность: @(TimeSpan.FromTicks(duration * TimeSpan.TicksPerMillisecond).ToString("g")).</p> }
+            @if (run.Timing?.ObservedFinishedUtc is not null) { <p class="muted">Во время копирования часы агента были переведены назад.</p> }
             @if (run.CopyKind is not null) { <p>Тип копии: @(run.CopyKind == "Full" ? "Полная" : "Инкрементная").</p> }
             @if (run.ConfigurationRevision is { } revision) { <p>Ревизия настроек этого запуска: @revision.</p> }
             @if (run.Incomplete) { <p class="error">Копия неполная: часть файлов пропущена. Для непрочитанных файлов может требоваться прежняя версия из цепочки.</p> }
