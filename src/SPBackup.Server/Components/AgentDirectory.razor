@@ -174,7 +174,7 @@
             .ThenByDescending(row => row.Reasons.Count != 0).ThenBy(row => row.Entry.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
         Selected = AgentId is { } selected ? Rows.FirstOrDefault(row => row.Entry.Id == selected) : null;
         Latest = Selected?.Entry.LatestRun;
-        if (Selected is { } item) Recent = (await Store.RunsAsync(item.Entry.Id, 0, token)).Runs.Where(run => run.Evidence is null).Take(8).ToArray();
+        if (Selected is { } item) Recent = (await Store.RunsAsync(item.Entry.Id, 0, token, agentCopiesOnly: true)).Runs.Take(8).ToArray();
         HasCurrentJob = Selected is { } current && Latest is { } run
             && (await Store.MonitoringAsync(current.Entry.Id, token))?.Snapshot.Jobs.Any(job => job.JobId == run.JobId) == true;
     }

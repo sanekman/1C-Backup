@@ -1,5 +1,6 @@
 @page "/agents/{Id:guid}/commands"
 @attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@using SPBackup.Server.Monitoring
 @inject ServerStore Store
 @inject IHttpContextAccessor Http
 @inject ServerOptions Settings
@@ -12,9 +13,23 @@
 {
 <tr><td>@(Jobs.FirstOrDefault(j => j.Id == item.Command.JobId)?.Name ?? item.Command.JobId.ToString())
     <small>Ревизия @item.Command.Revision · @item.Command.CommandId</small></td>
-<td>@RemoteRunText.Status(item.Status)
+<td>@ResultLabel(item)
     @if (item.Reason is not null) { <small>@RemoteRunText.Reason(item.Reason)</small> }
-    @if (item.RunId is { } run) { <small>Запуск @run. <a href="@($"agents/{Id}")">Результат копии</a></small> }
+    @if (item.RunId is { } run)
+    {
+        @if (Reports.TryGetValue(run, out var report))
+        {
+            @if (report.Destinations.Count > 0)
+            {
+                <small>Доставка по отчёту агента: @report.Destinations.Count(destination => destination.Succeeded) из @report.Destinations.Count.</small>
+            }
+            <small><a href="@($"agents/{Id}?runId={run}#run-history")">Открыть отчёт запуска</a></small>
+        }
+        else
+        {
+            <small>Подробный отчёт о запуске ожидается.</small>
+        }
+    }
     @if (item.Status == "Running") { <small>Завершение ещё не подтверждено. При потере связи итог может прийти позже.</small> }
 </td><td>@Clock.Time(item.CreatedUtc)<small>@Clock.Time(item.UpdatedUtc)</small></td><td>@Clock.Time(item.Command.ExpiresUtc)</td></tr>
 }
@@ -26,10 +41,16 @@
     [Parameter] public Guid Id { get; set; }
     private IReadOnlyList<RemoteRunState> Data = [];
     private IReadOnlyList<ManagedFileJob> Jobs = [];
+    private IReadOnlyDictionary<Guid, MonitoredRun> Reports = new Dictionary<Guid, MonitoredRun>();
+    private string ResultLabel(RemoteRunState item) =>
+        item.RunId is { } run && Reports.TryGetValue(run, out var report) && report.Status == "PartiallySucceeded"
+            ? "Частичная доставка" : RemoteRunText.Status(item.Status);
     protected override async Task OnParametersSetAsync()
     {
         if (await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted) is null) { Http.HttpContext.Response.StatusCode = 404; return; }
         Data = await Store.RemoteRunsAsync(Id, Http.HttpContext.RequestAborted);
+        var runIds = Data.Where(item => item.RunId.HasValue).Select(item => item.RunId!.Value).Distinct().ToArray();
+        Reports = (await Store.RunsByIdAsync(Id, runIds, Http.HttpContext.RequestAborted)).ToDictionary(run => run.RunId);
         try { Jobs = (await Store.ReadFileConfigurationAsync(Id, Http.HttpContext.RequestAborted)).Jobs; } catch (ServerRequestException) { }
     }
 }

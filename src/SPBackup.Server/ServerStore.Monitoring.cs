@@ -25,7 +25,16 @@ public sealed partial class ServerStore
     public async Task<IReadOnlyList<MonitoredRun>> LastSuccessfulRunsAsync(Guid id,CancellationToken token)
     {
         await using var db=await source.OpenConnectionAsync(token);
-        await using var cmd=Command(db,null,"SELECT DISTINCT ON(job_id) document::text FROM server_runs WHERE agent_id=@id AND document->>'status'='Succeeded' AND (document->>'incomplete')::boolean=false ORDER BY job_id,finished_utc DESC,run_id",("id",id));
+        await using var cmd=Command(db,null,"""
+            SELECT DISTINCT ON(r.job_id) r.document::text
+            FROM server_runs r
+            WHERE r.agent_id=@id AND r.document->>'status'='Succeeded' AND (r.document->>'incomplete')::boolean=false
+              AND NOT EXISTS(
+                SELECT 1 FROM server_monitoring m CROSS JOIN LATERAL jsonb_array_elements(m.document->'jobs') j
+                WHERE m.agent_id=r.agent_id AND j->>'jobId'=r.job_id::text AND j->>'backupScope' IS NOT NULL
+                  AND j->>'backupScope' IS DISTINCT FROM r.document->>'backupScope')
+            ORDER BY r.job_id,r.finished_utc DESC,r.run_id
+            """,("id",id));
         await using var reader=await cmd.ExecuteReaderAsync(token);
         var runs=new List<MonitoredRun>();
         while(await reader.ReadAsync(token)) runs.Add(JsonSerializer.Deserialize<MonitoredRun>(reader.GetString(0),MonitoringJson)!);
@@ -55,11 +64,11 @@ public sealed partial class ServerStore
         await using var reader = await cmd.ExecuteReaderAsync(token);
         return await reader.ReadAsync(token) ? new(reader.GetFieldValue<DateTimeOffset>(0),JsonSerializer.Deserialize<MonitoringSnapshot>(reader.GetString(1),MonitoringJson)!) : null;
     }
-    public async Task<MonitoredRunPage> RunsAsync(Guid id, int page, CancellationToken token)
+    public async Task<MonitoredRunPage> RunsAsync(Guid id, int page, CancellationToken token, bool agentCopiesOnly = false)
     {
         if (page is <0 or >100000) throw new ServerRequestException(400,"invalid_page");
         await using var db = await source.OpenConnectionAsync(token);
-        await using var cmd = Command(db,null,"SELECT document::text FROM server_runs WHERE agent_id=@id ORDER BY finished_utc DESC,run_id LIMIT 50 OFFSET @offset",("id",id),("offset",page*50));
+        await using var cmd = Command(db,null,"SELECT document::text FROM server_runs WHERE agent_id=@id AND (NOT @copies OR document->>'evidence' IS NULL) ORDER BY finished_utc DESC,run_id LIMIT 50 OFFSET @offset",("id",id),("offset",page*50),("copies",agentCopiesOnly));
         await using var reader = await cmd.ExecuteReaderAsync(token);
         var runs = new List<MonitoredRun>();
         while (await reader.ReadAsync(token)) runs.Add(JsonSerializer.Deserialize<MonitoredRun>(reader.GetString(0),MonitoringJson)!);

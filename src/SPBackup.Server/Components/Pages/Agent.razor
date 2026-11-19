@@ -71,11 +71,16 @@
     <p><a href="@($"agents/{Id}/commands")">Удалённые запуски: очередь и подтверждения</a></p>
     <h2 id="run-history">История запусков</h2>
     <p class="muted">Неполные копии и ошибки доставки отмечены отдельно. История сохраняется при перезапуске сервера.</p>
+    @if (RunId is not null)
+    {
+        <p><a href="@($"agents/{Id}#run-history")">Все запуски</a></p>
+        @if (Runs?.Runs.Count == 0) { <p>Отчёт этого запуска ещё не получен.</p> }
+    }
     @if (Runs is { } history)
     {
         @foreach (var run in history.Runs)
         {
-            <details><summary>@run.JobName · @Status(run) · @Clock.Time(run.FinishedUtc)</summary>
+            <details open="@(RunId == run.RunId)"><summary>@run.JobName · @Status(run) · @Clock.Time(run.FinishedUtc)</summary>
             <p>Начало: @Clock.Time(run.StartedUtc). Конец: @Clock.Time(run.FinishedUtc). Предупреждений: @run.WarningCount.</p>
             @if (run.CopyKind is not null) { <p>Тип копии: @(run.CopyKind == "Full" ? "Полная" : "Инкрементная").</p> }
             @if (run.ConfigurationRevision is { } revision) { <p>Ревизия настроек этого запуска: @revision.</p> }
@@ -94,7 +99,7 @@
             }
             </details>
         }
-        <div class="pagination">@if (RunPage > 0) { <a href="@($"agents/{Id}?runPage={RunPage-1}")">← Новее</a> } @if (history.Runs.Count == history.PageSize) { <a href="@($"agents/{Id}?runPage={RunPage+1}")">Старее →</a> }</div>
+        <div class="pagination">@if (RunPage > 0) { <a href="@($"agents/{Id}?runPage={RunPage-1}")">← Новее</a> } @if (RunId is null && history.Runs.Count == history.PageSize) { <a href="@($"agents/{Id}?runPage={RunPage+1}")">Старее →</a> }</div>
     }
     </section>
     <section class="card narrow">
@@ -135,6 +140,7 @@ else { <h1>Агент не найден</h1> }
 
     [Parameter] public Guid Id { get; set; }
     [SupplyParameterFromQuery] public int RunPage { get; set; }
+    [SupplyParameterFromQuery] public Guid? RunId { get; set; }
     private AgentRecord? Data;
     private IReadOnlyList<AgentFolderOption> Folders = [];
     private ConfigurationDecisionState? Decisions;
@@ -174,7 +180,9 @@ else { <h1>Агент не найден</h1> }
         Data = await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted);
         Decisions = Data is null ? null : await Store.ConfigurationDecisionsAsync(Id, Http.HttpContext.RequestAborted);
         Monitoring = await Store.MonitoringAsync(Id, Http.HttpContext!.RequestAborted);
-        Runs = await Store.RunsAsync(Id,RunPage,Http.HttpContext.RequestAborted);
+        Runs = RunId is { } runId && runId != Guid.Empty
+            ? new MonitoredRunPage(await Store.RunsByIdAsync(Id, [runId], Http.HttpContext.RequestAborted), 0, 50)
+            : await Store.RunsAsync(Id, RunPage, Http.HttpContext.RequestAborted);
         Successful = await Store.LastSuccessfulRunsAsync(Id,Http.HttpContext.RequestAborted);
         Latest = await Store.LatestRunsAsync(Id,Http.HttpContext.RequestAborted);
         CurrentObservationRuns = await Store.RunsByIdAsync(Id, Monitoring?.Snapshot.Sources?

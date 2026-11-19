@@ -34,6 +34,37 @@ public sealed class CentralManagementTests(ServerFixture fixture) : IClassFixtur
         Assert.Equal(expected, result.StatusCode);
     }
     [ServerFact]
+    public async Task CommandsPageDistinguishesAwaitingReportFromPartialDeliveryAndLinksExactRun()
+    {
+        var (agent, job, client) = await Ready();
+        using var scope = client;
+        var command = new RemoteRunRequest(Guid.NewGuid(), job.Id, 2);
+        await Submit(agent.AgentId, command);
+        await Receipt(client, agent.AgentId, new(command.CommandId, "Accepted"));
+        await Receipt(client, agent.AgentId, new(command.CommandId, "Running"));
+        var selectedRun = Guid.NewGuid();
+        await Receipt(client, agent.AgentId, new(command.CommandId, "Failed", selectedRun));
+
+        var commands = $"agents/{agent.AgentId}/commands";
+        Assert.Contains("Подробный отчёт о запуске ожидается", WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync(commands)));
+        var now = DateTimeOffset.UtcNow;
+        await fixture.Store.SaveRunAsync(agent.AgentId, new(selectedRun, job.Id, "Selected report",
+            now.AddMinutes(-5), now.AddMinutes(-1), "PartiallySucceeded", 0, false, "Full",
+            [new(0, true, 512, false), new(1, false, 0, false)]), default);
+        await fixture.Store.SaveRunAsync(agent.AgentId, new(Guid.NewGuid(), job.Id, "Unrelated report",
+            now.AddMinutes(-1), now, "Succeeded", 0, false, "Full", [new(0, true, 512, false)]), default);
+
+        var reportUrl = $"agents/{agent.AgentId}?runId={selectedRun}";
+        var commandHtml = WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync(commands));
+        Assert.Contains("Частичная доставка", commandHtml);
+        Assert.Contains("1 из 2", commandHtml);
+        Assert.Contains(reportUrl + "#run-history", commandHtml);
+        var reportHtml = WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync(reportUrl));
+        Assert.Contains("Selected report", reportHtml);
+        Assert.DoesNotContain("Unrelated report", reportHtml);
+    }
+
+    [ServerFact]
     public async Task CommandsAreDurableIdempotentAndCannotClaimAResultBeforeExecution()
     {
         var (agent, job, client) = await Ready(); using var scope = client;

@@ -14,6 +14,41 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
     public MonitoringTests(ServerFixture fixture) => server=fixture;
     private static M.MonitoredRun Run(bool incomplete=false) => new(Guid.NewGuid(),Guid.NewGuid(),"Files",DateTimeOffset.UtcNow.AddMinutes(-2),DateTimeOffset.UtcNow,"Succeeded",incomplete ? 1 : 0,incomplete,"Incremental",[new(0,true,128,incomplete)]);
     [ServerFact]
+    public async Task CurrentScopeAndCopyHistoryIgnoreObsoleteReports()
+    {
+        var agent = await server.EnrollAsync();
+        var previous = Run() with { BackupScope = new string('a', 64) };
+        var currentScope = new string('b', 64);
+        await server.Store.SaveRunAsync(agent.AgentId, previous, default);
+        var job = new M.MonitoredJob(previous.JobId, previous.JobName, "FilesAndFolders", true, "Daily", null, 1)
+        {
+            BackupScope = currentScope
+        };
+        await server.Store.SaveMonitoringAsync(agent.AgentId,
+            new(DateTimeOffset.UtcNow, "test", [job], null, 0), default);
+        Assert.Empty(await server.Store.LastSuccessfulRunsAsync(agent.AgentId, default));
+
+        var current = previous with { RunId = Guid.NewGuid(), BackupScope = currentScope };
+        await server.Store.SaveRunAsync(agent.AgentId, current, default);
+        Assert.Equal(current.RunId, Assert.Single(await server.Store.LastSuccessfulRunsAsync(agent.AgentId, default)).RunId);
+
+        var observation = Run() with { Evidence = "SqlServerMsdbHistory", CopyKind = null };
+        for (var index = 1; index <= 50; index++)
+        {
+            await server.Store.SaveRunAsync(agent.AgentId, observation with
+            {
+                RunId = Guid.NewGuid(),
+                FinishedUtc = previous.FinishedUtc.AddSeconds(index)
+            }, default);
+        }
+
+        var copies = await server.Store.RunsAsync(agent.AgentId, 0, default, agentCopiesOnly: true);
+        Assert.Contains(copies.Runs, run => run.RunId == current.RunId);
+        Assert.All(copies.Runs, run => Assert.Null(run.Evidence));
+        Assert.DoesNotContain((await server.Store.RunsAsync(agent.AgentId, 0, default)).Runs, run => run.RunId == current.RunId);
+    }
+
+    [ServerFact]
     public async Task ReportsAreDurableIdempotentAndScopedToAgent()
     {
         var agent=await server.EnrollAsync(); var other=await server.EnrollAsync();
