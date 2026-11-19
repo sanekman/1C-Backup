@@ -233,6 +233,49 @@ public sealed class FileFolderBackupTests : IDisposable
     }
 
     [Fact]
+    public async Task ConfirmedEmptyCleanupAffectsOnlyTheSelectedDestinationAndRejectsAStalePreview()
+    {
+        var second = Path.Combine(root, "mirror");
+        var job = Job with { FileBackupMode = FileBackupMode.Full, AdditionalDestinations = [new() { DestinationDirectory = second }] };
+        var path = Path.Combine(Source, "a.txt");
+        await File.WriteAllTextAsync(path, "before");
+        var previous = await Runner().RunAsync(job);
+        File.Delete(path);
+        var empty = await Runner().RunAsync(job);
+        var retention = new BackupRetention(catalog, storage);
+
+        var first = empty.Destinations![0].Record!;
+        var confirmed = Assert.IsType<BackupRecord>(await retention.PreviewEmptySourceCleanupAsync(job, first));
+        Assert.Equal(previous.Destinations![0].Record, confirmed);
+        var next = await Runner().RunAsync(job);
+        await Assert.ThrowsAsync<InvalidDataException>(() => retention.ConfirmEmptySourceCleanupAsync(job, first, confirmed));
+        Assert.True(File.Exists(confirmed.Backup.Location));
+
+        var result = await retention.ConfirmEmptySourceCleanupAsync(job, next.Destinations![0].Record!, confirmed);
+        Assert.Empty(result.Failures);
+        Assert.Equal(confirmed.Id, Assert.Single(result.Deleted));
+        Assert.False(File.Exists(confirmed.Backup.Location));
+        Assert.True(File.Exists(previous.Destinations[1].Record!.Backup.Location));
+        Assert.Null(await retention.PreviewEmptySourceCleanupAsync(job, next.Destinations[0].Record!));
+    }
+
+    [Fact]
+    public async Task EmptyIncrementCannotReleaseItsOwnNonEmptyBasis()
+    {
+        var job = Job with { FullBackupEvery = 2 };
+        var path = Path.Combine(Source, "a.txt");
+        await File.WriteAllTextAsync(path, "before");
+        var basis = await Run(job);
+        File.Delete(path);
+        var empty = await Run(job);
+        var retention = new BackupRetention(catalog, storage);
+
+        Assert.Null(await retention.PreviewEmptySourceCleanupAsync(job, empty));
+        await Assert.ThrowsAsync<InvalidDataException>(() => retention.ConfirmEmptySourceCleanupAsync(job, empty, basis));
+        Assert.True(File.Exists(basis.Backup.Location));
+    }
+
+    [Fact]
     public async Task ChangedSourceHasNoCurrentAuditUntilCopiedAndKeepsPreviousPoint()
     {
         await File.WriteAllTextAsync(Path.Combine(Source, "a.txt"), "original");

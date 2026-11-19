@@ -680,6 +680,9 @@ public partial class MainWindow : Window
         if (isIncrement) ExportCopyButton.ToolTip += " Это только изменения: для восстановления нужны полная основа и все предшествующие архивы. Кнопка «Восстановить файлы…» собирает цепочку автоматически.";
         CancelCopyVerificationButton.IsEnabled = copyVerification is { IsCancellationRequested: false };
         CancelCopyVerificationButton.Visibility = copyVerification is not null && !checkingStorages ? Visibility.Visible : Visibility.Collapsed;
+        ConfirmEmptySourceCleanupButton.Visibility = Copies.SelectedItem is BackupCopyRow { Record.Backup.FileCount: 0 }
+            ? Visibility.Visible : Visibility.Collapsed;
+        ConfirmEmptySourceCleanupButton.IsEnabled = VerifyCopyButton.IsEnabled && !copiesRefreshing;
         OpenCopyDirectoryButton.IsEnabled = ready && Copies.SelectedItem is BackupCopyRow { CanOpenDirectory: true };
         StartBackgroundButton.IsEnabled = ready && configurationReady && idle && engineAvailable && schedulingTask is null && !editorOpen && !backgroundStarting
             && automationService is AutomationService.None or AutomationService.Stopped;

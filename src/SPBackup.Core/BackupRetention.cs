@@ -10,7 +10,7 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
 {
     public Task<RetentionResult> ApplyAsync(BackupJob job, BackupRecord newest,
         CancellationToken cancellationToken = default, int? destinationIndex = null) =>
-        ApplyCoreAsync(job, newest, null, cancellationToken, destinationIndex);
+        ApplyCoreAsync(job, newest, null, cancellationToken, destinationIndex, null);
 
     internal async Task<HashSet<Guid>> VerifyDeliveryAsync(BackupJob job, BackupRecord newest, CancellationToken token)
     {
@@ -23,10 +23,43 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
 
     internal Task<RetentionResult> ApplyVerifiedAsync(BackupJob job, BackupRecord newest, HashSet<Guid> verified,
         CancellationToken token, int destinationIndex) =>
-        ApplyCoreAsync(job, newest, verified, token, destinationIndex);
+        ApplyCoreAsync(job, newest, verified, token, destinationIndex, null);
+
+    /// <summary>Returns the additional point retained because the current file snapshot is empty.</summary>
+    public async Task<BackupRecord?> PreviewEmptySourceCleanupAsync(BackupJob job, BackupRecord emptyPoint, CancellationToken token = default)
+    {
+        var target = BackupCopyVerifier.GetStorageJob(emptyPoint, job);
+        var records = await catalog.ReadAsync(token);
+        return EmptySourceProtection(target, emptyPoint, records);
+    }
+
+    /// <summary>Applies ordinary retention in this destination after confirmation of the exact protected point.</summary>
+    public Task<RetentionResult> ConfirmEmptySourceCleanupAsync(BackupJob job, BackupRecord emptyPoint,
+        BackupRecord confirmedPoint, CancellationToken token = default) =>
+        ApplyCoreAsync(BackupCopyVerifier.GetStorageJob(emptyPoint, job), emptyPoint, null, token, null, confirmedPoint);
+
+    private static BackupRecord? EmptySourceProtection(BackupJob target, BackupRecord emptyPoint,
+        IReadOnlyList<BackupRecord> records)
+    {
+        ValidateNewest(target, emptyPoint, records);
+        if (emptyPoint.Backup.FileCount != 0 || emptyPoint.Backup.FileSnapshot is not { IsIncomplete: false } snapshot) return null;
+        var jobRecords = records.Where(record => record.JobId == target.Id);
+        var ordered = BackupPointOrder.NewestFirst(jobRecords.Where(record => record.StorageIdentity == emptyPoint.StorageIdentity), jobRecords).ToArray();
+        if (ordered.FirstOrDefault() != emptyPoint || (target.Kind == DatabaseKind.FilesAndFolders
+            && snapshot.SourceIdentity != FileBackupManifest.IdentifySource(target.Source, snapshot.SourceIsFile)))
+            throw new InvalidDataException("Выберите последний пустой снимок текущего источника и хранилища.");
+        var sameSource = ordered.Where(record => record.Backup.FileSnapshot?.SourceIdentity == snapshot.SourceIdentity);
+        var previous = sameSource.Skip(1).Where(record => record.Backup.FileSnapshot is { IsIncomplete: false }).ToArray();
+        var protectedPoint = previous.FirstOrDefault(record => record.Backup.FileCount != 0);
+        if (protectedPoint is null || previous.Take(target.KeepLast - 1).Contains(protectedPoint)) return null;
+        // A point required by any retained archive will remain even with confirmation.
+        var retained = previous.Take(target.KeepLast - 1).Append(emptyPoint)
+            .Concat(sameSource.Where(record => record.Backup.FileSnapshot?.IsIncomplete == true));
+        return retained.Any(point => FileBackupChains.Resolve(point, sameSource).Contains(protectedPoint)) ? null : protectedPoint;
+    }
 
     private async Task<RetentionResult> ApplyCoreAsync(BackupJob job, BackupRecord newest, HashSet<Guid>? verified,
-        CancellationToken cancellationToken, int? destinationIndex)
+        CancellationToken cancellationToken, int? destinationIndex, BackupRecord? confirmedPoint)
     {
         BackupProgressContext.Report(BackupStage.Retention);
         if (job.KeepLast < 1) throw new ArgumentException("Нужно сохранять хотя бы одну копию.", nameof(job));
@@ -34,6 +67,8 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
         var identity = StorageAddress.Identity(job);
         var records = await catalog.ReadAsync(cancellationToken);
         ValidateNewest(job, newest, records);
+        if (confirmedPoint is not null && EmptySourceProtection(job, newest, records) != confirmedPoint)
+            throw new InvalidDataException("Защищённая точка изменилась. Откройте подтверждение очистки заново.");
         verified ??= [];
         await VerifyChainAsync(job, newest, records, verified, cancellationToken);
         // A partial source must never trigger deletion of earlier recoverable data.
@@ -50,7 +85,7 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
                 records.Where(record => record.JobId == job.Id)).ToArray();
         var keep = preceding.Take(job.KeepLast - 1).Select(record => record.Id).Append(newest.Id).ToHashSet();
         // An older catalog may not know the file count. Protect its latest candidate too.
-        var previousWithFiles = newest.Backup.FileCount == 0
+        var previousWithFiles = confirmedPoint is null && newest.Backup.FileCount == 0
             ? preceding.FirstOrDefault(record => record.Backup.FileCount != 0) : null;
         if (previousWithFiles is not null) keep.Add(previousWithFiles.Id);
         var previousSources = owned.Where(record => record.Backup.FileSnapshot?.SourceIdentity != sourceIdentity).ToArray();
@@ -98,7 +133,7 @@ public sealed class BackupRetention(BackupCatalog catalog, IBackupStorage storag
             try
             {
                 await storage.DeleteAsync(record.Backup, job, cancellationToken);
-                await catalog.RemoveAsync(record.Id, cancellationToken);
+                await catalog.RemoveAsync(record.Id, CancellationToken.None);
                 deleted.Add(record.Id);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

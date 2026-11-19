@@ -87,6 +87,48 @@ public partial class MainWindow
         UpdateRunControls();
     }
 
+    private async void ConfirmEmptySourceCleanup_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ConfirmEmptySourceCleanupButton.IsEnabled || Copies.SelectedItem is not BackupCopyRow row
+            || jobs.FirstOrDefault(job => job.Id == row.Record.JobId) is not { } job) return;
+        using var lease = AcquireEngineOrReport();
+        if (lease is null) return;
+        using var cancellation = new CancellationTokenSource();
+        copyVerification = cancellation;
+        UpdateRunControls();
+        try
+        {
+            var retention = new BackupRetention(EffectiveCatalog, backupStorage);
+            var point = await retention.PreviewEmptySourceCleanupAsync(job, row.Record, cancellation.Token);
+            if (point is null)
+            {
+                CopyVerificationStatus.Text = "Нет защищённой точки, которую можно удалить по текущему лимиту. Основы используемых цепочек сохраняются.";
+                return;
+            }
+            var message = $"В этом хранилище последняя копия источника содержит 0 файлов.{Environment.NewLine}{Environment.NewLine}" +
+                $"Защищённая точка от {point.CompletedUtc.ToLocalTime():dd.MM.yyyy HH:mm}{Environment.NewLine}{point.Backup.Location}{Environment.NewLine}{Environment.NewLine}" +
+                "Применить обычный лимит хранения в этом назначении? Защищённая точка и другие архивы сверх лимита могут быть удалены безвозвратно.";
+            if (MessageBox.Show(this, message, "Подтвердить очистку копий", MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+
+            var result = await Task.Run(() => retention.ConfirmEmptySourceCleanupAsync(job, row.Record, point, cancellation.Token));
+            await RefreshCopiesAsync();
+            CopyVerificationStatus.Text = Status.Text = $"Удалено архивов: {result.Deleted.Count}." +
+                (result.Failures.Count == 0 ? "" : " Ошибки очистки: " + string.Join(" · ", result.Failures.Select(item => item.Error.Message)));
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            await RefreshCopiesAsync();
+            CopyVerificationStatus.Text = Status.Text = "Очистка остановлена. Проверьте оставшиеся копии.";
+        }
+        catch (Exception error)
+        {
+            DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, error);
+            CopyVerificationStatus.Text = Status.Text = error.Message;
+        }
+        finally { copyVerification = null; UpdateRunControls(); }
+    }
+
     private void ResetCopyFilters_Click(object sender, RoutedEventArgs e)
     {
         CopyJobFilter.SelectedIndex = 0;
