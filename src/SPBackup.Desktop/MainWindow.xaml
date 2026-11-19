@@ -543,7 +543,7 @@
        <Button x:Name="RefreshHistoryButton" DockPanel.Dock="Right" Content="Обновить" Click="RefreshHistory_Click" IsEnabled="False" Margin="8,0,0,0" />
        <ComboBox x:Name="HistoryStatusFilter" DockPanel.Dock="Right" Width="160" SelectionChanged="HistoryFilter_Changed" Margin="8,0,0,0" SelectedIndex="0">
         <ComboBoxItem Content="Все результаты" Tag="all" />
-        <ComboBoxItem Content="Ошибки / прерывания" Tag="problems" />
+        <ComboBoxItem Content="Требуют внимания" Tag="problems" />
         <ComboBoxItem Content="Успешные" Tag="succeeded" />
         <ComboBoxItem Content="Выполняются" Tag="running" />
        </ComboBox>

@@ -11,7 +11,7 @@ public partial class FtpCredentialsWindow : Window
     private readonly Action<string, string, string> save;
     private bool jobDraft;
     public FtpCredentialsWindow(string key, WindowsFtpCredentialStore store)
-        : this(key, store.Save, "Логин и пароль FTP")
+        : this(key, store.Save, "Доступ к FTP")
     {
     }
 
