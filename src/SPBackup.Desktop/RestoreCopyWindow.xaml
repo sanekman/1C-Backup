@@ -10,14 +10,17 @@
     <TextBlock x:Name="CopyName" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
     <TextBlock x:Name="CopySource" TextWrapping="Wrap" Margin="0,4,0,8" />
     <TextBlock x:Name="ChainStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
-    <TextBlock Text="Папка назначения" Margin="0,12,0,4" />
+    <TextBlock Text="Куда восстановить файлы" Margin="0,12,0,4" />
     <DockPanel>
-     <Button x:Name="PickFolderButton" DockPanel.Dock="Right" Content="Выбрать…" Click="PickFolder_Click" Margin="8,0,0,0" />
+     <Button x:Name="PickFolderButton" DockPanel.Dock="Right" Content="Выбрать папку…" Click="PickFolder_Click" Margin="8,0,0,0" />
      <TextBox x:Name="TargetFolder" Text="Папка не выбрана" IsReadOnly="True" AutomationProperties.Name="Папка назначения" />
     </DockPanel>
     <TextBlock x:Name="FolderHint" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0" />
     <TextBlock x:Name="PasswordHint" TextWrapping="Wrap" Margin="0,12,0,4" />
-    <PasswordBox x:Name="OverridePassword" AutomationProperties.Name="Пароль архива для этой операции" />
+    <Expander x:Name="AlternatePassword" Header="Ввести другой пароль для этой операции" Expanded="AlternatePassword_Expanded" Collapsed="AlternatePassword_Collapsed">
+     <PasswordBox x:Name="OverridePassword" MaxLength="1024" AutomationProperties.Name="Пароль архива для этой операции" Margin="0,5,0,0" />
+    </Expander>
+    <TextBlock x:Name="PasswordError" TextWrapping="Wrap" Foreground="{DynamicResource ErrorBrush}" AutomationProperties.LiveSetting="Polite" />
    </StackPanel>
   </ScrollViewer>
   <WrapPanel Grid.Row="1" HorizontalAlignment="Right" Margin="0,12,0,0">

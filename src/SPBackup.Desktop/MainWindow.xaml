@@ -557,6 +557,7 @@
       <DockPanel Margin="0,0,0,8">
        <Button x:Name="ExportHistoryButton" DockPanel.Dock="Right" Content="Экспорт JSON" Click="ExportHistory_Click" IsEnabled="False" Margin="8,0,0,0" ToolTip="Экспортировать все записи, показанные текущим фильтром" />
        <Button x:Name="OpenRunDirectoryButton" DockPanel.Dock="Right" Content="Рабочая папка" Click="OpenRunDirectory_Click" IsEnabled="False" Padding="10,5" />
+       <Button x:Name="OpenHistoryCopyButton" DockPanel.Dock="Right" Content="Открыть сохранённую копию" Click="OpenHistoryCopy_Click" Visibility="Collapsed" Margin="0,0,8,0" />
        <Button x:Name="OpenHistoryJobButton" DockPanel.Dock="Right" Content="К заданию" Click="OpenHistoryJob_Click" IsEnabled="False" Padding="10,5" Margin="0,0,8,0" ToolTipService.ShowOnDisabled="True" />
        <TextBlock Text="Подробности выбранного запуска" FontWeight="SemiBold" VerticalAlignment="Center" />
       </DockPanel>

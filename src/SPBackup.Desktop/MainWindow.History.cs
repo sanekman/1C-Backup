@@ -26,6 +26,9 @@ public partial class MainWindow
         if (OpenHistoryJobButton is null || RunNextStep is null) return;
         var run = RunHistory.SelectedItem as BackupRun;
         var available = run is not null && jobs.Any(job => job.Id == run.JobId);
+        OpenHistoryCopyButton.Visibility = run?.Backup is not null || run?.Destinations?.Any(item => item.Record is not null) == true
+            ? Visibility.Visible : Visibility.Collapsed;
+        OpenHistoryCopyButton.IsEnabled = ready && !editorOpen && !persisting && !copiesRefreshing;
         OpenHistoryJobButton.IsEnabled = ready && !editorOpen && !persisting && available;
         OpenHistoryJobButton.ToolTip = run is null ? "Выберите запуск в таблице."
             : !available ? "Задание сейчас недоступно. История запуска сохранена."
@@ -56,6 +59,30 @@ public partial class MainWindow
         Jobs.SelectedItem = job;
         Jobs.ScrollIntoView(job);
         Status.Text = $"Открыто текущее задание «{job.Name}».";
+    }
+
+    private async void OpenHistoryCopy_Click(object sender, RoutedEventArgs e)
+    {
+        if (!OpenHistoryCopyButton.IsEnabled || RunHistory.SelectedItem is not BackupRun run) return;
+        await RefreshCopiesAsync();
+        if (RunHistory.SelectedItem is not BackupRun current || current.RunId != run.RunId || !HistoryView.IsVisible) return;
+
+        var ids = run.Destinations?.Where(item => item.Record is not null).Select(item => item.Record!.Id).ToHashSet();
+        var copy = copyRows.FirstOrDefault(row => row.Record.JobId == run.JobId
+            && (ids is { Count: > 0 } ? ids.Contains(row.Record.Id)
+                : run.Backup is { } backup && row.Record.Backup.Location == backup.Location
+                    && row.Record.Backup.Length == backup.Length && row.Record.Backup.Sha256 == backup.Sha256));
+        if (copy is null)
+        {
+            Status.Text = "Копия этого запуска больше не найдена в каталоге.";
+            return;
+        }
+
+        ShowPage("copies");
+        SelectCopiesForJob(run.JobId);
+        Copies.SelectedItem = copy;
+        Copies.ScrollIntoView(copy);
+        Copies.Focus();
     }
 
     private void HistoryView_SizeChanged(object sender, SizeChangedEventArgs e)

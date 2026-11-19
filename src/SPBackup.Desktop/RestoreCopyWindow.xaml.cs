@@ -1,5 +1,6 @@
 using System.Windows;
 using Microsoft.Win32;
+using SPBackup.Core;
 
 namespace SPBackup.Desktop;
 
@@ -18,9 +19,9 @@ public partial class RestoreCopyWindow : Window
             : "В выбранной папке будет создан новый подкаталог 1C-Restored-…";
         var encrypted = copy.Record.Backup.ArchivePasswordKey is not null;
         PasswordHint.Text = encrypted
-            ? "Нужен пароль ZIP. Оставьте поле пустым, чтобы использовать пароль из Windows, или введите пароль для этой операции."
+            ? "Пароль архива из Windows будет использован автоматически."
             : "Пароль архива не требуется по данным каталога.";
-        OverridePassword.Visibility = encrypted ? Visibility.Visible : Visibility.Collapsed;
+        AlternatePassword.Visibility = encrypted ? Visibility.Visible : Visibility.Collapsed;
         RestoreButton.Content = files ? "Восстановить файлы" : "Извлечь файл базы";
         Closed += (_, _) => OverridePassword.Clear();
     }
@@ -37,10 +38,28 @@ public partial class RestoreCopyWindow : Window
         RestoreButton.IsEnabled = true;
     }
 
+    private void AlternatePassword_Expanded(object sender, RoutedEventArgs e) => OverridePassword.Focus();
+
+    private void AlternatePassword_Collapsed(object sender, RoutedEventArgs e)
+    {
+        OverridePassword.Clear();
+        PasswordError.Text = "";
+    }
+
     private void Restore_Click(object sender, RoutedEventArgs e)
     {
         if (ParentDirectory is null) return;
-        PasswordOverride = OverridePassword.Password is { Length: > 0 } value ? value : null;
+        if (AlternatePassword.IsExpanded)
+        {
+            try { ArchivePasswords.Validate(OverridePassword.Password); }
+            catch (ArgumentException error)
+            {
+                PasswordError.Text = error.Message;
+                OverridePassword.Focus();
+                return;
+            }
+            PasswordOverride = OverridePassword.Password;
+        }
         DialogResult = true;
     }
 }
