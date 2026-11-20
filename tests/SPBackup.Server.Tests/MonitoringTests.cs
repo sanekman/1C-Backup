@@ -81,10 +81,11 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
         var agent=await server.EnrollAsync(); var run=Run(true);
         await server.Store.SaveRunAsync(agent.AgentId,run,default);
         await server.Store.SaveMonitoringAsync(agent.AgentId,new(DateTimeOffset.UtcNow.AddYears(1),"test-agent",[new(run.JobId,"Files","FilesAndFolders",true,"Daily",DateTimeOffset.UtcNow.AddHours(1),1)],null,2),default);
-        var overview=await server.Store.OverviewAsync(180,default); Assert.True(overview.Incomplete>=1); Assert.True(overview.Pending>=2);
+        var overview=await server.Store.OverviewAsync(180,default); Assert.True(overview.Incomplete>=1); Assert.True(overview.LegacyPending>=2);
         using var page=await server.Administrator.GetAsync($"agents/{agent.AgentId}"); page.EnsureSuccessStatusCode();
         var html=await page.Content.ReadAsStringAsync(); Assert.Contains("Incremental",JsonSerializer.Serialize(run));
         Assert.Contains("Неполная копия",WebUtility.HtmlDecode(html)); Assert.Contains("Инкрементная",WebUtility.HtmlDecode(html));
+        Assert.Contains("Ожидает передачи по данным агента: 2", WebUtility.HtmlDecode(html));
         Assert.Equal("30",page.Headers.GetValues("Refresh").Single());
         var monitoring=await server.Store.MonitoringAsync(agent.AgentId,default); Assert.True(monitoring!.ReceivedUtc < DateTimeOffset.UtcNow.AddMinutes(1));
     }

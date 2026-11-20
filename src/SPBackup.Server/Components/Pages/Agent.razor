@@ -16,7 +16,10 @@
     <h2>Резервное копирование</h2>
     @if (Monitoring is { } monitoring)
     {
-        <p>Состояние получено @Clock.Time(monitoring.ReceivedUtc). Готово к отправке: @monitoring.Snapshot.ReadyRuns.</p>
+        <p>Состояние получено @Clock.Time(monitoring.ReceivedUtc).
+            @(monitoring.Snapshot.ReportRejections is null
+                ? $"Ожидает передачи по данным агента: {monitoring.Snapshot.PendingRuns}."
+                : $"Готово к отправке: {monitoring.Snapshot.ReadyRuns}.")</p>
         @if (monitoring.Snapshot.ExecutionMode == "Managed")
         { <p>Задания с сервера. Принятая ревизия: @(monitoring.Snapshot.ConfigurationRevision?.ToString() ?? "ожидает первого подключения").
             @(monitoring.Snapshot.BackupExecutionAvailable == true && agent.BackupExecutionAvailable ? "Исполнитель работает." : "Исполнение не подтверждено.")</p> }

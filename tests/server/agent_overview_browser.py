@@ -38,6 +38,7 @@ with sync_playwright() as pw:
     checks.append('theme-icons-keyboard-accessibility-and-persistence')
     totals = page.locator('.agent-totals')
     expect(totals.get_by_text('Готово к отправке: 1', exact=True)).to_be_visible()
+    expect(totals.get_by_text('В очереди старых агентов: 2', exact=True)).to_be_visible()
     expect(totals.get_by_text('Отклонено сервером: 2', exact=True)).to_be_visible()
     expect(totals.get_by_text('Не подготовлено агентами: 1', exact=True)).to_be_visible()
     checks.append('report-delivery-totals-separate-ready-rejected-and-unprepared')

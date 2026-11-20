@@ -175,7 +175,7 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
                     LastLogUtc = observationTasks[m.Id].LastLogUtc }).ToArray(),collectionWarnings)
         { ExecutionMode = selected is null ? "Standalone" : "Managed", ConfigurationRevision = selected?.Revision,
             BackupExecutionAvailable = selected is null ? null : managedJobs is not null && fixedConnection is not null,
-            ReportRejections = retryAfter.Count == 0 ? null : new(invalid, conflicting, retryAfter.Count - invalid - conflicting) };
+            ReportRejections = new(invalid, conflicting, retryAfter.Count - invalid - conflicting) };
         var now = DateTimeOffset.UtcNow;
         // Bound stored cooldowns by the retry interval if the agent's wall clock moved back.
         var maxRetryAt = now.AddMinutes(2);

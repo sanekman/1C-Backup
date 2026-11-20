@@ -27,6 +27,7 @@
     <section class="agent-totals" aria-label="Мониторинг всех агентов">
         <span>Нет связи: @overview.Offline</span><span>Нет отчётов: @overview.Unreported</span>
         <span>Готово к отправке: @overview.Pending</span>
+        @if (overview.LegacyPending > 0) { <span>В очереди старых агентов: @overview.LegacyPending</span> }
         @if (overview.Rejected > 0) { <span class="error">Отклонено сервером: @overview.Rejected</span> }
         @if (overview.Unprepared > 0) { <span class="error">Не подготовлено агентами: @overview.Unprepared</span> }
         <a href="problems">Проблемы всех агентов →</a>

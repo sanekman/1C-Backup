@@ -5,7 +5,7 @@ public sealed partial class ServerStore
 {
     private static readonly JsonSerializerOptions MonitoringJson = new(JsonSerializerDefaults.Web);
     public sealed record Overview(int Agents, int Offline, int Unreported, int Failed, int Incomplete, int Warning,
-        long Pending, long Rejected, long Unprepared);
+        long Pending, long Rejected, long Unprepared, long LegacyPending);
     public async Task<Overview> OverviewAsync(int offlineSeconds,CancellationToken token)
     {
         await using var db=await source.OpenConnectionAsync(token);
@@ -17,7 +17,8 @@ public sealed partial class ServerStore
                     coalesce((document#>>'{reportRejections,invalid}')::integer,0)
                     + coalesce((document#>>'{reportRejections,conflict}')::integer,0)
                     + coalesce((document#>>'{reportRejections,unknown}')::integer,0) rejected,
-                    (document->>'collectionWarnings')::integer unprepared
+                    (document->>'collectionWarnings')::integer unprepared,
+                    document->'reportRejections' IS NOT NULL AS has_breakdown
                 FROM agents
             )
             SELECT (SELECT count(*)::integer FROM agents),
@@ -26,13 +27,14 @@ public sealed partial class ServerStore
               (SELECT count(*)::integer FROM latest WHERE document->>'status' IN ('Failed','Interrupted','Cancelled','PartiallySucceeded')),
               (SELECT count(*)::integer FROM latest WHERE (document->>'incomplete')::boolean),
               (SELECT count(*)::integer FROM latest WHERE (document->>'warningCount')::integer>0),
-              (SELECT coalesce(sum(pending - rejected),0) FROM delivery),
+              (SELECT coalesce(sum(pending - rejected) FILTER (WHERE has_breakdown),0) FROM delivery),
               (SELECT coalesce(sum(rejected),0) FROM delivery),
-              (SELECT coalesce(sum(unprepared),0) FROM delivery)
+              (SELECT coalesce(sum(unprepared),0) FROM delivery),
+              (SELECT coalesce(sum(pending) FILTER (WHERE NOT has_breakdown),0) FROM delivery)
             """,("seconds",offlineSeconds));
         await using var reader=await cmd.ExecuteReaderAsync(token); await reader.ReadAsync(token);
         return new(reader.GetInt32(0),reader.GetInt32(1),reader.GetInt32(2),reader.GetInt32(3),reader.GetInt32(4),reader.GetInt32(5),
-            reader.GetInt64(6), reader.GetInt64(7), reader.GetInt64(8));
+            reader.GetInt64(6), reader.GetInt64(7), reader.GetInt64(8), reader.GetInt64(9));
     }
     public async Task<IReadOnlyList<MonitoredRun>> LastSuccessfulRunsAsync(Guid id,CancellationToken token)
     {
