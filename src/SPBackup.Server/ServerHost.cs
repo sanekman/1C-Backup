@@ -113,7 +113,7 @@ public static partial class ServerHost
         app.MapGet("/health/live", () => Results.Text("live"));
         app.MapGet("/health/ready", async (ServerStore store, CancellationToken token) => await store.ReadyAsync(token) ? Results.Text("ready") : Results.StatusCode(503));
         app.MapOpenApi().RequireAuthorization(ServerAuthentication.Administrator);
-        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app); MapRemoteRuns(app); MapServerUpdates(app);
+        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app); MapRemoteRuns(app); MapServerUpdates(app); MapOperators(app);
         app.MapRazorComponents<App>();
         return app;
     }
@@ -137,19 +137,19 @@ public static partial class ServerHost
             if (name.Length is < 1 or > 80 || password.Length is < 1 or > 256) throw new ServerRequestException(400, "invalid_login");
             var user = await store.LoginAsync(name, password, context.RequestAborted);
             if (user is null) { log.Write(ServerEvent.LoginFailed); return Results.Redirect(context.Request.PathBase + "/login?failed=1"); }
-            await store.RecordAdministratorLoginAsync(user.Id, context.RequestAborted);
+            await store.RecordPanelLoginAsync(user, context.RequestAborted);
             var identity = new ClaimsIdentity([new(ClaimTypes.NameIdentifier, user.Id.ToString("D")), new(ClaimTypes.Name, user.Name),
-                new(ClaimTypes.Role, ServerAuthentication.Administrator), new("stamp", user.SecurityStamp.ToString("D"))], CookieAuthenticationDefaults.AuthenticationScheme);
+                new(ClaimTypes.Role, user.Role), new("stamp", user.SecurityStamp.ToString("D"))], CookieAuthenticationDefaults.AuthenticationScheme);
             await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
             log.Write(ServerEvent.LoginSucceeded);
-            return Results.Redirect(context.Request.PathBase + "/");
+            return Results.Redirect(context.Request.PathBase + (user.Role == ServerAuthentication.Operator ? "/operator" : "/"));
         }).RequireRateLimiting("login");
         app.MapPost("/session/logout", async (HttpContext context, IAntiforgery anti) =>
         {
             await anti.ValidateRequestAsync(context);
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             return Results.Redirect(context.Request.PathBase + "/login");
-        }).RequireAuthorization(ServerAuthentication.Administrator);
+        }).RequireAuthorization(ServerAuthentication.PanelUser);
         app.MapPost("/management/agents/{id:guid}/revoke", async (Guid id, HttpContext context, IAntiforgery anti, ServerStore store, ServerLog log) =>
         {
             await anti.ValidateRequestAsync(context);

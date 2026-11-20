@@ -1,6 +1,7 @@
 """Browser acceptance of seeded isolated ServerFixture; never connects outside loopback."""
 import argparse
 import json
+import secrets
 from pathlib import Path
 from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright, expect
@@ -136,5 +137,26 @@ with sync_playwright() as pw:
     page.goto(a.url)
     expect(page.locator('[data-agent-directory]')).to_be_visible()
     checks.append('dashboard-view-preference-persists-without-changing-agent-data')
+    page.goto(a.url + 'operators')
+    page.locator('input[name="name"]').fill('fixture-observer')
+    observer_password = secrets.token_urlsafe(24)
+    page.locator('input[name="password"]').fill(observer_password)
+    grant = page.locator(f'input[name="grant"][value="{a.agent}:{a.job}"]')
+    page.locator('details').filter(has=grant).locator('summary').click()
+    grant.check()
+    page.get_by_role('button', name='Сохранить', exact=True).click()
+    expect(page.get_by_text('fixture-observer', exact=True).first).to_be_visible()
+    observer = browser.new_page(ignore_https_errors=True, viewport={'width': 900, 'height': 580})
+    observer.goto(a.url + 'login')
+    observer.locator('input[name="name"]').fill('fixture-observer')
+    observer.locator('input[name="password"]').fill(observer_password)
+    observer.get_by_role('button', name='Войти', exact=True).click()
+    observer.wait_for_url(a.url + 'operator')
+    expect(observer.locator('tbody tr')).to_have_count(1)
+    expect(observer.locator('tbody tr')).to_contain_text('Office <УНФ>')
+    expect(observer.get_by_role('link', name='Настройки', exact=True)).to_have_count(0)
+    assert observer.goto(a.url + 'settings').status == 403
+    observer.close()
+    checks.append('operator-is-provisioned-in-browser-and-sees-only-assigned-job')
     browser.close()
 (out / 'result.json').write_text(json.dumps({'success': True, 'checks': checks}, indent=2))

@@ -74,6 +74,7 @@ public partial class MainWindow : Window
         JobEditor.AddHandler(System.Windows.Controls.Primitives.ToggleButton.CheckedEvent, new RoutedEventHandler(EditorFieldChanged));
         JobEditor.AddHandler(System.Windows.Controls.Primitives.ToggleButton.UncheckedEvent, new RoutedEventHandler(EditorFieldChanged));
         var dataDirectory = DesktopPaths.DataDirectory;
+        ClassicRestoreView.IsChecked = ReadClassicRestoreView(dataDirectory);
         engine = new BackupEngineCoordinator(dataDirectory);
         backgroundControl = new LocalAgentControlStore(dataDirectory);
         backupStorage = new RoutedBackupStorage(ftpCredentials, Path.Combine(dataDirectory, "ftp-verification"));
@@ -679,6 +680,7 @@ public partial class MainWindow : Window
         var restoreAvailable = !preparingCopyRestore && !copiesRefreshing;
         ExtractOneCButton.IsEnabled &= restoreAvailable;
         RestoreFilesButton.IsEnabled = isFileSnapshot && restoreAvailable && VerifyCopyButton.IsEnabled && copyRestoreChainError is null;
+        RecoveryKitsButton.Visibility = ClassicRestoreView.IsChecked == true ? Visibility.Collapsed : Visibility.Visible;
         RecoveryKitsButton.IsEnabled = ready && idle && restoreAvailable && engineAvailable && schedulingTask is null;
         RestoreFilesButton.ToolTip = copyRestoreChainError ?? (!engineAvailable || schedulingTask is not null
             ? "Остановите фоновую работу, чтобы восстановить выбранную копию."

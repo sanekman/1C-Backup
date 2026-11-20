@@ -8,7 +8,7 @@ public partial class RestoreCopyWindow : Window
 {
     private CancellationTokenSource? readingContents;
     private readonly bool mixedChain;
-    internal RestoreCopyWindow(BackupCopyRow copy, bool files, int archives, int storages = 0)
+    internal RestoreCopyWindow(BackupCopyRow copy, bool files, int archives, int storages = 0, bool showFileSelection = true)
     {
         InitializeComponent();
         CopyName.Text = $"{copy.JobName} · {copy.CompletedUtc.ToLocalTime():dd.MM.yyyy HH:mm}";
@@ -25,7 +25,7 @@ public partial class RestoreCopyWindow : Window
             ? "Пароль архива из Windows будет использован автоматически."
             : "Пароль архива не требуется по данным каталога.";
         AlternatePassword.Visibility = encrypted ? Visibility.Visible : Visibility.Collapsed;
-        FileSelection.Visibility = files ? Visibility.Visible : Visibility.Collapsed;
+        FileSelection.Visibility = files && showFileSelection ? Visibility.Visible : Visibility.Collapsed;
         mixedChain = storages > 1;
         AllowOtherDestinations.Visibility = mixedChain ? Visibility.Visible : Visibility.Collapsed;
         RestoreButton.Content = files ? "Восстановить файлы" : "Извлечь файл базы";

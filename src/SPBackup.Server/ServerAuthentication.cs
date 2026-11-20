@@ -25,6 +25,8 @@ public sealed class AgentAuthentication(IOptionsMonitor<AuthenticationSchemeOpti
 public static class ServerAuthentication
 {
     public const string Administrator = "Administrator";
+    public const string Operator = "Operator";
+    public const string PanelUser = "PanelUser";
     public static void Add(WebApplicationBuilder builder, ServerOptions settings)
     {
         var insecure = builder.Environment.IsDevelopment() && settings.AllowInsecureLoopback;
@@ -41,7 +43,8 @@ public static class ServerAuthentication
                     var user = context.Principal;
                     var valid = Guid.TryParse(user?.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
                         && Guid.TryParse(user?.FindFirstValue("stamp"), out var stamp)
-                        && await context.HttpContext.RequestServices.GetRequiredService<ServerStore>().ValidateSessionAsync(id, stamp, context.HttpContext.RequestAborted);
+                        && await context.HttpContext.RequestServices.GetRequiredService<ServerStore>().ValidateSessionAsync(id, stamp,
+                            user?.FindFirstValue(ClaimTypes.Role), context.HttpContext.RequestAborted);
                     if (!valid) context.RejectPrincipal();
                 };
                 options.Events.OnRedirectToLogin = context =>
@@ -50,11 +53,19 @@ public static class ServerAuthentication
                     else context.Response.Redirect(context.RedirectUri);
                     return Task.CompletedTask;
                 };
+                options.Events.OnRedirectToAccessDenied = context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return Task.CompletedTask;
+                };
             }).AddScheme<AuthenticationSchemeOptions, AgentAuthentication>(AgentAuthentication.SchemeName, _ => { });
         builder.Services.AddAuthorization(options =>
         {
-            options.AddPolicy(Administrator, policy => policy.AddAuthenticationSchemes(CookieAuthenticationDefaults.AuthenticationScheme)
-                .RequireAuthenticatedUser().RequireRole(Administrator));
+            foreach (var role in new[] { Administrator, Operator })
+                options.AddPolicy(role, policy => policy.AddAuthenticationSchemes(CookieAuthenticationDefaults.AuthenticationScheme)
+                    .RequireAuthenticatedUser().RequireRole(role));
+            options.AddPolicy(PanelUser, policy => policy.AddAuthenticationSchemes(CookieAuthenticationDefaults.AuthenticationScheme)
+                .RequireAuthenticatedUser().RequireRole(Administrator, Operator));
             options.AddPolicy("Agent", policy => policy.AddAuthenticationSchemes(AgentAuthentication.SchemeName).RequireAuthenticatedUser());
         });
         builder.Services.AddCascadingAuthenticationState();

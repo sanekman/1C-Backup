@@ -5,6 +5,7 @@ using SPBackup.Core;
 namespace SPBackup.Desktop;
 public partial class MainWindow
 {
+    private readonly Dictionary<Guid, (string Fingerprint, bool ThroughAgent, StorageCheckReport Report)> lastStorageAccessChecks = [];
     internal Func<BackupJob, bool>? ManagedAccessConfirmation { get; set; }
     internal Action<ArchivePasswordWindow>? ManagedArchiveDialogOpened { get; set; }
     private bool CanChangeManagedAccessInBackground => BackgroundExecutionMatchesMode && BackgroundAcceptsStorageChecks;
@@ -30,7 +31,9 @@ public partial class MainWindow
         {
             changingAgentConfiguration = true;
             UpdateRunControls();
-            var requirements = required.NetworkDestinations.Select(index => "Логин и пароль NAS для " + job.StorageJobs[index].DestinationDirectory);
+            var fingerprint = LocalStorageCheckRequest.Fingerprint(job);
+            var requirements = required.NetworkDestinations.Select(index => $"Хранилище {index + 1} · {job.StorageJobs[index].DestinationDirectory}\n"
+                + ManagedAccessCheck(job.Id, index, fingerprint));
             if (required.ArchivePassword) requirements = requirements.Prepend("Пароль ZIP для новых архивов");
             var summary = $"Задание: {job.Name}\nИсточник: {job.Source}\n\n" + string.Join("\n", requirements)
                 + $"\n\nИсполнитель: {executor}. Новые параметры будут использованы со следующего запуска.";
@@ -106,5 +109,16 @@ public partial class MainWindow
             changingAgentConfiguration = false;
             UpdateRunControls();
         }
+    }
+
+    private string ManagedAccessCheck(Guid jobId, int index, string fingerprint)
+    {
+        if (!lastStorageAccessChecks.TryGetValue(jobId, out var check) || check.Fingerprint != fingerprint
+            || index >= check.Report.Destinations.Count || check.Report.FinishedUtc is not { } finished)
+            return "Для текущих настроек в этом сеансе ещё нет результата проверки.";
+        var result = check.Report.Destinations[index];
+        return (result.Succeeded ? "Доступ проверен" : "Проверка доступа завершилась ошибкой")
+            + $" · {finished.ToLocalTime():dd.MM.yyyy HH:mm} · "
+            + (check.ThroughAgent ? "Фоновый исполнитель: " : "Окно программы: ") + check.Report.ExecutionIdentity!.Account;
     }
 }

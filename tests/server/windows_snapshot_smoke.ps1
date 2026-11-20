@@ -87,4 +87,38 @@ if ('До снимка' -notin $folderNames -or 'После снимка' -in $f
 if ((Get-FileHash (Join-Path $Root 'data\panel-time-zone.json')).Hash -ne $timeHash) { throw 'Server settings did not return to their saved state.' }
 $null=Invoke-RestMethod -Uri ($Address+'api/v1/agents/'+$agentId+'/configuration') -Headers $agentHeaders
 & $tool -Action Verify -BackupDirectory $snapshot | Out-Null
-@{coldBackup=$true; checksumVerification=$true; sameMachineGuard=$true; corruptedCopyRejectedWithoutStopping=$true; noOverwrite=$true; nestedPathRejected=$true; installerMutex=$true; privateSnapshotAcl=$true; startupFailureRollback=$true; restoredDatabase=$true; restoredSettings=$true; restoredDpapiCookie=$true; agentTokenPreserved=$true; previousDataRetained=$true} | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-snapshot-result.json'
+$oldMachineKeys=@(Get-ChildItem (Join-Path $Root 'data\keys') -File | ForEach-Object { $_.Name })
+if (!$oldMachineKeys.Count) { throw 'No live DPAPI key to validate the new host procedure.' }
+# The runner is an owned lab. Emulate a foreign snapshot identifier and an empty target,
+# verify the fresh-key branch, then restore the original fixture for subsequent checks.
+$manifestBefore=[IO.File]::ReadAllBytes($manifest)
+try {
+    $foreign=Get-Content $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
+    $foreign.Machine=[Guid]::NewGuid().ToString()
+    [IO.File]::WriteAllText($manifest,($foreign | ConvertTo-Json -Depth 6),(New-Object Text.UTF8Encoding($false)))
+    Rejected { & $tool -Action RestoreOnNewComputer -BackupDirectory $snapshot }
+    Rejected { & $tool -Action RestoreOnNewComputer -ConfirmNewComputer -BackupDirectory $snapshot }
+    $null=Invoke-RestMethod -Uri ($Address+'api/v1/agents/'+$agentId+'/configuration') -Headers $agentHeaders
+    $oldPgPassword=$env:PGPASSWORD
+    $connection=[IO.File]::ReadAllText((Join-Path $Root 'connection-string.txt')).Trim()
+    try {
+        $env:PGPASSWORD=$connection.Substring($connection.IndexOf(';Password=')+';Password='.Length)
+        $null=& (Join-Path $Install 'postgresql\bin\psql.exe') '-X' '-w' '-h' '127.0.0.1' '-p' '15433' '-U' 'onecbackup' '-d' 'postgres' '-c' 'TRUNCATE server_agents,server_invitations CASCADE;' 2>$null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not prepare the empty lab target.' }
+    } finally { $env:PGPASSWORD=$oldPgPassword }
+    $imported=& $tool -Action RestoreOnNewComputer -ConfirmNewComputer -BackupDirectory $snapshot
+    if (!$imported.Success -or !$imported.NewSessionsRequired -or !(Test-Path -LiteralPath $imported.PreviousData)) { throw 'New host restore did not preserve the target or rotate sessions.' }
+    Rejected { Invoke-RestMethod -Uri ($Address+'api/v1/management/session') -WebSession $Session }
+    $freshSession=New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $freshPage=Invoke-WebRequest -UseBasicParsing ($Address+'login') -WebSession $freshSession
+    $freshAnti=[Net.WebUtility]::HtmlDecode([regex]::Match($freshPage.Content,'name="__RequestVerificationToken"[^>]*value="([^"]+)"').Groups[1].Value)
+    $null=Invoke-WebRequest -UseBasicParsing ($Address+'session/login') -Method Post -WebSession $freshSession -Body @{name='admin';password=[IO.File]::ReadAllText($PasswordFile);__RequestVerificationToken=$freshAnti}
+    $null=Invoke-RestMethod -Uri ($Address+'api/v1/management/session') -WebSession $freshSession
+    $newKeys=@(Get-ChildItem (Join-Path $Root 'data\keys') -File | ForEach-Object { $_.Name })
+    if (!$newKeys.Count -or @($newKeys | Where-Object { $_ -in $oldMachineKeys }).Count) { throw 'The new host did not provision a separate DPAPI key.' }
+    $null=Invoke-RestMethod -Uri ($Address+'api/v1/agents/'+$agentId+'/configuration') -Headers $agentHeaders
+} finally {
+    [IO.File]::WriteAllBytes($manifest,$manifestBefore)
+    & $tool -Action Restore -BackupDirectory $snapshot | Out-Null
+}
+@{coldBackup=$true; checksumVerification=$true; sameMachineGuard=$true; corruptedCopyRejectedWithoutStopping=$true; noOverwrite=$true; nestedPathRejected=$true; installerMutex=$true; privateSnapshotAcl=$true; startupFailureRollback=$true; restoredDatabase=$true; restoredSettings=$true; restoredDpapiCookie=$true; agentTokenPreserved=$true; previousDataRetained=$true; newHostFreshTargetGuard=$true; newHostRotatesKeys=$true; genuineOtherWindowsHost=$false} | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-snapshot-result.json'

@@ -21,13 +21,14 @@ public static partial class ServerHost
             if (result is PasswordChangeResult.Changed or PasswordChangeResult.StaleSession)
             {
                 await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                if (result == PasswordChangeResult.Changed) log.Write(ServerEvent.AdministratorPasswordChanged);
+                if (result == PasswordChangeResult.Changed && context.User.IsInRole(ServerAuthentication.Administrator))
+                    log.Write(ServerEvent.AdministratorPasswordChanged);
                 return Results.Redirect(context.Request.PathBase + (result == PasswordChangeResult.Changed ? "/login?changed=1" : "/login"));
             }
             log.Write(ServerEvent.PasswordChangeFailed);
             var code = result switch { PasswordChangeResult.IncorrectCurrent => "current", PasswordChangeResult.Mismatch => "mismatch", PasswordChangeResult.SamePassword => "same", _ => "weak" };
             return Results.Redirect(context.Request.PathBase + "/account?error=" + code);
-        }).RequireAuthorization(ServerAuthentication.Administrator).RequireRateLimiting("maintenance");
+        }).RequireAuthorization(ServerAuthentication.PanelUser).RequireRateLimiting("maintenance");
 
         app.MapPost("/management/time-zone", async (HttpContext context, IAntiforgery anti, ServerTimeZone zones, ServerLog log) =>
         {

@@ -12,6 +12,9 @@ $secret=Join-Path $parent 'password.txt';$password=[Guid]::NewGuid().ToString('N
 $url='https://127.0.0.1:7447/monitoring/'
 $tool=(Resolve-Path (Join-Path $PSScriptRoot '../../deploy/server/windows/Server-Snapshot.ps1')).Path
 $statusTool=(Resolve-Path (Join-Path $PSScriptRoot '../../deploy/server/windows/Server-Status.ps1')).Path
+$schemaSource=Get-Content (Join-Path $PSScriptRoot '../../src/SPBackup.Server/ServerStore.cs') -Raw
+if ($schemaSource -notmatch 'const int SchemaVersions*=s*(d+)') { throw 'Expected schema version is unavailable.' }
+$candidateSchema=[int]$Matches[1]
 function Install([string]$Path,[bool]$Failure=$false) {
     $log=Join-Path (Get-Location).Path ('artifacts/server-tests/windows-installer-upgrade-'+[Guid]::NewGuid().ToString('N')+'.log')
     $process=Start-Process $Path -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG="'+$log+'"'),('/ADMINPASSWORDFILE="'+$secret+'"'),'/SERVERNAME="Upgrade fixture"',('/SERVERADDRESS="'+$url+'"'),'/FIREWALL=0') -PassThru
@@ -68,7 +71,7 @@ $dependency=Join-Path $install 'windows/Open-Panel.ps1';$dependencyBytes=[IO.Fil
 try { [IO.File]::AppendAllText($dependency,'changed');Rejected { & $tool -Action Verify -BackupDirectory $bundle -InstallDirectory $install } }
 finally { [IO.File]::WriteAllBytes($dependency,$dependencyBytes) }
 Install $Installer
-Assert-Preserved 6
+Assert-Preserved $candidateSchema
 Rejected { & $tool -Action Restore -BackupDirectory $bundle -InstallDirectory $install }
 $recovery=Join-Path $bundle 'Server-Snapshot.ps1'
 # Valid hashes do not guarantee successful startup: an unusable PFX must roll back BOTH live trees.
@@ -82,7 +85,7 @@ try {
     [IO.File]::WriteAllText($manifest,($bad | ConvertTo-Json -Depth 6))
     Rejected { & $recovery -Action RollbackUpgrade -BackupDirectory $bundle -InstallDirectory $install }
     if ((Get-FileHash (Join-Path $install 'SPBackup.Server.dll')).Hash -ne $newDll) { throw 'Failed rollback left the wrong program installed.' }
-    Assert-Preserved 6
+    Assert-Preserved $candidateSchema
 } finally { [IO.File]::WriteAllBytes($pfx,$pfxBytes);[IO.File]::WriteAllBytes($manifest,$manifestBytes) }
 $result=& $recovery -Action RollbackUpgrade -BackupDirectory $bundle -InstallDirectory $install
 if (!$result.Success -or !(Test-Path $result.PreviousProgram) -or !(Test-Path $result.PreviousData) -or (Get-FileHash (Join-Path $install 'SPBackup.Server.dll')).Hash -ne $oldDll) { throw 'Full upgrade rollback did not restore and retain both trees.' }

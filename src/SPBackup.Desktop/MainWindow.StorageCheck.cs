@@ -96,6 +96,8 @@ public partial class MainWindow
                 var checker = new StorageReadinessChecker(backupStorage, Path.Combine(DesktopPaths.DataDirectory, "work"));
                 report = await Task.Run(() => checker.CheckAsync(job, cancellation.Token));
             }
+            if (!report.Cancelled && report.Destinations.Count == job.StorageJobs.Count && report.ExecutionIdentity is not null)
+                lastStorageAccessChecks[job.Id] = (LocalStorageCheckRequest.Fingerprint(job), throughAgent, report);
             var passed = report.Destinations.Count(result => result.Succeeded);
             var all = report.TemporaryError is null && report.Destinations.Count == job.StorageJobs.Count
                 && passed == job.StorageJobs.Count && !report.Cancelled;

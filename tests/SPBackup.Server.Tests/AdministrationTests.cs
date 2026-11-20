@@ -98,7 +98,7 @@ public sealed class AdministrationTests(ServerFixture fixture) : IClassFixture<S
             var next = ServerTokens.Create();
             await Assert.ThrowsAsync<PostgresException>(() => fixture.Store.ChangePasswordAsync(user.Id, user.SecurityStamp, fixture.Password, next, next));
             Assert.NotNull(await fixture.Store.LoginAsync("administrator", fixture.Password, default));
-            Assert.True(await fixture.Store.ValidateSessionAsync(user.Id, user.SecurityStamp, default));
+            Assert.True(await fixture.Store.ValidateSessionAsync(user.Id, user.SecurityStamp, user.Role, default));
         }
         finally { await fixture.ExecuteAsync("DROP TRIGGER refuse_password_audit ON server_audit; DROP FUNCTION refuse_password_audit()"); }
     }
@@ -154,6 +154,6 @@ public sealed class PasswordChangeConcurrencyTests(ServerFixture fixture) : ICla
             fixture.Store.ChangePasswordAsync(user.Id, user.SecurityStamp, fixture.Password, second, second));
         Assert.Single(result, item => item == PasswordChangeResult.Changed); Assert.Single(result, item => item == PasswordChangeResult.StaleSession);
         Assert.Equal(1, (await fixture.Store.AuditPageAsync(0)).Entries.Count(e => e.Event == "AdministratorPasswordChanged"));
-        Assert.False(await fixture.Store.ValidateSessionAsync(user.Id, user.SecurityStamp, default));
+        Assert.False(await fixture.Store.ValidateSessionAsync(user.Id, user.SecurityStamp, user.Role, default));
     }
 }

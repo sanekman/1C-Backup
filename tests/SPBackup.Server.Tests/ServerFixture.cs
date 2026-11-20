@@ -112,13 +112,13 @@ public sealed class ServerFixture : IAsyncLifetime
         }
     };
     public HttpClient Client() => new(Handler()) { BaseAddress = Address };
-    public async Task SignInAsync(HttpClient client, string basePath = "", string? password = null)
+    public async Task SignInAsync(HttpClient client, string basePath = "", string? password = null, string name = "administrator")
     {
         using var page = await client.GetAsync(basePath + "login"); page.EnsureSuccessStatusCode();
         var html = await page.Content.ReadAsStringAsync();
         var token = AntiToken(html);
         using var response = await client.PostAsync(basePath + "session/login", new FormUrlEncodedContent(new Dictionary<string, string>
-            { ["__RequestVerificationToken"] = token, ["name"] = "administrator", ["password"] = password ?? Password }));
+            { ["__RequestVerificationToken"] = token, ["name"] = name, ["password"] = password ?? Password }));
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.DoesNotContain("failed", response.Headers.Location!.OriginalString);
     }
@@ -147,6 +147,8 @@ public sealed class ServerFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
     public Task RemoveFolderSchemaForMigrationTestAsync() => ExecuteAsync("""
+        DROP TABLE server_operator_grants;
+        ALTER TABLE server_users DROP COLUMN role, DROP COLUMN enabled;
         DROP TABLE server_remote_runs;
         ALTER TABLE server_invitations DROP COLUMN agent_display_name, DROP COLUMN folder_id, DROP COLUMN organization_configured;
         ALTER TABLE server_agents DROP COLUMN computer_name, DROP COLUMN folder_id;

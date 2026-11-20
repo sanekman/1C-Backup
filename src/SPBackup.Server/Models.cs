@@ -4,7 +4,10 @@ using Microsoft.AspNetCore.WebUtilities;
 
 namespace SPBackup.Server;
 
-public sealed record ServerUser(Guid Id, string Name, string PasswordHash, Guid SecurityStamp);
+public sealed record ServerUser(Guid Id, string Name, string PasswordHash, Guid SecurityStamp)
+{
+    public string Role { get; init; } = ServerAuthentication.Administrator;
+}
 public sealed record AgentRecord(Guid AgentId, string Name, DateTimeOffset RegisteredUtc, bool Revoked,
     DateTimeOffset? ReceivedUtc, DateTimeOffset? SentUtc, string? AgentVersion, bool BackupExecutionAvailable,
     long? ReportedRevision, long DesiredRevision)

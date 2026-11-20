@@ -671,6 +671,7 @@
         <ComboBox x:Name="ThemePicker" SelectedValuePath="Tag" SelectionChanged="Theme_Changed" Margin="0,8,0,20" MaxWidth="340" HorizontalAlignment="Left" MinWidth="220" AutomationProperties.Name="Тема оформления">
          <ComboBoxItem Content="Как в Windows" Tag="System" /><ComboBoxItem Content="Светлая" Tag="Light" /><ComboBoxItem Content="Тёмная" Tag="Dark" />
         </ComboBox>
+        <CheckBox x:Name="ClassicRestoreView" Content="Прежний вид восстановления файлов" Click="ClassicRestoreView_Click" />
        </StackPanel>
        <StackPanel x:Name="BackgroundSettingsSection" Visibility="Collapsed">
         <TextBlock x:Name="ServiceStatus" FontSize="16" FontWeight="SemiBold" Text="Состояние проверяется…" TextWrapping="Wrap" Margin="0,4,0,8" />

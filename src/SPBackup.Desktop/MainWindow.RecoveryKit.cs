@@ -9,6 +9,36 @@ namespace SPBackup.Desktop;
 
 public partial class MainWindow
 {
+    private const string RestoreViewPreference = "desktop-restore-view.txt";
+
+    private static bool ReadClassicRestoreView(string directory)
+    {
+        try { return File.ReadAllText(Path.Combine(directory, RestoreViewPreference)) == "classic"; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    private void ClassicRestoreView_Click(object sender, RoutedEventArgs e)
+    {
+        var path = Path.Combine(DesktopPaths.DataDirectory, RestoreViewPreference);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, ClassicRestoreView.IsChecked == true ? "classic" : "current");
+            File.Move(temporary, path, overwrite: true);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            ClassicRestoreView.IsChecked = ReadClassicRestoreView(DesktopPaths.DataDirectory);
+            Status.Text = "Не удалось сохранить вид восстановления.";
+        }
+        finally
+        {
+            try { File.Delete(temporary); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }
+        UpdateRunControls();
+    }
+
     private void RecoveryKits_Click(object sender, RoutedEventArgs e)
     {
         if (!RecoveryKitsButton.IsEnabled) return;

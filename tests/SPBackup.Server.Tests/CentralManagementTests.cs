@@ -209,7 +209,12 @@ public sealed class CentralManagementTests(ServerFixture fixture) : IClassFixtur
     public async Task SchemaSixFailureRollsBackAndUpgradePreservesEnrollmentAndHistory()
     {
         var agent = await fixture.EnrollAsync();
-        await fixture.ExecuteAsync("DROP TABLE server_remote_runs; DELETE FROM server_schema WHERE version=6; CREATE FUNCTION fail_six() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.version=6 THEN RAISE EXCEPTION 'fixture'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_six BEFORE INSERT ON server_schema FOR EACH ROW EXECUTE FUNCTION fail_six()");
+        await fixture.ExecuteAsync("""
+            DROP TABLE server_operator_grants; ALTER TABLE server_users DROP COLUMN role, DROP COLUMN enabled;
+            DROP TABLE server_remote_runs; DELETE FROM server_schema WHERE version>=6;
+            CREATE FUNCTION fail_six() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.version=6 THEN RAISE EXCEPTION 'fixture'; END IF; RETURN NEW; END $$;
+            CREATE TRIGGER fail_six BEFORE INSERT ON server_schema FOR EACH ROW EXECUTE FUNCTION fail_six();
+            """);
         try
         {
             await Assert.ThrowsAsync<Npgsql.PostgresException>(() => fixture.Store.MigrateAsync());

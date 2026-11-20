@@ -74,7 +74,8 @@ public partial class MainWindow
         }
         if (!(files ? RestoreFilesButton.IsEnabled : ExtractOneCButton.IsEnabled)) return;
         var dialog = new RestoreCopyWindow(row, files, alternate?.Count ?? chain.Count,
-            alternate?.Select(record => record.StorageIdentity).Distinct().Count() ?? 0) { Owner = this };
+            alternate?.Select(record => record.StorageIdentity).Distinct().Count() ?? 0,
+            showFileSelection: ClassicRestoreView.IsChecked != true) { Owner = this };
         if (job is not null)
         {
             var restorer = new FileBackupRestorer(backupStorage, EffectiveCatalog, EffectiveWorkDirectory, new WindowsArchivePasswordStore());

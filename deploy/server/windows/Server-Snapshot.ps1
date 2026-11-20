@@ -1,14 +1,16 @@
 ﻿# Same-computer, same-build cold snapshots for the standard Windows installation.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('Backup','Verify','Restore','PrepareUpgrade','VerifyUpgrade','RollbackUpgrade')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('Backup','Verify','Restore','PrepareUpgrade','VerifyUpgrade','RollbackUpgrade','RestoreOnNewComputer')][string]$Action,
     [Parameter(Mandatory=$true)][string]$BackupDirectory,
     [string]$DataDirectory = (Join-Path $env:ProgramData 'OneCBackupServer'),
-    [string]$InstallDirectory = (Split-Path $PSScriptRoot -Parent)
+    [string]$InstallDirectory = (Split-Path $PSScriptRoot -Parent),
+    [switch]$ConfirmNewComputer
 )
 $ErrorActionPreference='Stop'
 if ($PSVersionTable.PSEdition -eq 'Desktop') { $env:PSModulePath=Join-Path $PSHOME 'Modules' }
 Set-StrictMode -Version Latest
+if (($Action -eq 'RestoreOnNewComputer') -ne [bool]$ConfirmNewComputer) { throw 'Для восстановления на новой машине явно укажите -ConfirmNewComputer.' }
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 if (!(New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Запустите обслуживание сервера от имени администратора.' }
 $DataDirectory=[IO.Path]::GetFullPath($DataDirectory).TrimEnd('\')
@@ -126,7 +128,7 @@ function Resume-Services($State) {
     if ($State.Database) { Start-Service $database; (Get-Service $database).WaitForStatus('Running',[TimeSpan]::FromSeconds(60)) }
     if ($State.App) { Start-Service $server; (Get-Service $server).WaitForStatus('Running',[TimeSpan]::FromSeconds(60)) }
 }
-function Validate-RunningCluster {
+function Validate-RunningCluster([bool]$RequireFresh=$false) {
     if ((Get-Service $database).Status -ne 'Running') { Start-Service $database; (Get-Service $database).WaitForStatus('Running',[TimeSpan]::FromSeconds(60)) }
     $oldPassword=$env:PGPASSWORD; $oldConnectTimeout=$env:PGCONNECT_TIMEOUT
     $env:PGCONNECT_TIMEOUT='5'
@@ -142,6 +144,13 @@ function Validate-RunningCluster {
             $path=[IO.Path]::GetFullPath(([string]$value).Replace('/','\')).TrimEnd('\')
             if (!(Is-Within $path (Join-Path $DataDirectory 'postgresql'))) { throw 'Данные или файлы доступа PostgreSQL вынесены за пределы штатной папки. Нужна отдельная процедура.' }
             if ($setting -eq 'data_directory' -and $path -ine (Join-Path $DataDirectory 'postgresql')) { throw 'Работающая PostgreSQL использует другую папку данных. Копирование остановлено.' }
+        }
+        if ($RequireFresh) {
+            $freshQuery = "SELECT NOT EXISTS(SELECT 1 FROM server_agents) AND NOT EXISTS(SELECT 1 FROM server_invitations) AND (SELECT count(*) FROM server_users)=1;"
+            $fresh=& (Join-Path $InstallDirectory 'postgresqlinpsql.exe') '-X' '-w' '-h' '127.0.0.1' '-p' '15433' '-U' 'onecbackup' '-d' 'postgres' '-At' '-c' $freshQuery 2>$null
+            if ($LASTEXITCODE -ne 0 -or @($fresh).Count -ne 1 -or $fresh -cne 't') {
+                throw 'Новая установка уже содержит агентов, приглашения или пользователей. Рабочие данные не заменялись.'
+            }
         }
     } finally { $env:PGPASSWORD=$oldPassword; $env:PGCONNECT_TIMEOUT=$oldConnectTimeout }
 }
@@ -190,12 +199,15 @@ function Same-Records($Expected,$Actual) {
     return $map.Count -eq 0
 }
 function Directories([string]$Root) { foreach ($item in @(Tree $Root)) { if ($item.PSIsContainer) { $item.FullName.Substring($Root.Length+1) } } }
-function Verify-Snapshot([bool]$Upgrade=$false) {
+function Verify-Snapshot([bool]$Upgrade=$false,[bool]$NewComputer=$false) {
     Local-Ntfs $BackupDirectory; Private-Backup $BackupDirectory
     $manifest=Join-Path $BackupDirectory $manifestName
     if (!(Test-Path -LiteralPath $manifest -PathType Leaf) -or (Get-Item -LiteralPath $manifest).Length -gt 16777216) { throw 'Выберите готовую копию с файлом snapshot.json размером не более 16 МиБ.' }
     $m=Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($m.Format -notin @(1,2) -or $m.Machine -ne (Machine) -or $m.DataDirectory -ine $DataDirectory -or $m.InstallDirectory -ine $InstallDirectory) { throw 'Копия создана на другом компьютере или для других путей установки. Здесь она не применяется.' }
+    if ($m.Format -notin @(1,2) -or $m.DataDirectory -ine $DataDirectory -or $m.InstallDirectory -ine $InstallDirectory) { throw 'Копия создана для других путей установки или имеет неизвестный формат.' }
+    if ($NewComputer) {
+        if ($m.Format -ne 2 -or $m.Machine -eq (Machine)) { throw 'Нужна проверенная копия формата 2 с другого компьютера.' }
+    } elseif ($m.Machine -ne (Machine)) { throw 'Копия создана на другом компьютере. Здесь она не применяется.' }
     if ($Upgrade) {
         if ($m.Format -ne 2 -or !$m.PSObject.Properties['ProgramFiles'] -or !@($m.ProgramFiles).Count) { throw 'Это копия данных, а не полный комплект возврата перед обновлением.' }
         $program=Join-Path $BackupDirectory 'program'
@@ -285,13 +297,18 @@ try {
         if ($complete) { [pscustomobject]@{Action=$Action; Success=$true; Path=$BackupDirectory; Files=$records.Count; CreatedUtc=$m.CreatedUtc; Bytes=$dataBytes} }
     } else {
         $upgrade=$Action -eq 'RollbackUpgrade'
-        $verified=Verify-Snapshot $upgrade
+        $newComputer=$Action -eq 'RestoreOnNewComputer'
+        $verified=Verify-Snapshot $upgrade $newComputer
         $stage=$DataDirectory+'.restore-'+[Guid]::NewGuid().ToString('N'); $previous=$DataDirectory+'.before-restore-'+[Guid]::NewGuid().ToString('N')
         Private-Directory $stage $true; Copy-Tree (Join-Path $BackupDirectory 'data') $stage
         # Validate the completed staged copy before touching live data or stopping services.
         $staged=@(File-Records $stage)
         if (!(Same-Records @($verified.Files) $staged)) { throw 'Подготовленные файлы восстановления не совпали с копией. Рабочие данные не заменялись.' }
         if (@(Compare-Object @($verified.Directories) @(Directories $stage) -CaseSensitive).Count) { throw 'Подготовленные папки восстановления не совпали с копией. Рабочие данные не заменялись.' }
+        if ($newComputer) {
+            $oldKeys=Join-Path $stage 'data\keys'
+            if (Test-Path -LiteralPath $oldKeys) { Remove-Item -LiteralPath $oldKeys -Recurse -Force }
+        }
         $programStage=$InstallDirectory+'.restore-'+[Guid]::NewGuid().ToString('N')
         $previousProgram=$InstallDirectory+'.before-restore-'+[Guid]::NewGuid().ToString('N')
         if ($upgrade) {
@@ -301,6 +318,11 @@ try {
         $hadPrevious=Test-Path -LiteralPath $DataDirectory
         $swapped=$false; $programSwapped=$false; $programMoved=$false
         try {
+            if ($newComputer) {
+                $appService=Get-Service $server
+                if ($appService.Status -ne 'Stopped') { Stop-Service $server -Force; $appService.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(60)) }
+                Validate-RunningCluster $true
+            }
             Stop-Both $false; Check-Stopped
             if ($upgrade) {
                 [IO.Directory]::Move($InstallDirectory,$previousProgram); $programMoved=$true
@@ -324,7 +346,7 @@ try {
             # Inno's uninstall files were restored with the program; keep the displayed version consistent.
             Set-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{ACDE2073-28A8-43F8-9A84-BB0BE3C6831D}_is1' -Name DisplayVersion -Value $verified.DisplayVersion
         }
-        [pscustomobject]@{Action=$Action; Success=$true; Path=$BackupDirectory; PreviousProgram=$(if ($upgrade) { $previousProgram } else { $null }); PreviousData=$(if ($hadPrevious) { $previous } else { $null })}
+        [pscustomobject]@{Action=$Action; Success=$true; Path=$BackupDirectory; PreviousProgram=$(if ($upgrade) { $previousProgram } else { $null }); PreviousData=$(if ($hadPrevious) { $previous } else { $null }); NewSessionsRequired=$newComputer}
     }
 } finally {
     foreach ($mutex in $held) { $mutex.ReleaseMutex() }

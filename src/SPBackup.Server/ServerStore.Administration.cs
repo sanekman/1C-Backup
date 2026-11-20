@@ -18,9 +18,9 @@ public sealed partial class ServerStore
         await using var db = await source.OpenConnectionAsync(token);
         await using var tx = await db.BeginTransactionAsync(token);
         ServerUser? user = null;
-        await using (var select = Command(db, tx, "SELECT id,name,password_hash,security_stamp FROM server_users WHERE id=@id FOR UPDATE", ("id", id)))
+        await using (var select = Command(db, tx, "SELECT id,name,password_hash,security_stamp,role FROM server_users WHERE id=@id AND enabled FOR UPDATE", ("id", id)))
         await using (var reader = await select.ExecuteReaderAsync(token))
-            if (await reader.ReadAsync(token)) user = new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetGuid(3));
+            if (await reader.ReadAsync(token)) user = new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetGuid(3)) { Role = reader.GetString(4) };
         if (user is null || user.SecurityStamp != expectedStamp) return PasswordChangeResult.StaleSession;
         if (passwords.VerifyHashedPassword(user, user.PasswordHash, current) == PasswordVerificationResult.Failed)
             return PasswordChangeResult.IncorrectCurrent;
@@ -28,15 +28,15 @@ public sealed partial class ServerStore
         await using (var update = Command(db, tx, "UPDATE server_users SET password_hash=@hash,security_stamp=@stamp WHERE id=@id",
             ("id", id), ("hash", passwords.HashPassword(user, next)), ("stamp", Guid.NewGuid())))
             await update.ExecuteNonQueryAsync(token);
-        await AuditAsync(db, tx, id, null, "AdministratorPasswordChanged", token);
+        await AuditAsync(db, tx, id, null, user.Role == ServerAuthentication.Administrator ? "AdministratorPasswordChanged" : "OperatorPasswordChanged", token);
         await tx.CommitAsync(token);
         return PasswordChangeResult.Changed;
     }
 
-    public async Task RecordAdministratorLoginAsync(Guid id, CancellationToken token)
+    public async Task RecordPanelLoginAsync(ServerUser user, CancellationToken token)
     {
         await using var db = await source.OpenConnectionAsync(token);
-        await AuditAsync(db, null, id, null, "AdministratorLogin", token);
+        await AuditAsync(db, null, user.Id, null, user.Role == ServerAuthentication.Administrator ? "AdministratorLogin" : "OperatorLogin", token);
     }
 
     public async Task<AuditPage> AuditPageAsync(int page, CancellationToken token = default)

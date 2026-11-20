@@ -9,7 +9,7 @@ namespace SPBackup.Server;
 /// <summary>Parameterized PostgreSQL operations. Invitation consumption, registration and audit commit together.</summary>
 public sealed partial class ServerStore(NpgsqlDataSource source)
 {
-    public const int SchemaVersion = 6;
+    public const int SchemaVersion = 7;
     private readonly PasswordHasher<ServerUser> passwords = new();
     private static NpgsqlCommand Command(NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql,
         params (string Name, object? Value)[] values)
@@ -70,6 +70,13 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
             await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
             await migration.ExecuteNonQueryAsync(token);
         }
+        if (version < 7)
+        {
+            using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("SPBackup.Server.Migrations.007-operators.sql")!;
+            using var reader = new StreamReader(script);
+            await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
+            await migration.ExecuteNonQueryAsync(token);
+        }
         await transaction.CommitAsync(token);
     }
     public async Task<bool> ReadyAsync(CancellationToken token = default)
@@ -101,9 +108,10 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
     public async Task<ServerUser?> FindUserAsync(string name, CancellationToken token)
     {
         await using var connection = await source.OpenConnectionAsync(token);
-        await using var cmd = Command(connection, null, "SELECT id,name,password_hash,security_stamp FROM server_users WHERE name=@name", ("name", name.Trim().ToLowerInvariant()));
+        await using var cmd = Command(connection, null, "SELECT id,name,password_hash,security_stamp,role FROM server_users WHERE name=@name AND enabled", ("name", name.Trim().ToLowerInvariant()));
         await using var reader = await cmd.ExecuteReaderAsync(token);
-        return await reader.ReadAsync(token) ? new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetGuid(3)) : null;
+        return await reader.ReadAsync(token) ? new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetGuid(3))
+            { Role = reader.GetString(4) } : null;
     }
     private readonly ServerUser dummy = new(Guid.Empty, "", new PasswordHasher<ServerUser>().HashPassword(null!, ServerTokens.Create()), Guid.Empty);
     public async Task<ServerUser?> LoginAsync(string name, string password, CancellationToken token)
@@ -111,10 +119,11 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
         var user = await FindUserAsync(name, token); var candidate = user ?? dummy;
         return passwords.VerifyHashedPassword(candidate, candidate.PasswordHash, password) != PasswordVerificationResult.Failed ? user : null;
     }
-    public async Task<bool> ValidateSessionAsync(Guid id, Guid stamp, CancellationToken token)
+    public async Task<bool> ValidateSessionAsync(Guid id, Guid stamp, string? role, CancellationToken token)
     {
         await using var connection = await source.OpenConnectionAsync(token);
-        await using var cmd = Command(connection, null, "SELECT EXISTS(SELECT 1 FROM server_users WHERE id=@id AND security_stamp=@stamp)", ("id", id), ("stamp", stamp));
+        await using var cmd = Command(connection, null, "SELECT EXISTS(SELECT 1 FROM server_users WHERE id=@id AND security_stamp=@stamp AND enabled AND role=@role)",
+            ("id", id), ("stamp", stamp), ("role", role));
         return (bool)(await cmd.ExecuteScalarAsync(token))!;
     }
     public async Task<Invitation> InviteAsync(Guid userId, InviteRequest request, CancellationToken token)
