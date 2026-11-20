@@ -24,7 +24,7 @@ void Require(bool condition, string message) { if (!condition) throw new Invalid
 SqlConnection Owner(string name = "master") => new(new SqlConnectionStringBuilder
 {
     DataSource = windowsServer, InitialCatalog = name, IntegratedSecurity = true,
-    Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = false,
+    Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = true,
     Pooling = false, ConnectTimeout = 15
 }.ConnectionString);
 async Task<object?> Execute(string sql, string name = "master")
@@ -51,7 +51,30 @@ try
     // This is an owned functional stand, not a least-privilege deployment claim.
     await Execute($"ALTER SERVER ROLE dbcreator ADD MEMBER [{login}];");
     await Execute($"CREATE USER [{login}] FOR LOGIN [{login}]; ALTER ROLE db_backupoperator ADD MEMBER [{login}];", database);
+    await Execute($"CREATE USER [{login}] FOR LOGIN [{login}]; GRANT SELECT ON dbo.backupset TO [{login}]; GRANT SELECT ON dbo.backupmediafamily TO [{login}];", "msdb");
     credentials.Save(key, login, password); credentials.Save(wrongKey, login, "Deliberately wrong isolated SQL test password");
+    var monitor = new ExternalBackupMonitor { Name = "Owned SQL history", Kind = ExternalBackupSourceKind.SqlServerHistory,
+        SqlServer = server, SqlAuthentication = SqlServerAuthentication.SqlServer, SqlCredentialKey = key,
+        DatabaseName = database, TimeZoneId = TimeZoneInfo.Local.Id };
+    var source = new SqlServerBackupHistorySource(credentials: credentials);
+    var tlsStore = new ExternalBackupMonitorStore(Path.Combine(root, "monitor-tls.json"));
+    try
+    {
+        await source.ReadAsync(monitor);
+        throw new InvalidDataException("The client accepted the matching but untrusted certificate with default settings.");
+    }
+    catch (IOException error) when (ExternalBackupPollErrors.Classify(error) == "Certificate") { }
+    await tlsStore.SaveAsync([monitor with { TrustServerCertificate = true, AllowUnencryptedConnection = true }]);
+    var untrusted = (await tlsStore.LoadAsync()).Single();
+    Require((await source.ReadAsync(untrusted)).Count == 0,
+        "Reading msdb failed with both saved options on a server using an untrusted certificate.");
+    Require((await source.ReadAsync(untrusted with { AllowUnencryptedConnection = false })).Count == 0,
+        "Reading msdb failed with required encryption and an explicit exception for the untrusted certificate.");
+    checks.Add("msdb-matching-untrusted-certificate-rejected-by-default-and-accepted-with-saved-explicit-exception");
+    await File.WriteAllTextAsync(Path.Combine(root, "request-trusted-certificate"), "");
+    using var trustChangeDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+    while (!File.Exists(Path.Combine(root, "trusted-certificate-ready")))
+        await Task.Delay(150, trustChangeDeadline.Token);
     var stage = Path.Combine(root, "stage"); Directory.CreateDirectory(stage);
     var job = new BackupJob { Name = "Full SQL engine fixture", Kind = DatabaseKind.SqlServer, Source = database,
         Enabled = false, ScheduleKind = ScheduleKind.Manual, KeepLast = 10,
@@ -96,11 +119,6 @@ try
     await Execute("INSERT dbo.Fixture VALUES(3,N'external history');", database);
     await Execute($"BACKUP DATABASE [{database}] TO DISK={Literal(Path.Combine(external, "diff.bak"))} WITH DIFFERENTIAL,CHECKSUM;");
     await Execute($"BACKUP LOG [{database}] TO DISK={Literal(Path.Combine(external, "log.trn"))} WITH CHECKSUM;");
-    await Execute($"CREATE USER [{login}] FOR LOGIN [{login}]; GRANT SELECT ON dbo.backupset TO [{login}]; GRANT SELECT ON dbo.backupmediafamily TO [{login}];", "msdb");
-    var monitor = new ExternalBackupMonitor { Name = "Owned SQL history", Kind = ExternalBackupSourceKind.SqlServerHistory,
-        SqlServer = server, SqlAuthentication = SqlServerAuthentication.SqlServer, SqlCredentialKey = key,
-        DatabaseName = database, TimeZoneId = TimeZoneInfo.Local.Id };
-    var source = new SqlServerBackupHistorySource(credentials: credentials);
     var observed = await source.ReadAsync(monitor);
     Require(new[] { "D", "I", "L" }.All(type => observed.Any(item => item.BackupType == type && item.SizeBytes > 0 && item.Outcome == ExternalBackupOutcome.Completed)),
         "Real full/differential/log history was not observed.");
@@ -112,7 +130,6 @@ try
     }
     catch (IOException error) when (ExternalBackupPollErrors.Classify(error) == "Certificate"
         || error.Message.Contains("0x80090322", StringComparison.Ordinal)) { }
-    var tlsStore = new ExternalBackupMonitorStore(Path.Combine(root, "monitor-tls.json"));
     await tlsStore.SaveAsync([mismatchMonitor with { TrustServerCertificate = true }]);
     var trusted = (await tlsStore.LoadAsync()).Single();
     Require((await source.ReadAsync(trusted)).Count == observed.Count,
@@ -167,23 +184,6 @@ try
     Require(beforeCopies == JsonSerializer.Serialize(await catalog.ReadAsync()), "Monitoring changed the agent backup catalog.");
     checks.Add("real-msdb-full-differential-log-empty-source-and-permission-error-without-owning-external-copies");
     checks.Add("actual-history-type-dates-freshness-new-database-and-failed-poll-precedence");
-    await File.WriteAllTextAsync(Path.Combine(root, "request-untrusted-certificate"), "");
-    using var trustChangeDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-    while (!File.Exists(Path.Combine(root, "untrusted-certificate-ready")))
-        await Task.Delay(150, trustChangeDeadline.Token);
-    try
-    {
-        await source.ReadAsync(monitor);
-        throw new InvalidDataException("The client accepted the matching but untrusted certificate with default settings.");
-    }
-    catch (IOException error) when (ExternalBackupPollErrors.Classify(error) == "Certificate") { }
-    await tlsStore.SaveAsync([monitor with { TrustServerCertificate = true, AllowUnencryptedConnection = true }]);
-    var untrusted = (await tlsStore.LoadAsync()).Single();
-    Require((await source.ReadAsync(untrusted)).Count == observed.Count,
-        "Reading msdb failed with both saved options on a server using an untrusted certificate.");
-    Require((await source.ReadAsync(untrusted with { AllowUnencryptedConnection = false })).Count == observed.Count,
-        "Reading msdb failed with required encryption and an explicit exception for the untrusted certificate.");
-    checks.Add("msdb-matching-untrusted-certificate-rejected-by-default-and-accepted-with-saved-explicit-exception");
 }
 catch (Exception error) { failure = (error.GetType().Name + ": " + error.Message).Replace(password, "[redacted]"); }
 finally

@@ -113,6 +113,7 @@ internal static partial class DesktopSmoke
                 || Control<CheckBox>("SqlAllowUnencrypted").IsChecked == true)
                 throw new InvalidOperationException("Новое наблюдение унаследовало настройки прежнего задания.");
             editor.Close();
+            await VerifyExistingAllDatabaseObservationAsync(owner, settings, store, original, saved);
             await owner.SmokeRefreshObservationTasksAsync();
             var grid = (DataGrid)owner.FindName("Jobs");
             if (!grid.Items.OfType<ExternalBackupTask>().Any(task => task.Id == saved.Id))
@@ -124,5 +125,41 @@ internal static partial class DesktopSmoke
             await store.SaveAsync(original);
             await owner.SmokeRefreshObservationTasksAsync();
         }
+    }
+
+    private static async Task VerifyExistingAllDatabaseObservationAsync(MainWindow owner, AgentSettings settings,
+        ExternalBackupMonitorStore store, IReadOnlyList<ExternalBackupMonitor> original, ExternalBackupMonitor monitor)
+    {
+        // Legacy jobs may cover all databases and have an existing service credential.
+        // Editing TLS must not fetch the already saved credential from the desktop Vault.
+        monitor = monitor with
+        {
+            DatabaseName = "", MaximumBackupAgeHours = null, SqlAuthentication = SqlServerAuthentication.SqlServer, SqlCredentialKey = Guid.NewGuid().ToString("N"),
+            TrustServerCertificate = false, AllowUnencryptedConnection = false
+        };
+        await store.SaveAsync(original.Append(monitor).ToArray());
+        var editor = new ExternalMonitoringWindow(settings, monitor.Id) { Owner = owner };
+        editor.Show();
+        try
+        {
+            await WaitUntil(() => editor.SmokeReady, "Сохранённое наблюдение всех баз не открылось.");
+            await VerifySqlCertificateWarningAsync(editor);
+            ((Button)editor.FindName("SaveMonitorButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitUntil(() => editor.SmokeReady, "Параметры сертификата прежнего задания не сохранились.");
+            var saved = (await store.LoadAsync()).Single(value => value.Id == monitor.Id);
+            if (saved != (monitor with { TrustServerCertificate = true }))
+                throw new InvalidOperationException("Редактор не сохранил параметры сертификата прежнего наблюдения всех баз.");
+        }
+        finally { editor.Close(); }
+
+        var reopened = new ExternalMonitoringWindow(settings, monitor.Id) { Owner = owner };
+        reopened.Show();
+        try
+        {
+            await WaitUntil(() => reopened.SmokeReady, "Прежнее задание не открылось после сохранения.");
+            if (((CheckBox)reopened.FindName("SqlTrustServerCertificate")).IsChecked != true)
+                throw new InvalidOperationException("Прежнее задание не восстановило сохранённый выбор сертификата.");
+        }
+        finally { reopened.Close(); }
     }
 }

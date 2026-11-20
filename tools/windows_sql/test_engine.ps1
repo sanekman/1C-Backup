@@ -124,7 +124,6 @@ public static class OwnedSqlBatchRight {
         -SecurityDescriptor $keySecurity -Type SSLServerAuthentication -NotAfter (Get-Date).AddDays(2)
     if (-not $certificate.HasPrivateKey) { throw 'The owned SQL certificate has no private key.' }
     $public = Join-Path $private 'server.cer'; Export-Certificate -Cert $certificate -FilePath $public | Out-Null
-    Import-Certificate -FilePath $public -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
     Set-ItemProperty $network Certificate $certificate.Thumbprint.ToLowerInvariant()
     Set-ItemProperty $network ForceEncryption 1
     $listener = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback),0
@@ -219,12 +218,12 @@ exit $code
     $taskStartedAt = Get-Date
     Start-ScheduledTask -TaskName $taskName
     $taskDeadline = (Get-Date).AddSeconds(300)
-    $untrustedRequested = Join-Path $workspace 'request-untrusted-certificate'
-    $untrustedReady = Join-Path $workspace 'untrusted-certificate-ready'
+    $trustRequested = Join-Path $workspace 'request-trusted-certificate'
+    $trustedReady = Join-Path $workspace 'trusted-certificate-ready'
     while (-not (Test-Path -LiteralPath $exitPath)) {
-        if ((Test-Path -LiteralPath $untrustedRequested) -and -not (Test-Path -LiteralPath $untrustedReady)) {
-            Remove-Item -LiteralPath ("Cert:\LocalMachine\Root\" + $certificate.Thumbprint)
-            New-Item -ItemType File -Path $untrustedReady | Out-Null
+        if ((Test-Path -LiteralPath $trustRequested) -and -not (Test-Path -LiteralPath $trustedReady)) {
+            Import-Certificate -FilePath $public -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
+            New-Item -ItemType File -Path $trustedReady | Out-Null
         }
         $task = Get-ScheduledTask -TaskName $taskName
         $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName

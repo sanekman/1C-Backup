@@ -188,6 +188,7 @@ public partial class ExternalMonitoringWindow : Window
         UpdateMonitorControls();
         try
         {
+            var previous = monitors.FirstOrDefault(value => value.Id == editingId);
             var monitor = new ExternalBackupMonitor
             {
                 Id = editingId ?? Guid.NewGuid(), Name = MonitorName.Text.Trim(),
@@ -197,23 +198,28 @@ public partial class ExternalMonitoringWindow : Window
                 TrustServerCertificate = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory && SqlTrustServerCertificate.IsChecked == true,
                 AllowUnencryptedConnection = SourceKind.SelectedValue is ExternalBackupSourceKind.SqlServerHistory && SqlAllowUnencrypted.IsChecked == true,
                 SqlServer = SqlServer.Text.Trim(), DatabaseName = Database.Text.Trim(),
-                TimeZoneId = monitors.FirstOrDefault(value => value.Id == editingId)?.TimeZoneId ?? TimeZoneInfo.Local.Id,
+                TimeZoneId = previous?.TimeZoneId ?? TimeZoneInfo.Local.Id,
                 LookbackDays = int.TryParse(Days.Text, out var days) ? days : 0, ReportDirectory = ReportDirectory.Text.Trim(),
                 MaximumBackupAgeHours = FreshnessEnabled.IsChecked == true ? int.TryParse(FreshnessHours.Text, out var hours) ? hours : 0 : null,
                 Enabled = MonitorEnabled.IsChecked == true, PollIntervalSeconds = int.TryParse(PollInterval.Text, out var interval) ? interval : 0
             };
             monitor.Validate();
-            if (taskMode && string.IsNullOrWhiteSpace(monitor.DatabaseName))
+            var keepingAllDatabases = previous is not null && previous.Kind == monitor.Kind
+                && string.IsNullOrWhiteSpace(previous.DatabaseName);
+            if (taskMode && string.IsNullOrWhiteSpace(monitor.DatabaseName) && !keepingAllDatabases)
                 throw new InvalidDataException("Укажите конкретную базу, за копиями которой нужно наблюдать.");
             var updated = monitors.Where(m => m.Id != monitor.Id).Append(monitor).ToList();
-            if (monitor.SqlAuthentication == SqlServerAuthentication.SqlServer && monitor.SqlCredentialKey is { } key)
+            if (monitor.SqlAuthentication == SqlServerAuthentication.SqlServer && monitor.SqlCredentialKey is { } key
+                && key != previous?.SqlCredentialKey)
                 await new WindowsSqlServerCredentialStore().ExportForServiceAsync(key, lifetime.Token);
             await store.SaveAsync(updated, lifetime.Token);
             monitors = updated; BindMonitorSources(monitor.Id);
             UpdateReportSourceChoices();
             if (taskMode) SelectTaskReports(monitor.Id);
             ApplyReportFilter(); SourceSettings.IsExpanded = false;
-            Status.Text = "Задание наблюдения сохранено и появится в общем списке заданий. Проверка использует сохранённые настройки.";
+            Status.Text = monitor.Kind == ExternalBackupSourceKind.SqlServerHistory
+                ? "Задание сохранено. Проверка сертификата MS SQL " + (monitor.TrustServerCertificate ? "выключена." : "включена.")
+                : "Задание наблюдения сохранено. Проверка использует сохранённые настройки.";
         }
         catch (Exception ex) { Status.Text = "Не удалось сохранить: " + ex.Message; }
         finally { busy = false; Editor.IsEnabled = !lifetime.IsCancellationRequested; UpdateMonitorControls(); }
