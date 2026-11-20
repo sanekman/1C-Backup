@@ -35,7 +35,7 @@ internal static class SqlServerErrorHints
         if (native.Contains(unchecked((int)0x80090322)))
             return "Не подтверждено имя сервера MS SQL. Попросите администратора проверить имя подключения, сертификат и настройки аутентификации сервера. " + certificatePolicy + " Код Windows: 0x80090322.";
         if (errors.Any(item => item is AuthenticationException))
-            return "Не удалось подтвердить подлинность подключения к MS SQL. Попросите администратора проверить имя сервера и способ входа. " + certificatePolicy;
+            return "Не удалось подтвердить подлинность подключения к MS SQL. Попросите администратора проверить имя сервера, способ входа и настройки TLS. " + certificatePolicy;
         foreach (var code in new[] { 4060, 18487, 18488, 18456, 18452, 18470, 229, -2, 258, 26, 40, 53, 64, 233, 10060, 10061, 10054, 11001 })
         {
             if (!numbers.Contains(code)) continue;

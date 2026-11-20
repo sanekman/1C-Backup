@@ -25,7 +25,13 @@ public enum DiagnosticEvent
     NotificationSent, NotificationFailed, SnapshotCacheRecovered, SnapshotRecoveryFailed, StorageRetrying, StorageTemporaryCleanupFailed,
     ExistingWindowSignalled
 }
-public sealed record DiagnosticValues(long? Count = null, long? Bytes = null, long? Milliseconds = null, int? Code = null);
+public sealed record DiagnosticValues(long? Count = null, long? Bytes = null, long? Milliseconds = null, int? Code = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? SqlTrustServerCertificate { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? SqlAllowUnencryptedConnection { get; init; }
+}
 
 // No Message, ToString(), Data, source paths or raw process output: those can contain passwords and connection strings.
 public sealed record DiagnosticException(string Type, int HResult, int? NativeCode, IReadOnlyList<string> Frames,

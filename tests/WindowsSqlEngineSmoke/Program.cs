@@ -167,6 +167,23 @@ try
     Require(beforeCopies == JsonSerializer.Serialize(await catalog.ReadAsync()), "Monitoring changed the agent backup catalog.");
     checks.Add("real-msdb-full-differential-log-empty-source-and-permission-error-without-owning-external-copies");
     checks.Add("actual-history-type-dates-freshness-new-database-and-failed-poll-precedence");
+    await File.WriteAllTextAsync(Path.Combine(root, "request-untrusted-certificate"), "");
+    using var trustChangeDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+    while (!File.Exists(Path.Combine(root, "untrusted-certificate-ready")))
+        await Task.Delay(150, trustChangeDeadline.Token);
+    try
+    {
+        await source.ReadAsync(monitor);
+        throw new InvalidDataException("The client accepted the matching but untrusted certificate with default settings.");
+    }
+    catch (IOException error) when (ExternalBackupPollErrors.Classify(error) == "Certificate") { }
+    await tlsStore.SaveAsync([monitor with { TrustServerCertificate = true, AllowUnencryptedConnection = true }]);
+    var untrusted = (await tlsStore.LoadAsync()).Single();
+    Require((await source.ReadAsync(untrusted)).Count == observed.Count,
+        "Reading msdb failed with both saved options on a server using an untrusted certificate.");
+    Require((await source.ReadAsync(untrusted with { AllowUnencryptedConnection = false })).Count == observed.Count,
+        "Reading msdb failed with required encryption and an explicit exception for the untrusted certificate.");
+    checks.Add("msdb-matching-untrusted-certificate-rejected-by-default-and-accepted-with-saved-explicit-exception");
 }
 catch (Exception error) { failure = (error.GetType().Name + ": " + error.Message).Replace(password, "[redacted]"); }
 finally

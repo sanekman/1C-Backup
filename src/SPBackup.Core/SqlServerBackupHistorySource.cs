@@ -24,7 +24,15 @@ public sealed class SqlServerBackupHistorySource(Func<ExternalBackupMonitor, DbC
     {
         try { return await ReadCoreAsync(monitor, cancellationToken); }
         catch (Exception ex) when (SqlServerErrorHints.Describe(ex, monitor.TrustServerCertificate) is { } hint)
-        { throw new IOException(hint, ex); }
+        {
+            DiagnosticLog.Current.Write(DiagnosticEvent.MonitoringFailed, DiagnosticLevel.Warning, ex,
+                jobId: monitor.Id, sourceKind: DatabaseKind.SqlServer, values: new()
+                {
+                    SqlTrustServerCertificate = monitor.TrustServerCertificate,
+                    SqlAllowUnencryptedConnection = monitor.AllowUnencryptedConnection
+                });
+            throw new IOException(hint, ex);
+        }
     }
 
     private async Task<IReadOnlyList<ExternalBackupObservation>> ReadCoreAsync(ExternalBackupMonitor monitor,

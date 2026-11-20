@@ -219,7 +219,13 @@ exit $code
     $taskStartedAt = Get-Date
     Start-ScheduledTask -TaskName $taskName
     $taskDeadline = (Get-Date).AddSeconds(300)
+    $untrustedRequested = Join-Path $workspace 'request-untrusted-certificate'
+    $untrustedReady = Join-Path $workspace 'untrusted-certificate-ready'
     while (-not (Test-Path -LiteralPath $exitPath)) {
+        if ((Test-Path -LiteralPath $untrustedRequested) -and -not (Test-Path -LiteralPath $untrustedReady)) {
+            Remove-Item -LiteralPath ("Cert:\LocalMachine\Root\" + $certificate.Thumbprint)
+            New-Item -ItemType File -Path $untrustedReady | Out-Null
+        }
         $task = Get-ScheduledTask -TaskName $taskName
         $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName
         $taskDiagnostics = @{ state = [string]$task.State; result = [long]$taskInfo.LastTaskResult;
