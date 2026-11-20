@@ -76,9 +76,19 @@ public static class MonitoredPollErrors
     };
 }
 
+public sealed record MonitoredReportRejections(int Invalid, int Conflict, int Unknown)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public long Total => (long)Invalid + Conflict + Unknown;
+}
+
 public sealed record MonitoringSnapshot(DateTimeOffset SentUtc, string AgentVersion, IReadOnlyList<MonitoredJob> Jobs,
     MonitoredProgress? Progress, int PendingRuns, IReadOnlyList<MonitoredSource>? Sources = null, int CollectionWarnings = 0)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public MonitoredReportRejections? ReportRejections { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public long ReadyRuns => PendingRuns - (ReportRejections?.Total ?? 0);
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? ExecutionMode { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -97,6 +107,7 @@ public static class MonitoringValidation
         && s.ExecutionMode is null or "Standalone" or "Managed" && s.ConfigurationRevision is null or > 0
         && (s.ExecutionMode != "Standalone" || s.ConfigurationRevision is null)
         && Text(s.AgentVersion,128) && s.PendingRuns >= 0 && s.CollectionWarnings >= 0 && s.Jobs is { Count: <= 1000 }
+        && (s.ReportRejections is null || s.ReportRejections is { Invalid: >= 0, Conflict: >= 0, Unknown: >= 0 } && s.ReadyRuns >= 0)
         && (s.ConfigurationCapabilities is null || AgentCapabilities.Valid(s.ConfigurationCapabilities))
         && s.Jobs.All(j => j is not null && (j.BackupScope is null || j.BackupScope.Length == 64 && j.BackupScope.All(Uri.IsHexDigit)) && j.MaximumBackupAgeHours is not (< 1 or > 87600) && j.JobId != Guid.Empty && Text(j.Name,256) && Text(j.SourceKind,64)
             && Text(j.Schedule,512) && (j.TaskKind == "Backup" && j.DestinationCount is >= 1 and <= 100

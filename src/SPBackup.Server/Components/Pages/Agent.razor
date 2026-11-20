@@ -16,11 +16,20 @@
     <h2>Резервное копирование</h2>
     @if (Monitoring is { } monitoring)
     {
-        <p>Состояние получено @Clock.Time(monitoring.ReceivedUtc). Ожидает передачи запусков: @monitoring.Snapshot.PendingRuns.</p>
+        <p>Состояние получено @Clock.Time(monitoring.ReceivedUtc). Готово к отправке: @monitoring.Snapshot.ReadyRuns.</p>
         @if (monitoring.Snapshot.ExecutionMode == "Managed")
         { <p>Задания с сервера. Принятая ревизия: @(monitoring.Snapshot.ConfigurationRevision?.ToString() ?? "ожидает первого подключения").
             @(monitoring.Snapshot.BackupExecutionAvailable == true && agent.BackupExecutionAvailable ? "Исполнитель работает." : "Исполнение не подтверждено.")</p> }
-        @if (monitoring.Snapshot.CollectionWarnings > 0) { <p class="error">Не удалось передать часть локальной истории: @monitoring.Snapshot.CollectionWarnings. Проверьте журнал агента.</p> }
+        @if (monitoring.Snapshot.ReportRejections is { Total: > 0 } rejected)
+        {
+            <p class="error">Сервер отклонил отчётов: @rejected.Total. Агент повторит отправку.</p>
+            <ul>
+                @if (rejected.Invalid > 0) { <li>Сервер отклонил формат или данные отчёта · @rejected.Invalid</li> }
+                @if (rejected.Conflict > 0) { <li>Сервер уже хранит другой отчёт с тем же ID запуска · @rejected.Conflict</li> }
+                @if (rejected.Unknown > 0) { <li>Причина ещё неизвестна · @rejected.Unknown</li> }
+            </ul>
+        }
+        @if (monitoring.Snapshot.CollectionWarnings > 0) { <p class="error">Агент не смог подготовить локальных отчётов: @monitoring.Snapshot.CollectionWarnings. Подробности в журнале агента.</p> }
         @if (DateTimeOffset.UtcNow - monitoring.ReceivedUtc > TimeSpan.FromSeconds(Settings.OfflineAfterSeconds))
         { <p class="error">Нет свежих данных от агента. Показаны последние полученные сведения.</p> }
         @if (monitoring.Snapshot.Progress is { } progress)

@@ -81,7 +81,8 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
 {
     private readonly AgentJsonFile<ServerMonitoringSettings> configuration = new(Path.Combine(directory,"server-monitoring.json"));
     // One cursor per destination + enrollment: switching servers never loses history on the new server.
-    private sealed record Receipts(string Address, Guid AgentId, string CredentialKey, HashSet<Guid> Runs, Dictionary<Guid,DateTimeOffset>? RetryAfter = null);
+    private sealed record Receipts(string Address, Guid AgentId, string CredentialKey, HashSet<Guid> Runs,
+        Dictionary<Guid, DateTimeOffset>? RetryAfter = null, Dictionary<Guid, HttpStatusCode>? RejectionCodes = null);
     private readonly AgentJsonFile<Receipts> receipts = new(Path.Combine(directory,"server-monitoring-receipts.json"));
     public static async Task<(IReadOnlySet<Guid> Sent, IReadOnlySet<Guid> Rejected)?> ReadDeliveryAsync(
         string directory, ServerMonitoringSettings settings, CancellationToken token = default)
@@ -143,8 +144,17 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
             }
             catch (Exception e) when (e is ArgumentException or TimeZoneNotFoundException or InvalidTimeZoneException) { collectionWarnings++; }
         }
-        acknowledged = acknowledged with { RetryAfter = acknowledged.RetryAfter ?? [] };
         var pending = reports.Where(r=>!acknowledged.Runs.Contains(r.RunId)).OrderByDescending(r=>r.FinishedUtc).ToArray();
+        var retryAfter = acknowledged.RetryAfter ?? [];
+        var rejectionCodes = acknowledged.RejectionCodes ?? [];
+        acknowledged = acknowledged with { RetryAfter = retryAfter, RejectionCodes = rejectionCodes };
+        var pendingIds = pending.Select(run => run.RunId).ToHashSet();
+        var staleRetries = retryAfter.Keys.Where(id => !pendingIds.Contains(id)).ToArray();
+        foreach (var id in staleRetries) retryAfter.Remove(id);
+        var staleCodes = rejectionCodes.Keys.Where(id => !retryAfter.ContainsKey(id)).ToArray();
+        foreach (var id in staleCodes) rejectionCodes.Remove(id);
+        var invalid = rejectionCodes.Values.Count(code => code == HttpStatusCode.BadRequest);
+        var conflicting = rejectionCodes.Values.Count(code => code == HttpStatusCode.Conflict);
         var progress = await new BackupProgressStore(directory).ReadAsync();
         var observationTasks = ExternalBackupTask.Create(monitors, external, polling, settings.AgentId).ToDictionary(task => task.Id);
         var snapshot = new MonitoringSnapshot(DateTimeOffset.UtcNow, typeof(ServerMonitoringDispatcher).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute),false).Cast<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown",
@@ -164,27 +174,41 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
                     LastFullUtc = observationTasks[m.Id].LastFullUtc, LastDifferentialUtc = observationTasks[m.Id].LastDifferentialUtc,
                     LastLogUtc = observationTasks[m.Id].LastLogUtc }).ToArray(),collectionWarnings)
         { ExecutionMode = selected is null ? "Standalone" : "Managed", ConfigurationRevision = selected?.Revision,
-            BackupExecutionAvailable = selected is null ? null : managedJobs is not null && fixedConnection is not null };
-        var batch = pending.Where(r=>!acknowledged.RetryAfter!.TryGetValue(r.RunId,out var time) || time <= DateTimeOffset.UtcNow).Take(25).ToArray();
+            BackupExecutionAvailable = selected is null ? null : managedJobs is not null && fixedConnection is not null,
+            ReportRejections = retryAfter.Count == 0 ? null : new(invalid, conflicting, retryAfter.Count - invalid - conflicting) };
+        var now = DateTimeOffset.UtcNow;
+        // Bound stored cooldowns by the retry interval if the agent's wall clock moved back.
+        var maxRetryAt = now.AddMinutes(2);
+        var delayedByClock = retryAfter.Where(entry => entry.Value > maxRetryAt).Select(entry => entry.Key).ToArray();
+        foreach (var id in delayedByClock) retryAfter[id] = maxRetryAt;
+        var batch = pending.Where(r => !retryAfter.TryGetValue(r.RunId, out var time) || time <= now).Take(25).ToArray();
         // Only the initialized host opts in. A GUI reading a managed cache does not claim execution readiness.
         using var client = new ServerMonitoringClient(settings, managedExecution: managedJobs is not null && fixedConnection is not null);
         var secret = await credentials.GetAsync(settings.CredentialKey,token);
         await client.SendAsync(settings,secret.Password,snapshot,[],token);
+        var previousReceiptCount = acknowledged.Runs.Count;
         acknowledged.Runs.IntersectWith(reports.Select(r=>r.RunId));
-        var conflicts=0;
+        if (previousReceiptCount != acknowledged.Runs.Count || staleRetries.Length != 0 || staleCodes.Length != 0 || delayedByClock.Length != 0)
+            await receipts.WriteAsync(acknowledged, token);
         foreach (var item in batch)
         {
             try
             {
                 await client.SendRunAsync(settings,secret.Password,item,token);
                 acknowledged.Runs.Add(item.RunId);
-                acknowledged.RetryAfter!.Remove(item.RunId);
+                retryAfter.Remove(item.RunId);
+                rejectionCodes.Remove(item.RunId);
                 await receipts.WriteAsync(acknowledged,token);
             }
             catch (HttpRequestException error) when (error.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict)
-            { conflicts++; acknowledged.RetryAfter![item.RunId]=DateTimeOffset.UtcNow.AddMinutes(2); await receipts.WriteAsync(acknowledged,token); } // Preserve this report locally, but let other reports reach the server.
+            {
+                retryAfter[item.RunId] = DateTimeOffset.UtcNow.AddMinutes(2);
+                rejectionCodes[item.RunId] = error.StatusCode.Value;
+                await receipts.WriteAsync(acknowledged, token);
+            }
         }
-        if (conflicts>0 || collectionWarnings>0) throw new InvalidDataException("Часть отчётов не принята сервером. Остальные отправлены; исходная история сохранена.");
+        if (retryAfter.Count != 0 || collectionWarnings != 0)
+            throw new InvalidDataException($"Сервер отклонил отчётов: {retryAfter.Count}. Не удалось подготовить локальных отчётов: {collectionWarnings}. Исходная история сохранена.");
     }
     private static string Label(string value) => new string(value.Select(c=>char.IsControl(c) ? ' ' : c).Take(256).ToArray()).Trim() is { Length: >0 } text ? text : "Без имени";
     public static MonitoredRun ToReport(ExternalBackupReport report, IReadOnlyList<ExternalBackupMonitor> monitors)

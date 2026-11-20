@@ -4,23 +4,35 @@ namespace SPBackup.Server;
 public sealed partial class ServerStore
 {
     private static readonly JsonSerializerOptions MonitoringJson = new(JsonSerializerDefaults.Web);
-    public sealed record Overview(int Agents,int Offline,int Unreported,int Failed,int Incomplete,int Warning,int Pending);
+    public sealed record Overview(int Agents, int Offline, int Unreported, int Failed, int Incomplete, int Warning,
+        long Pending, long Rejected, long Unprepared);
     public async Task<Overview> OverviewAsync(int offlineSeconds,CancellationToken token)
     {
         await using var db=await source.OpenConnectionAsync(token);
         await using var cmd=Command(db,null,"""
             WITH latest AS (SELECT DISTINCT ON(agent_id,job_id) document FROM server_runs WHERE agent_id IN (SELECT id FROM server_agents WHERE NOT revoked) ORDER BY agent_id,job_id,finished_utc DESC,run_id),
-            agents AS (SELECT a.id, greatest(a.received_utc,m.received_utc) seen,m.document FROM server_agents a LEFT JOIN server_monitoring m ON m.agent_id=a.id WHERE NOT a.revoked)
+            agents AS (SELECT a.id, greatest(a.received_utc,m.received_utc) seen,m.document FROM server_agents a LEFT JOIN server_monitoring m ON m.agent_id=a.id WHERE NOT a.revoked),
+            delivery AS (
+                SELECT (document->>'pendingRuns')::integer pending,
+                    coalesce((document#>>'{reportRejections,invalid}')::integer,0)
+                    + coalesce((document#>>'{reportRejections,conflict}')::integer,0)
+                    + coalesce((document#>>'{reportRejections,unknown}')::integer,0) rejected,
+                    (document->>'collectionWarnings')::integer unprepared
+                FROM agents
+            )
             SELECT (SELECT count(*)::integer FROM agents),
               (SELECT count(*)::integer FROM agents WHERE seen IS NOT NULL AND seen<now()-make_interval(secs=>@seconds)),
               (SELECT count(*)::integer FROM agents WHERE document IS NULL),
               (SELECT count(*)::integer FROM latest WHERE document->>'status' IN ('Failed','Interrupted','Cancelled','PartiallySucceeded')),
               (SELECT count(*)::integer FROM latest WHERE (document->>'incomplete')::boolean),
               (SELECT count(*)::integer FROM latest WHERE (document->>'warningCount')::integer>0),
-              (SELECT coalesce(sum((document->>'pendingRuns')::integer),0)::integer FROM agents)
+              (SELECT coalesce(sum(pending - rejected),0) FROM delivery),
+              (SELECT coalesce(sum(rejected),0) FROM delivery),
+              (SELECT coalesce(sum(unprepared),0) FROM delivery)
             """,("seconds",offlineSeconds));
         await using var reader=await cmd.ExecuteReaderAsync(token); await reader.ReadAsync(token);
-        return new(reader.GetInt32(0),reader.GetInt32(1),reader.GetInt32(2),reader.GetInt32(3),reader.GetInt32(4),reader.GetInt32(5),reader.GetInt32(6));
+        return new(reader.GetInt32(0),reader.GetInt32(1),reader.GetInt32(2),reader.GetInt32(3),reader.GetInt32(4),reader.GetInt32(5),
+            reader.GetInt64(6), reader.GetInt64(7), reader.GetInt64(8));
     }
     public async Task<IReadOnlyList<MonitoredRun>> LastSuccessfulRunsAsync(Guid id,CancellationToken token)
     {

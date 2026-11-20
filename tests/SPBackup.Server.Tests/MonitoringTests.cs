@@ -136,6 +136,63 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
         Assert.Equal("ConnectingStorage",retrying.Stage); Assert.Null(retrying.Percent);
     }
     [ServerFact]
+    public async Task RejectedAndUnpreparedReportsStayOutOfTheReadyQueueAfterRestart()
+    {
+        var agent = await server.EnrollAsync();
+        var root = Directory.CreateDirectory(Path.Combine(server.Root, Guid.NewGuid().ToString("N"))).FullName;
+        var job = new BackupJob { Name = "Files", Kind = DatabaseKind.FilesAndFolders, Source = root,
+            DestinationDirectory = Path.Combine(root, "copies"), ScheduleKind = ScheduleKind.Manual };
+        await new JobStore(Path.Combine(root, "jobs.json"), true).SaveAsync([job]);
+        var end = DateTimeOffset.UtcNow;
+        var history = new BackupRunHistory(Path.Combine(root, "runs.json"));
+        var rejected = new BackupRun(Guid.NewGuid(), job.Id, job.Name, end.AddMinutes(-1), end,
+            BackupRunStatus.Succeeded, root);
+        var accepted = rejected with { RunId = Guid.NewGuid() };
+        var unprepared = rejected with { RunId = Guid.NewGuid(), DurationMilliseconds = -1 };
+        await history.SaveAsync(rejected);
+        await history.SaveAsync(accepted);
+        await history.SaveAsync(unprepared);
+        await server.Store.SaveRunAsync(agent.AgentId, new(rejected.RunId, job.Id, job.Name,
+            rejected.StartedUtc, end, "Failed", 0, false, null, []), default);
+
+        using var cert = X509CertificateLoader.LoadPkcs12FromFile(Path.Combine(server.Root, "certificate.pfx"),
+            File.ReadAllText(Path.Combine(server.Root, "certificate-password.txt")));
+        var settings = new ServerMonitoringSettings(server.Address.ToString(), agent.AgentId, "monitor", Convert.ToHexString(SHA256.HashData(cert.RawData)));
+        await ServerMonitoringDispatcher.SaveSettingsAsync(root, settings);
+        var secrets = new Credentials { Value = agent.Token };
+        await Assert.ThrowsAsync<InvalidDataException>(() => new ServerMonitoringDispatcher(root, secrets).PollAsync());
+        var delivery = await ServerMonitoringDispatcher.ReadDeliveryAsync(root, settings);
+        Assert.Contains(accepted.RunId, delivery!.Value.Sent);
+        Assert.Contains(rejected.RunId, delivery.Value.Rejected);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => new ServerMonitoringDispatcher(root, secrets).PollAsync());
+        var snapshot = (await server.Store.MonitoringAsync(agent.AgentId, default))!.Snapshot;
+        Assert.Equal(1, snapshot.PendingRuns); // Keep the total available to older servers.
+        Assert.Equal(0, snapshot.ReadyRuns);
+        Assert.Equal(1, snapshot.CollectionWarnings);
+        Assert.Equal(new M.MonitoredReportRejections(0, 1, 0), snapshot.ReportRejections);
+        var overview = await server.Store.OverviewAsync(180, default);
+        Assert.Equal(1, overview.Rejected);
+        Assert.Equal(1, overview.Unprepared);
+        using var page = await server.Administrator.GetAsync($"agents/{agent.AgentId}");
+        page.EnsureSuccessStatusCode();
+        var html = WebUtility.HtmlDecode(await page.Content.ReadAsStringAsync());
+        Assert.Contains("Готово к отправке: 0", html);
+        Assert.Contains("Сервер уже хранит другой отчёт с тем же ID запуска", html);
+        Assert.DoesNotContain(root, html);
+
+        var receiptPath = Path.Combine(root, "server-monitoring-receipts.json");
+        var legacy = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(receiptPath))!.AsObject();
+        Assert.True(legacy.Remove("RejectionCodes"));
+        await File.WriteAllTextAsync(receiptPath, legacy.ToJsonString());
+        await Assert.ThrowsAsync<InvalidDataException>(() => new ServerMonitoringDispatcher(root, secrets).PollAsync());
+        var legacySnapshot = (await server.Store.MonitoringAsync(agent.AgentId, default))!.Snapshot;
+        Assert.Equal(new M.MonitoredReportRejections(0, 0, 1), legacySnapshot.ReportRejections);
+        Assert.False(M.MonitoringValidation.Valid(snapshot with { PendingRuns = 0 }));
+        Assert.False(M.MonitoringValidation.Valid(snapshot with { ReportRejections = new(-1, 1, 0) }));
+    }
+
+    [ServerFact]
     public async Task ClockRollbackKeepsTheRunAndBothCopiesThroughReportRetry()
     {
         var agent = await server.EnrollAsync();

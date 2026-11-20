@@ -81,6 +81,10 @@ public sealed class AgentProblemSummaryTests(ServerFixture fixture) : IClassFixt
         Assert.True(summary.ObservedUtc < DateTimeOffset.UtcNow.AddMinutes(-50));
         if (Environment.GetEnvironmentVariable("ONECBACKUP_OVERVIEW_BROWSER_OUTPUT") is { } output)
         {
+            await fixture.Store.SaveMonitoringAsync(problem.AgentId,
+                new(DateTimeOffset.UtcNow, "summary", jobs, null, 3, CollectionWarnings: 1)
+                { ReportRejections = new(1, 1, 0) }, default);
+            await fixture.ExecuteAsync("UPDATE server_monitoring SET received_utc=now()-interval '1 hour' WHERE agent_id=@id", ("id", problem.AgentId));
             foreach (var (name, status, warnings, destinations) in new (string, string, int, MonitoredDestination[])[]
             {
                 ("Цвет ошибки", "Failed", 0, []),
