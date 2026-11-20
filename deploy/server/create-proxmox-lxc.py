@@ -6,6 +6,7 @@ copied into the new container; passwords are generated there and never cross pct
 """
 import argparse
 import contextlib
+import datetime
 import hashlib
 import ipaddress
 import json
@@ -623,7 +624,53 @@ def verify_update_database(host, port, database_name):
     return metadata
 
 
-def guest_update(version, package_directory=None, backup_directory=None):
+UPDATE_BACKUPS = Path('/var/backups/onec-backup-server')
+BACKUP_NAME = re.compile(r'[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}')
+BACKUP_FILES = ('config.tar', 'program.tar', 'unit.service', 'database.dump', 'data.tar')
+
+
+def update_backup_state(path, verify_hashes=False):
+    if path.parent != UPDATE_BACKUPS or not BACKUP_NAME.fullmatch(path.name):
+        raise ValueError('Некорректный идентификатор комплекта возврата.')
+    for item in [path.parent, path, path / 'state.json', *(path / name for name in BACKUP_FILES)]:
+        if item.is_symlink() or item.stat().st_uid != 0 or item.stat().st_mode & 0o022:
+            raise ValueError('Комплект возврата должен принадлежать root и быть закрыт от посторонней записи.')
+    journal = path / 'state.json'
+    if not journal.is_file() or journal.stat().st_size > 16384:
+        raise ValueError('Некорректное описание комплекта возврата.')
+    state = json.loads(journal.read_text())
+    if (not isinstance(state, dict) or state.get('format') != 1 or state.get('status') != 'updated'
+            or not web_update_version(state.get('from')) or not web_update_version(state.get('to'))
+            or not isinstance(state.get('files'), dict) or set(state['files']) != set(BACKUP_FILES)):
+        raise ValueError('Комплект не относится к завершённому обновлению.')
+    for name in BACKUP_FILES:
+        item = path / name
+        digest = state['files'][name]
+        if not item.is_file() or not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+            raise ValueError('Некорректный файл комплекта возврата.')
+        if verify_hashes:
+            with item.open('rb') as stream:
+                if hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
+                    raise ValueError('Повреждён комплект возврата.')
+    return state
+
+
+def restore_update_backup(backup, destination, database):
+    database_name = database['name']
+    run(['runuser', '-u', 'postgres', '--', 'dropdb', '--force', '--if-exists', database_name])
+    run(['runuser', '-u', 'postgres', '--', 'createdb', '--template=template0', '--encoding=UTF8',
+         '--lc-collate=' + database['collate'], '--lc-ctype=' + database['ctype'], '--owner=onecbackup', database_name])
+    with (backup / 'database.dump').open('rb') as dump:
+        binary_command(['runuser', '-u', 'postgres', '--', 'pg_restore', '--exit-on-error', '--no-owner', '--role=onecbackup', '-d', database_name], input_file=dump)
+    restore_tree(backup / 'data.tar', DATA)
+    restore_tree(backup / 'config.tar', CONFIG)
+    restore_tree(backup / 'program.tar', destination)
+    shutil.copy2(backup / 'unit.service', UNIT)
+    switch_release(destination)
+    run(['systemctl', 'daemon-reload'])
+
+
+def guest_update(version, package_directory=None, backup_directory=None, rollback_from=None):
     release_info = Path('/etc/os-release').read_text()
     if ('ID=debian' not in release_info or 'VERSION_ID="13"' not in release_info
             or platform.machine() != 'x86_64' or subprocess.run(['systemd-detect-virt', '--container'], capture_output=True).returncode):
@@ -644,7 +691,7 @@ def guest_update(version, package_directory=None, backup_directory=None):
     if not link.is_symlink() or old.parent != APPLICATION.resolve() or old.name != previous['version']:
         raise ValueError('Активная версия не соответствует журналу установки; данные не изменены.')
     reject_links(old)
-    if int(version.rsplit('.', 1)[1]) < int(previous['version'].rsplit('.', 1)[1]):
+    if rollback_from is None and int(version.rsplit('.', 1)[1]) < int(previous['version'].rsplit('.', 1)[1]):
         raise ValueError('Понижение версии не выполняется.')
     configuration = json.loads((CONFIG / 'server.json').read_text())['Server']
     expected = {'DataDirectory': str(DATA),
@@ -668,12 +715,21 @@ def guest_update(version, package_directory=None, backup_directory=None):
     if [line for line in unit.splitlines() if line.startswith('EnvironmentFile=')] != ['EnvironmentFile=' + str(env_path)]:
         raise ValueError('EnvironmentFile службы отличается от штатного.')
     database = verify_update_database(host, port, database_name)
+    if rollback_from is not None:
+        state = update_backup_state(rollback_from, verify_hashes=True)
+        if (state['from'] != version or state['to'] != previous['version'] or version == previous['version']
+                or any(state.get('database', {}).get(key) != database[key] for key in ['name', 'owner', 'encoding', 'collate', 'ctype'])):
+            raise ValueError('Комплект не соответствует установленной версии и текущей базе. Сервер не остановлен.')
+        with tarfile.open(rollback_from / 'config.tar', 'r:') as archive:
+            ca = archive.getmember('./ca.crt')
+            if not ca.isfile() or ca.size > 65536 or archive.extractfile(ca).read() != (CONFIG / 'ca.crt').read_bytes():
+                raise ValueError('Комплект принадлежит другой установке. Сервер не остановлен.')
     run(['systemctl', 'is-active', '--quiet', 'onec-backup-server'])
     wait_ready(previous['port'])
     if version == previous['version']:
         print('Сервер уже обновлён: ' + version)
         return
-    backup_root = Path(backup_directory or '/var/backups/onec-backup-server').resolve()
+    backup_root = Path(backup_directory or UPDATE_BACKUPS).resolve()
     if any(backup_root == p.resolve() or backup_root.is_relative_to(p.resolve()) or p.resolve().is_relative_to(backup_root)
            for p in [CONFIG, APPLICATION, DATA]):
         raise ValueError('Каталог копии не должен пересекаться с программой, конфигурацией или данными.')
@@ -684,7 +740,9 @@ def guest_update(version, package_directory=None, backup_directory=None):
     if shutil.disk_usage(backup_root).free < required:
         raise ValueError('Недостаточно места для пакета и полного комплекта возврата; сервер не остановлен.')
     # Download/check/extract first. Existing installed versions and current stay untouched.
-    target = install_package(request, package_directory, activate=False)
+    target = install_package(request, package_directory, activate=False) if rollback_from is None else APPLICATION / version
+    if rollback_from is not None and not target.exists() and not target.is_symlink():
+        target.mkdir(mode=0o755)
     reject_links(target)
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + secrets.token_hex(4)
     backup = backup_root / stamp
@@ -706,18 +764,21 @@ def guest_update(version, package_directory=None, backup_directory=None):
             binary_command(['runuser', '-u', 'postgres', '--', 'pg_dump', '-Fc', '-d', database_name], output=output)
         snapshot_tree(DATA, backup / 'data.tar')
         state['files'] = {}
-        for name in ['config.tar', 'program.tar', 'unit.service', 'database.dump', 'data.tar']:
+        for name in BACKUP_FILES:
             with (backup / name).open('rb') as stream:
                 state['files'][name] = hashlib.file_digest(stream, 'sha256').hexdigest()
         mark('backed-up')
         migrated = True
         mark('migrating')
-        run(['runuser', '-u', ACCOUNT, '--', target / 'SPBackup.Server', '--Server:ConfigFile', CONFIG / 'server.json', '--migrate'])
-        switch_release(target)
+        if rollback_from is None:
+            run(['runuser', '-u', ACCOUNT, '--', target / 'SPBackup.Server', '--Server:ConfigFile', CONFIG / 'server.json', '--migrate'])
+            switch_release(target)
+        else:
+            restore_update_backup(rollback_from, target, database)
         run(['systemctl', 'start', 'onec-backup-server'])
         wait_ready(previous['port'])
         atomic_json(journal, {**saved, 'request': request})
-        mark('updated')
+        mark('updated' if rollback_from is None else 'manually-restored')
         print('Сервер обновлён: ' + version + '. Комплект возврата: ' + str(backup))
     except (Exception, KeyboardInterrupt):
         try:
@@ -729,17 +790,7 @@ def guest_update(version, package_directory=None, backup_directory=None):
                         if hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
                             raise ValueError('Повреждён комплект возврата.')
                 mark('rolling-back')
-                run(['runuser', '-u', 'postgres', '--', 'dropdb', '--force', '--if-exists', database_name])
-                run(['runuser', '-u', 'postgres', '--', 'createdb', '--template=template0', '--encoding=UTF8',
-                     '--lc-collate=' + database['collate'], '--lc-ctype=' + database['ctype'], '--owner=onecbackup', database_name])
-                with (backup / 'database.dump').open('rb') as dump:
-                    binary_command(['runuser', '-u', 'postgres', '--', 'pg_restore', '--exit-on-error', '--no-owner', '--role=onecbackup', '-d', database_name], input_file=dump)
-                restore_tree(backup / 'data.tar', DATA)
-                restore_tree(backup / 'config.tar', CONFIG)
-                restore_tree(backup / 'program.tar', old)
-                shutil.copy2(backup / 'unit.service', UNIT)
-                switch_release(old)
-                run(['systemctl', 'daemon-reload'])
+                restore_update_backup(backup, old, database)
             if stopped:
                 run(['systemctl', 'start', 'onec-backup-server'])
                 wait_ready(previous['port'])
@@ -797,12 +848,33 @@ def web_update_save(state):
     atomic_json(WEB_UPDATE_HOME / 'state.json', state)
 
 
+def web_rollback_candidate(state, current_version):
+    last = state.get('lastSuccessfulUpdate') or state.get('lastResult')
+    if (not isinstance(last, dict) or last.get('phase') != 'updated' or last.get('operation') == 'rollback'
+            or last.get('targetVersion') != current_version or not isinstance(last.get('jobId'), str)
+            or not re.fullmatch(r'[0-9a-f]{32}', last['jobId']) or not isinstance(last.get('backupDirectory'), str)):
+        return None
+    path = Path(last['backupDirectory'])
+    try:
+        backup = update_backup_state(path)
+        if backup['to'] != current_version or int(backup['from'].rsplit('.', 1)[1]) >= int(current_version.rsplit('.', 1)[1]):
+            return None
+        timestamp = datetime.datetime.strptime(path.name[:16], '%Y%m%dT%H%M%SZ').replace(tzinfo=datetime.timezone.utc).timestamp()
+        return {'jobId': last['jobId'], 'version': backup['from'], 'snapshotUtc': timestamp}
+    except (ValueError, OSError, KeyError, TypeError):
+        return None
+
+
 def web_update_status(state):
     # No logs, configuration, exceptions or credentials are sent to the panel.
-    keys = ['phase', 'latestVersion', 'checkedUtc', 'jobId', 'targetVersion', 'startedUtc', 'finishedUtc', 'backupDirectory']
+    keys = ['phase', 'latestVersion', 'checkedUtc', 'jobId', 'targetVersion', 'startedUtc', 'finishedUtc', 'backupDirectory', 'operation']
     result = {**{key: state[key] for key in keys if key in state}, 'currentVersion': web_update_current()}
     if isinstance(state.get('lastResult'), dict):
-        result['lastResult'] = {key: state['lastResult'][key] for key in ['phase', 'jobId', 'targetVersion', 'finishedUtc', 'backupDirectory'] if key in state['lastResult']}
+        result['lastResult'] = {key: state['lastResult'][key] for key in ['phase', 'jobId', 'targetVersion', 'finishedUtc', 'backupDirectory', 'operation'] if key in state['lastResult']}
+    if state.get('phase') not in WEB_UPDATE_UNITS and state.get('phase') not in {'interrupted', 'recoveryRequired'}:
+        candidate = web_rollback_candidate(state, result['currentVersion'])
+        if candidate:
+            result['rollback'] = candidate
     return result
 
 
@@ -815,10 +887,11 @@ def web_update_service(args):
 
 
 def web_update_request(request):
-    if not isinstance(request, dict) or set(request) - {'command', 'version'} or not isinstance(request.get('command'), str) or request['command'] not in {'status', 'check', 'start'}:
+    if not isinstance(request, dict) or not isinstance(request.get('command'), str):
         return {'phase': 'invalidRequest'}
     command = request['command']
-    if command != 'start' and 'version' in request:
+    fields = {'status': {'command'}, 'check': {'command'}, 'start': {'command', 'version'}, 'rollback': {'command', 'jobId'}}
+    if command not in fields or set(request) != fields[command]:
         return {'phase': 'invalidRequest'}
     with web_update_lock():
         state = web_update_read()
@@ -832,7 +905,7 @@ def web_update_request(request):
                 pass  # Unknown unit state does not authorize a second update.
         if command == 'status' or state.get('phase') in WEB_UPDATE_UNITS:
             return web_update_status(state)
-        if state.get('phase') == 'interrupted':
+        if state.get('phase') in {'interrupted', 'recoveryRequired'}:
             return web_update_status(state)  # An operator must resolve an interrupted job first.
         if command == 'start':
             version = request.get('version')
@@ -840,11 +913,20 @@ def web_update_request(request):
                     or time.time() - state.get('checkedUtc', 0) > 1800
                     or int(version.rsplit('.', 1)[1]) <= int(web_update_current().rsplit('.', 1)[1])):
                 return {**web_update_status(state), 'requestError': 'checkRequired'}
+        candidate = web_rollback_candidate(state, web_update_current()) if command == 'rollback' else None
+        if command == 'rollback' and (candidate is None or request.get('jobId') != candidate['jobId']):
+            return {**web_update_status(state), 'requestError': 'rollbackUnavailable'}
         state = {**state, 'phase': 'checking' if command == 'check' else 'queued',
                  'jobId': secrets.token_hex(16), 'startedUtc': time.time()}
-        for key in ['backupDirectory', 'finishedUtc']:
+        for key in ['backupDirectory', 'finishedUtc', 'rollbackFrom', 'operation']:
             state.pop(key, None)
         if command == 'start': state['targetVersion'] = request['version']
+        elif candidate:
+            state['targetVersion'] = candidate['version']
+            state['operation'] = 'rollback'
+            successful = state.get('lastSuccessfulUpdate') or state['lastResult']
+            state['lastSuccessfulUpdate'] = successful
+            state['rollbackFrom'] = successful['backupDirectory']
         else: state.pop('targetVersion', None)
         web_update_save(state)
         try:
@@ -903,12 +985,16 @@ def web_update_run():
         if state.get('phase') != 'queued' or not web_update_version(version): return
         state['phase'] = 'updating'; web_update_save(state)
         job = state['jobId']
+        rollback_from = state.get('rollbackFrom') if state.get('operation') == 'rollback' else None
     log_path = WEB_UPDATE_HOME / (job + '.log')
     phase = 'failed'; backup = None
     try:
         with log_path.open('x') as output:
             os.chmod(log_path, 0o600)
-            result = subprocess.run([sys.executable, str(WEB_UPDATE_SCRIPT), '--inside-container', '--update', '--version', version],
+            command = [sys.executable, str(WEB_UPDATE_SCRIPT), '--inside-container', '--update', '--version', version]
+            if rollback_from is not None:
+                command += ['--rollback-from', rollback_from]
+            result = subprocess.run(command,
                                     stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                                     env=dict(os.environ, PATH='/usr/sbin:/usr/bin:/sbin:/bin', LANG='C', LC_ALL='C'))
         if result.returncode == 0 and web_update_current() == version:
@@ -930,7 +1016,11 @@ def web_update_run():
         if state.get('jobId') != job: return
         state.update(phase=phase, finishedUtc=time.time())
         if backup: state['backupDirectory'] = backup
-        state['lastResult'] = {key: state[key] for key in ['phase', 'jobId', 'targetVersion', 'finishedUtc', 'backupDirectory'] if key in state}
+        state['lastResult'] = {key: state[key] for key in ['phase', 'jobId', 'targetVersion', 'finishedUtc', 'backupDirectory', 'operation'] if key in state}
+        if phase == 'updated' and rollback_from is None:
+            state['lastSuccessfulUpdate'] = state['lastResult']
+        if phase == 'updated' and rollback_from is not None:
+            state.pop('lastSuccessfulUpdate', None)
         web_update_save(state)
 
 
@@ -1140,6 +1230,7 @@ def parser():
     mode.add_argument('--web-update-check', action='store_true', help=argparse.SUPPRESS)
     mode.add_argument('--web-update-run', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--backup-directory', type=Path, help='каталог комплектов возврата внутри CT')
+    p.add_argument('--rollback-from', type=Path, help=argparse.SUPPRESS)
     p.add_argument('--template', help='локальный Debian 13 amd64 шаблон; иначе скачивается через pveam')
     p.add_argument('--template-storage', help='хранилище шаблонов; по умолчанию local либо первое доступное')
     p.add_argument('--rootfs-pool', help='хранилище диска; по умолчанию local-lvm либо первое доступное')
@@ -1170,6 +1261,8 @@ def main():
         raise ValueError('Для обновления укажите --id существующего CT.')
     if args.version is None:
         args.version = latest_update_version() if args.update else VERSION
+    if args.rollback_from is not None and (not args.inside_container or not args.update or args.backup_directory is not None):
+        raise ValueError('Возврат должен использовать штатный комплект внутри контейнера.')
     if args.inside_container:
         import fcntl
         if not args.update and not args.enable_web_updates and (args.request is None or args.request.is_symlink() or args.request.stat().st_size > 16384):
@@ -1181,7 +1274,7 @@ def main():
             if args.enable_web_updates:
                 enable_web_updates()
             elif args.update:
-                guest_update(args.version, args.package_directory, args.backup_directory)
+                guest_update(args.version, args.package_directory, args.backup_directory, args.rollback_from)
             else:
                 guest_install(json.loads(args.request.read_text()), args.package_directory)
     elif args.update or args.enable_web_updates:

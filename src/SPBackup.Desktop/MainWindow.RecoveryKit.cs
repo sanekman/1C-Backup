@@ -1,5 +1,7 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using Microsoft.Win32;
 using SPBackup.Core;
 
@@ -7,10 +9,32 @@ namespace SPBackup.Desktop;
 
 public partial class MainWindow
 {
+    private void RecoveryKits_Click(object sender, RoutedEventArgs e)
+    {
+        if (!RecoveryKitsButton.IsEnabled) return;
+        var menu = new ContextMenu { PlacementTarget = RecoveryKitsButton, Placement = PlacementMode.Bottom };
+        var open = new MenuItem { Header = "Открыть комплект…" };
+        open.Click += OpenRecoveryKit_Click;
+        var create = new MenuItem { Header = "Сохранить комплект выбранной копии…", IsEnabled = RestoreFilesButton.IsEnabled };
+        create.Click += ExportRecoveryKit_Click;
+        menu.Items.Add(open);
+        menu.Items.Add(create);
+        menu.IsOpen = true;
+    }
+
     private async void ExportRecoveryKit_Click(object sender, RoutedEventArgs e)
     {
-        if (!ExportRecoveryKitButton.IsEnabled || Copies.SelectedItem is not BackupCopyRow row
+        if (!RestoreFilesButton.IsEnabled || Copies.SelectedItem is not BackupCopyRow row
             || jobs.FirstOrDefault(job => job.Id == row.Record.JobId) is not { } job) return;
+        var historical = ReadFormerStorage(row.Record, job);
+        if (historical is not null)
+        {
+            if (MessageBox.Show(this, $"Прочитать архивы из прежнего хранилища {historical.DestinationDirectory} с доступом текущего пользователя Windows?",
+                "Сохранить комплект", MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK) return;
+            job = historical;
+        }
+        var chain = copyRestoreChain;
+        var records = copyRows.Select(copy => copy.Record).ToArray();
         var picker = new OpenFolderDialog { Title = "Выберите папку для комплекта восстановления" };
         if (picker.ShowDialog(this) != true) return;
         using var lease = AcquireEngineOrReport();
@@ -23,8 +47,16 @@ public partial class MainWindow
             var progress = BeginCopyExportProgress();
             CopyVerificationStatus.Text = "Сохраняются и проверяются архивы комплекта…";
             var selectedCatalog = EffectiveCatalog;
+            var mixed = (chain.Count == 0 || await Task.Run(() => FirstMissingLocalArchive(chain), cancellation.Token) is not null)
+                && await Task.Run(() => TryMultiStorageChain(row.Record, job, records, checkLocalAvailability: true), cancellation.Token) is not null;
+            if (mixed && MessageBox.Show(this, "Для комплекта нужны архивы из нескольких хранилищ. Разрешить их чтение?",
+                "Сохранить комплект", MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK)
+            {
+                CopyVerificationStatus.Text = "Сохранение комплекта отменено.";
+                return;
+            }
             var path = await Task.Run(() => new FileRecoveryKit(backupStorage).ExportAsync(row.Record, job, selectedCatalog,
-                picker.FolderName, token: cancellation.Token, progress: progress));
+                picker.FolderName, mixed, cancellation.Token, progress));
             CopyVerificationStatus.Text = "Комплект сохранён: " + path + (row.Record.Backup.ArchivePasswordKey is null
                 ? "" : ". Для восстановления понадобится пароль архива.");
         }
@@ -37,7 +69,7 @@ public partial class MainWindow
 
     private async void OpenRecoveryKit_Click(object sender, RoutedEventArgs e)
     {
-        if (!OpenRecoveryKitButton.IsEnabled) return;
+        if (!RecoveryKitsButton.IsEnabled) return;
         var picker = new OpenFileDialog { Title = "Откройте описание комплекта восстановления",
             Filter = "Описание комплекта SP Backup|recovery.json", CheckFileExists = true };
         if (picker.ShowDialog(this) != true) return;

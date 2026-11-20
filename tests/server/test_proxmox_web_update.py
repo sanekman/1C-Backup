@@ -112,4 +112,30 @@ class WebUpdateBrokerTests(unittest.TestCase):
                 m.web_update_run()
             self.assertEqual(phase,m.web_update_read()['phase'])
 
+    def test_rollback_is_bound_to_the_last_successful_update_and_cannot_accept_a_backup_path(self):
+        job = 'b' * 32
+        path = m.UPDATE_BACKUPS / '20261115T075259Z-12345678'
+        m.web_update_save({'phase': 'updated', 'lastResult': {'phase': 'updated', 'jobId': job,
+            'targetVersion': '0.1.0-preview.9', 'backupDirectory': str(path)}})
+        with (patch.object(m, 'web_update_current', return_value='0.1.0-preview.9'),
+              patch.object(m, 'update_backup_state', return_value={'from': '0.1.0-preview.8', 'to': '0.1.0-preview.9'})):
+            preview = m.web_update_request({'command': 'status'})['rollback']
+            self.assertEqual(job, preview['jobId'])
+            self.assertEqual('0.1.0-preview.8', preview['version'])
+            self.assertEqual('invalidRequest', m.web_update_request({'command': 'rollback', 'jobId': job, 'path': '/tmp/other'})['phase'])
+            self.assertEqual('rollbackUnavailable', m.web_update_request({'command': 'rollback', 'jobId': 'c' * 32})['requestError'])
+            self.systemd.assert_not_called()
+            queued = m.web_update_request({'command': 'rollback', 'jobId': job})
+            self.assertEqual('rollback', queued['operation'])
+            self.assertEqual('0.1.0-preview.8', queued['targetVersion'])
+            self.assertEqual('queued', m.web_update_request({'command': 'rollback', 'jobId': job})['phase'])
+            self.systemd.assert_called_once()
+        def run(args, **kwargs):
+            self.assertEqual(['--rollback-from', str(path)], args[-2:])
+            return subprocess.CompletedProcess(args, 0)
+        with patch.object(m.subprocess, 'run', side_effect=run):
+            m.web_update_run()
+        self.assertEqual('rollback', m.web_update_read()['lastResult']['operation'])
+        self.assertEqual('updated', m.web_update_read()['lastResult']['phase'])
+
 if __name__=='__main__':unittest.main()

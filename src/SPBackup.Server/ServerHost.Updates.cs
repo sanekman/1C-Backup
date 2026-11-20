@@ -22,6 +22,13 @@ public static partial class ServerHost
                 var form = await context.Request.ReadFormAsync(context.RequestAborted);
                 await updates.StartAsync(form["version"].ToString(), context.RequestAborted);
             }
+            else if (action == "rollback")
+            {
+                var form = await context.Request.ReadFormAsync(context.RequestAborted);
+                if (form["confirm"] != "restore") return Results.BadRequest();
+                var state = await updates.RollbackAsync(form["jobId"].ToString(), context.RequestAborted);
+                if (state.RequestError is not null) return Results.Conflict("Комплект возврата больше недоступен. Проверьте состояние в настройках.");
+            }
             else return Results.NotFound();
             return Results.Redirect(context.Request.PathBase + "/settings");
         }).RequireAuthorization(ServerAuthentication.Administrator);

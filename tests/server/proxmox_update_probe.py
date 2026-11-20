@@ -205,7 +205,7 @@ m.web_update_run()
 state=rpc({'command':'status'})
 assert state['phase']=='updated' and state['currentVersion']=='0.1.0-preview.9',state['phase']
 assert state.get('backupDirectory') and 'log' not in state
-listener.close();Path(m.WEB_UPDATE_SOCKET).unlink()
+successful_update_backup = state['backupDirectory']
 checks.append('separate-root-worker-updates-published-package-and-retains-result-after-app-restart')
 assert (m.APPLICATION/'0.1.0-preview.9').stat().st_mode & 0o777==0o755
 assert m.WEB_UPDATE_HOME.stat().st_mode & 0o777==0o700
@@ -238,6 +238,23 @@ for directory in backup.iterdir():
 verify_original_database()
 checks.append('original-sql-ascii-database-untouched-by-update-and-both-rollbacks')
 checks.append('complete-private-program-database-config-data-and-unit-bundles-with-verified-hashes')
+candidate = rpc({'command': 'status'})['rollback']
+assert candidate['version'] == '0.1.0-preview.8'
+assert rpc({'command': 'rollback', 'jobId': '0' * 32})['requestError'] == 'rollbackUnavailable'
+pg('CREATE TABLE public.test_after_update(marker text); INSERT INTO public.test_after_update VALUES (\'new-state\')')
+queued = rpc({'command': 'rollback', 'jobId': candidate['jobId']})
+assert queued['phase'] == 'queued' and queued['operation'] == 'rollback'
+m.web_update_run()
+restored = rpc({'command': 'status'})
+assert restored['phase'] == 'updated' and restored['operation'] == 'rollback'
+assert restored['currentVersion'] == '0.1.0-preview.8' and restored['backupDirectory'] != successful_update_backup
+assert pg('SELECT max(version) FROM server_schema') == '5'
+assert pg("SELECT to_regclass('public.test_after_update') IS NULL") == 't'
+assert request('api/v1/management/session')[0] == 200
+assert request(f'api/v1/agents/{agent}/configuration',headers=bearer)[0] == 200
+verify_original_database()
+listener.close();Path(m.WEB_UPDATE_SOCKET).unlink()
+checks.append('confirmed-broker-rollback-restores-schema-account-and-agent-and-saves-newer-state')
 result={'success':True,'from':'0.1.0-preview.8','to':'0.1.0-preview.9','checks':checks,'realSystemdTested':False,'realProxmoxTested':False}
 Path('/tmp/proxmox-update-result.json').write_text(json.dumps(result,indent=2))
 print(json.dumps(result))

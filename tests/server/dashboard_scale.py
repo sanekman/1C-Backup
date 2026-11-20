@@ -1,6 +1,7 @@
 """Measure the Dashboard in the isolated PostgreSQL fixture."""
 import json
 import math
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -25,7 +26,7 @@ with sync_playwright() as playwright:
         rows = page.locator('[data-dashboard-row]')
         expect(rows).to_have_count(int(count))
         ready = perf_counter()
-        rows.filter(has_text='Scale agent').first.get_by_role('link').click()
+        rows.filter(has_text='Scale agent').first.get_by_role('link', name=re.compile(r'^Scale agent ')).click()
         expect(page.locator('#agent-summary')).to_be_visible()
         selected = perf_counter()
         if attempt:

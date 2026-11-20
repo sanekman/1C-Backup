@@ -52,7 +52,7 @@ internal sealed class UpdateBrokerFixture : IAsyncDisposable
                 using var request = JsonDocument.Parse(line!);
                 var command = request.RootElement.GetProperty("command").GetString();
                 if (command == "check") Phase = "checking";
-                if (command == "start") Phase = "queued";
+                if (command is "start" or "rollback") Phase = "queued";
                 var result = RawResponse ?? (Malformed ? "{bad" : JsonSerializer.Serialize(new { phase = Phase,
                     currentVersion = "0.1.0-preview.9", latestVersion = "0.1.0-preview.10",
                     targetVersion = command == "start" ? "0.1.0-preview.10" : null, checkedUtc = CheckedUtc ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds(), lastResult = LastResult }));
@@ -103,6 +103,11 @@ public sealed class ServerUpdateClientTests
             broker.LastResult=new("updated","fixture-job","0.1.0-preview.9",DateTimeOffset.UtcNow.ToUnixTimeSeconds(),"/var/backups/fixture");
             var checkedState=await client.CheckAsync();Assert.Equal("checking",checkedState.Phase);
             Assert.Equal("/var/backups/fixture",checkedState.LastResult!.BackupDirectory);
+            var job = new string('a', 32);
+            var invalidRollback = await Assert.ThrowsAsync<ServerRequestException>(() => client.RollbackAsync("/tmp/example"));
+            Assert.Equal(400, invalidRollback.Status);
+            Assert.Equal("queued", (await client.RollbackAsync(job)).Phase);
+            Assert.Equal("{\"command\":\"rollback\",\"jobId\":\"" + job + "\"}", broker.Requests.Last());
         }
         finally { Directory.Delete(root,true); }
     }
@@ -128,6 +133,12 @@ public sealed class ServerUpdateAdministrationTests(ServerFixture fixture) : ICl
         using var noCsrf=fixture.Client();await fixture.SignInAsync(noCsrf);
         using var forged=await noCsrf.PostAsync("management/server-update/check",new FormUrlEncodedContent(new Dictionary<string,string>()));Assert.Equal(HttpStatusCode.BadRequest,forged.StatusCode);
         using var invalid=await fixture.Administrator.PostAsync("management/server-update/start",new FormUrlEncodedContent(new Dictionary<string,string>{{"version","https://other/program"}}));Assert.Equal(HttpStatusCode.BadRequest,invalid.StatusCode);
+        using var rollbackWithoutConfirmation = await fixture.Administrator.PostAsync("management/server-update/rollback",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["jobId"] = new string('a', 32) }));
+        Assert.Equal(HttpStatusCode.BadRequest, rollbackWithoutConfirmation.StatusCode);
+        using var rollbackWithInvalidId = await fixture.Administrator.PostAsync("management/server-update/rollback",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["jobId"] = "/tmp/foreign", ["confirm"] = "restore" }));
+        Assert.Equal(HttpStatusCode.BadRequest, rollbackWithInvalidId.StatusCode);
         using var status=await fixture.Administrator.GetAsync("api/v1/management/server-update");Assert.True(status.Headers.CacheControl!.NoStore);
     }
     [ServerLinuxUpdateFact]

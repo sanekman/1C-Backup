@@ -351,7 +351,7 @@ jobs:
           python - <<'PYCODE'
           import json
           from pathlib import Path
-          for name, count in [('proxmox-installer-result.json',16),('proxmox-update-result.json',14)]:
+          for name, count in [('proxmox-installer-result.json',16),('proxmox-update-result.json',15)]:
               report=json.loads((Path('artifacts/accepted-native')/name).read_text())
               assert report['success'] is True and len(report['checks']) >= count
           report=json.loads(Path('artifacts/accepted-release/server-tests/compose-result.json').read_text())

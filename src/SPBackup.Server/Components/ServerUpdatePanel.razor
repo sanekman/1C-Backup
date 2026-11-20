@@ -34,6 +34,20 @@ else
             <form action="management/server-update/start" method="post"><AntiforgeryToken /><input type="hidden" name="version" value="@State.LatestVersion" /><button type="submit">Обновить до @State.LatestVersion</button></form>
         }
         </div>
+        @if (!State.Busy && State.Rollback is { } rollback)
+        {
+            <details>
+                <summary>Вернуть предыдущую версию</summary>
+                <p><strong>@State.CurrentVersion → @rollback.Version</strong> · снимок @Clock.Time(DateTimeOffset.FromUnixTimeSeconds((long)rollback.SnapshotUtc))</p>
+                <p>Будут восстановлены программа, база и настройки на момент снимка. Изменения на сервере после этой даты будут отменены. Перед возвратом будет сохранён отдельный комплект текущего состояния.</p>
+                <form action="management/server-update/rollback" method="post">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="jobId" value="@rollback.JobId" />
+                    <label><input type="checkbox" name="confirm" value="restore" required /> Подтверждаю возврат программы и данных к снимку</label>
+                    <button type="submit" class="danger">Вернуть @rollback.Version</button>
+                </form>
+            </details>
+        }
     }
     @if (State.LastResult is { } last && State.JobId != last.JobId)
     {
