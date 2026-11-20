@@ -27,12 +27,12 @@
        <ControlTemplate TargetType="TabItem">
         <Border x:Name="TabBorder" Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="1,1,1,0" Padding="{TemplateBinding Padding}" Margin="0,0,3,0">
-         <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" />
+         <ContentPresenter x:Name="TabHeader" ContentSource="Header" RecognizesAccessKey="True" />
         </Border>
         <ControlTemplate.Triggers>
          <Trigger Property="IsSelected" Value="True">
           <Setter TargetName="TabBorder" Property="Background" Value="{DynamicResource SelectionBrush}" />
-          <Setter Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+          <Setter TargetName="TabHeader" Property="TextElement.Foreground" Value="{DynamicResource SelectionTextBrush}" />
          </Trigger>
          <Trigger Property="IsKeyboardFocused" Value="True">
           <Setter TargetName="TabBorder" Property="BorderBrush" Value="{DynamicResource LinkBrush}" />

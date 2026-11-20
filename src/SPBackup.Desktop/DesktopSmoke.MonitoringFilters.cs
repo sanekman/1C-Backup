@@ -86,7 +86,7 @@ internal static partial class DesktopSmoke
         var tabs = Control<TabControl>("WorkspaceTabs");
         var settingsTab = Control<TabItem>("SourceSettings");
         var historyTab = Control<TabItem>("HistoryTab");
-        var selectedReport = grid.SelectedItem;
+        var selectedReport = ((ExternalBackupReport)grid.SelectedItem).ReportId;
         tabs.SelectedItem = settingsTab;
         await window.Dispatcher.InvokeAsync(window.UpdateLayout, System.Windows.Threading.DispatcherPriority.ContextIdle);
         var editor = Control<ScrollViewer>("SourceEditorScroll");
@@ -102,8 +102,11 @@ internal static partial class DesktopSmoke
             screenshot("sql-monitoring-settings-dark-900x580", window);
             tabs.SelectedItem = historyTab;
             await window.Dispatcher.InvokeAsync(window.UpdateLayout, System.Windows.Threading.DispatcherPriority.ContextIdle);
-            if (!grid.IsVisible || grid.ActualHeight < 120 || grid.SelectedItem != selectedReport || editor.IsVisible)
-                throw new InvalidOperationException("После возврата к истории таблица скрыта, сжата или потерян выбор.");
+            var minimumHistoryHeight = grid.ColumnHeaderHeight + 2 * grid.RowHeight;
+            if (!grid.IsVisible || grid.ActualHeight < minimumHistoryHeight || editor.IsVisible)
+                throw new InvalidOperationException($"После возврата к истории таблица не вмещает две строки: {grid.ActualHeight:F0}.");
+            if ((grid.SelectedItem as ExternalBackupReport)?.ReportId != selectedReport)
+                throw new InvalidOperationException("После возврата к истории потерян выбранный отчёт.");
             screenshot("sql-monitoring-history-dark-900x580", window);
         }
         finally { DesktopTheme.Select(theme); }
