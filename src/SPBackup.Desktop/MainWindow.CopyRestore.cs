@@ -41,6 +41,15 @@ public partial class MainWindow
         if (!(files ? RestoreFilesButton.IsEnabled : ExtractOneCButton.IsEnabled) || Copies.SelectedItem is not BackupCopyRow row) return;
         var chain = files ? copyRestoreChain : new[] { row.Record };
         var job = files ? jobs.FirstOrDefault(job => job.Id == row.Record.JobId) : null;
+        var historical = job is null ? null : ReadFormerStorage(row.Record, job);
+        if (historical is not null)
+        {
+            var message = "Эта копия находится в прежнем хранилище:\n" + historical.DestinationDirectory
+                + "\n\nSP Backup прочитает архивы с доступом текущего пользователя Windows. Настройки задания сохранятся.";
+            if (MessageBox.Show(this, message, "Открыть прежнее хранилище", MessageBoxButton.OKCancel, MessageBoxImage.Information)
+                != MessageBoxResult.OK) return;
+            job = historical;
+        }
         IReadOnlyList<BackupRecord>? alternate = null;
         preparingCopyRestore = true;
         UpdateRunControls();
@@ -79,8 +88,14 @@ public partial class MainWindow
         CopyRestoreDialogOpened?.Invoke(dialog);
         if (dialog.ShowDialog() != true || dialog.ParentDirectory is not { } parent
             || Copies.SelectedItem is not BackupCopyRow selected || selected.Record != row.Record) return;
-        if (files) await RestoreSelectedFilesAsync(parent, dialog.PasswordOverride, dialog.SelectedPaths, dialog.UseOtherDestinations);
+        if (files) await RestoreSelectedFilesAsync(parent, dialog.PasswordOverride, dialog.SelectedPaths, dialog.UseOtherDestinations, historical);
         else await ExtractSelectedCopyAsync(parent, dialog.PasswordOverride);
+    }
+
+    private static BackupJob? ReadFormerStorage(BackupRecord point, BackupJob job)
+    {
+        try { return HistoricalFileCopy.CreateReadJob(point, job); }
+        catch (Exception error) when (error is InvalidDataException or ArgumentException or NotSupportedException) { return null; }
     }
 
     private static IReadOnlyList<BackupRecord>? TryMultiStorageChain(BackupRecord point, BackupJob job,

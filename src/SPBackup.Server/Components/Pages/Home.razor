@@ -6,7 +6,13 @@
 @inject ServerHealth Health
 @inject IHttpContextAccessor Http
 <PageTitle>Агенты — @Settings.DisplayName</PageTitle>
-<div class="heading"><h1>Агенты</h1><a class="button" href="@ConnectLink">Подключить агент</a></div>
+<div class="heading">
+    <h1>Агенты</h1>
+    <div class="actions">
+        <a href="@(ListView ? "?view=tree&remember=true" : "?view=list&remember=true")">@(ListView ? "Вид: дерево" : "Вид: список")</a>
+        <a class="button" href="@ConnectLink">Подключить агент</a>
+    </div>
+</div>
 @if (HealthStatus is { HasWarnings: true } healthStatus)
 {
     if (ListView || healthStatus.DiskState == DataDiskState.Critical
@@ -35,7 +41,6 @@
 }
 @if (ListView)
 {
-<p><a href="./">Дерево агентов</a></p>
 <div class="agents-layout">
 <aside class="card folder-sidebar" aria-label="Папки агентов">
 <h2>Папки</h2>
@@ -120,6 +125,7 @@ else
     [SupplyParameterFromQuery(Name = "page")] public int Page { get; set; }
     [SupplyParameterFromQuery(Name = "folder")] public string? Folder { get; set; }
     [SupplyParameterFromQuery(Name = "view")] public string? View { get; set; }
+    [SupplyParameterFromQuery(Name = "remember")] public bool Remember { get; set; }
     [SupplyParameterFromQuery(Name = "agent")] public Guid? AgentId { get; set; }
     [SupplyParameterFromQuery(Name = "branch")] public string? BranchKey { get; set; }
     [SupplyParameterFromForm(FormName = "dashboard-organize")] public DashboardChange? Change { get; set; }
@@ -172,7 +178,9 @@ else
         catch (ServerRequestException error) { ChangeError = OrganizationText.Error(error); }
     }
 
-    private bool ListView => View == "list" || Folder is not null || Page != 0;
+    private bool PreferList;
+    private bool ListView => View == "list" || Folder is not null || Page != 0
+        || View is null && AgentId is null && BranchKey is null && PreferList;
     private Guid? SelectedFolder;
     private IReadOnlyList<AgentFolderOption> Folders = [];
     private string FolderTitle => Folder == "root" ? "Без папки" : SelectedFolder is { } id ? Folders.First(f => f.Id == id).Path : "Все агенты";
@@ -183,6 +191,17 @@ else
     private ServerStore.Overview? Overview;
     protected override async Task OnParametersSetAsync()
     {
+        var context = Http.HttpContext!;
+        var preferenceCookie = $"OneCBackup.Server.AgentView.{ServerAuthentication.UserId(context.User):N}";
+        PreferList = context.Request.Cookies[preferenceCookie] == "list";
+        if (context.Request.Method == "GET" && Remember && View is "list" or "tree")
+        {
+            context.Response.Cookies.Append(preferenceCookie, View, new CookieOptions
+            {
+                HttpOnly = true, Secure = context.Request.IsHttps, SameSite = SameSiteMode.Strict,
+                Path = Settings.PathBase ?? "/", MaxAge = TimeSpan.FromDays(365)
+            });
+        }
         HealthStatus = Health.Read();
         Overview = await Store.OverviewAsync(Settings.OfflineAfterSeconds,Http.HttpContext!.RequestAborted);
         Folders = await Store.FoldersAsync(Http.HttpContext!.RequestAborted);

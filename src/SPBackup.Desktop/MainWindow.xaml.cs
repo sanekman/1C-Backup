@@ -679,6 +679,9 @@ public partial class MainWindow : Window
         var restoreAvailable = !preparingCopyRestore && !copiesRefreshing;
         ExtractOneCButton.IsEnabled &= restoreAvailable;
         RestoreFilesButton.IsEnabled = isFileSnapshot && restoreAvailable && VerifyCopyButton.IsEnabled && copyRestoreChainError is null;
+        ExportRecoveryKitButton.Visibility = RestoreFilesButton.Visibility;
+        ExportRecoveryKitButton.IsEnabled = RestoreFilesButton.IsEnabled;
+        OpenRecoveryKitButton.IsEnabled = ready && idle && restoreAvailable && engineAvailable && schedulingTask is null;
         RestoreFilesButton.ToolTip = copyRestoreChainError ?? (!engineAvailable || schedulingTask is not null
             ? "Остановите фоновую работу, чтобы восстановить выбранную копию."
             : "Восстановить выбранную копию в новый подкаталог.");

@@ -115,6 +115,8 @@ public sealed class AgentProblemSummaryTests(ServerFixture fixture) : IClassFixt
             var standard = browser.StandardOutput.ReadToEndAsync();
             await browser.WaitForExitAsync();
             Assert.True(browser.ExitCode == 0, await error + await standard);
+            if (Environment.GetEnvironmentVariable("ONECBACKUP_DASHBOARD_SCALE_OUTPUT") is { } scaleOutput)
+                await DashboardScale.MeasureAsync(fixture, scaleOutput, repository.FullName, credentials);
         }
         await fixture.RestartAsync();
         Assert.Equal(68, Assert.Single(await fixture.Store.ProblemSummariesAsync([problem.AgentId], 120, default)).Total);

@@ -79,6 +79,58 @@ public sealed class FileFolderBackupTests : IDisposable
     }
 
     [Fact]
+    public async Task PortableEncryptedKitRestoresWithoutOriginalCatalogAndRejectsMissingArchive()
+    {
+        var kitParent = Directory.CreateDirectory(Path.Combine(root, "transfer")).FullName;
+        var content = Path.Combine(Source, "data.txt");
+        await File.WriteAllTextAsync(content, "before");
+        var job = Job with { ArchivePasswordKey = "private-fixture-key" };
+        await Run(job, new Passwords());
+        await File.WriteAllTextAsync(content, "after the full backup");
+        var point = await Run(job, new Passwords());
+        var kit = await new FileRecoveryKit(storage).ExportAsync(point, job, catalog, kitParent);
+        var metadata = await File.ReadAllTextAsync(Path.Combine(kit, FileRecoveryKit.ManifestName));
+        Assert.DoesNotContain(Source, metadata);
+        Assert.DoesNotContain("private-fixture-key", metadata);
+        Assert.DoesNotContain("fixture архив AES password", metadata);
+        var summary = await FileRecoveryKit.InspectAsync(kit);
+        Assert.True(summary.Encrypted);
+        Assert.Equal(2, summary.Archives);
+        var independentWork = Path.Combine(root, "clean-work");
+        await Assert.ThrowsAsync<InvalidDataException>(() => FileRecoveryKit.RestoreAsync(kit, RestoreParent, independentWork, null));
+        File.Delete(Path.Combine(root, "copies.json"));
+        Directory.Delete(job.DestinationDirectory, recursive: true);
+        var restored = await FileRecoveryKit.RestoreAsync(kit, RestoreParent, independentWork, "fixture архив AES password");
+        Assert.Equal("after the full backup", await File.ReadAllTextAsync(Path.Combine(restored.Directory, "data.txt")));
+        Assert.Equal(summary.SnapshotId, restored.SnapshotId);
+        Assert.Empty(Directory.GetFileSystemEntries(independentWork));
+        File.Delete(Path.Combine(kit, summary.SnapshotId.ToString("N") + ".zip"));
+        await Assert.ThrowsAsync<FileNotFoundException>(() => FileRecoveryKit.InspectAsync(kit));
+        Assert.Equal(restored.Directory, Assert.Single(Directory.GetDirectories(RestoreParent)));
+    }
+
+    [Fact]
+    public async Task FormerFilesystemDestinationRestoresTheRegisteredPointReadOnly()
+    {
+        var file = Path.Combine(Source, "original.txt");
+        await File.WriteAllTextAsync(file, "prior NAS version");
+        var previous = Job;
+        var point = await Run(previous);
+        var current = previous with { DestinationDirectory = Path.Combine(root, "new-destination") };
+        var historical = HistoricalFileCopy.CreateReadJob(point, current);
+        Assert.NotNull(historical);
+        Assert.Equal(previous.DestinationDirectory, historical.DestinationDirectory);
+        Assert.Null(HistoricalFileCopy.CreateReadJob(point with
+            { Backup = point.Backup with { Location = Path.Combine(root, "foreign", "fixture.zip") } }, current));
+        Assert.Null(HistoricalFileCopy.CreateReadJob(point with { JobId = Guid.NewGuid() }, current));
+        var before = await File.ReadAllBytesAsync(point.Backup.Location);
+        var result = await Restorer().RestoreAsync(point, historical, RestoreParent);
+        Assert.Equal("prior NAS version", await File.ReadAllTextAsync(Path.Combine(result.Directory, "original.txt")));
+        Assert.Equal(before, await File.ReadAllBytesAsync(point.Backup.Location));
+        Assert.False(Directory.Exists(current.DestinationDirectory));
+    }
+
+    [Fact]
     public async Task MonitoredVerificationUsesCurrentCatalogAndShowsOlderVerifiedDestination()
     {
         await File.WriteAllTextAsync(Path.Combine(Source, "file.txt"), "first");

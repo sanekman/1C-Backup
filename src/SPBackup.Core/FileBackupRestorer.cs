@@ -202,7 +202,7 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
             throw new InvalidDataException("Индекс архива не совпадает с зарегистрированной файловой цепочкой.");
         return manifest;
     }
-    private static void RejectAncestorReparse(string path)
+    internal static void RejectAncestorReparse(string path)
     {
         var current = Path.GetFullPath(path);
         while (!string.IsNullOrEmpty(current))

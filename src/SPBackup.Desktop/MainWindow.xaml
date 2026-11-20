@@ -619,6 +619,8 @@
         <Button x:Name="ExtractOneCButton" Content="Извлечь 1Cv8.1CD…" Click="ExtractOneC_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Margin="0,0,8,8" ToolTip="Извлечь файловую базу из проверенного ZIP в новую папку" />
         <Button x:Name="RestoreFilesButton" Content="Восстановить файлы…" Click="RestoreFiles_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Margin="0,0,8,8" ToolTipService.ShowOnDisabled="True" />
         <Button x:Name="ExportCopyButton" Content="Сохранить копию…" Click="ExportCopy_Click" IsEnabled="False" Margin="0,0,8,8" ToolTipService.ShowOnDisabled="True" />
+        <Button x:Name="ExportRecoveryKitButton" Content="Сохранить комплект…" Click="ExportRecoveryKit_Click" Visibility="Collapsed" IsEnabled="False" Margin="0,0,8,8" />
+        <Button x:Name="OpenRecoveryKitButton" Content="Открыть комплект…" Click="OpenRecoveryKit_Click" IsEnabled="False" Margin="0,0,8,8" />
         <Button x:Name="CancelCopyVerificationButton" Content="Отменить операцию" Click="CancelCopyVerification_Click" IsEnabled="False" Margin="0,0,8,8" />
         <Button x:Name="ConfirmEmptySourceCleanupButton" Content="Очистить прежние копии…" Click="ConfirmEmptySourceCleanup_Click" Visibility="Collapsed" Margin="0,0,8,8" />
         <Button x:Name="OpenCopyDirectoryButton" Content="Открыть папку" Click="OpenCopyDirectory_Click" IsEnabled="False" Margin="0,0,0,8" />

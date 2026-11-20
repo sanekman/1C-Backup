@@ -34,10 +34,10 @@ public partial class MainWindow
         => await ShowRestoreCopyAsync(files: true);
 
     internal async Task RestoreSelectedFilesAsync(string parentDirectory, string? passwordOverride = null,
-        IReadOnlyCollection<string>? selectedPaths = null, bool allowOtherDestinations = false)
+        IReadOnlyCollection<string>? selectedPaths = null, bool allowOtherDestinations = false, BackupJob? historicalJob = null)
     {
         if (!RestoreFilesButton.IsEnabled || Copies.SelectedItem is not BackupCopyRow row) return;
-        var job = jobs.FirstOrDefault(job => job.Id == row.Record.JobId); if (job is null) return;
+        var job = historicalJob ?? jobs.FirstOrDefault(job => job.Id == row.Record.JobId); if (job is null) return;
         using var lease = AcquireEngineOrReport(); if (lease is null) { CopyVerificationStatus.Text = Status.Text; return; }
         using var cancellation = new CancellationTokenSource(); copyVerification = cancellation; UpdateRunControls();
         CopyVerificationStatus.Text = Status.Text = "Проверяется цепочка и восстанавливаются файлы в новую папку. Исходные данные не изменяются.";
