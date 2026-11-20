@@ -143,19 +143,44 @@ def first_use(pw, page, url, out, checks):
         ok(api.post(base + '/commands/receipt', data={'commandId': command_id, 'status': status, 'runId': None, 'reason': None}))
     page.reload()
     assert 'Выполняется' in page.inner_text('body')
-    monitor(2, jobs, {'runId': str(uuid.uuid4()), 'jobId': job['id'], 'stage': 'CopyingToStorage',
-                      'percent': 42, 'updatedUtc': now()})
-    page.goto(url + '?branch=all')
-    expect(page.locator(f'[data-dashboard-row][data-agent-id="{agent_id}"]')).to_contain_text('Доставка · 42%')
-    page.screenshot(path=str(out / 'dashboard-running-900.png'))
-    # These reports are synthetic fixture input; no copy or restore is performed.
     run_id = str(uuid.uuid4())
+    progress = {'runId': run_id, 'jobId': job['id'], 'stage': 'CopyingToStorage', 'percent': 42, 'updatedUtc': now()}
+    monitor(2, jobs, progress)
+    page.clock.install()
+    page.goto(url + '?branch=all')
+    dashboard_row = page.locator(f'[data-dashboard-row][data-agent-id="{agent_id}"]')
+    expect(dashboard_row).to_contain_text('Доставка · 42%')
+    page.screenshot(path=str(out / 'dashboard-running-900.png'))
+    dashboard_row.evaluate("(row) => window.originalDashboardRow = row")
+    search = page.locator('[data-agent-search]')
+    search.fill(dashboard_row.get_attribute('data-agent-name'))
+    expect(search).to_be_focused()
+    monitor(2, jobs, dict(progress, percent=60, updatedUtc=now()))
+    page.clock.fast_forward(15000)
+    expect(dashboard_row).to_contain_text('Доставка · 60%')
+    expect(search).to_be_focused()
+    assert dashboard_row.evaluate("(row) => window.originalDashboardRow === row")
+    dashboard_row.locator('[data-agent-move]').click()
+    move_dialog = page.locator('#dashboard-action')
+    expect(move_dialog).to_be_visible()
+    expect(move_dialog.locator('[name="Change.Target"]')).to_be_focused()
+
+    # These reports are synthetic fixture input; no copy or restore is performed.
     ok(api.post(base + '/runs', data={'runId': run_id, 'jobId': job['id'], 'jobName': job['name'],
         'startedUtc': now(-10), 'finishedUtc': now(-5), 'status': 'PartiallySucceeded', 'warningCount': 0,
         'incomplete': False, 'copyKind': 'Full', 'configurationRevision': 2, 'destinations': [
             {'index': 0, 'succeeded': True, 'bytes': 100, 'incomplete': False},
             {'index': 1, 'succeeded': False, 'bytes': 0, 'incomplete': False}],
         'issues': [{'code': 'NetworkUnavailable', 'severity': 'Error', 'stage': 'Storage', 'destinationIndex': 1}]}))
+    page.clock.fast_forward(15000)
+    expect(dashboard_row).to_contain_text('Частичная доставка')
+    expect(dashboard_row).not_to_contain_text('Доставка · 60%')
+    expect(move_dialog).to_be_visible()
+    expect(move_dialog.locator('[name="Change.Target"]')).to_be_focused()
+    move_dialog.locator('[data-dialog-cancel]').click()
+    expect(search).to_have_value(dashboard_row.get_attribute('data-agent-name'))
+    page.locator('[data-agent-reset]').click()
+    checks.append('dashboard-auto-refresh-preserves-row-filter-focus-and-open-move-dialog')
     ok(api.post(base + '/commands/receipt', data={'commandId': command_id, 'status': 'Failed', 'runId': run_id, 'reason': None}))
     page.goto(url + 'agents/' + agent_id)
     assert 'Частичная доставка' in page.inner_text('body')

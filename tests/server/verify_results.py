@@ -5,7 +5,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 NS = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
-SERVER_TEST_COUNT = 186
+SERVER_TEST_COUNT = 187
 WINDOWS_SKIPS = {
     'SPBackup.Server.Tests.ServerUpdateClientTests.AbsentSocketDoesNotClaimThatTheServerIsUpdated',
     'SPBackup.Server.Tests.ServerUpdateClientTests.ClientUsesFixedJsonProtocolAndCannotSendACommandOrUrl',

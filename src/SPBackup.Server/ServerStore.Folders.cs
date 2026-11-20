@@ -16,7 +16,10 @@ public sealed partial class ServerStore
             SELECT a.id,a.folder_id,a.name,a.computer_name,a.revoked,greatest(a.received_utc,m.received_utc),m.received_utc,
                    (m.document->'progress')::text,r.document::text,
                    (SELECT j->>'name' FROM jsonb_array_elements(m.document->'jobs') AS j
-                    WHERE j->>'jobId'=m.document->'progress'->>'jobId' LIMIT 1)
+                    WHERE j->>'jobId'=m.document->'progress'->>'jobId' LIMIT 1),
+                   (m.document->>'progressObservedUtc')::timestamptz,
+                   EXISTS (SELECT 1 FROM server_runs completed WHERE completed.agent_id=a.id
+                           AND completed.run_id=(m.document->'progress'->>'runId')::uuid)
             FROM server_agents a LEFT JOIN server_monitoring m ON m.agent_id=a.id
             LEFT JOIN LATERAL (
                 SELECT document FROM server_runs
@@ -35,7 +38,8 @@ public sealed partial class ServerStore
                 reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6),
                 reader.IsDBNull(7) ? null : JsonSerializer.Deserialize<MonitoredProgress>(reader.GetString(7), MonitoringJson),
                 reader.IsDBNull(8) ? null : JsonSerializer.Deserialize<MonitoredRun>(reader.GetString(8), MonitoringJson),
-                reader.IsDBNull(9) ? null : reader.GetString(9)));
+                reader.IsDBNull(9) ? null : reader.GetString(9),
+                reader.IsDBNull(10) ? null : reader.GetFieldValue<DateTimeOffset>(10), reader.GetBoolean(11)));
         }
         return agents;
     }

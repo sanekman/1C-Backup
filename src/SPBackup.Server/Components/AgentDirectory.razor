@@ -10,8 +10,9 @@
             <label class="agent-attention-filter"><input type="checkbox" data-agent-attention /> Требуют внимания</label>
             <button type="button" class="secondary" data-agent-reset>Сбросить</button>
         </div>
-        <span>Сейчас работают: @Rows.Count(row => row.Current is not null)</span>
+        <span data-dashboard-active>Сейчас работают: @Rows.Count(row => row.Current is { Stale: false })</span>
         <a href="" data-dashboard-refresh>Обновить</a>
+        <span class="muted" data-dashboard-refresh-status role="status" hidden></span>
     </div>
     <div class="dashboard-panes">
         <aside class="dashboard-tree" aria-label="Дерево папок">
@@ -43,20 +44,22 @@
                             data-attention="@(row.Reasons.Count != 0 ? "yes" : "no")" draggable="true"
                             class="@(row.Entry.Id == AgentId ? "dashboard-selected" : null)">
                             <td><a href="@($"?agent={row.Entry.Id}#agent-summary")">@row.Entry.Name</a></td>
-                            <td><strong class="@row.ConnectionColor">@row.Connection</strong>
+                            <td data-dashboard-live><strong class="@row.ConnectionColor">@row.Connection</strong>
                                 @if (row.PrimaryReason is { } reason) { <small class="@ProblemColor(reason.Code)">@ProblemText.Filters[reason.Code]</small> }
                                 else if (row.Reasons.Any(reason => reason.Code != "Offline"))
                                 { <small><a href="@($"problems?agent={row.Entry.Id}")">Причины</a></small> }
                                 else if (row.Entry.LastSeen is { } seen) { <small title="@Clock.Time(seen)">@Clock.Time(seen, "dd.MM HH:mm")</small> }
                             </td>
-                            <td>
+                            <td data-dashboard-live>
                                 @if (row.Current is { } activity)
                                 {
-                                    <strong>@row.CurrentJob</strong><small>@ProgressLabel(activity)</small>
+                                    <strong>@row.CurrentJob</strong>
+                                    <small><span class="@(activity.Stale ? "dashboard-warn" : null)">@(activity.Stale ? "Прогресс устарел · " : "")@activity.Label</span>
+                                        · <time title="@Clock.Time(activity.ObservedUtc)" datetime="@activity.ObservedUtc.ToString("O")">@Clock.Time(activity.ObservedUtc, "dd.MM HH:mm")</time></small>
                                 }
                                 else { <span class="muted">—</span> }
                             </td>
-                            <td>
+                            <td data-dashboard-live>
                                 @if (row.Entry.LatestRun is { } run)
                                 { <strong>@run.JobName</strong><small title="@Clock.Time(run.DisplayFinishedUtc)"><span class="@DeliveryColor(run)">@Delivery(run)</span> · @Clock.Time(run.DisplayFinishedUtc, "dd.MM HH:mm")</small> }
                                 else { <span class="muted">—</span> }
@@ -80,6 +83,12 @@
                 <dt>Связь</dt><dd class="@row.ConnectionColor">@row.Connection</dd>
                 <dt>Последняя связь</dt><dd>@Clock.Time(row.Entry.LastSeen)</dd>
                 <dt>Последний отчёт</dt><dd>@Clock.Time(row.Entry.Observed)</dd>
+                @if (row.Current is { } activity)
+                {
+                    <dt>@(activity.Stale ? "Устаревший прогресс" : "Текущий прогресс")</dt>
+                    <dd><span class="@(activity.Stale ? "dashboard-warn" : null)">@row.CurrentJob · @activity.Label</span>
+                        <small>Последнее изменение @Clock.Time(activity.ObservedUtc)</small></dd>
+                }
                 <dt>Доставка по отчёту</dt>
                 <dd>
                     @if (Latest is { } run)
@@ -141,7 +150,7 @@
         public bool ContainsBranch(string key) => Key == key || Children.Any(child => child.ContainsBranch(key));
     }
 
-    public sealed record AgentRow(AgentTreeEntry Entry, string Connection, string ConnectionColor, IReadOnlyList<AgentProblemCount> Reasons, MonitoredProgress? Current)
+    public sealed record AgentRow(AgentTreeEntry Entry, string Connection, string ConnectionColor, IReadOnlyList<AgentProblemCount> Reasons)
     {
         public AgentProblemCount? PrimaryReason => Reasons.FirstOrDefault(reason => reason.Code != "Offline" && !RepeatsLatestRun(reason));
 
@@ -152,7 +161,8 @@
             "Warning" => reason.Count == 1 && run.Status == "Succeeded" && run.WarningCount > 0,
             _ => false
         };
-        public string CurrentJob { get; set; } = "Копирование";
+        internal MonitoringProgressDisplay? Current { get; init; }
+        public string CurrentJob => Entry.ProgressJob ?? "Копирование";
     }
 
     protected override async Task OnParametersSetAsync()
@@ -170,17 +180,17 @@
                 : entry.LastSeen is null ? ("Ожидает первого сигнала", "dashboard-warn")
                 : entry.LastSeen < cutoff ? ("Нет связи", "dashboard-error")
                 : ("На связи", "dashboard-good");
-            var current = !entry.Revoked && entry.Observed >= cutoff && entry.Progress is { } progress
-                && (entry.LatestRun is not { } latest || latest.JobId != progress.JobId || latest.FinishedUtc < progress.UpdatedUtc)
-                ? progress : null;
-            return new AgentRow(entry, connection, color, reasons, current) { CurrentJob = entry.ProgressJob ?? "Копирование" };
+            var current = entry.Observed is { } received
+                ? MonitoringProgressDisplay.Create(entry.Progress, entry.ProgressObservedUtc, received, entry.Revoked, entry.ProgressCompleted, cutoff)
+                : null;
+            return new AgentRow(entry, connection, color, reasons) { Current = current };
         }).ToLookup(row => row.Entry.FolderId is { } id && folderIds.Contains(id) ? id : Guid.Empty);
         var children = Folders.ToLookup(folder => folder.ParentId ?? Guid.Empty);
         BranchNode Build(AgentFolderOption folder) => new(folder.Id.ToString(), folder.Name, folder.Id,
             children[folder.Id].Select(Build).ToArray(), rows[folder.Id].ToArray(), folder.Path, folder.ParentId?.ToString() ?? "all");
         Branches = children[Guid.Empty].Select(Build)
             .Append(new("root", "Без папки", null, [], rows[Guid.Empty].ToArray(), "Без папки", "all")).ToArray();
-        Rows = rows.SelectMany(group => group).OrderByDescending(row => row.Current is not null)
+        Rows = rows.SelectMany(group => group).OrderByDescending(row => row.Current is { Stale: false })
             .ThenByDescending(row => row.Reasons.Count != 0).ThenBy(row => row.Entry.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
         Selected = AgentId is { } selected ? Rows.FirstOrDefault(row => row.Entry.Id == selected) : null;
         Latest = Selected?.Entry.LatestRun;
@@ -190,21 +200,6 @@
     }
 
     private string FolderPath(AgentRow row) => Folders.FirstOrDefault(folder => folder.Id == row.Entry.FolderId)?.Path ?? "Без папки";
-
-    private static string ProgressLabel(MonitoredProgress progress)
-    {
-        var stage = progress.Stage switch
-        {
-            "ConnectingSource" => "Подключение к источнику",
-            "PreparingStorage" or "ConnectingStorage" => "Подключение к хранилищу",
-            "CreatingBackup" or "ScanningSource" => "Создание копии",
-            "Archiving" => "Архивация",
-            "CopyingToStorage" => "Доставка",
-            "Verifying" => "Проверка",
-            _ => "Выполняется"
-        };
-        return progress.Percent is { } percent ? $"{stage} · {percent}%" : stage;
-    }
 
     private static string ProblemColor(string code) => code switch
     {

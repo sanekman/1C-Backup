@@ -58,7 +58,17 @@ public sealed partial class ServerStore
     {
         if (!MonitoringValidation.Valid(snapshot)) throw new ServerRequestException(400,"invalid_monitoring");
         await using var db = await source.OpenConnectionAsync(token);
-        await using var cmd = Command(db,null,"INSERT INTO server_monitoring(agent_id,document) VALUES(@id,@doc::jsonb) ON CONFLICT(agent_id) DO UPDATE SET document=excluded.document,received_utc=now()",
+        await using var cmd = Command(db, null, """
+            INSERT INTO server_monitoring(agent_id,document) VALUES(@id,
+                CASE WHEN @doc::jsonb->>'progress' IS NULL THEN @doc::jsonb
+                ELSE jsonb_set(@doc::jsonb,'{progressObservedUtc}',to_jsonb(now())) END)
+            ON CONFLICT(agent_id) DO UPDATE SET received_utc=now(), document=
+                CASE WHEN excluded.document->>'progress' IS NOT NULL
+                          AND server_monitoring.document->'progress'=excluded.document->'progress'
+                     THEN jsonb_set(excluded.document,'{progressObservedUtc}',
+                          coalesce(server_monitoring.document->'progressObservedUtc',to_jsonb(server_monitoring.received_utc)))
+                     ELSE excluded.document END
+            """,
             ("id",agentId),("doc",JsonSerializer.Serialize(snapshot,MonitoringJson)));
         await cmd.ExecuteNonQueryAsync(token);
     }
@@ -81,9 +91,12 @@ public sealed partial class ServerStore
     public async Task<MonitoringState?> MonitoringAsync(Guid id, CancellationToken token)
     {
         await using var db = await source.OpenConnectionAsync(token);
-        await using var cmd = Command(db,null,"SELECT received_utc,document::text FROM server_monitoring WHERE agent_id=@id",("id",id));
+        await using var cmd = Command(db,null,"SELECT received_utc,document::text,(document->>'progressObservedUtc')::timestamptz FROM server_monitoring WHERE agent_id=@id",("id",id));
         await using var reader = await cmd.ExecuteReaderAsync(token);
-        return await reader.ReadAsync(token) ? new(reader.GetFieldValue<DateTimeOffset>(0),JsonSerializer.Deserialize<MonitoringSnapshot>(reader.GetString(1),MonitoringJson)!) : null;
+        return await reader.ReadAsync(token)
+            ? new(reader.GetFieldValue<DateTimeOffset>(0), JsonSerializer.Deserialize<MonitoringSnapshot>(reader.GetString(1), MonitoringJson)!)
+                { ProgressObservedUtc = reader.IsDBNull(2) ? null : reader.GetFieldValue<DateTimeOffset>(2) }
+            : null;
     }
     public async Task<MonitoredRunPage> RunsAsync(Guid id, int page, CancellationToken token, bool agentCopiesOnly = false)
     {

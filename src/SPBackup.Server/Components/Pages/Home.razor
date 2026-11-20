@@ -24,7 +24,7 @@
 }
 @if (Overview is { } overview)
 {
-    <section class="agent-totals" aria-label="Мониторинг всех агентов">
+    <section class="agent-totals" data-dashboard-totals aria-label="Мониторинг всех агентов">
         <span>Нет связи: @overview.Offline</span><span>Нет отчётов: @overview.Unreported</span>
         <span>Готово к отправке: @overview.Pending</span>
         @if (overview.LegacyPending > 0) { <span>В очереди старых агентов: @overview.LegacyPending</span> }

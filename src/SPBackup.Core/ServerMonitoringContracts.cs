@@ -98,7 +98,11 @@ public sealed record MonitoringSnapshot(DateTimeOffset SentUtc, string AgentVers
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? ConfigurationCapabilities { get; init; }
 }
-public sealed record MonitoringState(DateTimeOffset ReceivedUtc, MonitoringSnapshot Snapshot);
+public sealed record MonitoringState(DateTimeOffset ReceivedUtc, MonitoringSnapshot Snapshot)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? ProgressObservedUtc { get; init; }
+}
 public sealed record MonitoredRunPage(IReadOnlyList<MonitoredRun> Runs, int Page, int PageSize);
 public static class MonitoringValidation
 {

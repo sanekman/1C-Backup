@@ -11,6 +11,8 @@
     const branches = [...dashboard.querySelectorAll('[data-agent-branch]')].reverse();
     const tableRows = [...dashboard.querySelectorAll('[data-dashboard-row]')];
     const leaves = [...dashboard.querySelectorAll('[data-agent-leaf]')];
+    const refreshLink = dashboard.querySelector('[data-dashboard-refresh]');
+    const refreshStatus = dashboard.querySelector('[data-dashboard-refresh-status]');
     const matches = new Set();
     const storageKey = 'sp-backup-dashboard:' + new URL(document.baseURI).pathname;
     let saved = {};
@@ -20,6 +22,7 @@
     const requestedBranch = new URL(location.href).searchParams.get('branch') ?? saved.branch;
     let selected = folders.get(requestedBranch) ?? folders.get('all');
     let dragged = null;
+    let refreshing = false;
     search.value = typeof saved.query === 'string' ? saved.query : '';
     attention.checked = saved.attention === true;
 
@@ -73,7 +76,9 @@
         }
         const title = dashboard.querySelector('[data-dashboard-title]');
         title.textContent = filtering ? 'Результаты по всем папкам' : selected.dataset.folderPath;
-        dashboard.querySelector('[data-dashboard-count]').textContent = `${shown} из ${tableRows.length}`;
+        const count = dashboard.querySelector('[data-dashboard-count]');
+        const countText = `${shown} из ${tableRows.length}`;
+        if (count.textContent !== countText) count.textContent = countText;
         dashboard.querySelector('[data-agent-no-match]').hidden = shown !== 0;
         reset.disabled = !filtering;
         dashboard.querySelectorAll('[data-folder-op]:not([data-folder-op="create"])')
@@ -187,10 +192,72 @@
         const move = event.target.closest('[data-agent-move]');
         if (move) open('agent-move', move.closest('[data-dashboard-row]'));
     });
-    dashboard.querySelector('[data-dashboard-refresh]').addEventListener('click', event => {
+
+    function replaceContent(target, incoming) {
+        if (target && incoming && !target.contains(document.activeElement) && target.innerHTML !== incoming.innerHTML)
+            target.replaceChildren(...incoming.childNodes);
+    }
+
+    function showRefreshStatus(message) {
+        if (refreshStatus.textContent !== message) refreshStatus.textContent = message;
+        refreshStatus.hidden = message === '';
+    }
+
+    async function refresh(manual = false) {
+        if (refreshing || dragged || (!manual && document.hidden)) return;
+        refreshing = true;
+        const url = location.href;
+        try {
+            const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+            if (dragged || url !== location.href) return;
+            if (response.redirected && manual && !dialog.open) {
+                location.reload();
+                return;
+            }
+            if (!response.ok || response.redirected) throw new Error('Dashboard unavailable');
+            const incoming = new DOMParser().parseFromString(await response.text(), 'text/html');
+            if (dragged || url !== location.href) return;
+            const next = incoming.querySelector('[data-agent-directory]');
+            if (!next) throw new Error('Dashboard missing');
+            const nextRows = new Map([...next.querySelectorAll('[data-dashboard-row]')].map(row => [row.dataset.agentId, row]));
+            const nextFolders = new Map([...next.querySelectorAll('[data-folder-key]')].map(link => [link.dataset.folderKey, link]));
+            const structureChanged = nextRows.size !== tableRows.length || nextFolders.size !== folders.size
+                || tableRows.some(row => {
+                    const other = nextRows.get(row.dataset.agentId);
+                    return !other || ['folderId', 'agentName', 'computerName'].some(key => row.dataset[key] !== other.dataset[key]);
+                })
+                || paths.some(link => {
+                    const other = nextFolders.get(link.dataset.folderKey);
+                    return !other || ['folderParent', 'folderPath'].some(key => link.dataset[key] !== other.dataset[key]);
+                });
+            if (structureChanged && manual && !dialog.open) {
+                location.reload();
+                return;
+            }
+
+            for (const row of tableRows) {
+                const other = nextRows.get(row.dataset.agentId);
+                if (!other) continue;
+                row.dataset.attention = other.dataset.attention;
+                const cells = other.querySelectorAll('[data-dashboard-live]');
+                row.querySelectorAll('[data-dashboard-live]').forEach((cell, index) => replaceContent(cell, cells[index]));
+            }
+            for (const selector of ['[data-dashboard-active]', '[data-dashboard-totals]', '#agent-summary'])
+                replaceContent(document.querySelector(selector), incoming.querySelector(selector));
+            render();
+            showRefreshStatus(structureChanged ? 'Состав дерева изменился. Нажмите «Обновить».' : '');
+        } catch {
+            showRefreshStatus('Не удалось обновить данные.');
+        } finally {
+            refreshing = false;
+        }
+    }
+
+    refreshLink.addEventListener('click', event => {
         event.preventDefault();
-        location.reload();
+        void refresh(true);
     });
+    setInterval(refresh, 15000);
     dialog.querySelector('[data-dialog-cancel]').addEventListener('click', () => dialog.close());
     search.addEventListener('input', render);
     attention.addEventListener('change', render);

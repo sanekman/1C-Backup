@@ -90,6 +90,57 @@ public sealed class MonitoringTests : IClassFixture<ServerFixture>
         var monitoring=await server.Store.MonitoringAsync(agent.AgentId,default); Assert.True(monitoring!.ReceivedUtc < DateTimeOffset.UtcNow.AddMinutes(1));
     }
     [ServerFact]
+    public async Task DashboardAgesRepeatedProgressAndClosesOnlyTheMatchingRun()
+    {
+        var agent = await server.EnrollAsync();
+        var run = Run();
+        var progress = new M.MonitoredProgress(run.RunId, run.JobId, "CopyingToStorage", 42, DateTimeOffset.UtcNow.AddYears(1));
+        var job = new M.MonitoredJob(run.JobId, run.JobName, "FilesAndFolders", true, "Daily", null, 1);
+        var snapshot = new M.MonitoringSnapshot(DateTimeOffset.UtcNow, "test", [job], progress, 0);
+        await server.Store.SaveMonitoringAsync(agent.AgentId, snapshot, default);
+        var first = (await server.Store.MonitoringAsync(agent.AgentId, default))!;
+        Assert.Equal(first.ReceivedUtc, first.ProgressObservedUtc);
+        Assert.True(first.ProgressObservedUtc < progress.UpdatedUtc);
+
+        // Simulate a row from before progress observations were recorded.
+        await server.ExecuteAsync("""
+            UPDATE server_monitoring SET document=document-'progressObservedUtc', received_utc=now()-interval '1 hour'
+            WHERE agent_id=@id
+            """, ("id", agent.AgentId));
+        var previous = (await server.Store.MonitoringAsync(agent.AgentId, default))!;
+        Assert.Null(previous.ProgressObservedUtc);
+        snapshot = snapshot with { SentUtc = DateTimeOffset.UtcNow };
+        await server.Store.SaveMonitoringAsync(agent.AgentId, snapshot, default);
+        var repeated = (await server.Store.MonitoringAsync(agent.AgentId, default))!;
+        Assert.Equal(previous.ReceivedUtc, repeated.ProgressObservedUtc);
+        Assert.True(repeated.ReceivedUtc > previous.ReceivedUtc);
+        using var dashboard = await server.Administrator.GetAsync($"?agent={agent.AgentId}");
+        using var card = await server.Administrator.GetAsync($"agents/{agent.AgentId}");
+        foreach (var page in new[] { dashboard, card })
+        {
+            page.EnsureSuccessStatusCode();
+            Assert.Contains("Прогресс устарел", WebUtility.HtmlDecode(await page.Content.ReadAsStringAsync()));
+        }
+
+        await server.Store.SaveRunAsync(agent.AgentId, run with { RunId = Guid.NewGuid() }, default);
+        await server.Store.SaveMonitoringAsync(agent.AgentId, snapshot with { Progress = progress with { Percent = 60 } }, default);
+        var active = (await server.Store.MonitoringAsync(agent.AgentId, default))!;
+        Assert.Equal(60, active.Snapshot.Progress?.Percent);
+        Assert.True(active.ProgressObservedUtc > repeated.ProgressObservedUtc);
+        using var activeDashboard = await server.Administrator.GetAsync($"?agent={agent.AgentId}");
+        activeDashboard.EnsureSuccessStatusCode();
+        Assert.Contains("Доставка · 60%", WebUtility.HtmlDecode(await activeDashboard.Content.ReadAsStringAsync()));
+
+        await server.Store.SaveRunAsync(agent.AgentId, run, default);
+        using var finished = await server.Administrator.GetAsync($"agents/{agent.AgentId}");
+        finished.EnsureSuccessStatusCode();
+        Assert.DoesNotContain("Доставка · 60%", WebUtility.HtmlDecode(await finished.Content.ReadAsStringAsync()));
+        using var finishedDashboard = await server.Administrator.GetAsync($"?agent={agent.AgentId}");
+        finishedDashboard.EnsureSuccessStatusCode();
+        Assert.DoesNotContain("Доставка · 60%", WebUtility.HtmlDecode(await finishedDashboard.Content.ReadAsStringAsync()));
+    }
+
+    [ServerFact]
     public async Task RealClientSendsHistoryAfterFailureWithoutChangingLocalJobs()
     {
         var agent=await server.EnrollAsync(); var root=Path.Combine(server.Root,Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
