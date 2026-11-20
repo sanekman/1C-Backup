@@ -1,0 +1,70 @@
+@page "/agents/{Id:guid}/jobs/{JobId:guid}/run"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject ServerOptions Settings
+@inject IHttpContextAccessor Http
+@using System.Security.Claims
+<PageTitle>Запустить задание — @Settings.DisplayName</PageTitle>
+<a href="@($"agents/{Id}/jobs")">← Задания агента</a>
+<h1>Удалённый ручной запуск</h1>
+@if (Job is { } job && Configuration is { } configuration)
+{
+    <section class="card narrow">
+    <h2>@job.Name</h2>
+    <p>План: ревизия @configuration.Revision. Команда запустит сохранённое задание даже при выключенном расписании.</p>
+    <p>Команда ждёт связи не дольше указанного срока. Если агент уже выполняет копию, он дождётся свободного исполнителя.
+        Изменение плана до принятия запуска отклоняет команду. Результат копирования показывается отдельно от принятия команды.</p>
+    @if (Created is not null) { <p role="status">Команда сохранена. Это ещё не подтверждение запуска или создания копии.</p> }
+    else
+    {
+        @if (Error is not null) { <p class="error" role="alert">@Error</p> }
+        <form method="post" @formname="remote-run" @onsubmit="Submit">
+        <AntiforgeryToken />
+        <input type="hidden" name="CommandId" value="@CommandId" /><input type="hidden" name="Revision" value="@Revision" />
+        <label>Срок ожидания<input name="Minutes" type="number" min="1" max="1440" value="@Minutes" required /> минут (от 1 до 1440)</label>
+        <button type="submit">Отправить команду запуска</button>
+        </form>
+    }
+    <p><a href="@($"agents/{Id}/commands")">Состояние и история команд</a></p>
+    <p class="muted">При отсутствии связи команда остаётся в ожидании. Новый запуск после ошибки или прерывания создавайте только после проверки истории копий.</p>
+    </section>
+}
+else { <p class="error">@(Error ?? "Задание недоступно.")</p> }
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [Parameter] public Guid JobId { get; set; }
+    [SupplyParameterFromForm] public string? CommandId { get; set; }
+    [SupplyParameterFromForm] public string? Revision { get; set; }
+    [SupplyParameterFromForm] public int? Minutes { get; set; }
+    private ManagedFileConfiguration? Configuration;
+    private ManagedFileJob? Job;
+    private RemoteRunState? Created;
+    private string? Error;
+    protected override async Task OnParametersSetAsync()
+    {
+        Http.HttpContext!.Response.Headers.Remove("Refresh");
+        try
+        {
+            Configuration = await Store.ReadFileConfigurationAsync(Id, Http.HttpContext!.RequestAborted);
+            Job = Configuration.Jobs.FirstOrDefault(j => j.Id == JobId);
+            Minutes ??= 10;
+            CommandId ??= Guid.NewGuid().ToString("D");
+            Revision ??= Configuration.Revision.ToString(CultureInfo.InvariantCulture);
+        }
+        catch (ServerRequestException) { Error = "Задание или план недоступны. Обновите список заданий."; }
+    }
+    private async Task Submit()
+    {
+        if (Configuration is null || Job is null) return;
+        var context = Http.HttpContext!;
+        if (!Guid.TryParse(CommandId, out var command) || !long.TryParse(Revision, NumberStyles.None, CultureInfo.InvariantCulture, out var revision)
+            || !Guid.TryParse(context.User.FindFirstValue("stamp"), out var stamp))
+        { Error = "Не удалось прочитать форму. Откройте запуск из списка заданий заново."; return; }
+        try { Created = await Store.CreateRemoteRunAsync(ServerAuthentication.UserId(context.User), stamp, Id, new(command, JobId, revision, Minutes ?? 10), context.RequestAborted); }
+        catch (ServerRequestException e)
+        { Error = e.Code switch { "remote_runs_unsupported" => "Нужен обновлённый работающий агент в режиме «Задания с сервера». Дождитесь его первого отчёта.",
+            "configuration_revision_conflict" => "План изменился. Проверьте новый план и откройте запуск заново.",
+            "remote_queue_full" => "Очередь команд заполнена. Дождитесь завершения или истечения прежних команд.",
+            _ => "Команда не подтверждена. Проверьте историю команд перед новым запуском." }; }
+    }
+}

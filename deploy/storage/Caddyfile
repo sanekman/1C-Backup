@@ -1,0 +1,13 @@
+{
+ email {$ACME_EMAIL}
+ acme_ca https://acme-v02.api.letsencrypt.org/directory
+ admin off
+}
+{$STORAGE_DOMAIN} {
+ tls {
+  issuer acme {
+   dir https://acme-v02.api.letsencrypt.org/directory
+  }
+ }
+ reverse_proxy 127.0.0.1:7087
+}

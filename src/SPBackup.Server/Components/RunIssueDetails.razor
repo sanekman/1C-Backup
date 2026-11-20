@@ -1,0 +1,21 @@
+@using SPBackup.Server.Monitoring
+@if (Run.Issues is { Count: > 0 } issues)
+{
+    <ul class="run-issues">
+    @foreach (var issue in issues)
+    {
+        <li>
+            <strong class="@(issue.Severity == "Error" ? "error" : "warning")">@(issue.Severity == "Error" ? "Ошибка" : "Предупреждение"): @RunIssueText.Title(issue)</strong>
+            <p>@RunIssueText.Stage(issue)@if (issue.DestinationIndex is { } index) { <span> · Хранилище @(index + 1)</span> }@if (issue.NativeCode is { } nativeCode) { <span> · @(issue.Code == "HttpFailed" ? "HTTP" : "Код системы"): @nativeCode</span> }</p>
+            <p>@RunIssueText.Advice(issue)</p>
+        </li>
+    }
+    </ul>
+}
+else if (Run.WarningCount > 0 || Run.Incomplete || Run.Status != "Succeeded")
+{
+    <p class="muted">Подробные причины не переданы агентом для этого запуска. Откройте его результат в истории на компьютере агента. Для новых запусков расшифровки появятся после обновления агента до версии с поддержкой подробных отчётов.</p>
+}
+@code {
+    [Parameter, EditorRequired] public MonitoredRun Run { get; set; } = null!;
+}

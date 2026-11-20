@@ -1,0 +1,99 @@
+<section class="card" aria-label="Сравнение планов">
+    <h2>Что изменится после принятия плана агентом</h2>
+    @if (Changes.Count == 0)
+    {
+        <p>Параметры заданий совпадают.</p>
+    }
+    else
+    {
+        <div class="table-scroll"><table>
+            <thead><tr><th>Задание / параметр</th><th>Сейчас · @Current.Revision</th><th>После · из @Plan.Revision</th></tr></thead>
+            <tbody>
+            @foreach (var row in Changes)
+            {
+                <tr><th scope="row">@row.Label</th><td class="path">@row.Before</td><td class="path">@row.After</td></tr>
+            }
+            </tbody>
+        </table></div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ManagedFileConfiguration Current { get; set; } = null!;
+    [Parameter, EditorRequired] public ManagedFileConfiguration Plan { get; set; } = null!;
+    private List<(string Label, string Before, string After)> Changes = [];
+
+    protected override void OnParametersSet()
+    {
+        Changes.Clear();
+        var current = Current.Jobs.ToDictionary(job => job.Id);
+        var target = Plan.Jobs.ToDictionary(job => job.Id);
+        foreach (var job in Current.Jobs)
+        {
+            if (!target.TryGetValue(job.Id, out var next))
+            {
+                Changes.Add((job.Name, Schedule(job), "Вне нового плана"));
+                continue;
+            }
+
+            foreach (var (label, before, after) in Compare(job, next))
+                if (before != after) Changes.Add(($"{job.Name} · {label}", before, after));
+        }
+
+        foreach (var job in Plan.Jobs)
+            if (!current.ContainsKey(job.Id))
+                Changes.Add((job.Name, "Вне текущего плана", $"{Schedule(job)} · {Destinations(job)}"));
+    }
+
+    private static IEnumerable<(string Label, string Before, string After)> Compare(ManagedFileJob before, ManagedFileJob after)
+    {
+        yield return ("Название", before.Name, after.Name);
+        yield return ("Тип источника", SourceKind(before), SourceKind(after));
+        yield return ("Источник", before.Source, after.Source);
+        yield return ("Расписание", Schedule(before), Schedule(after));
+        yield return ("Хранилища и лимиты", Destinations(before), Destinations(after));
+        yield return ("Пароль ZIP", Password(before), Password(after));
+        yield return ("Сетевой вход", NetworkAccess(before), NetworkAccess(after));
+        yield return ("Контроль свежести", Freshness(before), Freshness(after));
+        yield return ("Рабочая папка", before.TemporaryDirectory ?? "По умолчанию", after.TemporaryDirectory ?? "По умолчанию");
+        yield return ("Режим копирования", CopyMode(before), CopyMode(after));
+        yield return ("Открытая база 1С", OpenDatabase(before), OpenDatabase(after));
+    }
+
+    private static string SourceKind(ManagedFileJob job) => job.Kind == "OneCFile" ? "Файловая база 1С" : "Файлы и папки";
+    private static string Password(ManagedFileJob job) => job.ManagedSecrets?.ArchivePassword == true ? "Требуется" : "Не требуется";
+    private static string Freshness(ManagedFileJob job) => job.MaximumBackupAgeHours is { } hours ? $"{hours} ч" : "Контроль выключен";
+    private static string OpenDatabase(ManagedFileJob job) => job.Kind != "OneCFile" ? "—" : job.AllowOpenOneCDatabase ? "Разрешена" : "Требуется закрыть";
+    private static string CopyMode(ManagedFileJob job) => job.Kind == "OneCFile" || job.FileBackupMode == "Full" ? "Полная копия"
+        : job.FullBackupDayOfWeek is { } day ? $"Инкрементная · полная в {FileJobDraft.Days.First(item => item.Key == day.ToString()).Label}"
+        : $"Инкрементная · полная каждая {job.FullBackupEvery}-я копия";
+    private static string NetworkAccess(ManagedFileJob job) => job.ManagedSecrets?.NetworkDestinations is { Count: > 0 } destinations
+        ? "Хранилища " + string.Join(", ", destinations.Order().Select(index => index + 1)) : "Не требуется";
+
+    private static string Destinations(ManagedFileJob job)
+    {
+        static string Label(string path, string kind, int count) =>
+            $"{path} ({(kind == "NetworkShare" ? "сетевая папка" : "локальная папка")}, лимит {count})";
+
+        return string.Join(" · ", (job.AdditionalDestinations ?? []).Select(item =>
+            Label(item.DestinationDirectory, item.StorageKind, item.KeepLast ?? job.KeepLast))
+            .Prepend(Label(job.DestinationDirectory, job.StorageKind, job.KeepLast)));
+    }
+
+    private static string Schedule(ManagedFileJob job)
+    {
+        var label = FileJobDraft.ScheduleLabel(job.ScheduleKind);
+        if (job.ScheduleKind == "Manual") return label;
+
+        var enabled = job.Enabled ? "включено" : "выключено";
+        if (job.ScheduleKind is not ("Daily" or "Weekly")) return $"{label} · {enabled}";
+
+        var times = string.Join(", ", (job.AdditionalDailyTimes ?? []).Prepend(job.DailyAt)
+            .Select(time => time.ToString("HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture)));
+        var zone = job.TimeZoneId == "Local" ? "часовой пояс агента" : job.TimeZoneId;
+        var days = job.ScheduleKind == "Weekly"
+            ? " · " + string.Join(", ", FileJobDraft.Days.Where(day => job.DaysOfWeek.Split(',').Select(value => value.Trim()).Contains(day.Key)).Select(day => day.Label))
+            : "";
+        return $"{label} · {enabled}{days} · {times} · {zone}";
+    }
+}

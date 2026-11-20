@@ -1,0 +1,40 @@
+<dt>Сохранённый план</dt>
+<dd>Ревизия @Status.SavedRevision
+    <small class="@(Status.Rejected ? "dashboard-error" : Status.Decision == "Accepted" ? null : "dashboard-warn")">@Status.DecisionLabel</small>
+</dd>
+<dt>Принятая ревизия</dt>
+<dd>
+    @if (Status.AcceptedRevision is { } accepted)
+    {
+        <span>Ревизия @accepted</span><small>Подтверждение получено @Clock.Time(Status.AcceptedUtc)</small>
+    }
+    else
+    {
+        <span>Подтверждения ещё нет</span>
+    }
+</dd>
+<dt>Ревизия по данным агента</dt>
+<dd>
+    @(Status.ReportedRevision is { } reported ? $"Ревизия {reported}" : "Агент не сообщил ревизию")
+    @if (Status.ReportedUtc is { } report)
+    {
+        <small class="@(Status.ReportStale ? "dashboard-warn" : null)">@(Status.ReportStale ? "Данные устарели · " : "")@Clock.Time(report)</small>
+    }
+</dd>
+<dt>Готовность исполнителя</dt>
+<dd>
+    <span class="@(Status.ExecutorReady == false ? "dashboard-error" : Status.ExecutorReady is null ? "dashboard-warn" : null)">@Status.ExecutorLabel</span>
+    @if (Status.ExecutorObservedUtc is { } observed) { <small>Получено @Clock.Time(observed)</small> }
+</dd>
+<dt>Локальный доступ</dt>
+<dd>
+    <span class="@(Status.AccessStale ? "dashboard-warn" : Status.MissingAccess > 0 ? "dashboard-error" : null)">@Status.AccessLabel</span>
+    @if (Status.AccessUtc is { } access)
+    {
+        <small class="@(Status.AccessStale ? "dashboard-warn" : null)">@(Status.AccessStale ? "Отчёт устарел · " : "")@(Status.AccessRevision is { } revision ? $"По ревизии {revision} · " : "")@Clock.Time(access)</small>
+    }
+</dd>
+
+@code {
+    [Parameter, EditorRequired] public ManagedPlanStatus Status { get; set; } = null!;
+}

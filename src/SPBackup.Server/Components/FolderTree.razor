@@ -1,0 +1,26 @@
+<ul class="folder-tree">
+@foreach (var folder in Folders.Where(f => f.ParentId == ParentId))
+{
+    <li>
+    @if (Folders.Any(f => f.ParentId == folder.Id))
+    {
+        <details open="@Open(folder.Id)"><summary><a href="@($"?folder={folder.Id}")" aria-current="@(SelectedId == folder.Id ? "page" : null)">@folder.Name</a></summary>
+        <FolderTree Folders="Folders" ParentId="folder.Id" SelectedId="SelectedId" />
+        </details>
+    }
+    else
+    { <a href="@($"?folder={folder.Id}")" aria-current="@(SelectedId == folder.Id ? "page" : null)">@folder.Name</a> }
+    </li>
+}
+</ul>
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<AgentFolderOption> Folders { get; set; } = [];
+    [Parameter] public Guid? ParentId { get; set; }
+    [Parameter] public Guid? SelectedId { get; set; }
+    private bool Open(Guid id)
+    {
+        for (var next = SelectedId; next is not null; next = Folders.FirstOrDefault(f => f.Id == next)?.ParentId)
+            if (next == id) return true;
+        return false;
+    }
+}
