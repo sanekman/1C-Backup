@@ -228,6 +228,7 @@ public partial class ExternalMonitoringWindow : Window
         {
             SourceSettings.IsExpanded = true;
             Status.Text = "Параметры сертификата или шифрования изменены. Нажмите «Сохранить задание», затем «Прочитать журнал копий».";
+            SaveMonitorButton.Focus();
             return;
         }
         busy = true; Editor.IsEnabled = false; Status.Text = "Чтение сведений о внешних копиях…";

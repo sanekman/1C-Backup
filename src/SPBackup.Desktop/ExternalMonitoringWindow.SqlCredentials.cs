@@ -15,13 +15,21 @@ public partial class ExternalMonitoringWindow
     private void SqlAllowUnencrypted_Click(object sender, RoutedEventArgs e)
     {
         if (SqlAllowUnencrypted.IsChecked == true && !SqlCertificateWarning.ConfirmOptionalEncryption(this))
+        {
             SqlAllowUnencrypted.IsChecked = false;
+            return;
+        }
+        Status.Text = "Чтобы применить настройку шифрования, нажмите «Сохранить задание».";
     }
 
     private void SqlTrustServerCertificate_Click(object sender, RoutedEventArgs e)
     {
         if (SqlTrustServerCertificate.IsChecked == true && !SqlCertificateWarning.Confirm(this, SqlAllowUnencrypted.IsChecked == true))
+        {
             SqlTrustServerCertificate.IsChecked = false;
+            return;
+        }
+        Status.Text = "Чтобы применить настройку сертификата, нажмите «Сохранить задание».";
     }
 
     private void SqlAuthentication_Changed(object sender, RoutedEventArgs e)

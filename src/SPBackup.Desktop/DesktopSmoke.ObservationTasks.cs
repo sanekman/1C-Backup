@@ -82,6 +82,15 @@ internal static partial class DesktopSmoke
             if (!Control<TextBlock>("Status").Text.Contains("часов") || (await store.LoadAsync()).Count != original.Count)
                 throw new InvalidOperationException("Редактор сохранил неверный срок ожидания копии.");
             Control<TextBox>("FreshnessHours").Text = "26";
+            editor.Width = 900;
+            editor.Height = 580;
+            Control<Expander>("SqlCertificateSettings").IsExpanded = true;
+            Control<CheckBox>("SqlTrustServerCertificate").BringIntoView();
+            editor.UpdateLayout();
+            var save = Control<Button>("SaveMonitorButton");
+            if (!save.IsVisible || save.ActualHeight < 20
+                || save.TranslatePoint(new Point(0, save.ActualHeight), editor).Y >= editor.ActualHeight)
+                throw new InvalidOperationException("Компактное окно скрывает сохранение при настройке сертификата.");
             await VerifySqlCertificateWarningAsync(editor);
             Control<Button>("SaveMonitorButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitUntil(() => editor.SmokeReady, "Задание наблюдения не сохранилось.");
