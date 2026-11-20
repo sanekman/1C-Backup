@@ -123,6 +123,7 @@ with sync_playwright() as pw:
     expect(page.get_by_text('Сервер уже хранит другой отчёт с тем же ID запуска · 1', exact=True)).to_be_visible()
     page.set_viewport_size({'width': 360, 'height': 800})
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    page.evaluate('window.scrollTo(0, 0)')
     page.screenshot(path=str(out / 'agent-report-delivery-360.png'))
     checks.append('agent-shows-both-rejection-reasons-without-page-overflow')
     first_use(pw, page, a.url, out, checks)
