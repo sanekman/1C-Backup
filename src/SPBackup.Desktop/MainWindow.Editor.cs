@@ -191,6 +191,8 @@ public partial class MainWindow
                 : Enabled.IsChecked != true ? "Автоматические запуски отключены"
                 : Schedule.SelectedValue is ScheduleKind.SystemStartup ? "При запуске системы, после входа в Windows"
                 : (Schedule.SelectedValue is ScheduleKind.Weekly ? "По дням: " + string.Join(", ", DayControls.Where(day => day.Box.IsChecked == true).Select(day => day.Box.Content)) : "Ежедневно") + " · " + DailyAt.Text.Trim();
+            if (Enabled.IsChecked == true && Schedule.SelectedValue is ScheduleKind kind && ReadCatchUpWindow(kind) is > 0 and var minutes)
+                schedule += $" · догоняющий запуск до {minutes} мин";
             var format = EncryptArchive.IsChecked == true ? "ZIP с паролем (AES-256)"
                 : ArchiveCopies.IsChecked == true || OneCMethodPicker.SelectedValue is OneCBackupMethod.FileArchive && Kind.SelectedItem is DatabaseKind.OneCFile
                     ? "ZIP без пароля" : "Исходный формат копии";
@@ -391,7 +393,13 @@ public partial class MainWindow
             TimeOnly[] times = [new(23, 0)];
             if (Schedule.SelectedValue is ScheduleKind.Daily or ScheduleKind.Weekly && !TryParseRunTimes(DailyAt.Text, out times)) return RejectWizard("Введите время в формате 23:00. Несколько запусков: 09:00, 13:00, 23:00, без повторов.", 2, DailyAt);
             var job = new BackupJob { ScheduleKind = (ScheduleKind)Schedule.SelectedValue, DaysOfWeek = SelectedDays(), TimeZoneId = BackupSchedule.LocalTimeZone,
-                DailyAt = times[0], AdditionalDailyTimes = times.Skip(1).ToArray() };
+                DailyAt = times[0], AdditionalDailyTimes = times.Skip(1).ToArray(),
+                CatchUpWithinMinutes = ReadCatchUpWindow((ScheduleKind)Schedule.SelectedValue) };
+            if (job.CatchUpWithinMinutes is < 1 or > 1440)
+            {
+                CatchUpOptions.IsExpanded = true;
+                return RejectWizard("Укажите опоздание от 1 до 1440 минут.", 2, CatchUpMinutes);
+            }
             var errors = job.ValidateSchedule();
             if (errors.Count != 0) return RejectWizard(string.Join(" ", errors), 2, DailyAt);
         }

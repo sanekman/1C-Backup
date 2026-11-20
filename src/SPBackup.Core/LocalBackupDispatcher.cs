@@ -16,11 +16,26 @@ public sealed class LocalBackupDispatcher
     {
         this.store = store;
         this.execute = execute;
-        scheduler = new(new StartupBackupSchedule(startupSchedulePath));
+        scheduler = new(new StartupBackupSchedule(startupSchedulePath),
+            new CalendarScheduleState(CalendarScheduleState.PathBesideStartupMarker(startupSchedulePath)));
     }
 
     public static bool Supports(BackupJob job) => Enum.IsDefined(job.Kind) &&
         Enum.IsDefined(job.StorageKind);
+
+    public static async Task<IReadOnlyDictionary<Guid, MissedScheduledRun>> ReadMissedRunsAsync(
+        string profileDirectory, IEnumerable<BackupJob> jobs, CancellationToken token = default)
+    {
+        var cursors = await new CalendarScheduleState(Path.Combine(profileDirectory, "calendar-schedule.json")).ReadAsync(token);
+        var result = new Dictionary<Guid, MissedScheduledRun>();
+        foreach (var job in jobs.Where(CalendarScheduleState.Tracks))
+        {
+            if (cursors.GetValueOrDefault(job.Id) is { LastMissed: { } missed } cursor
+                && cursor.Schedule == CalendarScheduleState.Identity(job, BackupSchedule.ResolveTimeZone(job.TimeZoneId)))
+                result[job.Id] = missed;
+        }
+        return result;
+    }
 
     /// <summary>Resolve a manual command from the same source as the schedule, then retain its snapshot.</summary>
     public async Task ExecuteByIdAsync(Guid jobId, CancellationToken cancellationToken = default)

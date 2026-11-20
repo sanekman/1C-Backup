@@ -89,6 +89,57 @@ public sealed class SchedulerTests
     }
 
     [Fact]
+    public async Task RestartRecordsLatestMissedSlotAndOnlyAttemptsItWhenEnabledAndInTime()
+    {
+        var directory = Directory.CreateTempSubdirectory("spb-calendar-");
+        try
+        {
+            var state = new CalendarScheduleState(Path.Combine(directory.FullName, "calendar-schedule.json"));
+            var missed = Job;
+            var catchUp = Job with { CatchUpWithinMinutes = 10 };
+            var expired = Job with { CatchUpWithinMinutes = 5 };
+            var weekly = Job with { ScheduleKind = ScheduleKind.Weekly, DaysOfWeek = WeekDays.Saturday, CatchUpWithinMinutes = 10 };
+            BackupJob[] jobs = [missed, catchUp, expired, weekly];
+            var ran = new List<Guid>();
+            Task Execute(BackupJob job, CancellationToken _) { ran.Add(job.Id); return Task.CompletedTask; }
+            Assert.Empty(await new BackupScheduler(null, state).RunDueAsync(jobs, At(9, 22), Execute));
+            var resumedAt = At(17, 23).AddMinutes(6);
+            var resumed = await new BackupScheduler(null, state).RunDueAsync(jobs, resumedAt, Execute);
+            Assert.Equal([catchUp.Id, weekly.Id], ran);
+            Assert.All(resumed, item => Assert.Equal(At(17, 23), item.ScheduledAt));
+            Assert.Empty(await new BackupScheduler(null, state).RunDueAsync(jobs, resumedAt.AddMinutes(1), Execute));
+            Assert.Empty(await new BackupScheduler(null, state).RunDueAsync(jobs, At(17, 22), Execute));
+            var status = await LocalBackupDispatcher.ReadMissedRunsAsync(directory.FullName, jobs);
+            Assert.Equal(new MissedScheduledRun(At(17, 23), false), status[missed.Id]);
+            Assert.Equal(new MissedScheduledRun(At(17, 23), true), status[catchUp.Id]);
+            Assert.Equal(new MissedScheduledRun(At(17, 23), false), status[expired.Id]);
+            Assert.Equal(new MissedScheduledRun(At(17, 23), true), status[weekly.Id]);
+            Assert.All(await state.ReadAsync(default), cursor => Assert.True(cursor.Value.Next > resumedAt));
+        }
+        finally { directory.Delete(true); }
+    }
+
+    [Fact]
+    public async Task DisabledAndChangedTimeZoneJobsDoNotReplayTheirPreviousSchedules()
+    {
+        var directory = Directory.CreateTempSubdirectory("spb-calendar-");
+        try
+        {
+            var state = new CalendarScheduleState(Path.Combine(directory.FullName, "calendar-schedule.json"));
+            var job = Job with { CatchUpWithinMinutes = 60 };
+            var disabled = Job with { CatchUpWithinMinutes = 60 };
+            Task Execute(BackupJob _, CancellationToken _) => throw new InvalidOperationException("must not execute");
+            await new BackupScheduler(null, state).RunDueAsync([job, disabled], At(10, 22), Execute);
+            job = job with { TimeZoneId = "Tokyo Standard Time" };
+            disabled = disabled with { Enabled = false };
+            Assert.Empty(await new BackupScheduler(null, state).RunDueAsync([job, disabled], At(10, 23).AddMinutes(6), Execute));
+            Assert.Empty(await LocalBackupDispatcher.ReadMissedRunsAsync(directory.FullName, [job, disabled]));
+            Assert.Single(await state.ReadAsync(default));
+        }
+        finally { directory.Delete(true); }
+    }
+
+    [Fact]
     public async Task TimerHostExecutesAndStopsOnCancellation()
     {
         var job = Job;

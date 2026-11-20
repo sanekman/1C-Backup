@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using SPBackup.Core;
 
@@ -9,6 +10,41 @@ public partial class MainWindow
     private BackupJob? selectedScheduleJob;
     private AgentMode? selectedScheduleMode;
     private JobSchedulePreview? selectedSchedulePreview;
+    private Dictionary<Guid, (BackupJob Job, MissedScheduledRun Missed)> missedSchedules = [];
+    private DateTimeOffset missedSchedulesReadAt;
+    private string? missedSchedulesProfile;
+    private bool missedSchedulesReadFailed;
+
+    private int? ReadCatchUpWindow(ScheduleKind kind) =>
+        kind is ScheduleKind.Daily or ScheduleKind.Weekly && CatchUpMissedRun.IsChecked == true
+            ? int.TryParse(CatchUpMinutes.Text, out var minutes) ? minutes : 0
+            : null;
+
+    private async Task RefreshMissedSchedulesAsync()
+    {
+        var profile = agentSettings?.Mode == AgentMode.Managed
+            ? new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings).DirectoryPath : DesktopPaths.DataDirectory;
+        var now = DateTimeOffset.UtcNow;
+        if (missedSchedulesProfile == profile && now >= missedSchedulesReadAt && now - missedSchedulesReadAt < TimeSpan.FromSeconds(10))
+            return;
+        missedSchedulesProfile = profile;
+        missedSchedulesReadAt = now;
+        try
+        {
+            var jobs = Jobs.Items.OfType<BackupJob>().ToArray();
+            var statuses = await LocalBackupDispatcher.ReadMissedRunsAsync(profile, jobs);
+            missedSchedules = jobs.Where(job => statuses.ContainsKey(job.Id))
+                .ToDictionary(job => job.Id, job => (job, statuses[job.Id]));
+            missedSchedulesReadFailed = false;
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException
+            or TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+        {
+            missedSchedules = [];
+            missedSchedulesReadFailed = true;
+            DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Warning, error);
+        }
+    }
 
     private void SelectedSchedule_Expanded(object sender, RoutedEventArgs e)
     { UpdateJobActionsLayout(); UpdateSelectedSchedule(); }
@@ -35,6 +71,13 @@ public partial class MainWindow
         var preview = selectedSchedulePreview;
         var lines = new List<string> { "Задание: " + job.Name, preview.Summary };
         if (preview.Error is { } error) lines.Add(error);
+        if (job.Enabled && job.ScheduleKind is ScheduleKind.Daily or ScheduleKind.Weekly)
+        {
+            if (missedSchedules.TryGetValue(job.Id, out var state) && ReferenceEquals(state.Job, job))
+                lines.Add((state.Missed.CatchUpAttempted ? "Назначен запуск с опозданием · " : "Пропущенный запуск · ")
+                    + state.Missed.ScheduledAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm zzz"));
+            if (missedSchedulesReadFailed) lines.Add("Сведения о пропущенных запусках недоступны.");
+        }
         if (preview.Runs.Count > 0)
         {
             lines.Add("Время на этом компьютере: " + TimeZoneInfo.Local.DisplayName);

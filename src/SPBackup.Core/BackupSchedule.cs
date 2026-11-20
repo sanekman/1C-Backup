@@ -32,13 +32,25 @@ public static class BackupSchedule
         if (errors.Count > 0) throw new ArgumentException(string.Join(" ", errors), nameof(job));
         if (!job.Enabled || job.ScheduleKind is ScheduleKind.Manual or ScheduleKind.SystemStartup) return null;
         var zone = ResolveTimeZone(job.TimeZoneId);
-        var firstDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(after, zone).DateTime);
+        return NextRun(job, after, zone);
+    }
+
+    internal static DateTimeOffset NextRun(BackupJob job, DateTimeOffset after, TimeZoneInfo zone) =>
+        FindRun(job, after, zone, forward: true) ?? throw new InvalidOperationException("Не удалось определить следующий запуск.");
+
+    internal static DateTimeOffset? LastRun(BackupJob job, DateTimeOffset at, TimeZoneInfo zone) =>
+        FindRun(job, at, zone, forward: false);
+
+    private static DateTimeOffset? FindRun(BackupJob job, DateTimeOffset instant, TimeZoneInfo zone, bool forward)
+    {
+        var firstDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, zone).DateTime);
+        var times = job.ScheduledTimes;
         for (var offset = 0; offset <= 8; offset++)
         {
-            var date = firstDate.AddDays(offset);
+            var date = firstDate.AddDays(forward ? offset : -offset);
             if (job.ScheduleKind == ScheduleKind.Weekly && !job.DaysOfWeek.HasFlag(DayFlag(date.DayOfWeek))) continue;
-            DateTimeOffset? earliest = null;
-            foreach (var time in job.ScheduledTimes)
+            DateTimeOffset? nearest = null;
+            foreach (var time in times)
             {
                 var local = date.ToDateTime(time, DateTimeKind.Unspecified);
                 // When clocks jump forward, move to the first valid minute on that date.
@@ -47,10 +59,11 @@ public static class BackupSchedule
                 var utc = zone.IsAmbiguousTime(local)
                     ? new DateTimeOffset(local, zone.GetAmbiguousTimeOffsets(local).Max()).ToUniversalTime()
                     : new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, zone));
-                if (utc > after && (earliest is null || utc < earliest)) earliest = utc;
+                if (forward ? utc > instant && (nearest is null || utc < nearest)
+                    : utc <= instant && (nearest is null || utc > nearest)) nearest = utc;
             }
-            if (earliest is not null) return earliest;
+            if (nearest is not null) return nearest;
         }
-        throw new InvalidOperationException("Не удалось определить следующий запуск.");
+        return null;
     }
 }

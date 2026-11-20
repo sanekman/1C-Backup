@@ -477,6 +477,19 @@ internal static partial class DesktopSmoke
             AssertEditorContentVisible("SchedulePreviewPanel");
             AssertVisibleFooter("NextStepButton");
             Screenshot("schedule-preview-compact");
+            if (Control<CheckBox>("CatchUpMissedRun").IsChecked == true)
+                throw new InvalidOperationException("Запуск пропущенной копии включён по умолчанию.");
+            Control<Expander>("CatchUpOptions").IsExpanded = true;
+            Control<CheckBox>("CatchUpMissedRun").IsChecked = true;
+            Control<TextBox>("CatchUpMinutes").Text = "0";
+            Click("NextStepButton");
+            if (!Control<TextBlock>("WizardError").Text.Contains("от 1 до 1440 минут"))
+                throw new InvalidOperationException("Мастер принял неверный срок опоздания.");
+            Control<TextBox>("CatchUpMinutes").Text = "15";
+            Control<TextBox>("CatchUpMinutes").BringIntoView();
+            AssertEditorContentVisible("CatchUpMinutes");
+            AssertVisibleFooter("NextStepButton");
+            Screenshot("schedule-catch-up-compact");
             Click("NextStepButton");
             AssertVisibleFooter("SaveButton");
             if (!Control<TextBox>("WizardSummary").Text.Contains("ZIP с паролем") || !Control<TextBox>("WizardSummary").Text.Contains("7 успешных"))
@@ -488,7 +501,7 @@ internal static partial class DesktopSmoke
                 || !Control<TextBlock>("ReviewStorages").Text.Contains("Диск — 7")
                 || !Control<TextBlock>("ReviewStorages").Text.Contains("Диск — 2")
                 || Control<TextBlock>("ReviewTemporary").ToolTip as string != temporaryDirectory
-                || Control<TextBlock>("ReviewSchedule").Text != "Ежедневно · " + Control<TextBox>("DailyAt").Text.Trim())
+                || Control<TextBlock>("ReviewSchedule").Text != "Ежедневно · " + Control<TextBox>("DailyAt").Text.Trim() + " · догоняющий запуск до 15 мин")
                 throw new InvalidOperationException("Краткий итог не показывает защиту, лимиты, расписание или временную папку.");
             AssertEditorContentVisible("ReviewJobName");
             AssertEditorContentVisible("ReviewTemporary");
@@ -508,6 +521,7 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("После создания задания действия копирования не появились или осталась стартовая подсказка.");
             VerifyFirstRunGuide(window, (name, target) => Screenshot(name, target));
             var configured = (BackupJob)Control<DataGrid>("Jobs").Items[0];
+            if (configured.CatchUpWithinMinutes != 15) throw new InvalidOperationException("Срок опоздания не сохранён.");
             if (configured.KeepLast != 7 || configured.AdditionalDestinations![0].KeepLast != 2
                 || !Control<TextBox>("WizardSummary").Text.Contains("копий: 2"))
                 throw new InvalidOperationException("Разные количества копий не сохранены или не показаны в итоге.");

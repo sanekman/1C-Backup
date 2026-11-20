@@ -227,6 +227,7 @@ public partial class MainWindow : Window
             TemporaryDirectory = string.IsNullOrWhiteSpace(TemporaryFolder.Text) ? null : TemporaryFolder.Text.Trim(),
             AdditionalDestinations = additionalDestinations.Count == 0 ? null : additionalDestinations.ToArray(),
             DailyAt = times[0], AdditionalDailyTimes = times.Length > 1 ? times.Skip(1).ToArray() : null,
+            CatchUpWithinMinutes = ReadCatchUpWindow(scheduleKind),
             TimeZoneId = BackupSchedule.LocalTimeZone, KeepLast = keep, Enabled = Enabled.IsChecked == true,
             ArchiveCopies = ArchiveCopies.IsChecked == true,
             FileBackupMode = FileBackupModePicker.SelectedValue is FileBackupMode mode ? mode : FileBackupMode.Full,
@@ -442,6 +443,8 @@ public partial class MainWindow : Window
         additionalDestinations.Clear();
         foreach (var destination in job.AdditionalDestinations ?? []) additionalDestinations.Add(destination);
         DailyAt.Text = string.Join(", ", job.ScheduledTimes.Select(time => time.ToString("HH:mm", CultureInfo.InvariantCulture)));
+        CatchUpMinutes.Text = (job.CatchUpWithinMinutes ?? 60).ToString(CultureInfo.InvariantCulture);
+        CatchUpMissedRun.IsChecked = job.CatchUpWithinMinutes is not null;
         KeepLast.Text = job.KeepLast.ToString(); Enabled.IsChecked = job.Enabled;
         archivePasswordKey = job.ArchivePasswordKey;
         archivePasswordEdited = false;
@@ -496,6 +499,7 @@ public partial class MainWindow : Window
         postgreSqlAccess = null; postgreSqlAccessEdited = false; PgAuthenticationPicker.SelectedIndex = 0; UpdatePostgreSqlCredentialStatus();
         ResetPostgreSqlTools(); PgDumpPath.Clear(); PgRestorePath.Clear(); PgTimeout.Text = "120";
         DailyAt.Text = "23:00"; KeepLast.Text = "7"; Enabled.IsChecked = true;
+        CatchUpMissedRun.IsChecked = false; CatchUpMinutes.Text = "60";
         archivePasswordKey = null; archivePasswordEdited = false; EncryptArchive.IsChecked = false;
         ArchiveCopies.IsChecked = false;
         UpdateArchivePasswordStatus();
@@ -723,6 +727,7 @@ public partial class MainWindow : Window
             UpdateManualRunControl();
             await RefreshManualRequestsAsync();
             await RefreshBackupProgressAsync();
+            await RefreshMissedSchedulesAsync();
             if (launchedAgent is not null && launchedAgent.HasExited)
             {
                 var code = launchedAgent.ExitCode;
@@ -1308,6 +1313,7 @@ public partial class MainWindow : Window
         if (NextRun is null || Enabled is null || Schedule.SelectedValue is not ScheduleKind kind) return;
         DaysPanel.Visibility = kind == ScheduleKind.Weekly ? Visibility.Visible : Visibility.Collapsed;
         TimePanel.Visibility = kind is ScheduleKind.Manual or ScheduleKind.SystemStartup ? Visibility.Collapsed : Visibility.Visible;
+        if (CatchUpMinutes is not null) CatchUpMinutes.IsEnabled = CatchUpMissedRun?.IsChecked == true;
         Enabled.Visibility = kind == ScheduleKind.Manual ? Visibility.Collapsed : Visibility.Visible;
         SchedulePreviewHint.Visibility = Visibility.Collapsed;
         if (StartupSchedulePanel is not null) StartupSchedulePanel.Visibility = kind == ScheduleKind.SystemStartup ? Visibility.Visible : Visibility.Collapsed;

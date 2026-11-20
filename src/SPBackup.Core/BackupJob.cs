@@ -40,6 +40,8 @@ public sealed record BackupJob
         .Concat((AdditionalDestinations ?? []).Select(destination => destination.ApplyTo(this))).ToArray();
     public TimeOnly DailyAt { get; init; } = new(23, 0);
     public IReadOnlyList<TimeOnly>? AdditionalDailyTimes { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? CatchUpWithinMinutes { get; init; }
     public ScheduleKind ScheduleKind { get; init; } = ScheduleKind.Daily;
     public WeekDays DaysOfWeek { get; init; } = WeekDays.Monday;
     public string TimeZoneId { get; init; } = "UTC";
@@ -193,6 +195,8 @@ public sealed record BackupJob
     {
         var errors = new List<string>();
         if (!Enum.IsDefined(ScheduleKind)) errors.Add("Неизвестный тип расписания.");
+        if (CatchUpWithinMinutes is { } minutes && (minutes is < 1 or > 1440 || ScheduleKind is not (ScheduleKind.Daily or ScheduleKind.Weekly)))
+            errors.Add("Для пропущенного запуска укажите от 1 до 1440 минут и ежедневное или недельное расписание.");
         if (ScheduleKind != ScheduleKind.SystemStartup && AdditionalDailyTimes?.Count > 47) errors.Add("Укажите не более 48 запусков в день.");
         if (ScheduleKind != ScheduleKind.SystemStartup && AdditionalDailyTimes is not null && (AdditionalDailyTimes.Contains(DailyAt)
             || AdditionalDailyTimes.Distinct().Count() != AdditionalDailyTimes.Count))

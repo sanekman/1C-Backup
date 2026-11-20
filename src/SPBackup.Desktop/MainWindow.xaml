@@ -478,6 +478,18 @@
    <StackPanel x:Name="TimePanel">
     <TextBlock Text="Время запуска (местное время компьютера)" /><TextBox x:Name="DailyAt" Text="23:00" Margin="0,4,0,4" TextChanged="Schedule_Changed" />
     <TextBlock Text="Можно несколько раз в день: 09:00, 13:00, 23:00." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10" FontSize="12" />
+    <Expander x:Name="CatchUpOptions" Header="Пропущенные запуски" Margin="0,0,0,10">
+     <StackPanel Margin="0,6,0,0">
+      <CheckBox x:Name="CatchUpMissedRun" Checked="Schedule_Changed" Unchecked="Schedule_Changed">
+       <TextBlock Text="Выполнить один пропущенный запуск после запуска агента" TextWrapping="Wrap" />
+      </CheckBox>
+      <WrapPanel Margin="0,6,0,0">
+       <TextBlock Text="Допустимое опоздание, минут" VerticalAlignment="Center" />
+       <TextBox x:Name="CatchUpMinutes" Text="60" Width="70" Margin="8,0,0,0" TextChanged="Schedule_Changed"
+                AutomationProperties.Name="Допустимое опоздание в минутах" />
+      </WrapPanel>
+     </StackPanel>
+    </Expander>
    </StackPanel>
    <StackPanel x:Name="SchedulePreviewPanel">
    <TextBlock x:Name="NextRun" TextWrapping="Wrap" Margin="0,0,0,10" />

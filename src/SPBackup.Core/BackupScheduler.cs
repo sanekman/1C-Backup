@@ -7,6 +7,13 @@ public sealed class BackupScheduler(StartupBackupSchedule? startup = null)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Dictionary<Guid, (string Settings, DateTimeOffset Next)> pending = [];
+    private readonly CalendarScheduleState? calendar;
+    private readonly HashSet<Guid> observedCalendars = [];
+
+    internal BackupScheduler(StartupBackupSchedule? startup, CalendarScheduleState calendar) : this(startup)
+    {
+        this.calendar = calendar;
+    }
 
     public async Task RunAsync(Func<CancellationToken, Task<IReadOnlyList<BackupJob>>> loadJobs,
         Func<BackupJob, CancellationToken, Task> execute,
@@ -15,6 +22,9 @@ public sealed class BackupScheduler(StartupBackupSchedule? startup = null)
         CancellationToken cancellationToken = default, Func<Exception?, Task>? reportWarning = null)
     {
         var clock = timeProvider ?? TimeProvider.System;
+        await gate.WaitAsync(cancellationToken);
+        try { observedCalendars.Clear(); }
+        finally { gate.Release(); }
         using var timer = new PeriodicTimer(pollInterval ?? TimeSpan.FromSeconds(30), clock);
         do
         {
@@ -44,6 +54,8 @@ public sealed class BackupScheduler(StartupBackupSchedule? startup = null)
         try
         {
             foreach (var id in pending.Keys.Except(jobs.Select(j => j.Id)).ToArray()) pending.Remove(id);
+            var calendars = calendar is null ? null : await calendar.ReadAsync(cancellationToken);
+            var zones = calendars is null ? null : await PrepareCalendarsAsync(jobs, calendars, now, cancellationToken);
             var results = new List<ScheduledExecution>();
             foreach (var job in jobs)
             {
@@ -69,6 +81,13 @@ public sealed class BackupScheduler(StartupBackupSchedule? startup = null)
                     results.Add(new ScheduledExecution(job.Id, now, startupError));
                     continue;
                 }
+                if (calendars is not null)
+                {
+                    var due = await ConsumeCalendarAsync(job, calendars, zones![job.Id], now, cancellationToken);
+                    if (due is { } scheduledAt)
+                        results.Add(await ExecuteCalendarAsync(job, scheduledAt, execute, cancellationToken));
+                    continue;
+                }
                 var effectiveZone = BackupSchedule.ResolveTimeZone(job.TimeZoneId);
                 var zoneIdentity = job.TimeZoneId == BackupSchedule.LocalTimeZone ? effectiveZone.ToSerializedString() : job.TimeZoneId;
                 var settings = $"{job.ScheduleKind}|{(int)job.DaysOfWeek}|{string.Join(',', job.ScheduledTimes.Select(t => t.Ticks))}|{zoneIdentity}";
@@ -77,15 +96,74 @@ public sealed class BackupScheduler(StartupBackupSchedule? startup = null)
                 if (state.Next > now) { pending[job.Id] = state; continue; }
                 // Consume the slot before execution. Failures wait for the next slot.
                 pending[job.Id] = (settings, BackupSchedule.NextRun(job, now)!.Value);
-                cancellationToken.ThrowIfCancellationRequested();
-                Exception? error = null;
-                try { await execute(job, cancellationToken); }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-                catch (Exception ex) { error = ex; }
-                results.Add(new ScheduledExecution(job.Id, state.Next, error));
+                results.Add(await ExecuteCalendarAsync(job, state.Next, execute, cancellationToken));
             }
             return results;
         }
         finally { gate.Release(); }
+    }
+
+    private async Task<Dictionary<Guid, TimeZoneInfo>> PrepareCalendarsAsync(IReadOnlyList<BackupJob> jobs,
+        Dictionary<Guid, CalendarScheduleState.Cursor> cursors, DateTimeOffset now, CancellationToken token)
+    {
+        var scheduled = jobs.Where(CalendarScheduleState.Tracks).ToArray();
+        var ids = scheduled.Select(job => job.Id).ToHashSet();
+        observedCalendars.IntersectWith(ids);
+        var obsolete = cursors.Keys.Where(id => !ids.Contains(id)).ToArray();
+        foreach (var id in obsolete) cursors.Remove(id);
+        var changed = obsolete.Length != 0;
+        var zones = new Dictionary<Guid, TimeZoneInfo>();
+        foreach (var job in scheduled)
+        {
+            var zone = zones[job.Id] = BackupSchedule.ResolveTimeZone(job.TimeZoneId);
+            var identity = CalendarScheduleState.Identity(job, zone);
+            if (cursors.TryGetValue(job.Id, out var cursor) && cursor.Schedule == identity) continue;
+            cursors[job.Id] = new(identity, BackupSchedule.NextRun(job, now.AddTicks(-1), zone));
+            observedCalendars.Remove(job.Id);
+            changed = true;
+        }
+        if (changed) await calendar!.WriteAsync(cursors, token);
+        return zones;
+    }
+
+    private async Task<DateTimeOffset?> ConsumeCalendarAsync(BackupJob job, Dictionary<Guid, CalendarScheduleState.Cursor> cursors,
+        TimeZoneInfo zone, DateTimeOffset now, CancellationToken token)
+    {
+        var cursor = cursors[job.Id];
+        var alreadyObserved = observedCalendars.Contains(job.Id);
+        if (cursor.Next > now)
+        {
+            observedCalendars.Add(job.Id);
+            return null;
+        }
+
+        var latest = BackupSchedule.LastRun(job, now, zone)
+            ?? throw new InvalidOperationException("Не удалось определить прошедший запуск.");
+        var catchUp = job.CatchUpWithinMinutes is { } minutes && latest < now && now - latest <= TimeSpan.FromMinutes(minutes);
+        DateTimeOffset? executeAt = alreadyObserved ? cursor.Next : latest == now || catchUp ? latest : null;
+        var lastMissed = cursor.LastMissed;
+        if (executeAt is null || executeAt < latest)
+            lastMissed = new(latest, CatchUpAttempted: false);
+        else if (!alreadyObserved && catchUp)
+            lastMissed = new(latest, CatchUpAttempted: true);
+        else if (!alreadyObserved && cursor.Next < latest && BackupSchedule.LastRun(job, latest.AddTicks(-1), zone) is { } older)
+            lastMissed = new(older, CatchUpAttempted: false);
+
+        token.ThrowIfCancellationRequested();
+        cursors[job.Id] = cursor with { Next = BackupSchedule.NextRun(job, now, zone), LastMissed = lastMissed };
+        await calendar!.WriteAsync(cursors, token);
+        observedCalendars.Add(job.Id);
+        return executeAt;
+    }
+
+    private static async Task<ScheduledExecution> ExecuteCalendarAsync(BackupJob job, DateTimeOffset scheduledAt,
+        Func<BackupJob, CancellationToken, Task> execute, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        Exception? error = null;
+        try { await execute(job, token); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception ex) { error = ex; }
+        return new(job.Id, scheduledAt, error);
     }
 }
