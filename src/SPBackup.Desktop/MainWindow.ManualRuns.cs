@@ -95,10 +95,11 @@ public partial class MainWindow
 
     private async Task RefreshManualRequestsAsync()
     {
+        Guid? recoveredSession = null;
         if(BackgroundManualSessionLive && backgroundState is { } state && restoredManualSession!=state.SessionId)
         {
             foreach(var request in await (ManualQueueRecoveryOverride?.Invoke(state.SessionId) ?? manualQueue.OutstandingAsync(state.SessionId))) backgroundManualRuns[request.RequestId]=request;
-            restoredManualSession=state.SessionId;
+            recoveredSession = state.SessionId;
         }
         foreach (var request in await manualQueue.PendingAsync())
             if (request.SessionId == backgroundState?.SessionId) backgroundManualRuns.TryAdd(request.RequestId, new(request.RequestId,request.SessionId,request.JobId));
@@ -139,7 +140,8 @@ public partial class MainWindow
         }
         manualReceiptWarnings.IntersectWith(backgroundManualRuns.Keys);
         acceptedManualRequests.IntersectWith(backgroundManualRuns.Keys);
-        UpdateManualQueueOverview();
+        if (recoveredSession is { } session) restoredManualSession = session;
+        UpdateManualRunControl();
     }
 
     private void CancelQueuedManualRuns()
