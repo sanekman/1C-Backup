@@ -16,14 +16,14 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
     public async Task<IReadOnlyList<FileRestoreItem>> ReadContentsAsync(BackupRecord selected, BackupJob job,
         CancellationToken cancellationToken = default, string? passwordOverride = null, bool allowOtherDestinations = false)
     {
-        await ReadChainAsync(selected, job, allowOtherDestinations, cancellationToken);
+        var plan = await ReadChainAsync(selected, job, allowOtherDestinations, cancellationToken);
         var password = await GetPasswordAsync(selected, passwordOverride, cancellationToken);
         var work = WorkDirectory(job, Guid.NewGuid().ToString("N"));
         PrivateBackupDirectory.Create(work);
         try
         {
             var archivePath = Path.Combine(work, "point.zip");
-            var manifest = await ReadArchiveAsync(selected, job, archivePath, password, cancellationToken);
+            var manifest = await ReadArchiveAsync(plan, selected, job, archivePath, password, cancellationToken);
             var skipped = (manifest.SkippedPaths ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
             return manifest.Directories.Select(path => new FileRestoreItem(path, true, false))
                 .Concat(manifest.Files.Select(file => new FileRestoreItem(file.Path, false, skipped.Contains(file.Path))))
@@ -38,7 +38,8 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
     {
         DiagnosticLog.Current.Write(DiagnosticEvent.FileRestoreStarted, jobId: job.Id, sourceKind: job.Kind);
         cancellationToken.ThrowIfCancellationRequested();
-        var chain = await ReadChainAsync(selected, job, allowOtherDestinations, cancellationToken);
+        var plan = await ReadChainAsync(selected, job, allowOtherDestinations, cancellationToken);
+        var chain = plan.Chain;
         var selection = selectedPaths?.ToHashSet(StringComparer.Ordinal);
         if (selection is { Count: 0 }) throw new InvalidDataException("Выберите файл или папку для восстановления.");
         var ancestors = new HashSet<string>(StringComparer.Ordinal);
@@ -81,7 +82,7 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
                 archiveNumber++;
                 reporter.Report(FileRestorePhase.PreparingArchive, archiveNumber, chain.Count, 0, record.Backup.Length, true);
                 var archivePath = Path.Combine(work, record.Id.ToString("N") + ".zip");
-                var manifest = await ReadArchiveAsync(record, job, archivePath, password, cancellationToken, reporter.ForArchive(archiveNumber, chain.Count));
+                var manifest = await ReadArchiveAsync(plan, record, job, archivePath, password, cancellationToken, reporter.ForArchive(archiveNumber, chain.Count));
                 var changed = manifest.ChangedFiles.Where(Included).ToArray();
                 reporter.Report(FileRestorePhase.ApplyingSnapshot, archiveNumber, chain.Count, 0, changed.Length, true);
                 var currentFiles = manifest.Files.Where(file => Included(file.Path)).Select(file => file.Path).ToHashSet(StringComparer.Ordinal);
@@ -163,16 +164,13 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
         }
     }
 
-    private async Task<IReadOnlyList<BackupRecord>> ReadChainAsync(BackupRecord selected, BackupJob job,
+    private async Task<FileBackupReadPlan> ReadChainAsync(BackupRecord selected, BackupJob job,
         bool allowOtherDestinations, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         if (selected.Backup.FileSnapshot is null) throw new InvalidDataException("Выбранная копия не является файловым снимком.");
-        BackupCopyVerifier.GetStorageJob(selected, job);
         var records = await catalog.ReadAsync(token);
-        if (!records.Contains(selected)) throw new InvalidDataException("Выбранная копия больше не зарегистрирована.");
-        return allowOtherDestinations ? FileBackupChains.ResolveAcrossStorages(selected, job, records, checkLocalAvailability: true)
-            : FileBackupChains.Resolve(selected, records);
+        return new(selected, job, records, allowOtherDestinations);
     }
 
     private async Task<string?> GetPasswordAsync(BackupRecord selected, string? passwordOverride, CancellationToken token)
@@ -193,10 +191,10 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
         return work;
     }
 
-    private async Task<FileBackupManifest> ReadArchiveAsync(BackupRecord record, BackupJob job, string path, string? password,
+    private async Task<FileBackupManifest> ReadArchiveAsync(FileBackupReadPlan plan, BackupRecord record, BackupJob job, string path, string? password,
         CancellationToken token, IProgress<BackupExportProgress>? progress = null)
     {
-        await new BackupCopyExporter(storage).ExportAsync(record, job, path, token, progress);
+        await plan.ExportAsync(record, job, new(storage), path, token, progress);
         var manifest = await FileBackupZip.ReadManifestAsync(path, password, token);
         if (manifest.GetSnapshot() != record.Backup.FileSnapshot)
             throw new InvalidDataException("Индекс архива не совпадает с зарегистрированной файловой цепочкой.");

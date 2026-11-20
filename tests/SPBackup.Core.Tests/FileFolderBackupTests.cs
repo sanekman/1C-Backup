@@ -76,6 +76,11 @@ public sealed class FileFolderBackupTests : IDisposable
         var conflicting = firstDestination with { Backup = firstDestination.Backup with { Sha256 = new string('0', 64) } };
         Assert.Throws<InvalidDataException>(() => FileBackupChains.ResolveAcrossStorages(increment, job,
             points.Select(record => record.Id == conflicting.Id ? conflicting : record)));
+        File.Delete(increment.Backup.Location);
+        var recoveredContents = await restorer.ReadContentsAsync(increment, job, allowOtherDestinations: true);
+        Assert.Contains(recoveredContents, item => item.Path == "keep.txt");
+        var recovered = await restorer.RestoreAsync(increment, job, RestoreParent, selectedPaths: ["other.txt"], allowOtherDestinations: true);
+        Assert.Equal("leave out", await File.ReadAllTextAsync(Path.Combine(recovered.Directory, "other.txt")));
     }
 
     [Fact]

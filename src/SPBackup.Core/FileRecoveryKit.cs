@@ -26,9 +26,8 @@ public sealed class FileRecoveryKit(IBackupStorage storage)
         if (job.Kind == DatabaseKind.FilesAndFolders && Directory.Exists(job.Source))
             FileBackupPaths.RequireOutside(job.Source, parent, "Для комплекта выберите папку вне исходных данных.");
         var records = await catalog.ReadAsync(token);
-        if (!records.Contains(selected)) throw new InvalidDataException("Выбранная копия больше не зарегистрирована.");
-        var chain = permitOtherDestinations ? FileBackupChains.ResolveAcrossStorages(selected, job, records, checkLocalAvailability: true)
-            : FileBackupChains.Resolve(selected, records);
+        var plan = new FileBackupReadPlan(selected, job, records, permitOtherDestinations);
+        var chain = plan.Chain;
         var manifest = new Manifest(1, chain[^1].Backup.FileSnapshot!.SnapshotId, selected.Backup.ArchivePasswordKey is not null,
             chain.Select(record => new Archive(record.Backup.FileSnapshot!, record.CompletedUtc.ToUniversalTime(), record.Backup.Length, record.Backup.Sha256)).ToArray());
         Validate(manifest);
@@ -41,7 +40,7 @@ public sealed class FileRecoveryKit(IBackupStorage storage)
         {
             var exporter = new BackupCopyExporter(storage);
             foreach (var record in chain)
-                await exporter.ExportAsync(record, job, ArchivePath(stage, record.Backup.FileSnapshot!.SnapshotId), token, progress);
+                await plan.ExportAsync(record, job, exporter, ArchivePath(stage, record.Backup.FileSnapshot!.SnapshotId), token, progress);
             await using (var stream = new FileStream(Path.Combine(stage, ManifestName), FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 await JsonSerializer.SerializeAsync(stream, manifest, Json, token);

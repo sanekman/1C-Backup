@@ -79,14 +79,22 @@ public partial class MainWindow
             var selectedCatalog = EffectiveCatalog;
             var mixed = (chain.Count == 0 || await Task.Run(() => FirstMissingLocalArchive(chain), cancellation.Token) is not null)
                 && await Task.Run(() => TryMultiStorageChain(row.Record, job, records, checkLocalAvailability: true), cancellation.Token) is not null;
-            if (mixed && MessageBox.Show(this, "Для комплекта нужны архивы из нескольких хранилищ. Разрешить их чтение?",
-                "Сохранить комплект", MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK)
+            var allowOtherDestinations = false;
+            if (mixed || job.StorageJobs.Count > 1)
             {
-                CopyVerificationStatus.Text = "Сохранение комплекта отменено.";
-                return;
+                var decision = MessageBox.Show(this, mixed
+                        ? "Для комплекта нужны дополнительные хранилища. Разрешить их чтение?"
+                        : "Если нужный архив недоступен, разрешить прочитать ту же версию в другом хранилище задания?",
+                    "Сохранить комплект", mixed ? MessageBoxButton.OKCancel : MessageBoxButton.YesNoCancel, MessageBoxImage.Information);
+                if (decision == MessageBoxResult.Cancel)
+                {
+                    CopyVerificationStatus.Text = "Сохранение комплекта отменено.";
+                    return;
+                }
+                allowOtherDestinations = decision is MessageBoxResult.Yes or MessageBoxResult.OK;
             }
             var path = await Task.Run(() => new FileRecoveryKit(backupStorage).ExportAsync(row.Record, job, selectedCatalog,
-                picker.FolderName, mixed, cancellation.Token, progress));
+                picker.FolderName, allowOtherDestinations, cancellation.Token, progress));
             CopyVerificationStatus.Text = "Комплект сохранён: " + path + (row.Record.Backup.ArchivePasswordKey is null
                 ? "" : ". Для восстановления понадобится пароль архива.");
         }

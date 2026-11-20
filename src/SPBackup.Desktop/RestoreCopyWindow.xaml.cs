@@ -8,13 +8,14 @@ public partial class RestoreCopyWindow : Window
 {
     private CancellationTokenSource? readingContents;
     private readonly bool mixedChain;
-    internal RestoreCopyWindow(BackupCopyRow copy, bool files, int archives, int storages = 0, bool showFileSelection = true)
+    internal RestoreCopyWindow(BackupCopyRow copy, bool files, int archives, int storages = 0, bool showFileSelection = true,
+        bool canReadOtherDestinations = false, bool requireOtherDestinations = false)
     {
         InitializeComponent();
         CopyName.Text = $"{copy.JobName} · {copy.CompletedUtc.ToLocalTime():dd.MM.yyyy HH:mm}";
         CopySource.Text = copy.DisplayLocation;
         ChainStatus.Text = files
-            ? (storages > 1 ? $"Для восстановления нужны {archives} архивов из нескольких хранилищ ({storages})."
+            ? (requireOtherDestinations ? $"Для восстановления нужно прочитать архивы из других хранилищ задания. Архивов: {archives}, хранилищ: {storages}."
                 : $"В каталоге найдены все архивы цепочки ({archives}). При восстановлении программа проверит каждый архив.")
                 + (copy.Record.Backup.FileSnapshot?.IsIncomplete == true ? "\nКопия с пропусками. Могут восстановиться прежние версии файлов." : "")
             : "Из ZIP будет извлечён файл 1Cv8.1CD. Перед извлечением программа проверит архив.";
@@ -26,8 +27,8 @@ public partial class RestoreCopyWindow : Window
             : "Пароль архива не требуется по данным каталога.";
         AlternatePassword.Visibility = encrypted ? Visibility.Visible : Visibility.Collapsed;
         FileSelection.Visibility = files && showFileSelection ? Visibility.Visible : Visibility.Collapsed;
-        mixedChain = storages > 1;
-        AllowOtherDestinations.Visibility = mixedChain ? Visibility.Visible : Visibility.Collapsed;
+        mixedChain = requireOtherDestinations;
+        AllowOtherDestinations.Visibility = mixedChain || canReadOtherDestinations ? Visibility.Visible : Visibility.Collapsed;
         RestoreButton.Content = files ? "Восстановить файлы" : "Извлечь файл базы";
         UpdateRestoreAvailability();
         Closed += (_, _) => { readingContents?.Cancel(); OverridePassword.Clear(); };
@@ -39,7 +40,7 @@ public partial class RestoreCopyWindow : Window
     internal Func<string?, bool, CancellationToken, Task<IReadOnlyList<FileRestoreItem>>>? ReadContents { get; set; }
     internal Action<RestoreSelectionWindow>? SelectionDialogOpened { get; set; }
     internal IReadOnlyCollection<string>? SelectedPaths { get; private set; }
-    internal bool UseOtherDestinations => mixedChain && AllowOtherDestinations.IsChecked == true;
+    internal bool UseOtherDestinations => AllowOtherDestinations.Visibility == Visibility.Visible && AllowOtherDestinations.IsChecked == true;
 
     private void PickFolder_Click(object sender, RoutedEventArgs e)
     {

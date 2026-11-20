@@ -209,7 +209,11 @@ public static class FileBackupChains
         first.Validate();
         var candidates = records.Where(record => record.JobId == selected.JobId && record.Backup.FileSnapshot is not null)
             .ToLookup(record => record.Backup.FileSnapshot!.SnapshotId);
-        var result = new List<BackupRecord>(); var current = selected; var visited = new HashSet<Guid>();
+        var result = new List<BackupRecord>();
+        var current = acrossStorages && checkLocalAvailability && MissingLocalArchive(selected)
+            ? candidates[first.SnapshotId].FirstOrDefault(record => EquivalentArchive(selected, record) && !MissingLocalArchive(record)) ?? selected
+            : selected;
+        var visited = new HashSet<Guid>();
         while (true)
         {
             var snapshot = current.Backup.FileSnapshot!; snapshot.Validate();
@@ -223,10 +227,7 @@ public static class FileBackupChains
             if (acrossStorages && matches.Length > 1)
             {
                 var expected = matches[0];
-                if (matches.Any(record => record.Backup.FileSnapshot != expected.Backup.FileSnapshot
-                    || record.Backup.ArchivePasswordKey != expected.Backup.ArchivePasswordKey
-                    || record.Backup.Length != expected.Backup.Length
-                    || !string.Equals(record.Backup.Sha256, expected.Backup.Sha256, StringComparison.OrdinalIgnoreCase)))
+                if (matches.Any(record => !EquivalentArchive(record, expected)))
                     throw new InvalidDataException("Хранилища содержат несовпадающие архивы одного снимка.");
                 matches = [matches.OrderBy(record => checkLocalAvailability && MissingLocalArchive(record))
                     .ThenByDescending(record => record.StorageIdentity == selected.StorageIdentity).First()];
@@ -237,6 +238,10 @@ public static class FileBackupChains
         }
         result.Reverse(); return result;
     }
+
+    internal static bool EquivalentArchive(BackupRecord first, BackupRecord second) => first.JobId == second.JobId
+        && first.Backup.FileSnapshot == second.Backup.FileSnapshot && first.Backup.ArchivePasswordKey == second.Backup.ArchivePasswordKey
+        && first.Backup.Length == second.Backup.Length && string.Equals(first.Backup.Sha256, second.Backup.Sha256, StringComparison.OrdinalIgnoreCase);
 
     private static bool MissingLocalArchive(BackupRecord record) =>
         record.StorageIdentity.StartsWith("LocalDirectory:", StringComparison.Ordinal)

@@ -155,7 +155,9 @@ with sync_playwright() as pw:
     expect(observer.locator('tbody tr')).to_have_count(1)
     expect(observer.locator('tbody tr')).to_contain_text('Office <УНФ>')
     expect(observer.get_by_role('link', name='Настройки', exact=True)).to_have_count(0)
-    assert observer.goto(a.url + 'settings').status == 403
+    assert observer.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    observer.screenshot(path=str(out / 'operator-assigned-900.png'))
+    assert observer.request.get(a.url + 'settings').status == 403
     observer.close()
     checks.append('operator-is-provisioned-in-browser-and-sees-only-assigned-job')
     browser.close()
