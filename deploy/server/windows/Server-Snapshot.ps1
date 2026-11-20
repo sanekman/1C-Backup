@@ -147,7 +147,7 @@ function Validate-RunningCluster([bool]$RequireFresh=$false) {
         }
         if ($RequireFresh) {
             $freshQuery = "SELECT NOT EXISTS(SELECT 1 FROM server_agents) AND NOT EXISTS(SELECT 1 FROM server_invitations) AND (SELECT count(*) FROM server_users)=1;"
-            $fresh=& (Join-Path $InstallDirectory 'postgresqlinpsql.exe') '-X' '-w' '-h' '127.0.0.1' '-p' '15433' '-U' 'onecbackup' '-d' 'postgres' '-At' '-c' $freshQuery 2>$null
+            $fresh=& (Join-Path $InstallDirectory 'postgresql\bin\psql.exe') '-X' '-w' '-h' '127.0.0.1' '-p' '15433' '-U' 'onecbackup' '-d' 'postgres' '-At' '-c' $freshQuery 2>$null
             if ($LASTEXITCODE -ne 0 -or @($fresh).Count -ne 1 -or $fresh -cne 't') {
                 throw 'Новая установка уже содержит агентов, приглашения или пользователей. Рабочие данные не заменялись.'
             }
