@@ -33,7 +33,8 @@ public partial class MainWindow
     private async void RestoreFiles_Click(object sender, RoutedEventArgs e)
         => await ShowRestoreCopyAsync(files: true);
 
-    internal async Task RestoreSelectedFilesAsync(string parentDirectory, string? passwordOverride = null)
+    internal async Task RestoreSelectedFilesAsync(string parentDirectory, string? passwordOverride = null,
+        IReadOnlyCollection<string>? selectedPaths = null, bool allowOtherDestinations = false)
     {
         if (!RestoreFilesButton.IsEnabled || Copies.SelectedItem is not BackupCopyRow row) return;
         var job = jobs.FirstOrDefault(job => job.Id == row.Record.JobId); if (job is null) return;
@@ -44,7 +45,7 @@ public partial class MainWindow
         try
         {
             var result = await Task.Run(() => new FileBackupRestorer(backupStorage, EffectiveCatalog, EffectiveWorkDirectory, new WindowsArchivePasswordStore())
-                .RestoreAsync(row.Record, job, parentDirectory, cancellation.Token, passwordOverride, progress));
+                .RestoreAsync(row.Record, job, parentDirectory, cancellation.Token, passwordOverride, progress, selectedPaths, allowOtherDestinations));
             CopyVerificationStatus.Text = $"Восстановлено файлов: {result.Files}; архивов в цепочке: {result.Archives}. Папка: {result.Directory}";
             Status.Text = $"Файлы восстановлены в новую папку. Файлов: {result.Files}; архивов: {result.Archives}.";
             if (result.SkippedPaths is { Count: > 0 } skipped)

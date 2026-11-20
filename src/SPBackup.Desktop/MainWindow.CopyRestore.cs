@@ -27,6 +27,12 @@ public partial class MainWindow
         {
             copyRestoreChainError = error.Message;
             CopyRestoreReadiness.Text = "Цепочка недоступна. " + error.Message;
+            if (jobs.FirstOrDefault(job => job.Id == row.Record.JobId) is { } job
+                && TryMultiStorageChain(row.Record, job, copyRows.Select(copy => copy.Record)) is not null)
+            {
+                copyRestoreChainError = null;
+                CopyRestoreReadiness.Text = "Цепочку можно собрать из нескольких хранилищ.";
+            }
         }
     }
 
@@ -34,15 +40,21 @@ public partial class MainWindow
     {
         if (!(files ? RestoreFilesButton.IsEnabled : ExtractOneCButton.IsEnabled) || Copies.SelectedItem is not BackupCopyRow row) return;
         var chain = files ? copyRestoreChain : new[] { row.Record };
+        var job = files ? jobs.FirstOrDefault(job => job.Id == row.Record.JobId) : null;
+        IReadOnlyList<BackupRecord>? alternate = null;
         preparingCopyRestore = true;
         UpdateRunControls();
         try
         {
+            var records = files ? copyRows.Select(copy => copy.Record).ToArray() : [];
             var missing = await Task.Run(() => FirstMissingLocalArchive(chain));
+            if (job is not null && (missing is not null || chain.Count == 0))
+                alternate = await Task.Run(() => TryMultiStorageChain(row.Record, job, records, checkLocalAvailability: true));
             if (!CopiesView.IsVisible || Copies.SelectedItem is not BackupCopyRow current || current.Record != row.Record) return;
-            if (missing is not null)
+            if ((missing is not null || chain.Count == 0) && alternate is null)
             {
-                CopyVerificationStatus.Text = "Восстановление невозможно. Не найден архив: " + missing;
+                CopyVerificationStatus.Text = missing is null ? "Восстановление невозможно. Не найдены все архивы цепочки."
+                    : "Восстановление невозможно. Не найден архив: " + missing;
                 return;
             }
         }
@@ -52,12 +64,35 @@ public partial class MainWindow
             UpdateRunControls();
         }
         if (!(files ? RestoreFilesButton.IsEnabled : ExtractOneCButton.IsEnabled)) return;
-        var dialog = new RestoreCopyWindow(row, files, chain.Count) { Owner = this };
+        var dialog = new RestoreCopyWindow(row, files, alternate?.Count ?? chain.Count,
+            alternate?.Select(record => record.StorageIdentity).Distinct().Count() ?? 0) { Owner = this };
+        if (job is not null)
+        {
+            var restorer = new FileBackupRestorer(backupStorage, EffectiveCatalog, EffectiveWorkDirectory, new WindowsArchivePasswordStore());
+            dialog.ReadContents = async (password, useOtherDestinations, token) =>
+            {
+                using var lease = AcquireEngineOrReport();
+                if (lease is null) throw new InvalidOperationException(Status.Text);
+                return await Task.Run(() => restorer.ReadContentsAsync(row.Record, job, token, password, useOtherDestinations), token);
+            };
+        }
         CopyRestoreDialogOpened?.Invoke(dialog);
         if (dialog.ShowDialog() != true || dialog.ParentDirectory is not { } parent
             || Copies.SelectedItem is not BackupCopyRow selected || selected.Record != row.Record) return;
-        if (files) await RestoreSelectedFilesAsync(parent, dialog.PasswordOverride);
+        if (files) await RestoreSelectedFilesAsync(parent, dialog.PasswordOverride, dialog.SelectedPaths, dialog.UseOtherDestinations);
         else await ExtractSelectedCopyAsync(parent, dialog.PasswordOverride);
+    }
+
+    private static IReadOnlyList<BackupRecord>? TryMultiStorageChain(BackupRecord point, BackupJob job,
+        IEnumerable<BackupRecord> records, bool checkLocalAvailability = false)
+    {
+        try
+        {
+            var chain = FileBackupChains.ResolveAcrossStorages(point, job, records, checkLocalAvailability);
+            return chain.Any(record => record.StorageIdentity != point.StorageIdentity)
+                && (!checkLocalAvailability || FirstMissingLocalArchive(chain) is null) ? chain : null;
+        }
+        catch (InvalidDataException) { return null; }
     }
 
     private static string? FirstMissingLocalArchive(IReadOnlyList<BackupRecord> chain)

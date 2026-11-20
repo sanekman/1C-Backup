@@ -151,11 +151,21 @@ def first_use(pw, page, url, out, checks):
     ok(api.post(base + '/configuration-receipt', data={'agentId': agent_id, 'revision': 2,
         'offerId': offered.headers['sp-backup-configuration-offer'], 'status': 'Accepted', 'reason': None, 'observedUtc': now()}))
     jobs = [{'jobId': job['id'], 'name': job['name'], 'sourceKind': 'FilesAndFolders', 'enabled': False,
-             'schedule': 'Manual', 'nextRunUtc': None, 'destinationCount': 2}]
+             'schedule': 'Manual', 'nextRunUtc': None, 'destinationCount': 2, 'fileCopyChecks': [
+                 {'index': 0, 'snapshotId': str(uuid.uuid4()), 'createdUtc': now(-3600), 'checkedUtc': now(-20),
+                  'olderThanLatest': False, 'incomplete': False, 'latestCheck': 'Verified'},
+                 {'index': 1, 'snapshotId': str(uuid.uuid4()), 'createdUtc': now(-7200), 'checkedUtc': now(-15),
+                  'olderThanLatest': True, 'incomplete': False, 'latestCheck': 'Failed'}]}]
     monitor(2, jobs)
     page.locator('[data-dashboard-refresh]').click()
     expect(dashboard_row.locator('[data-managed-plan]')).to_have_count(0)
     expect(summary).to_contain_text('Исполнитель готов')
+    checks_panel = summary.locator('details[data-dashboard-disclosure]')
+    checks_panel.locator('summary').click()
+    expect(checks_panel).to_contain_text('Размер и SHA-256 проверены')
+    expect(checks_panel).to_contain_text('Проверена предыдущая версия')
+    expect(checks_panel).to_contain_text('Проверка последней копии завершилась ошибкой')
+    checks.append('dashboard-file-checks-distinguish-destination-age-and-latest-check-failure')
     checks.append('dashboard-plan-revision-acceptance-executor-and-local-access-refresh-in-place')
     checks.append('first-use-hierarchy-invitation-enrollment-invalid-path-back-navigation-and-revision-acceptance')
     page.goto(url + 'agents/' + agent_id + '/jobs')

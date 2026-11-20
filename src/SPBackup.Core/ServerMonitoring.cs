@@ -122,6 +122,18 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
             throw new InvalidDataException("Источник заданий не относится к подключению мониторинга.");
         var selected = effective is null ? null : await effective.LoadSnapshotAsync(token);
         var jobs = selected?.Jobs ?? await new JobStore(Path.Combine(directory,"jobs.json"),useLocalTime:true).LoadAsync(token);
+        Dictionary<Guid, IReadOnlyList<MonitoredFileCopyCheck>> fileCopyChecks = [];
+        try
+        {
+            if (jobs.Any(job => job.Kind == DatabaseKind.FilesAndFolders))
+                fileCopyChecks = await MonitoredFileCopyChecks.ReadAsync(directory,
+                    effective?.CatalogPath(directory) ?? Path.Combine(directory, "copies.json"), jobs, token);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        {
+            // A damaged or inaccessible local check log must not prevent delivery of run history.
+            DiagnosticLog.Current.Write(DiagnosticEvent.MonitoringFailed, DiagnosticLevel.Warning, error);
+        }
         var acknowledged = await receipts.ReadAsync(token);
         if (acknowledged is null || acknowledged.Address != settings.Address || acknowledged.AgentId != settings.AgentId || acknowledged.CredentialKey != settings.CredentialKey)
             acknowledged = new(settings.Address,settings.AgentId,settings.CredentialKey,[]);
@@ -159,7 +171,12 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
         var observationTasks = ExternalBackupTask.Create(monitors, external, polling, settings.AgentId).ToDictionary(task => task.Id);
         var snapshot = new MonitoringSnapshot(DateTimeOffset.UtcNow, typeof(ServerMonitoringDispatcher).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute),false).Cast<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown",
             jobs.Select(j=>new MonitoredJob(j.Id,Label(j.Name),j.Kind.ToString(),j.Enabled,j.ScheduleDescription+" · "+j.TimeZoneId+(j.ScheduleKind==ScheduleKind.Weekly ? " · "+j.DaysOfWeek : ""),
-                BackupSchedule.NextRun(j,DateTimeOffset.UtcNow),j.StorageJobs.Count) { BackupScope = j.ExecutionConfiguration?.JobScope, MaximumBackupAgeHours = j.MaximumBackupAgeHours, LocalAccessReady = j.ManagedSecrets is null ? null : ManagedJobBindings.Ready(j) })
+                BackupSchedule.NextRun(j,DateTimeOffset.UtcNow),j.StorageJobs.Count)
+                {
+                    BackupScope = j.ExecutionConfiguration?.JobScope, MaximumBackupAgeHours = j.MaximumBackupAgeHours,
+                    LocalAccessReady = j.ManagedSecrets is null ? null : ManagedJobBindings.Ready(j),
+                    FileCopyChecks = fileCopyChecks.GetValueOrDefault(j.Id)
+                })
                 .Concat(monitors.Select(m=>new MonitoredJob(m.Id,Label(m.Name),m.Kind.ToString(),m.Enabled,
                     "Опрос каждые "+m.PollIntervalSeconds+" с",null,0) { TaskKind = "Observation" })).ToArray(),
             progress is { Finished:false } && history.Any(r=>r.RunId==progress.RunId && r.Status==BackupRunStatus.Running) ? new(progress.RunId,progress.JobId,

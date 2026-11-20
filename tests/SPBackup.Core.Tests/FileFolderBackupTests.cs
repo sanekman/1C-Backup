@@ -40,6 +40,75 @@ public sealed class FileFolderBackupTests : IDisposable
     }
 
     [Fact]
+    public async Task SelectedPathsRestoreFromRegisteredArchivesAcrossDestinations()
+    {
+        Directory.CreateDirectory(Path.Combine(Source, "empty"));
+        await File.WriteAllTextAsync(Path.Combine(Source, "keep.txt"), "older");
+        await File.WriteAllTextAsync(Path.Combine(Source, "other.txt"), "leave out");
+        var job = Job with { AdditionalDestinations = [new() { DestinationDirectory = Path.Combine(root, "second"), KeepLast = 2 }] };
+        var fullRun = await Runner().RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, fullRun.Status);
+        await File.WriteAllTextAsync(Path.Combine(Source, "keep.txt"), "newest");
+        var nextRun = await Runner().RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, nextRun.Status);
+        var points = await catalog.ReadAsync();
+        var full = points.Where(record => record.Backup.FileSnapshot!.IsFull).ToArray();
+        var increment = points.Where(record => !record.Backup.FileSnapshot!.IsFull).Last();
+        var missing = Assert.Single(full, record => record.StorageIdentity == increment.StorageIdentity);
+        File.Delete(missing.Backup.Location);
+        var firstDestination = Assert.Single(full, record => record.StorageIdentity != increment.StorageIdentity);
+        Assert.Equal(2, FileBackupChains.ResolveAcrossStorages(increment, job, points, checkLocalAvailability: true)
+            .Select(record => record.StorageIdentity).Distinct().Count());
+        var restorer = Restorer();
+        var contents = await restorer.ReadContentsAsync(increment, job, allowOtherDestinations: true);
+        Assert.Contains(contents, item => item.Path == "keep.txt" && !item.IsDirectory);
+        Assert.Contains(contents, item => item.Path == "empty" && item.IsDirectory);
+        Assert.Contains(contents, item => item.Path == "other.txt");
+        var result = await restorer.RestoreAsync(increment, job, RestoreParent, selectedPaths: ["keep.txt", "empty"], allowOtherDestinations: true);
+        Assert.Equal(1, result.Files);
+        Assert.Equal("newest", await File.ReadAllTextAsync(Path.Combine(result.Directory, "keep.txt")));
+        Assert.True(Directory.Exists(Path.Combine(result.Directory, "empty")));
+        Assert.False(File.Exists(Path.Combine(result.Directory, "other.txt")));
+        Assert.Equal(firstDestination, Assert.Single(await catalog.ReadAsync(), record => record.Id == firstDestination.Id));
+        await Assert.ThrowsAsync<InvalidDataException>(() => restorer.RestoreAsync(increment, job, RestoreParent,
+            selectedPaths: ["missing.txt"], allowOtherDestinations: true));
+        Assert.Equal(result.Directory, Assert.Single(Directory.GetDirectories(RestoreParent)));
+        var conflicting = firstDestination with { Backup = firstDestination.Backup with { Sha256 = new string('0', 64) } };
+        Assert.Throws<InvalidDataException>(() => FileBackupChains.ResolveAcrossStorages(increment, job,
+            points.Select(record => record.Id == conflicting.Id ? conflicting : record)));
+    }
+
+    [Fact]
+    public async Task MonitoredVerificationUsesCurrentCatalogAndShowsOlderVerifiedDestination()
+    {
+        await File.WriteAllTextAsync(Path.Combine(Source, "file.txt"), "first");
+        var job = Job with { AdditionalDestinations = [new() { DestinationDirectory = Path.Combine(root, "second"), KeepLast = 2 }] };
+        var fullRun = await Runner().RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, fullRun.Status);
+        var catalogPath = Path.Combine(root, "copies.json");
+        var verification = new BackupVerificationState(Path.Combine(root, "verification-state.json"));
+        var records = await catalog.ReadAsync();
+        var checkedAt = DateTimeOffset.UtcNow;
+        await verification.RememberAsync(records.Select(record => BackupVerificationEntry.Create(record,
+            BackupVerificationOutcome.Verified, BackupVerificationOrigin.LatestCopies, checkedAt)), records);
+        await File.WriteAllTextAsync(Path.Combine(Source, "file.txt"), "next, with changed length");
+        var nextRun = await Runner().RunAsync(job);
+        Assert.Equal(BackupRunStatus.Succeeded, nextRun.Status);
+        records = await catalog.ReadAsync();
+        var primary = records.Last(record => record.StorageIdentity == StorageAddress.Identity(job));
+        await verification.RememberAsync([BackupVerificationEntry.Create(primary, BackupVerificationOutcome.Verified,
+            BackupVerificationOrigin.LatestCopies, checkedAt.AddMinutes(1))], records);
+
+        var checks = (await MonitoredFileCopyChecks.ReadAsync(root, catalogPath, [job], default))[job.Id];
+        Assert.Equal(primary.Backup.FileSnapshot!.SnapshotId, checks[0].SnapshotId);
+        Assert.False(checks[0].OlderThanLatest);
+        Assert.True(checks[1].OlderThanLatest);
+        Assert.Equal(checkedAt, checks[1].CheckedUtc);
+        var changed = job with { Source = Path.Combine(root, "new-source") };
+        Assert.Empty(await MonitoredFileCopyChecks.ReadAsync(root, catalogPath, [changed], default));
+    }
+
+    [Fact]
     public async Task FirstIncrementalIsFullAndSubsequentChangesDeletesAndEmptyFoldersRestoreExactly()
     {
         await File.WriteAllTextAsync(Path.Combine(Source, "stable.txt"), "unchanged");

@@ -53,6 +53,10 @@
                 @if (job.LocalAccessReady == false) { <small class="error">Не задан локальный доступ. В Windows-программе: «Файл → Доступ серверного задания…».</small> }
             </td>
             <td>@(observation && poll?.ObservationStatus is { } currentStatus ? ObservationStatus(currentStatus) : poll?.Failed == true ? "Ошибка опроса" : observation && last?.Status == "Failed" ? "Ошибка внешней копии" : poll?.FreshnessWarning == true ? "Нет свежей копии" : last is null ? observation ? "Копии пока не обнаружены" : "Результатов ещё нет" : Status(last))<small>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LatestFinishedUtc : last?.DisplayFinishedUtc)</small>
+            @if (!agent.Revoked && job.FileCopyChecks is { } checks)
+            {
+                <details><summary>Проверенные точки по хранилищам</summary><FileCopyChecks Checks="checks" /></details>
+            }
             @if (observation)
             { <small>Последний опрос: @Clock.Time(poll?.PolledUtc). @(matchingHistory && last?.Evidence is { } evidence ? Evidence(evidence) : "")</small> }
             @if (observation && poll?.LatestReportId is not null && poll.ObservationStatus is not null && last is null)

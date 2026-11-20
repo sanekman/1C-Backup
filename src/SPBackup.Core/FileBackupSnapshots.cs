@@ -191,12 +191,24 @@ public sealed class FileBackupSnapshotStore(string directory)
 
 public static class FileBackupChains
 {
-    public static IReadOnlyList<BackupRecord> Resolve(BackupRecord selected, IEnumerable<BackupRecord> records)
+    public static IReadOnlyList<BackupRecord> Resolve(BackupRecord selected, IEnumerable<BackupRecord> records) =>
+        Resolve(selected, records.Where(record => record.StorageIdentity == selected.StorageIdentity), acrossStorages: false, false);
+
+    public static IReadOnlyList<BackupRecord> ResolveAcrossStorages(BackupRecord selected, BackupJob job,
+        IEnumerable<BackupRecord> records, bool checkLocalAvailability = false)
+    {
+        BackupCopyVerifier.GetStorageJob(selected, job);
+        var allowed = job.StorageJobs.Select(StorageAddress.Identity).ToHashSet(StringComparer.Ordinal);
+        return Resolve(selected, records.Where(record => allowed.Contains(record.StorageIdentity)), acrossStorages: true, checkLocalAvailability);
+    }
+
+    private static IReadOnlyList<BackupRecord> Resolve(BackupRecord selected, IEnumerable<BackupRecord> records, bool acrossStorages,
+        bool checkLocalAvailability)
     {
         var first = selected.Backup.FileSnapshot ?? throw new InvalidDataException("У копии отсутствуют сведения о файловой цепочке.");
         first.Validate();
-        var candidates = records.Where(record => record.JobId == selected.JobId && record.StorageIdentity == selected.StorageIdentity
-            && record.Backup.FileSnapshot is not null).ToArray();
+        var candidates = records.Where(record => record.JobId == selected.JobId && record.Backup.FileSnapshot is not null)
+            .ToLookup(record => record.Backup.FileSnapshot!.SnapshotId);
         var result = new List<BackupRecord>(); var current = selected; var visited = new HashSet<Guid>();
         while (true)
         {
@@ -207,11 +219,27 @@ public static class FileBackupChains
                 throw new InvalidDataException("Файловая цепочка противоречива или содержит цикл.");
             result.Add(current);
             if (snapshot.ParentSnapshotId is not { } parent) break;
-            var matches = candidates.Where(record => record.Backup.FileSnapshot!.SnapshotId == parent).ToArray();
+            var matches = candidates[parent].ToArray();
+            if (acrossStorages && matches.Length > 1)
+            {
+                var expected = matches[0];
+                if (matches.Any(record => record.Backup.FileSnapshot != expected.Backup.FileSnapshot
+                    || record.Backup.ArchivePasswordKey != expected.Backup.ArchivePasswordKey
+                    || record.Backup.Length != expected.Backup.Length
+                    || !string.Equals(record.Backup.Sha256, expected.Backup.Sha256, StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidDataException("Хранилища содержат несовпадающие архивы одного снимка.");
+                matches = [matches.OrderBy(record => checkLocalAvailability && MissingLocalArchive(record))
+                    .ThenByDescending(record => record.StorageIdentity == selected.StorageIdentity).First()];
+            }
             if (matches.Length != 1 || matches[0].Backup.FileSnapshot!.Depth != snapshot.Depth - 1)
                 throw new InvalidDataException("Отсутствует или неоднозначна предыдущая копия файловой цепочки. Восстановление требует полную основу и все последующие изменения.");
             current = matches[0];
         }
         result.Reverse(); return result;
     }
+
+    private static bool MissingLocalArchive(BackupRecord record) =>
+        record.StorageIdentity.StartsWith("LocalDirectory:", StringComparison.Ordinal)
+        && Path.IsPathFullyQualified(record.Backup.Location) && !record.Backup.Location.StartsWith(@"\\", StringComparison.Ordinal)
+        && !File.Exists(record.Backup.Location);
 }

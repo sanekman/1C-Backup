@@ -13,6 +13,7 @@ public sealed record AgentJobSnapshot(AgentMode Mode, Guid AgentId, string? Serv
 public sealed class AgentExecutionJobSource(AgentConfiguration configuration, AgentSettings settings, ManagedJobBindings? bindings = null) : IBackupJobSource
 {
     internal string? ConnectionId => settings.Mode == AgentMode.Managed ? ManagedAgentProfile.Identity(settings) : null;
+    internal string CatalogPath(string directory) => new ManagedAgentProfile(directory, settings).CatalogPath;
     public async Task<IReadOnlyList<BackupJob>> LoadAsync(CancellationToken cancellationToken = default) =>
         (await LoadSnapshotAsync(cancellationToken)).Jobs;
 

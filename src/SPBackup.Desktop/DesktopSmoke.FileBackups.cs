@@ -200,6 +200,7 @@ internal static partial class DesktopSmoke
         }
         var restoreProgress = new List<FileRestoreProgress>();
         var progressCaptured = false;
+        var selectionInspected = false;
         window.FileRestoreProgressObserved = value =>
         {
             restoreProgress.Add(value);
@@ -218,7 +219,21 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("Папка восстановления не видна до подтверждения.");
             dialog.UpdateLayout();
             screenshotDialog("files-restore-confirm", dialog);
-            restore.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            dialog.SelectionDialogOpened = selection => selection.Dispatcher.BeginInvoke(() =>
+            {
+                var search = (TextBox)selection.FindName("Search");
+                var entries = (ListBox)selection.FindName("Entries");
+                search.Text = "change.txt";
+                if (entries.Items.Count != 1 || ((Button)selection.FindName("ApplyButton")).IsEnabled)
+                    throw new InvalidOperationException("Содержимое копии не фильтруется по пути.");
+                selection.UpdateLayout();
+                screenshotDialog("files-restore-selection", selection);
+                selectionInspected = true;
+                selection.DialogResult = false;
+                dialog.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                    () => restore.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            });
+            ((Button)dialog.FindName("ChooseFilesButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         });
         try
         {
@@ -233,7 +248,7 @@ internal static partial class DesktopSmoke
         }
         if (!Control<TextBlock>("CopyVerificationStatus").Text.Contains("Восстановлено файлов: 3; архивов в цепочке: 2"))
             throw new InvalidOperationException(Control<TextBlock>("CopyVerificationStatus").Text);
-        if (!restoreProgress.Any(value => value.Phase == FileRestorePhase.TransferringArchive)
+        if (!selectionInspected || !restoreProgress.Any(value => value.Phase == FileRestorePhase.TransferringArchive)
             || !restoreProgress.Any(value => value.Phase == FileRestorePhase.VerifyingFiles)
             || Control<Border>("CopyExportProgressPanel").Visibility != Visibility.Collapsed
             || !Control<TextBlock>("Status").Text.Contains("Файлы восстановлены"))

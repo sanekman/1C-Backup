@@ -194,8 +194,13 @@
     });
 
     function replaceContent(target, incoming) {
-        if (target && incoming && !target.contains(document.activeElement) && target.innerHTML !== incoming.innerHTML)
-            target.replaceChildren(...incoming.childNodes);
+        if (!target || !incoming || target.contains(document.activeElement)) return;
+        const disclosures = new Map([...target.querySelectorAll('[data-dashboard-disclosure]')]
+            .map(item => [item.dataset.dashboardDisclosure, item.open]));
+        for (const item of incoming.querySelectorAll('[data-dashboard-disclosure]')) {
+            if (disclosures.has(item.dataset.dashboardDisclosure)) item.open = disclosures.get(item.dataset.dashboardDisclosure);
+        }
+        if (target.innerHTML !== incoming.innerHTML) target.replaceChildren(...incoming.childNodes);
     }
 
     function showRefreshStatus(message) {

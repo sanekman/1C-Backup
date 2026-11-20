@@ -10,6 +10,10 @@
     <TextBlock x:Name="CopyName" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
     <TextBlock x:Name="CopySource" TextWrapping="Wrap" Margin="0,4,0,8" />
     <TextBlock x:Name="ChainStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
+    <CheckBox x:Name="AllowOtherDestinations" Visibility="Collapsed" Margin="0,6,0,0"
+     Checked="RestoreAvailability_Changed" Unchecked="RestoreAvailability_Changed">
+     <TextBlock Text="Разрешаю прочитать архивы из других хранилищ задания" TextWrapping="Wrap" />
+    </CheckBox>
     <TextBlock Text="Куда восстановить файлы" Margin="0,12,0,4" />
     <DockPanel>
      <Button x:Name="PickFolderButton" DockPanel.Dock="Right" Content="Выбрать папку…" Click="PickFolder_Click" Margin="8,0,0,0" />
@@ -21,6 +25,14 @@
      <PasswordBox x:Name="OverridePassword" MaxLength="1024" AutomationProperties.Name="Пароль архива для этой операции" Margin="0,5,0,0" />
     </Expander>
     <TextBlock x:Name="PasswordError" TextWrapping="Wrap" Foreground="{DynamicResource ErrorBrush}" AutomationProperties.LiveSetting="Polite" />
+    <StackPanel x:Name="FileSelection" Visibility="Collapsed" Margin="0,8,0,0">
+     <WrapPanel>
+      <Button x:Name="ChooseFilesButton" Content="Выбрать файлы и папки…" Click="ChooseFiles_Click" Margin="0,0,8,0" />
+      <Button x:Name="RestoreAllButton" Content="Вся копия" Click="RestoreAll_Click" Visibility="Collapsed" />
+     </WrapPanel>
+     <TextBlock x:Name="SelectionStatus" Text="Будет восстановлена вся копия." TextWrapping="Wrap" Margin="0,4,0,0"
+      AutomationProperties.LiveSetting="Polite" />
+    </StackPanel>
    </StackPanel>
   </ScrollViewer>
   <WrapPanel Grid.Row="1" HorizontalAlignment="Right" Margin="0,12,0,0">

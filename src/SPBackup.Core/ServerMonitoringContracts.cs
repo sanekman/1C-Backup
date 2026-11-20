@@ -28,7 +28,11 @@ public sealed record MonitoredJob(Guid JobId, string Name, string SourceKind, bo
     public string? BackupScope { get; init; }
     public int? MaximumBackupAgeHours { get; init; }
     public bool? LocalAccessReady { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<MonitoredFileCopyCheck>? FileCopyChecks { get; init; }
 }
+public sealed record MonitoredFileCopyCheck(int Index, Guid? SnapshotId, DateTimeOffset? CreatedUtc, DateTimeOffset? CheckedUtc,
+    bool OlderThanLatest, bool Incomplete, string? LatestCheck);
 public sealed record MonitoredDestination(int Index, bool Succeeded, long Bytes, bool Incomplete);
 public sealed record MonitoredRunTiming(long? DurationMilliseconds, DateTimeOffset? ObservedFinishedUtc);
 public sealed record MonitoredRun(Guid RunId, Guid JobId, string JobName, DateTimeOffset StartedUtc,
@@ -115,7 +119,8 @@ public static class MonitoringValidation
         && (s.ConfigurationCapabilities is null || AgentCapabilities.Valid(s.ConfigurationCapabilities))
         && s.Jobs.All(j => j is not null && (j.BackupScope is null || j.BackupScope.Length == 64 && j.BackupScope.All(Uri.IsHexDigit)) && j.MaximumBackupAgeHours is not (< 1 or > 87600) && j.JobId != Guid.Empty && Text(j.Name,256) && Text(j.SourceKind,64)
             && Text(j.Schedule,512) && (j.TaskKind == "Backup" && j.DestinationCount is >= 1 and <= 100
-                || j.TaskKind == "Observation" && j.DestinationCount == 0 && j.SourceKind is "SqlServerHistory" or "PostgreSqlReports"))
+                || j.TaskKind == "Observation" && j.DestinationCount == 0 && j.SourceKind is "SqlServerHistory" or "PostgreSqlReports")
+            && ValidFileCopyChecks(j))
         && s.Jobs.Select(j=>j.JobId).Distinct().Count() == s.Jobs.Count
         && (s.Sources is null || s.Sources.Count <= 1000 && s.Sources.All(m=>m is not null && m.MonitorId != Guid.Empty && Text(m.Name,256) && Text(m.Kind,64)
                 && m.MaximumBackupAgeHours is null or >= 1 and <= 87600
@@ -133,6 +138,20 @@ public static class MonitoringValidation
             && s.Sources.Select(m=>m.MonitorId).Distinct().Count()==s.Sources.Count)
         && (s.Progress is null || s.Progress.RunId != Guid.Empty && s.Progress.JobId != Guid.Empty
             && Text(s.Progress.Stage,64) && s.Progress.Percent is null or >= 0 and <= 100 && s.Progress.UpdatedUtc != default);
+
+    private static bool ValidFileCopyChecks(MonitoredJob job)
+    {
+        if (job.FileCopyChecks is not { } checks) return true;
+        return job.TaskKind == "Backup" && job.SourceKind == "FilesAndFolders" && checks.Count > 0
+            && checks.Count == job.DestinationCount
+            && checks.All(check => check is not null && check.Index >= 0 && check.Index < job.DestinationCount
+                && check.LatestCheck is null or "Verified" or "Failed" or "Cancelled"
+                && (check.SnapshotId is { } snapshot ? snapshot != Guid.Empty && ValidVerificationTime(check.CreatedUtc) && ValidVerificationTime(check.CheckedUtc)
+                    : check.CreatedUtc is null && check.CheckedUtc is null && !check.OlderThanLatest && !check.Incomplete && check.LatestCheck != "Verified"))
+            && checks.Select(check => check.Index).Distinct().Count() == checks.Count;
+    }
+
+    private static bool ValidVerificationTime(DateTimeOffset? time) => time is { } value && value != default && value.Offset == TimeSpan.Zero;
     public static bool Valid(MonitoredRun? r) => r is not null && (r.BackupScope is null || r.BackupScope.Length == 64 && r.BackupScope.All(Uri.IsHexDigit)) && r.RunId != Guid.Empty && r.JobId != Guid.Empty
         && r.ConfigurationRevision is null or > 0
         && Text(r.JobName,256) && r.StartedUtc != default && r.FinishedUtc >= r.StartedUtc

@@ -1,0 +1,33 @@
+<Window x:Class="SPBackup.Desktop.RestoreSelectionWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="Файлы и папки в копии" Width="640" Height="460" MinWidth="420" MinHeight="340"
+ WindowStartupLocation="CenterOwner">
+ <Grid Margin="18" FocusManager.FocusedElement="{Binding ElementName=Search}">
+  <Grid.RowDefinitions>
+   <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+  </Grid.RowDefinitions>
+  <Label Content="Поиск по пути" Target="{Binding ElementName=Search}" Padding="0,0,0,4"/>
+  <TextBox x:Name="Search" Grid.Row="1" MaxLength="256" TextChanged="Search_Changed"/>
+  <ListBox x:Name="Entries" Grid.Row="2" Margin="0,8,0,0" AutomationProperties.Name="Содержимое копии"
+   ScrollViewer.HorizontalScrollBarVisibility="Disabled" VirtualizingPanel.VirtualizationMode="Recycling">
+   <ListBox.ItemTemplate>
+    <DataTemplate>
+     <CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+      <StackPanel>
+       <TextBlock Text="{Binding Path}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding Description}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+      </StackPanel>
+     </CheckBox>
+    </DataTemplate>
+   </ListBox.ItemTemplate>
+  </ListBox>
+  <DockPanel Grid.Row="3" Margin="0,12,0,0">
+   <WrapPanel DockPanel.Dock="Right">
+    <Button Content="Отмена" IsCancel="True" Margin="0,0,8,0"/>
+    <Button x:Name="ApplyButton" Content="Применить выбор" Style="{StaticResource PrimaryButton}" IsEnabled="False" Click="Apply_Click"/>
+   </WrapPanel>
+   <TextBlock x:Name="SelectionCount" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/>
+  </DockPanel>
+ </Grid>
+</Window>

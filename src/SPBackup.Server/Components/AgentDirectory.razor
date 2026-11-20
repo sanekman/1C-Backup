@@ -122,6 +122,18 @@
                 <h3 id="agent-plan" tabindex="-1">Серверный план и готовность</h3>
                 <dl><ManagedPlanDetails Status="plan" /></dl>
             }
+            @if (!row.Entry.Revoked && SelectedMonitoring is { } monitoring && monitoring.Snapshot.Jobs.Any(job => job.FileCopyChecks is not null))
+            {
+                <h3>Проверенные файловые копии</h3>
+                <p class="muted">@(monitoring.ReceivedUtc < Cutoff ? "Отчёт устарел · " : "")Отчёт агента получен @Clock.Time(monitoring.ReceivedUtc)</p>
+                @foreach (var job in monitoring.Snapshot.Jobs.Where(job => job.FileCopyChecks is not null))
+                {
+                    <details data-dashboard-disclosure="@job.JobId" open="@(job.JobId == Latest?.JobId)">
+                        <summary>@job.Name</summary>
+                        <FileCopyChecks Checks="job.FileCopyChecks!" />
+                    </details>
+                }
+            }
             @if (row.Reasons.Count > 0)
             {
                 <ul>
@@ -160,6 +172,8 @@
     private AgentRow? Selected;
     private MonitoredRun? Latest;
     private bool HasCurrentJob;
+    private MonitoringState? SelectedMonitoring;
+    private DateTimeOffset Cutoff;
 
     public sealed record BranchNode(string Key, string Label, Guid? FolderId, IReadOnlyList<BranchNode> Children,
         IReadOnlyList<AgentRow> Agents, string Path, string Parent)
@@ -198,6 +212,7 @@
         var entries = await Store.AgentTreeAsync(token);
         var problems = (await Store.TreeProblemSummariesAsync(Settings.OfflineAfterSeconds, token)).ToDictionary(problem => problem.AgentId);
         var cutoff = DateTimeOffset.UtcNow.AddSeconds(-Settings.OfflineAfterSeconds);
+        Cutoff = cutoff;
         var plans = await Store.ManagedPlansAsync(null, cutoff, token);
         var folderIds = Folders.Select(folder => folder.Id).ToHashSet();
         var rows = entries.Select(entry =>
@@ -223,8 +238,8 @@
         Selected = AgentId is { } selected ? Rows.FirstOrDefault(row => row.Entry.Id == selected) : null;
         Latest = Selected?.Entry.LatestRun;
         if (Selected is { } item) Recent = (await Store.RunsAsync(item.Entry.Id, 0, token, agentCopiesOnly: true)).Runs.Take(8).ToArray();
-        HasCurrentJob = Selected is { } current && Latest is { } run
-            && (await Store.MonitoringAsync(current.Entry.Id, token))?.Snapshot.Jobs.Any(job => job.JobId == run.JobId) == true;
+        SelectedMonitoring = Selected is { } current ? await Store.MonitoringAsync(current.Entry.Id, token) : null;
+        HasCurrentJob = Latest is { } run && SelectedMonitoring?.Snapshot.Jobs.Any(job => job.JobId == run.JobId) == true;
     }
 
     private string FolderPath(AgentRow row) => Folders.FirstOrDefault(folder => folder.Id == row.Entry.FolderId)?.Path ?? "Без папки";

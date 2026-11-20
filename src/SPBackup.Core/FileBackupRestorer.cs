@@ -7,39 +7,67 @@ public sealed record RestoredFileBackup(string Directory, int Files, int Archive
 {
     public IReadOnlyList<string>? SkippedPaths { get; init; }
 }
+public sealed record FileRestoreItem(string Path, bool IsDirectory, bool FromEarlierSnapshot);
 
 /// <summary>Restores a verified chain into an owned new directory; existing files are never overwritten.</summary>
 public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog catalog, string defaultWorkRoot,
     IArchivePasswordStore? passwords = null)
 {
+    public async Task<IReadOnlyList<FileRestoreItem>> ReadContentsAsync(BackupRecord selected, BackupJob job,
+        CancellationToken cancellationToken = default, string? passwordOverride = null, bool allowOtherDestinations = false)
+    {
+        await ReadChainAsync(selected, job, allowOtherDestinations, cancellationToken);
+        var password = await GetPasswordAsync(selected, passwordOverride, cancellationToken);
+        var work = WorkDirectory(job, Guid.NewGuid().ToString("N"));
+        PrivateBackupDirectory.Create(work);
+        try
+        {
+            var archivePath = Path.Combine(work, "point.zip");
+            var manifest = await ReadArchiveAsync(selected, job, archivePath, password, cancellationToken);
+            var skipped = (manifest.SkippedPaths ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return manifest.Directories.Select(path => new FileRestoreItem(path, true, false))
+                .Concat(manifest.Files.Select(file => new FileRestoreItem(file.Path, false, skipped.Contains(file.Path))))
+                .OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+        finally { Directory.Delete(work, recursive: true); }
+    }
+
     public async Task<RestoredFileBackup> RestoreAsync(BackupRecord selected, BackupJob job, string parentDirectory,
-        CancellationToken cancellationToken = default, string? passwordOverride = null, IProgress<FileRestoreProgress>? progress = null)
+        CancellationToken cancellationToken = default, string? passwordOverride = null, IProgress<FileRestoreProgress>? progress = null,
+        IReadOnlyCollection<string>? selectedPaths = null, bool allowOtherDestinations = false)
     {
         DiagnosticLog.Current.Write(DiagnosticEvent.FileRestoreStarted, jobId: job.Id, sourceKind: job.Kind);
         cancellationToken.ThrowIfCancellationRequested();
-        if (selected.Backup.FileSnapshot is null) throw new InvalidDataException("Выбранная копия не является файловым снимком.");
-        BackupCopyVerifier.GetStorageJob(selected, job);
-        var records = await catalog.ReadAsync(cancellationToken);
-        if (!records.Contains(selected)) throw new InvalidDataException("Выбранная копия больше не зарегистрирована.");
-        var chain = FileBackupChains.Resolve(selected, records);
+        var chain = await ReadChainAsync(selected, job, allowOtherDestinations, cancellationToken);
+        var selection = selectedPaths?.ToHashSet(StringComparer.Ordinal);
+        if (selection is { Count: 0 }) throw new InvalidDataException("Выберите файл или папку для восстановления.");
+        var ancestors = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var path in selection ?? [])
+        {
+            FileBackupPaths.Resolve(parentDirectory, path);
+            for (var at = path.LastIndexOf('/'); at > 0; at = path.LastIndexOf('/', at - 1))
+                ancestors.Add(path[..at]);
+        }
+        bool Included(string path)
+        {
+            if (selection is null || selection.Contains(path)) return true;
+            for (var at = path.LastIndexOf('/'); at > 0; at = path.LastIndexOf('/', at - 1))
+                if (selection.Contains(path[..at])) return true;
+            return false;
+        }
         var reporter = new FileRestoreReporter(progress);
         if (!Path.IsPathFullyQualified(parentDirectory) || !Directory.Exists(parentDirectory))
             throw new DirectoryNotFoundException("Выберите существующую папку для восстановления.");
         RejectAncestorReparse(parentDirectory);
         if (Directory.Exists(job.Source))
             FileBackupPaths.RequireOutside(job.Source, parentDirectory, "Для восстановления выберите папку вне исходных данных.");
-        if (passwordOverride is not null) ArchivePasswords.Validate(passwordOverride);
-        var password = selected.Backup.ArchivePasswordKey is null ? null
-            : passwordOverride ?? await ArchivePasswords.ResolveAsync(selected.Backup.ArchivePasswordKey, passwords, cancellationToken);
+        var password = await GetPasswordAsync(selected, passwordOverride, cancellationToken);
         var nonce = Guid.NewGuid().ToString("N");
         var stage = Path.Combine(parentDirectory, ".onec-restore-" + nonce + ".partial");
         var result = Path.Combine(parentDirectory, "Restored-files-" + nonce);
-        var work = Path.Combine(Path.GetFullPath(job.TemporaryDirectory ?? defaultWorkRoot), "file-restore-" + nonce);
-        if (Directory.Exists(job.Source))
-            FileBackupPaths.RequireOutside(job.Source, work, "Временная папка восстановления должна находиться вне исходных данных.");
-        if (Directory.Exists(stage) || File.Exists(stage) || Directory.Exists(work) || File.Exists(work))
+        var work = WorkDirectory(job, nonce);
+        if (Directory.Exists(stage) || File.Exists(stage))
             throw new IOException("Временная папка восстановления уже существует.");
-        RejectAncestorReparse(work);
         var ownsStage = false; var ownsWork = false;
         FileBackupManifest? final = null;
         try
@@ -53,12 +81,10 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
                 archiveNumber++;
                 reporter.Report(FileRestorePhase.PreparingArchive, archiveNumber, chain.Count, 0, record.Backup.Length, true);
                 var archivePath = Path.Combine(work, record.Id.ToString("N") + ".zip");
-                await new BackupCopyExporter(storage).ExportAsync(record, job, archivePath, cancellationToken, reporter.ForArchive(archiveNumber, chain.Count));
-                var manifest = await FileBackupZip.ReadManifestAsync(archivePath, password, cancellationToken);
-                if (manifest.GetSnapshot() != record.Backup.FileSnapshot)
-                    throw new InvalidDataException("Индекс архива не совпадает с зарегистрированной файловой цепочкой.");
-                reporter.Report(FileRestorePhase.ApplyingSnapshot, archiveNumber, chain.Count, 0, manifest.ChangedFiles.Count, true);
-                var currentFiles = manifest.Files.Select(file => file.Path).ToHashSet(StringComparer.Ordinal);
+                var manifest = await ReadArchiveAsync(record, job, archivePath, password, cancellationToken, reporter.ForArchive(archiveNumber, chain.Count));
+                var changed = manifest.ChangedFiles.Where(Included).ToArray();
+                reporter.Report(FileRestorePhase.ApplyingSnapshot, archiveNumber, chain.Count, 0, changed.Length, true);
+                var currentFiles = manifest.Files.Where(file => Included(file.Path)).Select(file => file.Path).ToHashSet(StringComparer.Ordinal);
                 // All paths inside stage belong to this restore, including files removed by an increment.
                 foreach (var file in Directory.EnumerateFiles(stage, "*", SearchOption.AllDirectories))
                 {
@@ -67,7 +93,7 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
                     var relative = Path.GetRelativePath(stage, file).Replace(Path.DirectorySeparatorChar, '/');
                     if (!currentFiles.Contains(relative)) File.Delete(file);
                 }
-                var currentDirectories = manifest.Directories.ToHashSet(StringComparer.Ordinal);
+                var currentDirectories = manifest.Directories.Where(path => ancestors.Contains(path) || Included(path)).ToHashSet(StringComparer.Ordinal);
                 foreach (var directory in Directory.EnumerateDirectories(stage, "*", SearchOption.AllDirectories).OrderByDescending(path => path.Length))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -75,7 +101,7 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
                     var relative = Path.GetRelativePath(stage, directory).Replace(Path.DirectorySeparatorChar, '/');
                     if (!currentDirectories.Contains(relative)) Directory.Delete(directory, recursive: false);
                 }
-                foreach (var directory in manifest.Directories.OrderBy(path => path.Length))
+                foreach (var directory in currentDirectories.OrderBy(path => path.Length))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var path = FileBackupPaths.Resolve(stage, directory); RejectAncestorReparse(path); Directory.CreateDirectory(path);
@@ -84,21 +110,28 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
                 {
                     var files = manifest.Files.ToDictionary(file => file.Path, StringComparer.Ordinal);
                     var applied = 0;
-                    foreach (var name in manifest.ChangedFiles)
+                    foreach (var name in changed)
                     {
                         var path = FileBackupPaths.Resolve(stage, name); RejectAncestorReparse(path);
                         await using var input = zip.GetInputStream(zip.GetEntry("data/" + name));
                         await using var output = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous);
                         await FileBackupZip.CopyVerifiedAsync(input, output, files[name], cancellationToken);
                         await output.FlushAsync(cancellationToken); output.Flush(true);
-                        reporter.Report(FileRestorePhase.ApplyingSnapshot, archiveNumber, chain.Count, ++applied, manifest.ChangedFiles.Count);
+                        reporter.Report(FileRestorePhase.ApplyingSnapshot, archiveNumber, chain.Count, ++applied, changed.Length);
                     }
                 }
                 final = manifest; File.Delete(archivePath);
             }
+            if (selection is not null)
+            {
+                var names = final!.Files.Select(file => file.Path).Concat(final.Directories).ToHashSet(StringComparer.Ordinal);
+                if (!selection.IsSubsetOf(names))
+                    throw new InvalidDataException("Один из выбранных путей отсутствует в этом снимке.");
+            }
+            var filesToVerify = final!.Files.Where(file => Included(file.Path)).ToArray();
             var verified = 0;
-            reporter.Report(FileRestorePhase.VerifyingFiles, chain.Count, chain.Count, 0, final!.Files.Count, true);
-            foreach (var file in final.Files)
+            reporter.Report(FileRestorePhase.VerifyingFiles, chain.Count, chain.Count, 0, filesToVerify.Length, true);
+            foreach (var file in filesToVerify)
             {
                 var path = FileBackupPaths.Resolve(stage, file.Path); RejectAncestorReparse(path);
                 await using (var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -108,15 +141,16 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
                         throw new InvalidDataException("Восстановленная цепочка не совпадает с итоговым индексом: " + file.Path);
                 }
                 File.SetLastWriteTimeUtc(path, file.LastWriteUtc.UtcDateTime);
-                reporter.Report(FileRestorePhase.VerifyingFiles, chain.Count, chain.Count, ++verified, final.Files.Count);
+                reporter.Report(FileRestorePhase.VerifyingFiles, chain.Count, chain.Count, ++verified, filesToVerify.Length);
             }
             cancellationToken.ThrowIfCancellationRequested(); RejectAncestorReparse(parentDirectory);
             reporter.Report(FileRestorePhase.Publishing, chain.Count, chain.Count, 0, 1, true);
             cancellationToken.ThrowIfCancellationRequested();
             Directory.Move(stage, result); ownsStage = false;
             reporter.Report(FileRestorePhase.Completed, chain.Count, chain.Count, 1, 1, true);
-            DiagnosticLog.Current.Write(DiagnosticEvent.FileRestoreCompleted, jobId: job.Id, sourceKind: job.Kind, values: new(Count: final.Files.Count, Code: chain.Count));
-            return new(result, final.Files.Count, chain.Count, final.SnapshotId) { SkippedPaths = final.SkippedPaths };
+            DiagnosticLog.Current.Write(DiagnosticEvent.FileRestoreCompleted, jobId: job.Id, sourceKind: job.Kind, values: new(Count: filesToVerify.Length, Code: chain.Count));
+            return new(result, filesToVerify.Length, chain.Count, final.SnapshotId)
+                { SkippedPaths = selection is null ? final.SkippedPaths : final.SkippedPaths?.Where(Included).ToArray() };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         { DiagnosticLog.Current.Write(DiagnosticEvent.FileRestoreCancelled, jobId: job.Id); throw; }
@@ -127,6 +161,46 @@ public sealed class FileBackupRestorer(IBackupStorage storage, BackupCatalog cat
             if (ownsStage) Directory.Delete(stage, recursive: true);
             if (ownsWork) Directory.Delete(work, recursive: true);
         }
+    }
+
+    private async Task<IReadOnlyList<BackupRecord>> ReadChainAsync(BackupRecord selected, BackupJob job,
+        bool allowOtherDestinations, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (selected.Backup.FileSnapshot is null) throw new InvalidDataException("Выбранная копия не является файловым снимком.");
+        BackupCopyVerifier.GetStorageJob(selected, job);
+        var records = await catalog.ReadAsync(token);
+        if (!records.Contains(selected)) throw new InvalidDataException("Выбранная копия больше не зарегистрирована.");
+        return allowOtherDestinations ? FileBackupChains.ResolveAcrossStorages(selected, job, records, checkLocalAvailability: true)
+            : FileBackupChains.Resolve(selected, records);
+    }
+
+    private async Task<string?> GetPasswordAsync(BackupRecord selected, string? passwordOverride, CancellationToken token)
+    {
+        if (passwordOverride is not null) ArchivePasswords.Validate(passwordOverride);
+        return selected.Backup.ArchivePasswordKey is { } key
+            ? passwordOverride ?? await ArchivePasswords.ResolveAsync(key, passwords, token)
+            : null;
+    }
+
+    private string WorkDirectory(BackupJob job, string nonce)
+    {
+        var work = Path.Combine(Path.GetFullPath(job.TemporaryDirectory ?? defaultWorkRoot), "file-restore-" + nonce);
+        if (Directory.Exists(job.Source))
+            FileBackupPaths.RequireOutside(job.Source, work, "Временная папка восстановления должна находиться вне исходных данных.");
+        if (Directory.Exists(work) || File.Exists(work)) throw new IOException("Временная папка восстановления уже существует.");
+        RejectAncestorReparse(work);
+        return work;
+    }
+
+    private async Task<FileBackupManifest> ReadArchiveAsync(BackupRecord record, BackupJob job, string path, string? password,
+        CancellationToken token, IProgress<BackupExportProgress>? progress = null)
+    {
+        await new BackupCopyExporter(storage).ExportAsync(record, job, path, token, progress);
+        var manifest = await FileBackupZip.ReadManifestAsync(path, password, token);
+        if (manifest.GetSnapshot() != record.Backup.FileSnapshot)
+            throw new InvalidDataException("Индекс архива не совпадает с зарегистрированной файловой цепочкой.");
+        return manifest;
     }
     private static void RejectAncestorReparse(string path)
     {
