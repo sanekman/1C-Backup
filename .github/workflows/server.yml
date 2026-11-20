@@ -28,7 +28,7 @@ on:
         description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
         default: full
-        options: [full, compose, maintenance, installed, proxmox, reports, integration, publish-accepted]
+        options: [full, compose, maintenance, snapshot, installed, proxmox, reports, integration, publish-accepted]
       report_source_run:
         description: 'Reports scope only: existing server.yml run to validate without rerunning checks'
         type: string
@@ -78,7 +78,7 @@ jobs:
           echo "ONECBACKUP_SERVER_TEST_CONNECTION_FILE=/tmp/onec-server-ci/connection-string.txt" >> "$GITHUB_ENV"
       - if: runner.os == 'Linux'
         run: dotnet test tests/SPBackup.Server.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=ServerPackage' --logger 'trx;LogFileName=server-linux.trx' --results-directory artifacts/server-tests
-      - if: runner.os == 'Windows' && inputs.scope != 'maintenance'
+      - if: runner.os == 'Windows' && inputs.scope != 'maintenance' && inputs.scope != 'snapshot'
         run: python tests/server/run_windows.py
       - run: python tools/build_server_distribution.py --runtime ${{ matrix.runtime }}
       - if: runner.os == 'Linux'
@@ -95,7 +95,7 @@ jobs:
         run: Invoke-WebRequest 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile artifacts/server/vc_redist.x64.exe
       - if: runner.os == 'Windows' && inputs.scope != 'integration'
         run: python tools/build_server_windows_installer.py
-      - if: runner.os == 'Windows' && inputs.scope != 'integration'
+      - if: runner.os == 'Windows' && inputs.scope != 'integration' && inputs.scope != 'snapshot'
         shell: pwsh
         run: |
           $baseline = Join-Path $env:RUNNER_TEMP 'SP-Backup-Server-preview8-setup.exe'
@@ -109,7 +109,7 @@ jobs:
         run: |
           $installer = (Get-ChildItem artifacts/server/SP-Backup-Server-*-windows-x64-setup.exe).FullName
           & tests/server/windows_installer_smoke.ps1 -Installer $installer
-      - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }} ${{ inputs.scope == 'maintenance' && '--maintenance-only' || inputs.scope == 'integration' && '--integration-only' || '' }}
+      - run: python tests/server/verify_results.py --runtime ${{ matrix.runtime }} ${{ inputs.scope == 'snapshot' && '--snapshot-only' || inputs.scope == 'maintenance' && '--maintenance-only' || inputs.scope == 'integration' && '--integration-only' || '' }}
       - if: runner.os == 'Linux'
         run: python3 tests/server/compose_smoke.py
       - if: always() && runner.os == 'Windows'
@@ -246,7 +246,8 @@ jobs:
           $required = @{'windows-installer-result.json'=21; 'windows-snapshot-result.json'=14; 'windows-upgrade-result.json'=16}
           foreach ($name in $required.Keys) {
             $report = Get-Content (Join-Path 'artifacts/server-tests' $name) -Raw | ConvertFrom-Json -AsHashtable
-            if ($report.Count -ne $required[$name] -or @($report.Values | Where-Object { $_ -isnot [bool] -or $_ -ne $true }).Count) { throw ('Native acceptance incomplete: '+$name) }
+            $counts=@($required[$name]); if ($name -eq 'windows-snapshot-result.json') { $counts+=16 }
+            if ($report.Count -notin $counts -or @($report.Values | Where-Object { $_ -isnot [bool] -or $_ -ne $true }).Count) { throw ('Native acceptance incomplete: '+$name) }
             Write-Output ($name+': '+$report.Count+' native checks passed.')
           }
       - if: always()

@@ -31,16 +31,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime', choices=['linux-x64', 'win-x64'], required=True)
     parser.add_argument('--maintenance-only', action='store_true', help='Windows package/upgrade/installer checks; integration already accepted on unchanged C# sources')
+    parser.add_argument('--snapshot-only', action='store_true', help='Windows package and installed snapshot checks')
     parser.add_argument('--results-dir', type=Path, default=Path(__file__).resolve().parents[2] / 'artifacts/server-tests')
     parser.add_argument('--integration-only', action='store_true', help='Verify integration and built package; no unchanged native installer scenarios')
     args = parser.parse_args()
-    if args.integration_only and args.maintenance_only:
-        parser.error('integration-only and maintenance-only are mutually exclusive')
-    if args.maintenance_only and args.runtime != 'win-x64':
-        parser.error('maintenance-only is restricted to Windows')
+    if sum([args.integration_only, args.maintenance_only, args.snapshot_only]) > 1:
+        parser.error('only one acceptance scope may be chosen')
+    if (args.maintenance_only or args.snapshot_only) and args.runtime != 'win-x64':
+        parser.error('maintenance and snapshot acceptance are restricted to Windows')
     platform = 'windows' if args.runtime == 'win-x64' else 'linux'
     root = args.results_dir
-    if not args.maintenance_only:
+    if not args.maintenance_only and not args.snapshot_only:
         verify_suite(root / f'server-{platform}.trx', SERVER_TEST_COUNT, WINDOWS_SKIPS if platform == 'windows' else frozenset())
     verify_suite(root / f'server-package-{platform}.trx', 1)
     if platform == 'windows' and not args.integration_only:
@@ -49,6 +50,9 @@ def main():
             'windows-snapshot-result.json': {'coldBackup', 'checksumVerification', 'startupFailureRollback', 'restoredDatabase'},
             'windows-upgrade-result.json': {'baselinePreview8', 'schema5To6', 'fullProgramInventory', 'fullProgramAndDataRollback', 'failedRollbackRestoresBothTrees', 'migrationFailureRecovery', 'stoppedServicesDiagnosedReadOnly'},
         }
+        if args.snapshot_only:
+            del reports['windows-upgrade-result.json']
+            reports['windows-snapshot-result.json'].update({'newHostFreshTargetGuard', 'newHostRotatesKeys'})
         for name, required in reports.items():
             report = json.loads((root / name).read_text(encoding='utf-8-sig'))
             if not required <= report.keys() or not all(value is True for value in report.values()):
