@@ -20,9 +20,6 @@
             @(monitoring.Snapshot.ReportRejections is null
                 ? $"Ожидает передачи по данным агента: {monitoring.Snapshot.PendingRuns}."
                 : $"Готово к отправке: {monitoring.Snapshot.ReadyRuns}.")</p>
-        @if (monitoring.Snapshot.ExecutionMode == "Managed")
-        { <p>Задания с сервера. Принятая ревизия: @(monitoring.Snapshot.ConfigurationRevision?.ToString() ?? "ожидает первого подключения").
-            @(monitoring.Snapshot.BackupExecutionAvailable == true && agent.BackupExecutionAvailable ? "Исполнитель работает." : "Исполнение не подтверждено.")</p> }
         @if (monitoring.Snapshot.ReportRejections is { Total: > 0 } rejected)
         {
             <p class="error">Сервер отклонил отчётов: @rejected.Total. Агент повторит отправку.</p>
@@ -119,24 +116,21 @@
         <div class="pagination">@if (RunPage > 0) { <a href="@($"agents/{Id}?runPage={RunPage-1}")">← Новее</a> } @if (RunId is null && history.Runs.Count == history.PageSize) { <a href="@($"agents/{Id}?runPage={RunPage+1}")">Старее →</a> }</div>
     }
     </section>
+    @if (Plan is { } plan)
+    {
+        <section class="card narrow" aria-labelledby="agent-plan">
+            <h2 id="agent-plan">Серверный план и готовность</h2>
+            <dl><ManagedPlanDetails Status="plan" /></dl>
+        </section>
+    }
     <section class="card narrow">
         <dl><dt>ID</dt><dd class="mono">@agent.AgentId</dd>
             <dt>Версия</dt><dd>@(Monitoring?.Snapshot.AgentVersion ?? agent.AgentVersion ?? "Ещё не получена")</dd>
             <dt>Зарегистрирован</dt><dd>@Clock.Time(agent.RegisteredUtc)</dd>
             <dt>Последняя связь, время сервера</dt><dd>@Clock.Time(Monitoring?.ReceivedUtc ?? agent.ReceivedUtc)</dd>
             <dt>Последняя отметка времени агента</dt><dd>@Clock.Time(Monitoring?.Snapshot.SentUtc ?? agent.SentUtc)</dd>
-            <dt>Ревизия на сервере</dt><dd>@agent.DesiredRevision</dd>
-            @if (Decisions is { } decisions)
-            {
-                <dt>Настройки серверной ревизии</dt><dd>@DecisionLabel(decisions)</dd>
-                <dt>Последняя проверенная и сохранённая агентом</dt><dd>@(decisions.LastAccepted is { } accepted ? $"Ревизия {accepted.Revision} · подтверждение получено {Clock.Time(accepted.ReceivedUtc)}" : "Подтверждения ещё нет")</dd>
-            }
-            <dt>Ревизия, сообщённая агентом</dt><dd>@(agent.ReportedRevision?.ToString() ?? "Нет сигнала")</dd>
-            <dt>Исполнитель копирования</dt><dd>@(agent.ReceivedUtc is null ? "Нет данных" : agent.BackupExecutionAvailable ? "Агент сообщает готовность" : "Агент сообщает, что недоступен")</dd>
             <dt>Серверные задания</dt><dd>@(Monitoring?.Snapshot.ConfigurationCapabilities is not { } caps ? "Агент не передал сведения о поддержке" : caps.Contains(AgentCapabilities.ManagedExecutionV1) ? "Поддержка заявлена агентом" : "Задания настраиваются на компьютере агента")</dd>
         </dl>
-        <p class="muted">Данные актуальны на время последнего сигнала. Готовность исполнителя не подтверждает успешное создание копии.</p>
-        <p class="muted">Агент подтверждает проверку и сохранение настроек. Это не подтверждает запуск расписания или создание резервной копии.</p>
         @if (agent.Revoked) { <p class="error">Доступ отозван. Сервер не принимает этот агентский токен. Принятое локальное расписание само по себе не отменяется.</p><a href="@($"connect?agentId={Id}")">Создать приглашение для повторного подключения</a> }
         else
         {
@@ -160,7 +154,7 @@ else { <h1>Агент не найден</h1> }
     [SupplyParameterFromQuery] public Guid? RunId { get; set; }
     private AgentRecord? Data;
     private IReadOnlyList<AgentFolderOption> Folders = [];
-    private ConfigurationDecisionState? Decisions;
+    private ManagedPlanStatus? Plan;
     private MonitoringState? Monitoring;
     private MonitoringProgressDisplay? Activity;
     private MonitoredRunPage? Runs;
@@ -177,26 +171,19 @@ else { <h1>Агент не найден</h1> }
     { "SqlServerMsdbHistory"=>"История MS SQL (msdb)", "PgRestoreCatalogChecked"=>"Каталог дампа PostgreSQL проверен", "PostgreSqlScriptFailure"=>"Ошибка скрипта PostgreSQL", _=>"Отчёт внешнего источника" };
     private static string Status(MonitoredRun r) => r.Incomplete ? "Неполная копия" : r.Status switch
     { "Succeeded" => r.WarningCount > 0 ? "С предупреждениями" : "Успешно", "Failed" => "Ошибка", "PartiallySucceeded"=>"Частичная доставка", "Cancelled"=>"Отменено", _=>"Прервано" };
-    private static string DecisionLabel(ConfigurationDecisionState state) => state.Revoked ? "Доступ агента отозван" : state.Current switch
-    {
-        null => "Ревизия ещё не выдана с запросом подтверждения",
-        { Status: "Awaiting" } => "Ожидается подтверждение агента",
-        { Status: "Accepted" } => "Проверена и сохранена агентом",
-        { Reason: "CacheWriteFailed" } => "Агент не смог сохранить настройки",
-        _ => "Агент отклонил настройки"
-    };
     protected override async Task OnParametersSetAsync()
     {
         Folders = await Store.FoldersAsync(Http.HttpContext!.RequestAborted);
         Data = await Store.AgentAsync(Id, Http.HttpContext!.RequestAborted);
-        Decisions = Data is null ? null : await Store.ConfigurationDecisionsAsync(Id, Http.HttpContext.RequestAborted);
+        var cutoff = DateTimeOffset.UtcNow.AddSeconds(-Settings.OfflineAfterSeconds);
+        Plan = Data is null ? null : (await Store.ManagedPlansAsync(Id, cutoff, Http.HttpContext.RequestAborted)).GetValueOrDefault(Id);
         Monitoring = await Store.MonitoringAsync(Id, Http.HttpContext!.RequestAborted);
         Activity = null;
         if (Data is { Revoked: false } && Monitoring is { Snapshot.Progress: { } progress } monitoring)
         {
             var completed = (await Store.RunsByIdAsync(Id, [progress.RunId], Http.HttpContext.RequestAborted)).Count != 0;
             Activity = MonitoringProgressDisplay.Create(progress, monitoring.ProgressObservedUtc, monitoring.ReceivedUtc,
-                revoked: false, completed, DateTimeOffset.UtcNow.AddSeconds(-Settings.OfflineAfterSeconds));
+                revoked: false, completed, cutoff);
         }
         Runs = RunId is { } runId && runId != Guid.Empty
             ? new MonitoredRunPage(await Store.RunsByIdAsync(Id, [runId], Http.HttpContext.RequestAborted), 0, 50)

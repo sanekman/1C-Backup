@@ -10,6 +10,16 @@ public sealed record ConfigurationDecisionState(Guid AgentId, long DesiredRevisi
 
 public sealed partial class ServerStore
 {
+    private const string ConfigurationOffersJoin = """
+        LEFT JOIN server_configuration_offers offered ON offered.agent_id=a.id AND offered.generation=a.token_hash AND offered.revision=c.revision
+            AND offered.document_hash=sha256(convert_to(c.document::text,'UTF8'))
+        LEFT JOIN LATERAL (
+            SELECT * FROM server_configuration_offers o
+            WHERE o.agent_id=a.id AND o.generation=a.token_hash AND o.status='Accepted'
+            ORDER BY o.revision DESC LIMIT 1
+        ) accepted ON true
+        """;
+
     public async Task<Guid> RegisterConfigurationOfferAsync(Guid agent, long revision, string document, byte[] authenticatedGeneration, CancellationToken token)
     {
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(document));
@@ -79,14 +89,12 @@ public sealed partial class ServerStore
     public async Task<ConfigurationDecisionState> ConfigurationDecisionsAsync(Guid agent, CancellationToken token)
     {
         await using var db = await source.OpenConnectionAsync(token);
-        await using var command = Command(db, null, """
+        await using var command = Command(db, null, $"""
             SELECT c.revision,a.revoked,
                 offered.revision,offered.offer_id,offered.status,offered.reason,offered.received_utc,offered.observed_utc,
                 accepted.revision,accepted.offer_id,accepted.status,accepted.reason,accepted.received_utc,accepted.observed_utc
             FROM server_agents a JOIN server_configurations c ON c.agent_id=a.id
-            LEFT JOIN server_configuration_offers offered ON offered.agent_id=a.id AND offered.generation=a.token_hash AND offered.revision=c.revision
-                AND offered.document_hash=sha256(convert_to(c.document::text,'UTF8'))
-            LEFT JOIN LATERAL (SELECT * FROM server_configuration_offers o WHERE o.agent_id=a.id AND o.generation=a.token_hash AND o.status='Accepted' ORDER BY o.revision DESC LIMIT 1) accepted ON true
+            {ConfigurationOffersJoin}
             WHERE a.id=@id
             """, ("id", agent));
         await using var reader = await command.ExecuteReaderAsync(token);

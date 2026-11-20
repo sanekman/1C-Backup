@@ -41,14 +41,28 @@
                     {
                         <tr data-dashboard-row data-agent-id="@row.Entry.Id" data-folder-id="@row.Entry.FolderId"
                             data-folder-path="@FolderPath(row)" data-agent-name="@row.Entry.Name" data-computer-name="@row.Entry.ComputerName"
-                            data-attention="@(row.Reasons.Count != 0 ? "yes" : "no")" draggable="true"
+                            data-attention="@(row.NeedsAttention ? "yes" : "no")" draggable="true"
                             class="@(row.Entry.Id == AgentId ? "dashboard-selected" : null)">
                             <td><a href="@($"?agent={row.Entry.Id}#agent-summary")">@row.Entry.Name</a></td>
                             <td data-dashboard-live><strong class="@row.ConnectionColor">@row.Connection</strong>
                                 @if (row.PrimaryReason is { } reason) { <small class="@ProblemColor(reason.Code)">@ProblemText.Filters[reason.Code]</small> }
-                                else if (row.Reasons.Any(reason => reason.Code != "Offline"))
+                                else if (row.Reasons.Any(reason => reason.Code != "Offline" && !row.ShowsPlanReason(reason.Code)))
                                 { <small><a href="@($"problems?agent={row.Entry.Id}")">Причины</a></small> }
                                 else if (row.Entry.LastSeen is { } seen) { <small title="@Clock.Time(seen)">@Clock.Time(seen, "dd.MM HH:mm")</small> }
+                                @if (row.Plan is { NeedsAttention: true } plan)
+                                {
+                                    <small data-managed-plan>
+                                        <a href="@($"?agent={row.Entry.Id}#agent-plan")" class="@(plan.Rejected ? "dashboard-error" : plan.RevisionDiffers ? "dashboard-warn" : null)">@plan.PlanLabel</a>
+                                        @if (plan.Rejected) { <span class="dashboard-error"> · отклонён</span> }
+                                        @if (plan.AcceptedRevision is { } accepted && plan.ReportedRevision is { } reported && accepted != reported)
+                                        { <span class="dashboard-warn" title="@Clock.Time(plan.ReportedUtc)"> · по отчёту @reported</span> }
+                                    </small>
+                                    <small class="@(plan.ExecutorReady == false ? "dashboard-error" : plan.ExecutorReady is null ? "dashboard-warn" : null)" title="@Clock.Time(plan.ExecutorObservedUtc)">@plan.ExecutorLabel</small>
+                                    @if (plan.AccessStale || plan.MissingAccess > 0)
+                                    {
+                                        <small class="@(plan.AccessStale ? "dashboard-warn" : "dashboard-error")" title="@Clock.Time(plan.AccessUtc)">@(plan.AccessStale ? "Сведения о доступе устарели" : plan.AccessLabel)</small>
+                                    }
+                                }
                             </td>
                             <td data-dashboard-live>
                                 @if (row.Current is { } activity)
@@ -103,6 +117,11 @@
                     else { <span>Данных о копировании пока нет.</span> }
                 </dd>
             </dl>
+            @if (row.Plan is { } plan)
+            {
+                <h3 id="agent-plan" tabindex="-1">Серверный план и готовность</h3>
+                <dl><ManagedPlanDetails Status="plan" /></dl>
+            }
             @if (row.Reasons.Count > 0)
             {
                 <ul>
@@ -152,7 +171,15 @@
 
     public sealed record AgentRow(AgentTreeEntry Entry, string Connection, string ConnectionColor, IReadOnlyList<AgentProblemCount> Reasons)
     {
-        public AgentProblemCount? PrimaryReason => Reasons.FirstOrDefault(reason => reason.Code != "Offline" && !RepeatsLatestRun(reason));
+        public AgentProblemCount? PrimaryReason => Reasons.FirstOrDefault(reason => reason.Code != "Offline" && !RepeatsLatestRun(reason) && !ShowsPlanReason(reason.Code));
+        internal bool NeedsAttention => Reasons.Count != 0 || Plan?.NeedsAttention == true;
+        internal ManagedPlanStatus? Plan { get; init; }
+        internal bool ShowsPlanReason(string code) => Plan is { NeedsAttention: true } plan && (code switch
+        {
+            "PlanPending" or "PlanRejected" or "ExecutorUnavailable" => true,
+            "AccessRequired" => plan.MissingAccess > 0,
+            _ => false
+        });
 
         private bool RepeatsLatestRun(AgentProblemCount reason) => Entry.LatestRun is { } run && reason.Code switch
         {
@@ -171,6 +198,7 @@
         var entries = await Store.AgentTreeAsync(token);
         var problems = (await Store.TreeProblemSummariesAsync(Settings.OfflineAfterSeconds, token)).ToDictionary(problem => problem.AgentId);
         var cutoff = DateTimeOffset.UtcNow.AddSeconds(-Settings.OfflineAfterSeconds);
+        var plans = await Store.ManagedPlansAsync(null, cutoff, token);
         var folderIds = Folders.Select(folder => folder.Id).ToHashSet();
         var rows = entries.Select(entry =>
         {
@@ -183,7 +211,7 @@
             var current = entry.Observed is { } received
                 ? MonitoringProgressDisplay.Create(entry.Progress, entry.ProgressObservedUtc, received, entry.Revoked, entry.ProgressCompleted, cutoff)
                 : null;
-            return new AgentRow(entry, connection, color, reasons) { Current = current };
+            return new AgentRow(entry, connection, color, reasons) { Current = current, Plan = plans.GetValueOrDefault(entry.Id) };
         }).ToLookup(row => row.Entry.FolderId is { } id && folderIds.Contains(id) ? id : Guid.Empty);
         var children = Folders.ToLookup(folder => folder.ParentId ?? Guid.Empty);
         BranchNode Build(AgentFolderOption folder) => new(folder.Id.ToString(), folder.Name, folder.Id,
@@ -191,7 +219,7 @@
         Branches = children[Guid.Empty].Select(Build)
             .Append(new("root", "Без папки", null, [], rows[Guid.Empty].ToArray(), "Без папки", "all")).ToArray();
         Rows = rows.SelectMany(group => group).OrderByDescending(row => row.Current is { Stale: false })
-            .ThenByDescending(row => row.Reasons.Count != 0).ThenBy(row => row.Entry.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
+            .ThenByDescending(row => row.NeedsAttention).ThenBy(row => row.Entry.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
         Selected = AgentId is { } selected ? Rows.FirstOrDefault(row => row.Entry.Id == selected) : null;
         Latest = Selected?.Entry.LatestRun;
         if (Selected is { } item) Recent = (await Store.RunsAsync(item.Entry.Id, 0, token, agentCopiesOnly: true)).Runs.Take(8).ToArray();

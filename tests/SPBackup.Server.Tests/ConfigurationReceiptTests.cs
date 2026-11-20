@@ -6,6 +6,7 @@ using SPBackup.Core;
 using SPBackup.Server;
 using Xunit;
 using Caps = SPBackup.Server.AgentCapabilities;
+using M = SPBackup.Server.Monitoring;
 using Receipt = SPBackup.Server.ConfigurationReceipt;
 
 namespace SPBackup.Server.Tests;
@@ -100,6 +101,62 @@ public sealed class ConfigurationReceiptTests(ServerFixture fixture) : IClassFix
     }
 
     [ServerFact]
+    public async Task DashboardAndCardDistinguishAcceptedPlanFromReportedRevisionAndAccess()
+    {
+        var agent = await fixture.EnrollAsync();
+        using (var receipt = await Post(agent, Decision(agent, await Offer(agent)))) receipt.EnsureSuccessStatusCode();
+        await Version(agent.AgentId, 2);
+        var offer = await Offer(agent);
+        var job = new M.MonitoredJob(Guid.NewGuid(), "Protected copy", "FilesAndFolders", true, "Daily", null, 1)
+            { LocalAccessReady = false };
+        var report = new M.MonitoringSnapshot(DateTimeOffset.UtcNow, "test", [job], null, 0)
+            { ExecutionMode = "Managed", ConfigurationRevision = 1, BackupExecutionAvailable = true };
+        Task Monitor() => fixture.Store.SaveMonitoringAsync(agent.AgentId, report, default);
+        Task Heartbeat(long revision, bool ready) => fixture.Store.HeartbeatAsync(agent.AgentId,
+            new(agent.AgentId, "test", ready, revision, DateTimeOffset.UtcNow), default);
+        async Task<string> Page(string path)
+        {
+            using var response = await fixture.Administrator.GetAsync(path);
+            response.EnsureSuccessStatusCode();
+            return WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+        }
+
+        await Heartbeat(1, true);
+        await Monitor();
+        using (var rejected = await Post(agent, Decision(agent, offer, 2, "Rejected", "CacheWriteFailed"))) rejected.EnsureSuccessStatusCode();
+        var dashboard = await Page($"?agent={agent.AgentId}");
+        Assert.Contains("План 2 · принят 1", dashboard);
+        Assert.Contains("Исполнитель готов", dashboard);
+        Assert.Contains("Не задан доступ для заданий: 1", dashboard);
+        foreach (var path in new[] { $"?agent={agent.AgentId}", $"agents/{agent.AgentId}" })
+        {
+            var html = await Page(path);
+            Assert.Contains("Агент не смог сохранить настройки", html);
+            Assert.Contains("По ревизии 1", html);
+        }
+
+        using (var accepted = await Post(agent, Decision(agent, offer, 2))) accepted.EnsureSuccessStatusCode();
+        await Heartbeat(1, false);
+        dashboard = await Page($"?agent={agent.AgentId}");
+        Assert.Contains("План 2 · принят 2", dashboard);
+        Assert.Contains("по отчёту 1", dashboard);
+        Assert.Contains("Исполнитель недоступен", dashboard);
+
+        await Heartbeat(2, true);
+        await fixture.ExecuteAsync("UPDATE server_monitoring SET received_utc=now()-interval '1 hour' WHERE agent_id=@id", ("id", agent.AgentId));
+        dashboard = await Page($"?agent={agent.AgentId}");
+        Assert.Contains("На связи", dashboard);
+        Assert.Contains("Сведения о доступе устарели", dashboard);
+        Assert.Contains("Отчёт устарел · По ревизии 1", dashboard);
+        Assert.Contains("Отчёт устарел · По ревизии 1", await Page($"agents/{agent.AgentId}"));
+
+        report = report with { ConfigurationRevision = 2, Jobs = [job with { LocalAccessReady = true }] };
+        await Monitor();
+        dashboard = await Page($"?agent={agent.AgentId}");
+        Assert.Contains("Настроены привязки для заданий: 1", dashboard);
+    }
+
+    [ServerFact]
     public async Task UnknownForeignAndMalformedReceiptsCannotAcknowledgeSettings()
     {
         var a = await fixture.EnrollAsync(); var b = await fixture.EnrollAsync(); var id = await Offer(a);
@@ -145,6 +202,9 @@ public sealed class ConfigurationReceiptTests(ServerFixture fixture) : IClassFix
         var a = await fixture.EnrollAsync(); using var client = Agent(a, false);
         using (var heartbeat = await client.PostAsync($"api/v1/agents/{a.AgentId}/heartbeat", ServerFixture.Json(new { agentId=a.AgentId, agentVersion="test", backupExecutionAvailable=true, configurationRevision=1, sentUtc=DateTimeOffset.UtcNow }))) heartbeat.EnsureSuccessStatusCode();
         Assert.Null((await State(a)).LastAccepted);
+        using var dashboard = await fixture.Administrator.GetAsync($"?agent={a.AgentId}");
+        dashboard.EnsureSuccessStatusCode();
+        Assert.Contains("План 1 · без подтверждения", WebUtility.HtmlDecode(await dashboard.Content.ReadAsStringAsync()));
         using var denied = await client.GetAsync($"api/v1/management/agents/{a.AgentId}/configuration-state"); Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         using var allowed = await fixture.Administrator.GetAsync($"api/v1/management/agents/{a.AgentId}/configuration-state"); Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
     }

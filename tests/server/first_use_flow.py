@@ -41,14 +41,17 @@ def first_use(pw, page, url, out, checks):
         'Authorization': 'Bearer ' + agent['token'], 'SP-Backup-Capabilities': caps})
     base = url + 'api/v1/agents/' + agent_id
 
-    def monitor(revision, jobs, progress=None):
+    def monitor(revision, jobs, progress=None, executor_ready=True):
         ok(api.post(base + '/heartbeat', data={'agentId': agent_id, 'agentVersion': 'browser-fixture',
-            'backupExecutionAvailable': True, 'configurationRevision': revision, 'sentUtc': now()}))
+            'backupExecutionAvailable': executor_ready, 'configurationRevision': revision, 'sentUtc': now()}))
         ok(api.put(base + '/monitoring', data={'sentUtc': now(), 'agentVersion': 'browser-fixture',
             'jobs': jobs, 'progress': progress, 'pendingRuns': 0, 'executionMode': 'Managed',
             'configurationRevision': revision, 'backupExecutionAvailable': True}))
 
     monitor(1, [])
+    first_offer = ok(api.get(base + '/configuration')).headers['sp-backup-configuration-offer']
+    ok(api.post(base + '/configuration-receipt', data={'agentId': agent_id, 'revision': 1,
+        'offerId': first_offer, 'status': 'Accepted', 'reason': None, 'observedUtc': now()}))
     page.goto(url + '?folder=' + parent)
     assert 'Первый агент ' + suffix in page.inner_text('body')
     page.goto(url)
@@ -124,11 +127,36 @@ def first_use(pw, page, url, out, checks):
     config = offered.json()
     assert config['revision'] == 2
     job = config['jobs'][0]
+    executor_jobs = [{'jobId': job['id'], 'name': job['name'], 'sourceKind': 'FilesAndFolders', 'enabled': True,
+                      'schedule': 'Manual', 'nextRunUtc': None, 'destinationCount': 2, 'localAccessReady': False}]
+    monitor(1, executor_jobs, executor_ready=False)
+    page.goto(url + '?branch=all')
+    dashboard_row = page.locator(f'[data-dashboard-row][data-agent-id="{agent_id}"]')
+    plan_link = dashboard_row.get_by_role('link', name='План 2 · принят 1', exact=True)
+    expect(dashboard_row).to_contain_text('Исполнитель недоступен')
+    expect(dashboard_row).to_contain_text('Не задан доступ для заданий: 1')
+    plan_link.click()
+    summary = page.locator('#agent-summary')
+    expect(summary).to_contain_text('Подтверждение получено')
+    expect(summary).to_contain_text('По ревизии 1')
+    starting_theme = page.locator('html').get_attribute('data-theme')
+    for theme in ['light', 'dark']:
+        if page.locator('html').get_attribute('data-theme') != theme:
+            page.locator('[data-theme-toggle]').click()
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        page.screenshot(path=str(out / f'dashboard-plan-{theme}-900.png'), full_page=True)
+    if page.locator('html').get_attribute('data-theme') != starting_theme:
+        page.locator('[data-theme-toggle]').click()
+
     ok(api.post(base + '/configuration-receipt', data={'agentId': agent_id, 'revision': 2,
         'offerId': offered.headers['sp-backup-configuration-offer'], 'status': 'Accepted', 'reason': None, 'observedUtc': now()}))
     jobs = [{'jobId': job['id'], 'name': job['name'], 'sourceKind': 'FilesAndFolders', 'enabled': False,
              'schedule': 'Manual', 'nextRunUtc': None, 'destinationCount': 2}]
     monitor(2, jobs)
+    page.locator('[data-dashboard-refresh]').click()
+    expect(dashboard_row.locator('[data-managed-plan]')).to_have_count(0)
+    expect(summary).to_contain_text('Исполнитель готов')
+    checks.append('dashboard-plan-revision-acceptance-executor-and-local-access-refresh-in-place')
     checks.append('first-use-hierarchy-invitation-enrollment-invalid-path-back-navigation-and-revision-acceptance')
     page.goto(url + 'agents/' + agent_id + '/jobs')
     page.get_by_role('link', name='Запустить…', exact=True).click()
