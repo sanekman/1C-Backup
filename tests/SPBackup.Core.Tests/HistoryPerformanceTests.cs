@@ -18,12 +18,13 @@ public sealed class HistoryPerformanceTests(ITestOutputHelper output)
             var job = Guid.NewGuid();
             var profile = Directory.CreateDirectory(Path.Combine(root, "profile")).FullName;
             var index = Path.Combine(profile, "runs.json");
+            var workDirectory = Path.Combine(profile, "work");
             var history = new BackupRunHistory(index);
             using var log = DiagnosticLog.Use(new DiagnosticLog(profile, DiagnosticComponent.Tests, "benchmark", "test"));
             foreach (var count in new[] { 7300, 10950 })
             {
                 var runs = Enumerable.Range(0, count).Select(item => new BackupRun(Guid.NewGuid(), job, "Test files",
-                    started.AddMinutes(item), started.AddMinutes(item + 1), BackupRunStatus.Succeeded, "",
+                    started.AddMinutes(item), started.AddMinutes(item + 1), BackupRunStatus.Succeeded, workDirectory,
                     new("sample.zip", 1024, new string('a', 64)))).ToArray();
                 await File.WriteAllTextAsync(index, JsonSerializer.Serialize(runs));
                 var read = new List<double>();
@@ -36,7 +37,7 @@ public sealed class HistoryPerformanceTests(ITestOutputHelper output)
                     Assert.InRange((await history.ReadAsync()).Count, count, count + 1);
                     if (attempt != 0) read.Add(Stopwatch.GetElapsedTime(start).TotalMilliseconds);
                     start = Stopwatch.GetTimestamp();
-                    await history.SaveAsync(new(job, job, "Test files", DateTimeOffset.UtcNow, null, BackupRunStatus.Running, ""));
+                    await history.SaveAsync(new(job, job, "Test files", DateTimeOffset.UtcNow, null, BackupRunStatus.Running, workDirectory));
                     if (attempt != 0) save.Add(Stopwatch.GetElapsedTime(start).TotalMilliseconds);
                     start = Stopwatch.GetTimestamp();
                     var archive = Path.Combine(root, "support.zip");
