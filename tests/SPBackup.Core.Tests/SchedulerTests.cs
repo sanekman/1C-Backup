@@ -128,7 +128,7 @@ public sealed class SchedulerTests
             var state = new CalendarScheduleState(Path.Combine(directory.FullName, "calendar-schedule.json"));
             var job = Job with { CatchUpWithinMinutes = 60 };
             var disabled = Job with { CatchUpWithinMinutes = 60 };
-            Task Execute(BackupJob _, CancellationToken _) => throw new InvalidOperationException("must not execute");
+            Task Execute(BackupJob _, CancellationToken token) => throw new InvalidOperationException("must not execute");
             await new BackupScheduler(null, state).RunDueAsync([job, disabled], At(10, 22), Execute);
             job = job with { TimeZoneId = "Tokyo Standard Time" };
             disabled = disabled with { Enabled = false };
