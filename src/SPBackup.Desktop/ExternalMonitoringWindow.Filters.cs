@@ -15,9 +15,8 @@ public partial class ExternalMonitoringWindow
 
     private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (SourceEditorScroll is null || ReportDetails is null || PollStatuses is null) return;
+        if (ReportDetails is null || PollStatuses is null) return;
         var compact = ActualHeight < 650;
-        SourceEditorScroll.MaxHeight = compact ? 180 : 280;
         ReportDetails.Height = compact ? 60 : 100;
         PollStatuses.Height = compact ? 80 : 100;
         if (compact && PollStatusesPanel.IsExpanded && ReportDetailsPanel.IsExpanded) PollStatusesPanel.IsExpanded = false;

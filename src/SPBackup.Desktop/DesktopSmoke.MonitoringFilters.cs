@@ -78,9 +78,36 @@ internal static partial class DesktopSmoke
             throw new InvalidOperationException($"История мониторинга требует горизонтальной прокрутки: {scroll?.ExtentWidth}/{scroll?.ViewportWidth}.");
         var visible = grid.ItemContainerGenerator.ContainerFromItem(grid.Items[0]) as DataGridRow;
         if (visible is null || visible.ActualHeight < 25 || !Control<Button>("CollectMonitorButton").IsVisible
-            || Control<Expander>("SourceSettings").IsExpanded)
+            || !Control<TabItem>("HistoryTab").IsSelected)
             throw new InvalidOperationException("Компактный мониторинг скрывает строку истории или ручную проверку.");
         screenshot("sql-monitoring-filtered-compact", window);
+
+        window.Width = 900;
+        var tabs = Control<TabControl>("WorkspaceTabs");
+        var settingsTab = Control<TabItem>("SourceSettings");
+        var historyTab = Control<TabItem>("HistoryTab");
+        var selectedReport = grid.SelectedItem;
+        tabs.SelectedItem = settingsTab;
+        await window.Dispatcher.InvokeAsync(window.UpdateLayout, System.Windows.Threading.DispatcherPriority.ContextIdle);
+        var editor = Control<ScrollViewer>("SourceEditorScroll");
+        var save = Control<Button>("SaveMonitorButton");
+        var saveBottom = save.TranslatePoint(new Point(0, save.ActualHeight), window).Y;
+        if (grid.IsVisible || editor.ViewportHeight < 250 || !save.IsVisible || saveBottom >= window.ActualHeight)
+            throw new InvalidOperationException("Настройки источника не используют рабочую область или скрывают кнопку сохранения.");
+        screenshot("sql-monitoring-settings-900x580", window);
+        var theme = DesktopTheme.Preference;
+        try
+        {
+            DesktopTheme.Select(DesktopThemePreference.Dark);
+            screenshot("sql-monitoring-settings-dark-900x580", window);
+            tabs.SelectedItem = historyTab;
+            await window.Dispatcher.InvokeAsync(window.UpdateLayout, System.Windows.Threading.DispatcherPriority.ContextIdle);
+            if (!grid.IsVisible || grid.ActualHeight < 120 || grid.SelectedItem != selectedReport || editor.IsVisible)
+                throw new InvalidOperationException("После возврата к истории таблица скрыта, сжата или потерян выбор.");
+            screenshot("sql-monitoring-history-dark-900x580", window);
+        }
+        finally { DesktopTheme.Select(theme); }
+
         if (JsonSerializer.Serialize(await outbox.ReadAsync()) != before || JsonSerializer.Serialize(await monitorStore.LoadAsync()) != beforeMonitors)
             throw new InvalidOperationException("Фильтрация изменила историю наблюдений или настройки источников.");
     }

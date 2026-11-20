@@ -43,7 +43,7 @@ public partial class ExternalMonitoringWindow : Window
         {
             Title = createNew ? "Новое задание наблюдения SQL" : "Задание наблюдения SQL";
             Sources.Visibility = NewMonitorButton.Visibility = Visibility.Collapsed;
-            SourceSettings.Header = "Параметры задания наблюдения";
+            SourceSettings.Header = "Настройки задания";
             DatabaseLabel.Text = "Имя базы, за копиями которой наблюдать";
         }
         SqlAuthentication.ItemsSource = new Dictionary<SqlServerAuthentication, string>
@@ -67,7 +67,7 @@ public partial class ExternalMonitoringWindow : Window
                 monitors = (await store.LoadAsync(lifetime.Token)).ToList();
                 BindMonitorSources(taskId ?? (createNew ? null : monitors.FirstOrDefault()?.Id));
                 if (createNew) ClearMonitorEditor();
-                SourceSettings.IsExpanded = taskMode || monitors.Count == 0;
+                WorkspaceTabs.SelectedItem = monitors.Count == 0 || (taskMode && !collect) ? SourceSettings : HistoryTab;
                 await RefreshAsync();
                 ready = true; Editor.IsEnabled = true;
                 UpdateMonitorControls();
@@ -163,7 +163,7 @@ public partial class ExternalMonitoringWindow : Window
     private void New_Click(object sender, RoutedEventArgs e)
     {
         if (!ready || busy) return;
-        SourceSettings.IsExpanded = true;
+        WorkspaceTabs.SelectedItem = SourceSettings;
         ReportDetailsPanel.IsExpanded = PollStatusesPanel.IsExpanded = false;
         ClearMonitorEditor();
         MonitorName.Focus();
@@ -216,7 +216,8 @@ public partial class ExternalMonitoringWindow : Window
             monitors = updated; BindMonitorSources(monitor.Id);
             UpdateReportSourceChoices();
             if (taskMode) SelectTaskReports(monitor.Id);
-            ApplyReportFilter(); SourceSettings.IsExpanded = false;
+            ApplyReportFilter();
+            WorkspaceTabs.SelectedItem = HistoryTab;
             Status.Text = monitor.Kind == ExternalBackupSourceKind.SqlServerHistory
                 ? "Задание сохранено. Проверка сертификата MS SQL " + (monitor.TrustServerCertificate ? "выключена." : "включена.")
                 : "Задание наблюдения сохранено. Проверка использует сохранённые настройки.";
@@ -232,11 +233,12 @@ public partial class ExternalMonitoringWindow : Window
             && (monitor.TrustServerCertificate != (SqlTrustServerCertificate.IsChecked == true)
                 || monitor.AllowUnencryptedConnection != (SqlAllowUnencrypted.IsChecked == true)))
         {
-            SourceSettings.IsExpanded = true;
+            WorkspaceTabs.SelectedItem = SourceSettings;
             Status.Text = "Параметры сертификата или шифрования изменены. Нажмите «Сохранить задание», затем «Прочитать журнал копий».";
             SaveMonitorButton.Focus();
             return;
         }
+        WorkspaceTabs.SelectedItem = HistoryTab;
         busy = true; Editor.IsEnabled = false; Status.Text = "Чтение сведений о внешних копиях…";
         UpdateMonitorControls();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
@@ -307,7 +309,7 @@ public partial class ExternalMonitoringWindow : Window
             monitors = updated; BindMonitorSources(null);
             ClearMonitorEditor();
             UpdateReportSourceChoices(); ApplyReportFilter();
-            SourceSettings.IsExpanded = monitors.Count == 0;
+            WorkspaceTabs.SelectedItem = monitors.Count == 0 ? SourceSettings : HistoryTab;
             Status.Text = "Источник удалён. Уже начавшийся фоновый опрос может завершиться; новые опросы этого источника прекращаются.";
         }
         catch (Exception ex) { Status.Text = "Не удалось удалить источник: " + ex.Message; }
