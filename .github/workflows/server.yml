@@ -246,8 +246,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        role: [destination, source]
-    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+        include:
+          - {role: source, os: windows-2025}
+          - {role: destination, os: windows-2022}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     defaults:
       run:
