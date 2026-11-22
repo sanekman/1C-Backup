@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
@@ -53,7 +52,8 @@ internal static partial class Program
             {
                 Name = "Skip missed slot", Kind = DatabaseKind.FilesAndFolders, Source = source,
                 DestinationDirectory = Path.Combine(profileDirectory, "skip"), Enabled = true,
-                ScheduleKind = ScheduleKind.Daily, DailyAt = TimeOnly.FromDateTime(due.UtcDateTime), TimeZoneId = "UTC"
+                ScheduleKind = ScheduleKind.Daily, DailyAt = TimeOnly.FromDateTime(due.LocalDateTime),
+                TimeZoneId = BackupSchedule.LocalTimeZone
             };
             var catchUp = skip with
             {
@@ -61,7 +61,7 @@ internal static partial class Program
                 DestinationDirectory = Path.Combine(profileDirectory, "catch-up")
             };
             BackupJob[] jobs = [skip, catchUp];
-            await new JobStore(Path.Combine(profileDirectory, "jobs.json")).SaveAsync(jobs);
+            await new JobStore(Path.Combine(profileDirectory, "jobs.json"), useLocalTime: true).SaveAsync(jobs);
             var controls = new LocalAgentControlStore(profileDirectory);
             var history = new BackupRunHistory(Path.Combine(profileDirectory, "runs.json"));
             var catalog = new BackupCatalog(Path.Combine(profileDirectory, "copies.json"));
@@ -101,15 +101,19 @@ internal static partial class Program
             await Wait(async () => (await history.ReadAsync()).Any(run => run.JobId == catchUp.Id && run.Status == BackupRunStatus.Succeeded),
                 "The missed slot was not executed after restarting the service.");
             var missed = await LocalBackupDispatcher.ReadMissedRunsAsync(profileDirectory, jobs);
-            Require(missed.GetValueOrDefault(skip.Id) == new MissedScheduledRun(due, false)
-                && missed.GetValueOrDefault(catchUp.Id) == new MissedScheduledRun(due, true),
-                "The saved skip and catch-up outcomes differ from the selected policies.");
+            var skipped = missed.GetValueOrDefault(skip.Id);
+            var attempted = missed.GetValueOrDefault(catchUp.Id);
+            Require(skipped == new MissedScheduledRun(due, false) && attempted == new MissedScheduledRun(due, true),
+                $"Unexpected scheduler decisions for {due:O}: skipped {skipped}; catch-up {attempted}.");
             var run = (await history.ReadAsync()).Single();
             var copy = (await catalog.ReadAsync()).Single();
             Require(run.JobId == catchUp.Id && copy.JobId == catchUp.Id, "Unexpected backup from the skipped slot.");
-            using (var archive = ZipFile.OpenRead(copy.Backup.Location))
-            using (var reader = new StreamReader(archive.Entries.Single(entry => entry.Name == "example.txt").Open()))
-                Require(await reader.ReadToEndAsync() == contents, "The scheduled archive did not contain the source bytes.");
+            var restoreParent = Path.Combine(profileDirectory, "restore");
+            Directory.CreateDirectory(restoreParent);
+            var restored = await new FileBackupRestorer(new FileBackupStorage(), catalog, Path.Combine(profileDirectory, "restore-work"))
+                .RestoreAsync(copy, catchUp, restoreParent);
+            Require(restored.Files == 1 && await File.ReadAllTextAsync(Path.Combine(restored.Directory, "example.txt")) == contents,
+                "The scheduled archive did not restore the source bytes.");
             completedRun = run.RunId;
 
             stage = "restart-again-in-catch-up-window";
