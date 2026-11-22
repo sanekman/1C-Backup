@@ -45,10 +45,10 @@ with sync_playwright() as playwright:
 
         page.evaluate('sessionStorage.clear()')
         page.goto(url + suffix)
-        for name in ['Нагрузка', 'Филиал']:
-            page.locator(f'summary:has(> [data-folder-name="{name}"])').focus()
+        for path in ['Нагрузка', 'Нагрузка / Филиал']:
+            page.locator(f'summary:has(> [data-folder-path="{path}"])').focus()
             page.keyboard.press('Space')
-        leaf_summary = page.locator('summary:has(> [data-folder-name="Отдел"])')
+        leaf_summary = page.locator('summary:has(> [data-folder-path="Нагрузка / Филиал / Отдел"])')
         leaf_summary.focus()
         opening = perf_counter()
         page.keyboard.press('Space')
