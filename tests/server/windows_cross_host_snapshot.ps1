@@ -55,6 +55,16 @@ function Write-Run([Guid]$runId,[Guid]$jobId,[string]$agentRoute,[hashtable]$hea
     } $headers
 }
 
+function Assert-TransferredSettings($session, $expected) {
+    $export=Invoke-RestMethod ($address+'management/settings-transfer/export') -WebSession $session
+    if ($export -is [string]) { $export=$export | ConvertFrom-Json }
+    $pending=@($export.plans | Where-Object agentId -eq $expected.agentId)
+    if ($export.panel.displayName -ne 'Cross-host imported panel' -or $export.panel.timeZoneId -ne 'Asia/Vladivostok' -or
+        $pending.Count -ne 1 -or $pending[0].folderId -ne $expected.folderId -or $pending[0].jobs[0].id -ne $expected.jobId) {
+        throw 'Imported panel settings or a staged agent plan differ.'
+    }
+}
+
 $installPassword=[Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N')
 $passwordPath=Join-Path $Work 'bootstrap.txt'
 [IO.File]::WriteAllText($passwordPath,$installPassword)
@@ -68,6 +78,27 @@ if ((Invoke-WebRequest ($address+'health/ready') -TimeoutSec 10).StatusCode -ne 
 $session=Panel-Session $installPassword
 
 if ($Role -eq 'source') {
+    $schema=Database-Schema
+    $transferred=$null
+    if ($schema -ge 9) {
+        $transferred=@{agentId=[Guid]::NewGuid().ToString();folderId=[Guid]::NewGuid().ToString();jobId=[Guid]::NewGuid().ToString()}
+        $portable=@{
+            formatVersion=1
+            panel=@{displayName='Cross-host imported panel';timeZoneId='Asia/Vladivostok'}
+            folders=@(@{id=$transferred.folderId;parentId=$null;name='Imported fixture folder'})
+            plans=@(@{agentId=$transferred.agentId;agentName='Pending fixture agent';folderId=$transferred.folderId;
+                jobs=@(@{id=$transferred.jobId;name='Pending fixture job';source='C:\Imported';destinationDirectory='D:\ImportedCopies'})})
+        }
+        $upload=Join-Path $Work 'portable-fixture.json'
+        $portable | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $upload -Encoding utf8
+        $page=Invoke-WebRequest ($address+'settings-transfer') -WebSession $session
+        $anti=[Net.WebUtility]::HtmlDecode([regex]::Match($page.Content,'name="__RequestVerificationToken"[^>]*value="([^"]+)"').Groups[1].Value)
+        $result=Invoke-WebRequest ($address+'management/settings-transfer/import') -Method Post -WebSession $session -Form @{
+            settings=(Get-Item -LiteralPath $upload);confirm='true';__RequestVerificationToken=$anti
+        }
+        if ($result.BaseResponse.RequestMessage.RequestUri.Query -ne '?result=imported') { throw 'Could not import source fixture settings.' }
+        Assert-TransferredSettings $session $transferred
+    }
     $agentId=[Guid]::NewGuid()
     $jobId=[Guid]::NewGuid()
     $runId=[Guid]::NewGuid()
@@ -98,7 +129,8 @@ if ($Role -eq 'source') {
     })
     if (!$cookies.Count) { throw 'Expected an authenticated source cookie.' }
     $metadata=@{machine=$identity;adminPassword=$installPassword;agentToken=$agent.token;agentId=$agentId;
-        jobId=$jobId;runId=$runId;folderId=$folder.id;cookies=$cookies;schema=(Database-Schema);certificateSha256=(Get-FileHash (Join-Path $fixture 'source.cer')).Hash}
+        jobId=$jobId;runId=$runId;folderId=$folder.id;cookies=$cookies;schema=$schema;transferred=$transferred;
+        certificateSha256=(Get-FileHash (Join-Path $fixture 'source.cer')).Hash}
     $metadata | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $fixture 'fixture.json') -Encoding utf8
     $null=Invoke-RestMethod ($address+'api/v1/management/folders') -Method Post -WebSession $session -Headers $header -ContentType 'application/json' -Body (@{name='Created after cold snapshot'} | ConvertTo-Json)
     return
@@ -119,6 +151,18 @@ foreach ($item in $meta.cookies) { $old.Cookies.Add([Uri]$address,[System.Net.Co
 $status=(Invoke-WebRequest ($address+'api/v1/management/session') -WebSession $old -SkipHttpErrorCheck).StatusCode
 if ($status -ne 401) { throw 'The source session was accepted on the destination.' }
 $restored=Panel-Session $meta.adminPassword
+if ($meta.schema -ge 9) {
+    Assert-TransferredSettings $restored $meta.transferred
+    $adminAnti=(Invoke-RestMethod ($address+'api/v1/management/session') -WebSession $restored).csrfToken
+    $invite=Invoke-RestMethod ($address+'api/v1/management/invitations') -Method Post -WebSession $restored -Headers @{'X-CSRF-TOKEN'=$adminAnti} -ContentType 'application/json' -Body (@{
+        name='restored staged plan';agentId=$meta.transferred.agentId
+    } | ConvertTo-Json)
+    $null=Server-Json 'api/v1/enrollment' 'Post' @{
+        invitationCode=$invite.code;agentId=$meta.transferred.agentId;name='Pending fixture agent'
+    } @{}
+    $staged=Invoke-RestMethod ($address+'api/v1/management/agents/'+$meta.transferred.agentId+'/configuration') -WebSession $restored
+    if ($staged.revision -ne 1 -or $staged.jobs[0].id -ne $meta.transferred.jobId) { throw 'The restored staged plan was not assigned on enrollment.' }
+}
 $agentId=$meta.agentId
 $adminRoute=$address+'api/v1/management/agents/'+$agentId
 $folders=Invoke-RestMethod ($address+'api/v1/management/folders') -WebSession $restored
@@ -150,4 +194,4 @@ if ($schema -ne $meta.schema) { throw 'Restored schema differs from the source.'
 @{success=$true; independentWindowsHosts=$true; schema=$schema; run=$env:GITHUB_RUN_ID; source=$env:GITHUB_SHA;
     installerSha256=(Get-FileHash $Installer -Algorithm SHA256).Hash; https=$true; oldSessionRejected=$true;
     administratorLogin=$true; previousAndNewReport=$true; planPreserved=$true; enrolledAgentTokenPreserved=$true;
-    dataRetained=$true; dpapiKeyRotated=$true} | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-cross-host-result.json'
+    dataRetained=$true; dpapiKeyRotated=$true; portableSettingsTested=($schema -ge 9)} | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-cross-host-result.json'

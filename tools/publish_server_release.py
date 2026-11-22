@@ -40,11 +40,15 @@ def main():
             raise
         raise FileExistsError('Refusing to overwrite existing GitHub object: ' + path)
 
-    if args.create_tag:
-        require_absent('git/ref/tags/' + tag)
-    else:
+    create_tag = False
+    try:
         reference = api('git/ref/tags/' + tag)
-        if reference['object']['sha'] != source:
+    except urllib.error.HTTPError as error:
+        if not args.create_tag or error.code != 404:
+            raise
+        create_tag = True
+    else:
+        if reference['object']['type'] != 'commit' or reference['object']['sha'] != source:
             raise RuntimeError('Tag does not point to the tested source commit.')
     require_absent('releases/tags/' + tag)
     branch = 'distribution/server-' + version
@@ -81,7 +85,7 @@ def main():
     notes = notes.replace('(docs/', '(https://github.com/' + REPOSITORY + '/blob/' + source + '/docs/')
     notes += f'\n\n[Полные заметки и история выпусков](https://github.com/{REPOSITORY}/blob/{source}/docs/release-notes-server.md).'
     notes += '\n\nИсходный коммит: `' + source + '`. Контрольные суммы находятся рядом с файлами и в server-release.json.'
-    if args.create_tag:
+    if create_tag:
         api('git/refs', {'ref': 'refs/tags/' + tag, 'sha': source})
     # Each distribution branch is created once, containing the commit/checksum manifest.
     # Large offline installers stay in release assets (not Git blobs).
