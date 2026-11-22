@@ -57,7 +57,9 @@ with sync_playwright() as playwright:
         if compact:
             expect(page.locator('[data-agent-leaf]')).to_have_count(50)
 
-        target = page.locator('[data-agent-leaf]').filter(has_text='Scale agent').last.inner_text()
+        page.evaluate('sessionStorage.clear()')
+        page.goto(url + suffix)
+        target = f'Scale agent {count:04d}'
         search = page.get_by_role('searchbox', name='Найти агента')
         searching = perf_counter()
         search.fill(target)
@@ -80,6 +82,9 @@ with sync_playwright() as playwright:
         for theme in ['dark', 'light']:
             page.evaluate('sessionStorage.clear()')
             page.goto(url + suffix)
-            page.evaluate('(theme) => document.documentElement.dataset.theme = theme', theme)
+            if page.locator('html').get_attribute('data-theme') != theme:
+                page.locator('[data-theme-toggle]').click()
+            expect(page.locator('html')).to_have_attribute('data-theme', theme)
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.screenshot(path=output.with_name(f'{view}-{theme}-900.png'))
     browser.close()

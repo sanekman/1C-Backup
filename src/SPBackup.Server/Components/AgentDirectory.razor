@@ -288,7 +288,7 @@
     private void PrepareCompactRows()
     {
         SearchQuery = (Query ?? "").Trim();
-        if (SearchQuery.Length > 128) SearchQuery = SearchQuery[..128];
+        if (SearchQuery.Length > 128) SearchQuery = SearchQuery[..(char.IsHighSurrogate(SearchQuery[127]) ? 127 : 128)];
         var folder = Guid.TryParse(BranchKey, out var id) ? FolderLookup.GetValueOrDefault(id) : null;
         ResultsTitle = Filtering ? "Результаты по всем папкам" : folder?.Path ?? (BranchKey == "root" ? "Без папки" : "Все агенты");
         var query = SearchQuery.Normalize();

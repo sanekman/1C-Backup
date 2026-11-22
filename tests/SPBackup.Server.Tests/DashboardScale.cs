@@ -21,7 +21,7 @@ internal static class DashboardScale
                 WITH agents AS (
                     INSERT INTO server_agents(id,name,computer_name,folder_id,received_utc,execution_available,reported_revision)
                     SELECT gen_random_uuid(), 'Scale agent ' || lpad(i::text,4,'0'), 'SCALE-' || i, @folder, now(), true, 1
-                    FROM generate_series(1, greatest(0, @count - (SELECT count(*)::int FROM server_agents))) i
+                    FROM generate_series((SELECT count(*)::int + 1 FROM server_agents), @count) i
                     RETURNING id
                 ), configurations AS (
                     INSERT INTO server_configurations(agent_id,revision,document)
