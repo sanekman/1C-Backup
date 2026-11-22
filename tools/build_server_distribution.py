@@ -20,9 +20,6 @@ def main():
     if args.version and not re.fullmatch(r"0\.1\.0-preview\.[1-9][0-9]*", args.version):
         parser.error("--version requires an exact 0.1.0-preview.N version")
     repository = Path(__file__).resolve().parents[1]
-    output = repository / "artifacts/server" / args.runtime
-    if output.exists():
-        shutil.rmtree(output)
     version = "0.1.0-dev"
     reference = os.environ.get("GITHUB_REF_NAME", "")
     if os.environ.get("GITHUB_REF_TYPE") == "tag" and reference.startswith("server-v"):
@@ -31,6 +28,9 @@ def main():
             parser.error("--version must match the server tag")
     elif args.version:
         version = args.version
+    output = repository / "artifacts/server" / args.runtime
+    if output.exists():
+        shutil.rmtree(output)
     subprocess.run([args.dotnet, "publish", "src/SPBackup.Server", "-c", "Release", "-r", args.runtime,
                     "--self-contained", "true", "-p:RestoreLockedMode=true", "-o", str(output), "-p:Version=" + version], cwd=repository, check=True)
     from legacy_apphosts import copy_legacy_apphosts
