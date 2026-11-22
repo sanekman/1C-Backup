@@ -4,12 +4,12 @@
     <li>
     @if (Folders.Any(f => f.ParentId == folder.Id))
     {
-        <details open="@Open(folder.Id)"><summary><a href="@($"?folder={folder.Id}")" aria-current="@(SelectedId == folder.Id ? "page" : null)">@folder.Name</a></summary>
-        <FolderTree Folders="Folders" ParentId="folder.Id" SelectedId="SelectedId" />
+        <details open="@Open(folder.Id)"><summary><a href="@Link(folder.Id)" aria-current="@(SelectedId == folder.Id ? "page" : null)">@folder.Name</a></summary>
+        <FolderTree Folders="Folders" ParentId="folder.Id" SelectedId="SelectedId" LinkForFolder="LinkForFolder" />
         </details>
     }
     else
-    { <a href="@($"?folder={folder.Id}")" aria-current="@(SelectedId == folder.Id ? "page" : null)">@folder.Name</a> }
+    { <a href="@Link(folder.Id)" aria-current="@(SelectedId == folder.Id ? "page" : null)">@folder.Name</a> }
     </li>
 }
 </ul>
@@ -17,6 +17,8 @@
     [Parameter, EditorRequired] public IReadOnlyList<AgentFolderOption> Folders { get; set; } = [];
     [Parameter] public Guid? ParentId { get; set; }
     [Parameter] public Guid? SelectedId { get; set; }
+    [Parameter] public Func<Guid, string>? LinkForFolder { get; set; }
+    private string Link(Guid id) => LinkForFolder?.Invoke(id) ?? $"?folder={id}";
     private bool Open(Guid id)
     {
         for (var next = SelectedId; next is not null; next = Folders.FirstOrDefault(f => f.Id == next)?.ParentId)

@@ -6,9 +6,17 @@
 <PageTitle>Назначенные задания</PageTitle>
 <div class="heading"><h1>Назначенные задания</h1><a href="account">Сменить пароль</a></div>
 <form action="operator" method="get" class="actions">
+    @if (Folder is not null) { <input type="hidden" name="folder" value="@Folder" /> }
     <label>Агент или задание<input type="search" name="search" value="@Search" maxlength="128" /></label>
     <button type="submit">Найти</button>
 </form>
+<div class="operator-layout">
+<aside aria-label="Папки доступных агентов" class="card folder-sidebar">
+    <a href="@FolderLink(null)" aria-current="@(Folder is null ? "page" : null)">Все задания</a>
+    <FolderTree Folders="Folders" SelectedId="SelectedFolder" LinkForFolder="LinkForFolder" />
+    <a href="@FolderLink("root")" aria-current="@(Folder == "root" ? "page" : null)">Без папки</a>
+</aside>
+<div class="agents-main">
 @if (Rows.Count == 0)
 {
     <p>Доступных заданий по этому запросу нет.</p>
@@ -22,7 +30,11 @@ else
             @foreach (var row in Rows.Take(50))
             {
                 <tr>
-                    <td>@row.AgentName</td><td>@row.JobName</td>
+                    <td>@row.AgentName</td>
+                    <td>
+                        @if (row.JobId is { } job) { <a href="@($"operator/agents/{row.AgentId:D}/jobs/{job:D}")">@row.JobName</a> }
+                        else { @row.JobName }
+                    </td>
                     <td><span class="@(row.SeenUtc is null ? "dashboard-warn" : row.SeenUtc < Cutoff ? "dashboard-error" : "dashboard-good")">
                         @(row.SeenUtc is null ? "Ожидает сигнала" : row.SeenUtc < Cutoff ? "Нет связи" : "На связи")</span>
                         <small>Отчёт @Clock.Time(row.ObservedUtc)</small></td>
@@ -37,11 +49,16 @@ else
     @if (Page > 0) { <a href="@PageLink(Page - 1)">Назад</a> }
     @if (Rows.Count > 50) { <a href="@PageLink(Page + 1)">Далее</a> }
 </div>
+</div>
+</div>
 
 @code {
     [SupplyParameterFromQuery] public string? Search { get; set; }
     [SupplyParameterFromQuery] public int Page { get; set; }
+    [SupplyParameterFromQuery] public string? Folder { get; set; }
     private IReadOnlyList<OperatorJob> Rows = [];
+    private IReadOnlyList<AgentFolderOption> Folders = [];
+    private Guid? SelectedFolder;
     private DateTimeOffset Cutoff;
 
     protected override async Task OnParametersSetAsync()
@@ -49,17 +66,29 @@ else
         var context = Http.HttpContext!;
         context.Response.Headers.CacheControl = "no-store";
         Cutoff = DateTimeOffset.UtcNow.AddSeconds(-Settings.OfflineAfterSeconds);
-        Rows = await Store.OperatorJobsAsync(ServerAuthentication.UserId(context.User), Search, Page, context.RequestAborted);
+        var id = ServerAuthentication.UserId(context.User);
+        Folders = await Store.OperatorFoldersAsync(id, context.RequestAborted);
+        SelectedFolder = Guid.TryParse(Folder, out var folder) && Folders.Any(value => value.Id == folder) ? folder : null;
+        if (Folder is not (null or "root") && SelectedFolder is null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            Folders = [];
+            return;
+        }
+        Rows = await Store.OperatorJobsAsync(id, Search, Page, context.RequestAborted, SelectedFolder, Folder == "root");
     }
 
-    private string PageLink(int page) => $"operator?page={page}&search={Uri.EscapeDataString(Search ?? "")}";
-    private static string Status(string? status) => status switch
+    private string PageLink(int page) => $"{FolderLink(Folder)}&page={page}";
+    private string LinkForFolder(Guid folder) => FolderLink(folder.ToString("D"));
+    private string FolderLink(string? folder) => $"operator?search={Uri.EscapeDataString(Search ?? "")}"
+        + (folder is null ? "" : $"&folder={Uri.EscapeDataString(folder)}");
+    internal static string Status(string? status) => status switch
     {
         "Succeeded" => "Успешно по отчёту", "PartiallySucceeded" => "Частичная доставка", "Failed" => "Ошибка",
         "Incomplete" => "Копия с пропусками", "Warning" => "С предупреждениями",
         "Cancelled" => "Отменено", "Interrupted" => "Прервано", _ => "Отчёта о результате пока нет"
     };
-    private static string Color(string? status) => status switch
+    internal static string Color(string? status) => status switch
     {
         "Succeeded" => "dashboard-good", "Failed" or "Interrupted" => "dashboard-error", null => "muted", _ => "dashboard-warn"
     };

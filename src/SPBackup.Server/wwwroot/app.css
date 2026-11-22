@@ -93,3 +93,7 @@ details[open]>.dashboard-folder::before{content:"−"}
 .dashboard-search-form .dashboard-search{flex:1 1 200px}
 .dashboard-pager{display:flex;align-items:center;gap:10px;white-space:nowrap}
 .dashboard-pager a{min-width:24px;text-align:center}
+
+.operator-layout{display:grid;grid-template-columns:minmax(150px,210px) minmax(0,1fr);gap:16px;margin-top:16px}
+.operator-layout th,.operator-layout td{overflow-wrap:anywhere}
+@media(max-width:700px){.operator-layout{grid-template-columns:1fr}}

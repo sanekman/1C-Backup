@@ -157,6 +157,12 @@ with sync_playwright() as pw:
     expect(observer.get_by_role('link', name='Настройки', exact=True)).to_have_count(0)
     assert observer.evaluate('document.documentElement.scrollWidth <= innerWidth')
     observer.screenshot(path=str(out / 'operator-assigned-900.png'))
+    observer.locator('tbody tr a').click()
+    expect(observer.get_by_role('heading', name='История задания', exact=True)).to_be_visible()
+    observer.get_by_role('link', name='Подробности запуска').first.click()
+    expect(observer.get_by_role('link', name='Все запуски задания', exact=True)).to_be_visible()
+    assert observer.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    observer.screenshot(path=str(out / 'operator-run-900.png'))
     assert observer.request.get(a.url + 'settings').status == 403
     observer.close()
     checks.append('operator-is-provisioned-in-browser-and-sees-only-assigned-job')
