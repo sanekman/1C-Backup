@@ -7,13 +7,13 @@ namespace SPBackup.Server;
 public sealed record RecoveryDownloadStatus(Guid Id, string Status, DateTimeOffset ExpiresUtc, long Length);
 public sealed record RecoveryDownloadOffer(Guid Id, Guid JobId, Guid RunId, int Destination, DateTimeOffset ExpiresUtc, long MaximumBytes);
 
-public sealed class RecoveryDownloads(ServerStore store, TimeProvider? clock = null) : BackgroundService
+public sealed class RecoveryDownloads(ServerStore store, TimeProvider? clock = null, ServerOptions? settings = null) : BackgroundService
 {
     internal const long MaximumBytes = 512L * 1024 * 1024;
     private const int MaximumRequests = 4;
     private const int CheckedBlock = 1024 * 1024;
     private readonly TimeProvider time = clock ?? TimeProvider.System;
-    private readonly DirectoryInfo staging = Directory.CreateTempSubdirectory("sp-backup-download-");
+    private readonly TransferDirectory staging = new(settings?.DataDirectory);
     private readonly ConcurrentDictionary<Guid, Transfer> transfers = new();
     private readonly object admission = new();
 
@@ -28,6 +28,7 @@ public sealed class RecoveryDownloads(ServerStore store, TimeProvider? clock = n
         public string Status { get; set; } = "Waiting";
         public long Length { get; set; }
         public volatile bool Cancelled;
+        public CancellationTokenSource Revoked { get; } = new();
     }
 
     public async Task<Guid> CreateAsync(Guid user, Guid stamp, Guid agent, Guid job, Guid run, int destination, CancellationToken token)
@@ -36,7 +37,7 @@ public sealed class RecoveryDownloads(ServerStore store, TimeProvider? clock = n
             ?? throw new ServerRequestException(404, "recovery_point_unavailable");
         var id = Guid.NewGuid();
         var offer = new RecoveryDownloadOffer(id, job, run, destination, time.GetUtcNow().AddMinutes(30), MaximumBytes);
-        var transfer = new Transfer(user, stamp, agent, generation, offer, Path.Combine(staging.FullName, $"{id:N}.zip"));
+        var transfer = new Transfer(user, stamp, agent, generation, offer, Path.Combine(staging.Path, $"{id:N}.zip"));
         lock (admission)
         {
             if (transfers.Count >= MaximumRequests || transfers.Values.Any(item => item.Owner == user || item.Agent == agent))
@@ -112,7 +113,7 @@ public sealed class RecoveryDownloads(ServerStore store, TimeProvider? clock = n
             if (item.Cancelled || item.Status != "Preparing") throw new ServerRequestException(409, "recovery_upload_state");
             item.Status = "Uploading";
         }
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, item.Revoked.Token);
         var remaining = item.Offer.ExpiresUtc - time.GetUtcNow();
         deadline.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
         try
@@ -190,7 +191,10 @@ public sealed class RecoveryDownloads(ServerStore store, TimeProvider? clock = n
             context.Response.Headers.ContentDisposition = "attachment; filename=\"SP-Backup-recovery.zip\"";
             context.Response.ContentLength = end - start + 1;
             file.Position = start;
-            await CopyCheckedAsync(item, file, context.Response.Body, end - start + 1, token);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, item.Revoked.Token);
+            var remaining = item.Offer.ExpiresUtc - time.GetUtcNow();
+            deadline.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
+            await CopyCheckedAsync(item, file, context.Response.Body, end - start + 1, deadline.Token);
         }
         finally
         {
@@ -240,13 +244,15 @@ public sealed class RecoveryDownloads(ServerStore store, TimeProvider? clock = n
 
     private void Remove(Transfer item)
     {
+        bool active;
         lock (item)
         {
             item.Cancelled = true;
-            if (item.Status is "Uploading" or "Sending") return;
-            transfers.TryRemove(item.Offer.Id, out _);
+            active = item.Status is "Uploading" or "Sending";
+            if (!active) transfers.TryRemove(item.Offer.Id, out _);
         }
-        TryDelete(item.Path);
+        item.Revoked.Cancel();
+        if (!active) TryDelete(item.Path);
     }
 
     private static void TryDelete(string path)
@@ -267,7 +273,7 @@ public sealed class RecoveryDownloads(ServerStore store, TimeProvider? clock = n
                     try { if (!await AuthorizedAsync(item, stoppingToken)) Remove(item); }
                     catch (Npgsql.NpgsqlException) { if (item.Offer.ExpiresUtc <= time.GetUtcNow()) Remove(item); }
                 }
-                foreach (var path in Directory.EnumerateFiles(staging.FullName))
+                foreach (var path in Directory.EnumerateFiles(staging.Path))
                     if (Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out var id) && !transfers.ContainsKey(id))
                         TryDelete(path);
             }
@@ -275,8 +281,58 @@ public sealed class RecoveryDownloads(ServerStore store, TimeProvider? clock = n
         finally
         {
             foreach (var item in transfers.Values) Remove(item);
-            try { staging.Delete(recursive: true); }
-            catch (IOException) { }
+            staging.Dispose();
+        }
+    }
+
+    private sealed class TransferDirectory : IDisposable
+    {
+        private readonly FileStream owner;
+        internal string Path { get; }
+
+        internal TransferDirectory(string? dataDirectory)
+        {
+            if (dataDirectory is null)
+            {
+                Path = Directory.CreateTempSubdirectory("sp-backup-download-").FullName;
+            }
+            else
+            {
+                var root = System.IO.Path.Combine(dataDirectory, "recovery-transfers");
+                Directory.CreateDirectory(root);
+                if (File.GetAttributes(root).HasFlag(FileAttributes.ReparsePoint))
+                    throw new IOException("Recovery staging must be a private directory.");
+                if (!OperatingSystem.IsWindows())
+                    File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                foreach (var old in Directory.EnumerateDirectories(root)) ClearAbandoned(old);
+                Path = System.IO.Path.Combine(root, Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(Path);
+            }
+            owner = OpenLock(Path);
+        }
+
+        private static FileStream OpenLock(string path) => new(System.IO.Path.Combine(path, ".owner"),
+            FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+        private static void ClearAbandoned(string path)
+        {
+            if (!Guid.TryParseExact(System.IO.Path.GetFileName(path), "N", out _)) return;
+            try
+            {
+                if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint)) return;
+                var marker = System.IO.Path.Combine(path, ".owner");
+                if (!File.Exists(marker) || File.GetAttributes(marker).HasFlag(FileAttributes.ReparsePoint)) return;
+                using (OpenLock(path)) { }
+                Directory.Delete(path, recursive: true);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }
+
+        public void Dispose()
+        {
+            owner.Dispose();
+            try { Directory.Delete(Path, recursive: true); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
         }
     }
 }

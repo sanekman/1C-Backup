@@ -15,6 +15,7 @@ internal sealed class RecoveryKitDelivery(string directory, IFtpCredentialStore 
 
     internal async Task RunAsync(Action<Exception?> report, CancellationToken token)
     {
+        CleanAbandoned();
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         do
         {
@@ -22,6 +23,25 @@ internal sealed class RecoveryKitDelivery(string directory, IFtpCredentialStore 
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
             catch (Exception error) { report(error); }
         } while (await timer.WaitForNextTickAsync(token));
+    }
+
+    private void CleanAbandoned()
+    {
+        try
+        {
+            if (!Directory.Exists(temp)) return;
+            FileBackupRestorer.RejectAncestorReparse(temp);
+            foreach (var work in Directory.EnumerateDirectories(temp))
+            {
+                var name = Path.GetFileName(work);
+                if (name.Length != 65 || name[32] != '-' || !Guid.TryParseExact(name[..32], "N", out _) ||
+                    !Guid.TryParseExact(name[33..], "N", out _)) continue;
+                FileBackupRestorer.RejectAncestorReparse(work);
+                Directory.Delete(work, recursive: true);
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { DiagnosticLog.Current.Write(DiagnosticEvent.MonitoringFailed, DiagnosticLevel.Warning, error); }
     }
 
     private async Task PollAsync(CancellationToken token)
