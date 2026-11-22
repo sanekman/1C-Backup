@@ -16,18 +16,16 @@
 ## Текущее положение
 
 - Рабочая ветка: `feature/local-backup-agent`. PR №2 остаётся черновиком.
-- Серверный кандидат **v0.1.0-preview.18** собран из `3ec9194`. Включён перенос
-  настроек панели, папок и заданий. На Windows и в отдельном Debian LXC
-  проверены обновление с preview.17 и возврат. [Пакеты и результаты](reliability-and-recovery-plan.md#6-решение-о-выпуске)
 - Последние опубликованные версии: Windows **v0.2.0-alpha.40**, Server
-  **v0.1.0-preview.17**. У агента прошли проверки службы, SMB, SQL, NTFS,
-  установки и обновления с alpha.25. У сервера прошли 181 тест Windows с тремя
-  штатными пропусками, 184 теста Linux, установка и возврат Windows, Compose
-  и Proxmox. Проверены файлы обоих выпусков и манифесты автообновлений.
+  **v0.1.0-preview.18**. У агента прошли проверки службы, SMB, SQL, NTFS,
+  установки и обновления с alpha.25. Сервер собран из `3ec9194` и включает
+  перенос настроек панели, папок и заданий. На Windows и в отдельном Debian LXC
+  проверены обновление с preview.17 и возврат. Скачанные публичные пакеты
+  совпали по SHA-256 с принятыми артефактами.
   [Выпуск агента](https://github.com/sanekman/1C-Backup/releases/tag/v0.2.0-alpha.40) ·
   [Прогон агента](https://github.com/sanekman/1C-Backup/actions/runs/44456078193) ·
-  [Выпуск сервера](https://github.com/sanekman/1C-Backup/releases/tag/server-v0.1.0-preview.17) ·
-  [Прогон сервера](https://github.com/sanekman/1C-Backup/actions/runs/44457201300).
+  [Выпуск сервера](https://github.com/sanekman/1C-Backup/releases/tag/server-v0.1.0-preview.18) ·
+  [Пакеты и результаты сервера](reliability-and-recovery-plan.md#6-решение-о-выпуске).
   [Публикация alpha.39](windows-agent-ui-plan.md#публикация-alpha39).
   [Предыдущий отчёт alpha.35](windows-alpha35-publication.md).
   [Публикация Server preview.14](server-agent-ui-plan.md#публикация-preview14).
