@@ -1,5 +1,9 @@
 ﻿# Isolated GitHub Windows runner only. Never run against an existing installation.
-param([Parameter(Mandatory=$true)][string]$Installer,[Parameter(Mandatory=$true)][string]$BaselineInstaller)
+param(
+    [Parameter(Mandatory=$true)][string]$Installer,
+    [Parameter(Mandatory=$true)][string]$BaselineInstaller,
+    [ValidateSet(5,6)][int]$BaselineSchema=5
+)
 $ErrorActionPreference='Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or (Test-Path (Join-Path $env:ProgramData 'OneCBackupServer'))) { throw 'Upgrade fixture requires a clean disposable GitHub runner.' }
 if ($PSVersionTable.PSEdition -eq 'Desktop') { $env:PSModulePath=Join-Path $PSHOME 'Modules' }
@@ -15,6 +19,7 @@ $statusTool=(Resolve-Path (Join-Path $PSScriptRoot '../../deploy/server/windows/
 $schemaSource=Get-Content (Join-Path $PSScriptRoot '../../src/SPBackup.Server/ServerStore.cs') -Raw
 if ($schemaSource -notmatch 'const int SchemaVersion[ ]*=[ ]*([0-9]+)') { throw 'Expected schema version is unavailable.' }
 $candidateSchema=[int]$Matches[1]
+if ($candidateSchema -le $BaselineSchema) { throw 'The candidate must advance the baseline schema.' }
 function Install([string]$Path,[bool]$Failure=$false) {
     $log=Join-Path (Get-Location).Path ('artifacts/server-tests/windows-installer-upgrade-'+[Guid]::NewGuid().ToString('N')+'.log')
     $process=Start-Process $Path -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG="'+$log+'"'),('/ADMINPASSWORDFILE="'+$secret+'"'),'/SERVERNAME="Upgrade fixture"',('/SERVERADDRESS="'+$url+'"'),'/FIREWALL=0') -PassThru
@@ -57,7 +62,7 @@ function Assert-Preserved([int]$Schema) {
 New-Item -ItemType Directory 'artifacts/server-tests' -Force | Out-Null
 Install $BaselineInstaller
 $info=Session
-if ((Sql 'SELECT max(version) FROM server_schema;') -ne '5') { throw 'Pinned public baseline must use schema 5.' }
+if ((Sql 'SELECT max(version) FROM server_schema;') -ne [string]$BaselineSchema) { throw 'Unexpected schema of the pinned public baseline.' }
 $folder=Post 'api/v1/management/folders' @{name='Before upgrade'};$id=[Guid]::NewGuid()
 $invitation=Post 'api/v1/management/invitations' @{name='upgrade fixture';agentId=$id;folderId=$folder.id}
 $agent=Invoke-RestMethod ($url+'api/v1/enrollment') -Method Post -ContentType 'application/json' -Body (@{invitationCode=$invitation.code;agentId=$id;name='upgrade-agent'} | ConvertTo-Json)
@@ -89,23 +94,24 @@ try {
 } finally { [IO.File]::WriteAllBytes($pfx,$pfxBytes);[IO.File]::WriteAllBytes($manifest,$manifestBytes) }
 $result=& $recovery -Action RollbackUpgrade -BackupDirectory $bundle -InstallDirectory $install
 if (!$result.Success -or !(Test-Path $result.PreviousProgram) -or !(Test-Path $result.PreviousData) -or (Get-FileHash (Join-Path $install 'SPBackup.Server.dll')).Hash -ne $oldDll) { throw 'Full upgrade rollback did not restore and retain both trees.' }
-Assert-Preserved 5
-# Conflict makes the real 5 -> 6 migration fail transactionally; saved baseline stays usable.
+Assert-Preserved $BaselineSchema
+# A table conflict makes the real migration fail transactionally; the saved baseline stays usable.
 Stop-Service OneCBackupServer
-$null=Sql 'CREATE TABLE server_remote_runs (fixture integer);'
+$conflict = if ($BaselineSchema -eq 5) { 'server_remote_runs' } else { 'server_imported_plans' }
+$null=Sql "CREATE TABLE $conflict (fixture integer);"
 Install $Installer $true
-if ((Sql 'SELECT max(version) FROM server_schema;') -ne '5') { throw 'Failed migration committed schema version.' }
+if ((Sql 'SELECT max(version) FROM server_schema;') -ne [string]$BaselineSchema) { throw 'Failed migration committed schema version.' }
 if ((Get-Service OneCBackupServer).Status -ne 'Stopped') { throw 'Failed migration started the application.' }
 $report=& $statusTool
 if ($report.Healthy -or @($report.Checks | Where-Object { $_.Code -eq 'OneCBackupServer' -and $_.State -eq 'Error' }).Count -ne 1) { throw 'Stopped application was not diagnosed.' }
 $null=& $recovery -Action RollbackUpgrade -BackupDirectory $bundle -InstallDirectory $install
-Assert-Preserved 5
+Assert-Preserved $BaselineSchema
 # Report a stopped database without starting it or changing the configured secrets.
 & (Join-Path $install 'windows/Stop-Server.ps1') | Out-Null
 $report=& $statusTool
 if ($report.Healthy -or (Get-Service OneCBackupServerDatabase).Status -ne 'Stopped' -or @($report.Checks | Where-Object State -eq 'Error').Count -lt 2) { throw 'Local diagnostics modified stopped services or hid the fault.' }
 Start-Service OneCBackupServerDatabase;Start-Service OneCBackupServer
-Assert-Preserved 5
+Assert-Preserved $BaselineSchema
 # A replaced public CER is diagnosed independently of the certificate loaded by the running service.
 $faultRoot=Join-Path $parent 'status-fixture';[void][IO.Directory]::CreateDirectory($faultRoot)
 Copy-Item (Join-Path $root 'server.json') (Join-Path $faultRoot 'server.json')
@@ -125,4 +131,12 @@ $uninstall=Start-Process (Join-Path $install 'unins000.exe') -ArgumentList @('/V
 if ($uninstall.ExitCode -ne 0 -or (Get-Service OneCBackupServer -ErrorAction SilentlyContinue) -or (Get-Service OneCBackupServerDatabase -ErrorAction SilentlyContinue)) { throw 'Fixture cleanup did not remove the owned services.' }
 Remove-Item -LiteralPath $root -Recurse -Force
 Remove-Item -LiteralPath $secret
-@{baselinePreview8=$true; schema5To6=$true; persistedDatabase=$true; preservedConfigurationAndSecrets=$true; preservedDpapiCookie=$true; preservedAgentToken=$true; fullProgramInventory=$true; ordinaryRestoreRejectsOtherVersion=$true; fullProgramAndDataRollback=$true; failedRollbackRestoresBothTrees=$true; migrationFailureRetainsSchema=$true; migrationFailureRecovery=$true; stoppedServicesDiagnosedReadOnly=$true; expiredCertificateDiagnosed=$true; activeHttpsIndependentOfCer=$true; unreadableVolumeDiagnosed=$true} | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-upgrade-result.json'
+$result = @{persistedDatabase=$true; preservedConfigurationAndSecrets=$true; preservedDpapiCookie=$true; preservedAgentToken=$true; fullProgramInventory=$true; ordinaryRestoreRejectsOtherVersion=$true; fullProgramAndDataRollback=$true; failedRollbackRestoresBothTrees=$true; migrationFailureRetainsSchema=$true; migrationFailureRecovery=$true; stoppedServicesDiagnosedReadOnly=$true; expiredCertificateDiagnosed=$true; activeHttpsIndependentOfCer=$true; unreadableVolumeDiagnosed=$true}
+if ($BaselineSchema -eq 5) {
+    $result.baselinePreview8=$true
+    $result.schema5To6=$true
+} else {
+    $result.baselinePreview17=$true
+    $result.schemaVersionAdvanced=$true
+}
+$result | ConvertTo-Json | Set-Content 'artifacts/server-tests/windows-upgrade-result.json'

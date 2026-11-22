@@ -15,7 +15,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dotnet", default="dotnet")
     parser.add_argument("--runtime", choices=["win-x64", "linux-x64"], required=True)
+    parser.add_argument("--version", help="Explicit preview version for an unpublished candidate")
     args = parser.parse_args()
+    if args.version and not re.fullmatch(r"0\.1\.0-preview\.[1-9][0-9]*", args.version):
+        parser.error("--version requires an exact 0.1.0-preview.N version")
     repository = Path(__file__).resolve().parents[1]
     output = repository / "artifacts/server" / args.runtime
     if output.exists():
@@ -24,6 +27,10 @@ def main():
     reference = os.environ.get("GITHUB_REF_NAME", "")
     if os.environ.get("GITHUB_REF_TYPE") == "tag" and reference.startswith("server-v"):
         version = reference.removeprefix("server-v")
+        if args.version and args.version != version:
+            parser.error("--version must match the server tag")
+    elif args.version:
+        version = args.version
     subprocess.run([args.dotnet, "publish", "src/SPBackup.Server", "-c", "Release", "-r", args.runtime,
                     "--self-contained", "true", "-p:RestoreLockedMode=true", "-o", str(output), "-p:Version=" + version], cwd=repository, check=True)
     from legacy_apphosts import copy_legacy_apphosts

@@ -44,6 +44,9 @@ on:
       release_tag:
         description: 'Publish-accepted: immutable existing server tag'
         type: string
+      candidate_version:
+        description: 'Full scope on the working branch: build an unpublished preview, e.g. 0.1.0-preview.18'
+        type: string
 permissions:
   contents: read
 jobs:
@@ -80,7 +83,17 @@ jobs:
         run: dotnet test tests/SPBackup.Server.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=ServerPackage' --logger 'trx;LogFileName=server-linux.trx' --results-directory artifacts/server-tests
       - if: runner.os == 'Windows' && inputs.scope != 'maintenance' && inputs.scope != 'snapshot'
         run: python tests/server/run_windows.py
-      - run: python tools/build_server_distribution.py --runtime ${{ matrix.runtime }}
+      - name: Build the server distribution
+        shell: bash
+        env:
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+        run: |
+          args=()
+          if [[ -n "$CANDIDATE_VERSION" ]]; then
+            [[ "${{ inputs.scope }}" == full && "${{ github.ref_type }}" == branch ]]
+            args+=(--version "$CANDIDATE_VERSION")
+          fi
+          python tools/build_server_distribution.py --runtime ${{ matrix.runtime }} "${args[@]}"
       - if: runner.os == 'Linux'
         run: |
           export ONECBACKUP_SERVER_TEST_PACKAGE_DIR="$GITHUB_WORKSPACE/artifacts/server/linux-x64"
@@ -97,12 +110,20 @@ jobs:
         run: python tools/build_server_windows_installer.py
       - if: runner.os == 'Windows' && inputs.scope != 'integration' && inputs.scope != 'snapshot'
         shell: pwsh
+        env:
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
         run: |
-          $baseline = Join-Path $env:RUNNER_TEMP 'SP-Backup-Server-preview8-setup.exe'
-          Invoke-WebRequest 'https://github.com/sanekman/1C-Backup/releases/download/server-v0.1.0-preview.8/SP-Backup-Server-0.1.0-preview.8-windows-x64-setup.exe' -OutFile $baseline
-          if ((Get-FileHash $baseline -Algorithm SHA256).Hash.ToLowerInvariant() -ne '491b9157d5d0664d53ac45ac5f4ba3bc298ab71c0d63cf4d385b126311748309') { throw 'Published baseline checksum differs.' }
+          $baselineVersion, $baselineSchema, $baselineHash = if ($env:CANDIDATE_VERSION) {
+            '0.1.0-preview.17', 6, '5ad976145338cd37b33e21740ece4237518c25dc86fd6803378064b9ea693f27'
+          } else {
+            '0.1.0-preview.8', 5, '491b9157d5d0664d53ac45ac5f4ba3bc298ab71c0d63cf4d385b126311748309'
+          }
+          $name = "SP-Backup-Server-$baselineVersion-windows-x64-setup.exe"
+          $baseline = Join-Path $env:RUNNER_TEMP $name
+          Invoke-WebRequest "https://github.com/sanekman/1C-Backup/releases/download/server-v$baselineVersion/$name" -OutFile $baseline
+          if ((Get-FileHash $baseline -Algorithm SHA256).Hash.ToLowerInvariant() -ne $baselineHash) { throw 'Published baseline checksum differs.' }
           $installer = (Get-ChildItem artifacts/server/SP-Backup-Server-*-windows-x64-setup.exe).FullName
-          & (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/server/windows_upgrade_smoke.ps1 -Installer $installer -BaselineInstaller $baseline
+          & (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/server/windows_upgrade_smoke.ps1 -Installer $installer -BaselineInstaller $baseline -BaselineSchema $baselineSchema
           if ($LASTEXITCODE -ne 0) { throw 'Native Windows upgrade/recovery acceptance failed.' }
       - if: runner.os == 'Windows' && inputs.scope != 'integration'
         shell: pwsh
@@ -179,7 +200,7 @@ jobs:
           retention-days: 14
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/server-v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/server-v')
     needs: [server, proxmox-installer]
     runs-on: ubuntu-latest
     permissions:

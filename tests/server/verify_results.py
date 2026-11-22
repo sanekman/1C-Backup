@@ -48,13 +48,16 @@ def main():
         reports = {
             'windows-installer-result.json': {'installed', 'administratorLogin', 'reinstallPreservesData', 'coldSnapshotRoundTrip'},
             'windows-snapshot-result.json': {'coldBackup', 'checksumVerification', 'startupFailureRollback', 'restoredDatabase'},
-            'windows-upgrade-result.json': {'baselinePreview8', 'schema5To6', 'fullProgramInventory', 'fullProgramAndDataRollback', 'failedRollbackRestoresBothTrees', 'migrationFailureRecovery', 'stoppedServicesDiagnosedReadOnly'},
+            'windows-upgrade-result.json': {'fullProgramInventory', 'fullProgramAndDataRollback', 'failedRollbackRestoresBothTrees', 'migrationFailureRecovery', 'stoppedServicesDiagnosedReadOnly'},
         }
         if args.snapshot_only:
             del reports['windows-upgrade-result.json']
             reports['windows-snapshot-result.json'].update({'newHostFreshTargetGuard', 'newHostRotatesKeys'})
         for name, required in reports.items():
             report = json.loads((root / name).read_text(encoding='utf-8-sig'))
+            if name == 'windows-upgrade-result.json':
+                baseline = {'baselinePreview17', 'schemaVersionAdvanced'} if 'baselinePreview17' in report else {'baselinePreview8', 'schema5To6'}
+                required.update(baseline)
             if not required <= report.keys() or not all(value is True for value in report.values()):
                 raise RuntimeError(f'{name}: required native Windows checks did not pass')
             print(name, len(report), 'native checks passed')
