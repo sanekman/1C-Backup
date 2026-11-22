@@ -210,6 +210,7 @@ public sealed class CentralManagementTests(ServerFixture fixture) : IClassFixtur
     {
         var agent = await fixture.EnrollAsync();
         await fixture.ExecuteAsync("""
+            DROP TABLE server_imported_plans, server_portable_panel_settings;
             DROP TABLE server_operator_grants; ALTER TABLE server_users DROP COLUMN role, DROP COLUMN enabled;
             DROP TABLE server_remote_runs; DELETE FROM server_schema WHERE version>=6;
             CREATE FUNCTION fail_six() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.version=6 THEN RAISE EXCEPTION 'fixture'; END IF; RETURN NEW; END $$;

@@ -148,6 +148,7 @@ public sealed class ServerFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
     public Task RemoveFolderSchemaForMigrationTestAsync() => ExecuteAsync("""
+        DROP TABLE server_imported_plans, server_portable_panel_settings;
         DROP TABLE server_operator_grants;
         ALTER TABLE server_users DROP COLUMN role, DROP COLUMN enabled;
         DROP TABLE server_remote_runs;
