@@ -91,3 +91,5 @@ details[open]>.dashboard-folder::before{content:"−"}
 
 .dashboard-search-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .dashboard-search-form .dashboard-search{flex:1 1 200px}
+.dashboard-pager{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.dashboard-pager a{min-width:24px;text-align:center}

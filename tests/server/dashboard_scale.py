@@ -36,7 +36,7 @@ with sync_playwright() as playwright:
         page.goto(url + suffix)
         rows = page.locator('[data-dashboard-row]')
         expect(rows).to_have_count(min(50, count) if compact else count)
-        expect(page.locator('[data-dashboard-count]')).to_have_text(f'{count} из {count}')
+        expect(page.locator('[data-dashboard-count]')).to_have_text(f'1–50 из {count}' if compact else f'{count} из {count}')
         ready = perf_counter()
         dom_nodes = page.locator('[data-agent-directory] *').count()
         rows.filter(has_text='Scale agent').first.get_by_role('link', name=re.compile(r'^Scale agent ')).click()
@@ -76,6 +76,15 @@ with sync_playwright() as playwright:
         result[key] = statistics_for(values)
     output = Path(output)
     output.write_text(json.dumps(result, indent=2))
+
+    if compact:
+        page.goto(url + suffix)
+        next_page = page.get_by_role('link', name='Следующая страница агентов')
+        next_page.focus()
+        next_page.press('Enter')
+        expect(page.locator('[data-dashboard-count]')).to_have_text(f'51–100 из {count}')
+        page.get_by_role('link', name='Предыдущая страница агентов').click()
+        expect(page.locator('[data-dashboard-count]')).to_have_text(f'1–50 из {count}')
 
     if count == 1000:
         page.set_viewport_size({'width': 900, 'height': 580})

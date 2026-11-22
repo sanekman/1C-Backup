@@ -49,7 +49,19 @@
             </ul>
         </aside>
         <section class="dashboard-results" aria-label="Состояние агентов">
-            <div class="dashboard-results-title"><strong data-dashboard-title>@(Compact ? ResultsTitle : "Все агенты")</strong><span class="muted" data-dashboard-count aria-live="polite">@(Compact ? $"{MatchingCount} из {Rows.Count}" : "")</span></div>
+            <div class="dashboard-results-title">
+                <strong data-dashboard-title>@(Compact ? ResultsTitle : "Все агенты")</strong>
+                @if (Compact && PageCount > 1)
+                {
+                    <nav class="dashboard-pager" aria-label="Страницы агентов">
+                        @if (CurrentPage > 0) { <a href="@ResultsLink(CurrentPage - 1)" aria-label="Предыдущая страница агентов">←</a> }
+                        <span class="muted" data-dashboard-count aria-live="polite">@ResultRange</span>
+                        @if (CurrentPage + 1 < PageCount) { <a href="@ResultsLink(CurrentPage + 1)" aria-label="Следующая страница агентов">→</a> }
+                    </nav>
+                }
+                else
+                { <span class="muted" data-dashboard-count aria-live="polite">@(Compact ? ResultRange : "")</span> }
+            </div>
             <div class="dashboard-table-scroll">
                 <table class="dashboard-table">
                     <colgroup><col class="dashboard-col-agent" /><col class="dashboard-col-state" /><col class="dashboard-col-active" /><col /><col class="dashboard-col-actions" /></colgroup>
@@ -103,14 +115,6 @@
                 </table>
                 <p data-agent-no-match hidden="@(!Compact || MatchingCount != 0)" role="status">В этом разделе нет подходящих агентов.</p>
             </div>
-            @if (Compact && PageCount > 1)
-            {
-                <nav class="pagination" aria-label="Страницы агентов">
-                    @if (CurrentPage > 0) { <a href="@ResultsLink(CurrentPage - 1)">← Назад</a> }
-                    <span>Страница @(CurrentPage + 1) из @PageCount</span>
-                    @if (CurrentPage + 1 < PageCount) { <a href="@ResultsLink(CurrentPage + 1)">Далее →</a> }
-                </nav>
-            }
         </section>
     </div>
     @if (AgentId is not null) {
@@ -204,6 +208,8 @@
     private int CurrentPage;
     private int PageCount;
     private int MatchingCount;
+    private string ResultRange => MatchingCount == 0 ? "0"
+        : $"{CurrentPage * RowsPerPage + 1}–{CurrentPage * RowsPerPage + VisibleRows.Count} из {MatchingCount}";
     private string ResultsTitle = "Все агенты";
     private string AgentIndex = "";
     private Dictionary<Guid, AgentFolderOption> FolderLookup = [];
