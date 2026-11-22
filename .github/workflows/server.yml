@@ -231,10 +231,9 @@ jobs:
       - name: Verify the shared candidate
         run: |
           $installer = @(Get-ChildItem artifacts/candidate/server/SP-Backup-Server-*-windows-x64-setup.exe)
-          if ($installer.Count -ne 1 -or $env:CANDIDATE_INSTALLER_SHA256 -notmatch '^[a-fA-F0-9]{64}$'
-              -or (Get-FileHash $installer[0].FullName).Hash -ne $env:CANDIDATE_INSTALLER_SHA256) {
-            throw 'Fixture installer checksum differs.'
-          }
+          if ($installer.Count -ne 1) { throw 'Expected one shared fixture installer.' }
+          if ($env:CANDIDATE_INSTALLER_SHA256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'Invalid fixture checksum input.' }
+          if ((Get-FileHash $installer[0].FullName).Hash -ne $env:CANDIDATE_INSTALLER_SHA256) { throw 'Fixture installer checksum differs.' }
           "CROSS_HOST_INSTALLER=$($installer[0].FullName)" >> $env:GITHUB_ENV
           $work = Join-Path $env:RUNNER_TEMP 'spbackup-cross-host'
           New-Item -ItemType Directory -Path $work | Out-Null
