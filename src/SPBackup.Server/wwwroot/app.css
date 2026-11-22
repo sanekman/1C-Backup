@@ -97,3 +97,6 @@ details[open]>.dashboard-folder::before{content:"−"}
 .operator-layout{display:grid;grid-template-columns:minmax(150px,210px) minmax(0,1fr);gap:16px;margin-top:16px}
 .operator-layout th,.operator-layout td{overflow-wrap:anywhere}
 @media(max-width:700px){.operator-layout{grid-template-columns:1fr}}
+.operator-grant{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+.operator-grant label{display:flex;align-items:center;gap:5px;margin:0;font-weight:400}
+.recovery-download-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap}

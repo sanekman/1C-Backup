@@ -40,6 +40,7 @@ public sealed class ServerFixture : IAsyncLifetime
     private string adminCsrf = "";
     private string connection = "";
     private X509Certificate2 certificate = null!;
+    public string CertificateSha256 => certificate.GetCertHashString(System.Security.Cryptography.HashAlgorithmName.SHA256);
     public WebApplication App { get; private set; } = null!;
     public HttpClient Administrator { get; private set; } = null!;
     public ServerStore Store => App.Services.GetRequiredService<ServerStore>();

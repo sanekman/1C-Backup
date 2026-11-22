@@ -737,6 +737,8 @@
         </WrapPanel>
         <TextBlock x:Name="ServerConnectionCheckStatus" Style="{StaticResource ConnectionStatusText}" Margin="0,0,0,4" AutomationProperties.LiveSetting="Polite" />
         <TextBlock x:Name="ServerMonitoringStatus" Style="{StaticResource ConnectionStatusText}" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10" />
+        <Button x:Name="RecoveryKitExportButton" Content="Разрешить скачивание копий через сервер…" Click="RecoveryKitExport_Click"
+            HorizontalAlignment="Left" Margin="0,0,0,12" Visibility="Collapsed" />
         <TextBlock Text="Откуда получать задания" FontSize="16" FontWeight="SemiBold" />
         <ComboBox x:Name="AgentModePicker" MaxWidth="360" HorizontalAlignment="Left" DisplayMemberPath="Value" SelectedValuePath="Key" SelectionChanged="AgentMode_Changed" Margin="0,4,0,6" AutomationProperties.Name="Откуда получать задания" />
         <StackPanel x:Name="ServerPanel" Visibility="Collapsed">

@@ -216,6 +216,13 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
                 .RunAsync(error => warnings.Set("Сервер мониторинга", error), lifetime.Token);
         }
         var serverMonitoringTask = manual is null ? ServerReportsLoop() : Task.CompletedTask;
+        async Task RecoveryKitLoop()
+        {
+            await initialized;
+            await new RecoveryKitDelivery(directory, credentials, connection, source, catalog, storage, runner, history)
+                .RunAsync(error => warnings.Set("Комплекты восстановления", error), lifetime.Token);
+        }
+        var recoveryKitsTask = manual is null ? RecoveryKitLoop() : Task.CompletedTask;
         async Task ConnectionLoop()
         {
             await initialized;
@@ -373,7 +380,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         finally
         {
             lifetime.Cancel();
-            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask, serverMonitoringTask, manualRequestsTask, storageChecksTask, sourceChecksTask, connectionTask, remoteCommandsTask); }
+            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask, serverMonitoringTask, recoveryKitsTask, manualRequestsTask, storageChecksTask, sourceChecksTask, connectionTask, remoteCommandsTask); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) { failure ??= ex; }
             var error = failure?.Message ?? (manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? lastRun.Error : null);

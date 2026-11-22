@@ -8,6 +8,11 @@ namespace SPBackup.Core;
 
 public sealed record ServerMonitoringSettings(string Address, Guid AgentId, string CredentialKey, string CertificateSha256 = "")
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AllowRecoveryKitExport { get; init; }
+    internal bool SameEnrollment(ServerMonitoringSettings other) =>
+        Address == other.Address && AgentId == other.AgentId && CredentialKey == other.CredentialKey && CertificateSha256 == other.CertificateSha256;
+
     public void Validate()
     {
         if (!Uri.TryCreate(Address, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.UserInfo.Length != 0
@@ -190,7 +195,9 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
                     SqlBackupTypesReported = m.Kind == ExternalBackupSourceKind.SqlServerHistory,
                     LastFullUtc = observationTasks[m.Id].LastFullUtc, LastDifferentialUtc = observationTasks[m.Id].LastDifferentialUtc,
                     LastLogUtc = observationTasks[m.Id].LastLogUtc }).ToArray(),collectionWarnings)
-        { ExecutionMode = selected is null ? "Standalone" : "Managed", ConfigurationRevision = selected?.Revision,
+        { RecoveryKitExportAvailable = await configuration.ReadAsync(token) is { AllowRecoveryKitExport: true } permitted
+                && settings.SameEnrollment(permitted),
+            ExecutionMode = selected is null ? "Standalone" : "Managed", ConfigurationRevision = selected?.Revision,
             BackupExecutionAvailable = selected is null ? null : managedJobs is not null && fixedConnection is not null,
             ReportRejections = new(invalid, conflicting, retryAfter.Count - invalid - conflicting) };
         var now = DateTimeOffset.UtcNow;

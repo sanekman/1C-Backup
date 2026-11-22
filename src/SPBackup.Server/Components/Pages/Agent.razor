@@ -107,6 +107,7 @@
             @if (run.Incomplete) { <p class="error">Копия неполная: часть файлов пропущена. Для непрочитанных файлов может требоваться прежняя версия из цепочки.</p> }
             @if (run.Evidence is { } evidence) { <p>Подтверждение внешней копии: @Evidence(evidence). Данные получены из внешнего источника; агент не выполнял доставку этой копии.</p> }
             <RunIssueDetails Run="run" />
+            <RecoveryDownloadActions AgentId="Id" Run="run" />
             @if (run.Evidence is not null)
             {
                 @if (run.Destinations.FirstOrDefault()?.Bytes is > 0 and var size)

@@ -2,9 +2,14 @@
 @attribute [Authorize(Policy = ServerAuthentication.Operator)]
 @inject ServerStore Store
 @inject ServerOptions Settings
+@inject RecoveryDownloads Downloads
 @inject IHttpContextAccessor Http
 <PageTitle>Назначенные задания</PageTitle>
 <div class="heading"><h1>Назначенные задания</h1><a href="account">Сменить пароль</a></div>
+@if (ActiveDownload is { } active)
+{
+    <p><a href="@($"operator/downloads/{active.Id:D}")">Текущая заявка на скачивание</a></p>
+}
 <form action="operator" method="get" class="actions">
     @if (Folder is not null) { <input type="hidden" name="folder" value="@Folder" /> }
     <label>Агент или задание<input type="search" name="search" value="@Search" maxlength="128" /></label>
@@ -59,6 +64,7 @@ else
     private IReadOnlyList<OperatorJob> Rows = [];
     private IReadOnlyList<AgentFolderOption> Folders = [];
     private Guid? SelectedFolder;
+    private RecoveryDownloadStatus? ActiveDownload;
     private DateTimeOffset Cutoff;
 
     protected override async Task OnParametersSetAsync()
@@ -67,6 +73,7 @@ else
         context.Response.Headers.CacheControl = "no-store";
         Cutoff = DateTimeOffset.UtcNow.AddSeconds(-Settings.OfflineAfterSeconds);
         var id = ServerAuthentication.UserId(context.User);
+        ActiveDownload = await Downloads.ActiveAsync(id, ServerHost.DownloadStamp(context.User), context.RequestAborted);
         Folders = await Store.OperatorFoldersAsync(id, context.RequestAborted);
         SelectedFolder = Guid.TryParse(Folder, out var folder) && Folders.Any(value => value.Id == folder) ? folder : null;
         if (Folder is not (null or "root") && SelectedFolder is null)

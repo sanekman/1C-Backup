@@ -20,7 +20,8 @@ public sealed class FileRecoveryKit(IBackupStorage storage)
     };
 
     public async Task<string> ExportAsync(BackupRecord selected, BackupJob job, BackupCatalog catalog, string parentDirectory,
-        bool permitOtherDestinations = false, CancellationToken token = default, IProgress<BackupExportProgress>? progress = null)
+        bool permitOtherDestinations = false, CancellationToken token = default, IProgress<BackupExportProgress>? progress = null,
+        long? maximumBytes = null)
     {
         var parent = ExistingFolder(parentDirectory);
         if (job.Kind == DatabaseKind.FilesAndFolders && Directory.Exists(job.Source))
@@ -28,6 +29,8 @@ public sealed class FileRecoveryKit(IBackupStorage storage)
         var records = await catalog.ReadAsync(token);
         var plan = new FileBackupReadPlan(selected, job, records, permitOtherDestinations);
         var chain = plan.Chain;
+        if (maximumBytes is { } maximum && chain.Sum(record => record.Backup.Length) > maximum)
+            throw new InvalidDataException("Комплект превышает допустимый размер.");
         var manifest = new Manifest(1, chain[^1].Backup.FileSnapshot!.SnapshotId, selected.Backup.ArchivePasswordKey is not null,
             chain.Select(record => new Archive(record.Backup.FileSnapshot!, record.CompletedUtc.ToUniversalTime(), record.Backup.Length, record.Backup.Sha256)).ToArray());
         Validate(manifest);

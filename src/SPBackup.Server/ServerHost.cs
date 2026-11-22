@@ -60,6 +60,8 @@ public static partial class ServerHost
         builder.Services.AddSingleton<ServerDiagnostics>();
         builder.Services.AddSingleton<ServerHealth>();
         builder.Services.AddSingleton<ServerUpdates>();
+        builder.Services.AddSingleton<RecoveryDownloads>();
+        builder.Services.AddHostedService(services => services.GetRequiredService<RecoveryDownloads>());
         var protection = builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(keys)).SetApplicationName("OneCBackup.Server");
         if (OperatingSystem.IsWindows()) protection.ProtectKeysWithDpapi();
         ServerAuthentication.Add(builder, settings);
@@ -113,7 +115,7 @@ public static partial class ServerHost
         app.MapGet("/health/live", () => Results.Text("live"));
         app.MapGet("/health/ready", async (ServerStore store, CancellationToken token) => await store.ReadyAsync(token) ? Results.Text("ready") : Results.StatusCode(503));
         app.MapOpenApi().RequireAuthorization(ServerAuthentication.Administrator);
-        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app); MapRemoteRuns(app); MapServerUpdates(app); MapOperators(app);
+        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app); MapRemoteRuns(app); MapServerUpdates(app); MapOperators(app); MapRecoveryDownloads(app);
         app.MapRazorComponents<App>();
         return app;
     }

@@ -24,8 +24,39 @@ public partial class MainWindow
         ConnectServerMonitoringButton.Content = connection is null ? "Подключить по приглашению…" : "Сменить подключение…";
         CheckServerConnectionButton.Visibility = DisconnectServerMonitoringButton.Visibility =
             connection is null ? Visibility.Collapsed : Visibility.Visible;
+        RecoveryKitExportButton.Visibility = connection is null ? Visibility.Collapsed : Visibility.Visible;
+        RecoveryKitExportButton.Content = connection?.AllowRecoveryKitExport == true
+            ? "Запретить скачивание копий через сервер" : "Разрешить скачивание копий через сервер…";
         CheckServerConnectionButton.IsEnabled = connection is not null && !checkingServerConnection;
         DisconnectServerMonitoringButton.IsEnabled = connection is not null;
+    }
+
+    private async void RecoveryKitExport_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ready || ConfigurationWorkInProgress || displayedServerConnection is not { } displayed) return;
+        if (!displayed.AllowRecoveryKitExport && MessageBox.Show(this,
+            "Фоновый агент сможет передавать этому серверу зарегистрированные файловые копии. Доступ к скачиванию назначает администратор сервера.",
+            "Скачивание файловых копий", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        RecoveryKitExportButton.IsEnabled = false;
+        changingAgentConfiguration = true;
+        try
+        {
+            var current = await ServerMonitoringDispatcher.LoadSettingsAsync(DesktopPaths.DataDirectory, notificationCancellation.Token);
+            if (displayed != current) throw new InvalidDataException("Подключение изменилось. Проверьте настройки сервера.");
+            var updated = displayed with { AllowRecoveryKitExport = !displayed.AllowRecoveryKitExport };
+            await ServerMonitoringDispatcher.SaveSettingsAsync(DesktopPaths.DataDirectory, updated, notificationCancellation.Token);
+            ShowServerConnection(updated);
+            ServerMonitoringStatus.Text = updated.AllowRecoveryKitExport
+                ? "Скачивание разрешено для этого сервера. Комплекты подготавливает фоновый агент." : "Скачивание запрещено.";
+        }
+        catch (OperationCanceledException) when (notificationCancellation.IsCancellationRequested) { }
+        catch (Exception error) { ServerMonitoringStatus.Text = error.Message; }
+        finally
+        {
+            changingAgentConfiguration = false;
+            RecoveryKitExportButton.IsEnabled = true;
+            UpdateRunControls();
+        }
     }
 
     private async void CheckServerConnection_Click(object sender, RoutedEventArgs e)

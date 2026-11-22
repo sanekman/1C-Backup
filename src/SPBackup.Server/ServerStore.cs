@@ -9,7 +9,7 @@ namespace SPBackup.Server;
 /// <summary>Parameterized PostgreSQL operations. Invitation consumption, registration and audit commit together.</summary>
 public sealed partial class ServerStore(NpgsqlDataSource source)
 {
-    public const int SchemaVersion = 7;
+    public const int SchemaVersion = 8;
     private readonly PasswordHasher<ServerUser> passwords = new();
     private static NpgsqlCommand Command(NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql,
         params (string Name, object? Value)[] values)
@@ -73,6 +73,13 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
         if (version < 7)
         {
             using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("SPBackup.Server.Migrations.007-operators.sql")!;
+            using var reader = new StreamReader(script);
+            await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
+            await migration.ExecuteNonQueryAsync(token);
+        }
+        if (version < 8)
+        {
+            using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("SPBackup.Server.Migrations.008-operator-downloads.sql")!;
             using var reader = new StreamReader(script);
             await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
             await migration.ExecuteNonQueryAsync(token);

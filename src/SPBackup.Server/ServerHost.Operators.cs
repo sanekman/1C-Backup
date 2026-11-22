@@ -19,6 +19,11 @@ public static partial class ServerHost
                     return Results.BadRequest("Некорректное назначение.");
                 grants.Add(new(agent, job));
             }
+            var downloads = form["download"].ToHashSet(StringComparer.Ordinal);
+            var allowed = grants.Select(grant => $"{grant.AgentId:D}:{grant.JobId:D}").ToHashSet(StringComparer.Ordinal);
+            if (!downloads.IsSubsetOf(allowed)) return Results.BadRequest("Для скачивания включите мониторинг того же задания.");
+            grants = grants.Select(grant => grant with
+                { Download = downloads.Contains($"{grant.AgentId:D}:{grant.JobId:D}") }).ToList();
             Guid? id = null, stamp = null;
             var selected = form["id"].ToString();
             if (selected.Length > 0)

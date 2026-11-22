@@ -3,7 +3,7 @@
 @inject ServerStore Store
 @inject IHttpContextAccessor Http
 <PageTitle>Операторы</PageTitle>
-<div class="heading"><h1>Операторы</h1><a href="settings">Настройки сервера</a></div>
+<div class="heading"><h1>Операторы</h1><div class="actions"><a href="recovery-downloads">Заявки на скачивание</a><a href="settings">Настройки сервера</a></div></div>
 <section class="card narrow">
     <h2>Учётные записи</h2>
     <ul>
@@ -34,12 +34,16 @@
             <legend>Назначенные агенты и задания</legend>
             @foreach (var agent in Choices.GroupBy(choice => (choice.Grant.AgentId, choice.AgentName)))
             {
-                <details open="@agent.Any(choice => Grants.Contains(choice.Grant))">
+                <details open="@agent.Any(choice => Grants.ContainsKey(choice.Grant))">
                     <summary>@agent.Key.AgentName</summary>
                     @foreach (var choice in agent)
                     {
-                        <label><input type="checkbox" name="grant" value="@($"{choice.Grant.AgentId:D}:{choice.Grant.JobId:D}")"
-                            checked="@Grants.Contains(choice.Grant)" /> @(choice.JobName ?? "Все задания компьютера, включая будущие")</label>
+                        var key = $"{choice.Grant.AgentId:D}:{choice.Grant.JobId:D}";
+                        <div class="operator-grant">
+                            <span>@(choice.JobName ?? "Все задания компьютера, включая будущие")</span>
+                            <label><input type="checkbox" name="grant" value="@key" checked="@Grants.ContainsKey(choice.Grant)" /> Мониторинг</label>
+                            <label><input type="checkbox" name="download" value="@key" checked="@Grants.GetValueOrDefault(choice.Grant)" /> Скачивание</label>
+                        </div>
                     }
                 </details>
             }
@@ -52,7 +56,7 @@
     [SupplyParameterFromQuery] public Guid? Edit { get; set; }
     private IReadOnlyList<OperatorAccount> Accounts = [];
     private IReadOnlyList<OperatorChoice> Choices = [];
-    private HashSet<OperatorGrant> Grants = [];
+    private Dictionary<OperatorGrant, bool> Grants = [];
     private OperatorAccount? Selected;
 
     protected override async Task OnParametersSetAsync()
@@ -62,6 +66,6 @@
         Choices = await Store.OperatorChoicesAsync(context.RequestAborted);
         Selected = Accounts.FirstOrDefault(account => account.Id == Edit);
         if (Edit is not null && Selected is null) context.Response.StatusCode = StatusCodes.Status404NotFound;
-        Grants = Selected is null ? [] : (await Store.OperatorGrantsAsync(Selected.Id, context.RequestAborted)).ToHashSet();
+        Grants = Selected is null ? [] : (await Store.OperatorGrantsAsync(Selected.Id, context.RequestAborted)).ToDictionary(grant => grant with { Download = false }, grant => grant.Download);
     }
 }

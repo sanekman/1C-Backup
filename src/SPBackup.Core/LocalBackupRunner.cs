@@ -7,6 +7,13 @@ public sealed class LocalBackupRunner(IBackupExecutor executor, BackupCompletion
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
+    internal async Task<string?> TryPrepareRecoveryKitAsync(Func<Task<string>> prepare, CancellationToken token)
+    {
+        if (!await gate.WaitAsync(0, token)) return null;
+        try { return await prepare(); }
+        finally { gate.Release(); }
+    }
+
     public async Task<BackupRun> RunAsync(BackupJob job, CancellationToken cancellationToken = default)
     {
         var errors = job.Validate();

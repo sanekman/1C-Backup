@@ -1,0 +1,55 @@
+@page "/operator/downloads/{Id:guid}"
+@attribute [Authorize(Policy = ServerAuthentication.PanelUser)]
+@inject RecoveryDownloads Downloads
+@inject IHttpContextAccessor Http
+<PageTitle>Комплект восстановления</PageTitle>
+<div class="heading"><h1>Комплект восстановления</h1><a href="@Back">@(Back == "operator" ? "Назначенные задания" : "Агенты")</a></div>
+@if (Transfer is { } item)
+{
+    <section class="card narrow">
+        <p role="status">@Status(item.Status)</p>
+        <p>Доступен до @Clock.Time(item.ExpiresUtc)</p>
+        @if (item.Status == "Ready")
+        {
+            <p><a class="button" href="@($"management/recovery-downloads/{Id:D}/file")">Скачать ZIP</a></p>
+            <p>Распакуйте ZIP, затем откройте recovery.json через «Комплекты…» в SP Backup. Для зашифрованной копии понадобится её пароль.</p>
+        }
+        else if (item.Status is "Waiting" or "Preparing" or "Uploading" or "Sending")
+        {
+            <p><a href="@($"operator/downloads/{Id:D}")">Обновить состояние</a></p>
+        }
+        <form method="post" action="@($"management/recovery-downloads/{Id:D}/cancel")">
+            <AntiforgeryToken />
+            <button type="submit" class="secondary">@(item.Status == "Ready" ? "Закрыть и удалить временный комплект" : "Отменить заявку")</button>
+        </form>
+    </section>
+}
+else
+{
+    <p>Комплект недоступен. Проверьте доступ и срок действия заявки.</p>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private RecoveryDownloadStatus? Transfer;
+    private string Back = "operator";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var context = Http.HttpContext!;
+        Back = context.User.IsInRole(ServerAuthentication.Administrator) ? "./" : "operator";
+        Transfer = await Downloads.StatusAsync(ServerAuthentication.UserId(context.User), ServerHost.DownloadStamp(context.User), Id, context.RequestAborted);
+        if (Transfer is null) context.Response.StatusCode = StatusCodes.Status404NotFound;
+        else if (Transfer.Status is "Waiting" or "Preparing" or "Uploading") context.Response.Headers["Refresh"] = "5";
+    }
+
+    internal static string Status(string value) => value switch
+    {
+        "Waiting" => "Ожидает ответа агента.",
+        "Preparing" => "Агент проверяет архивы и собирает комплект.",
+        "Uploading" => "Агент передаёт комплект на сервер.",
+        "Sending" => "Идёт скачивание.",
+        "Ready" => "Комплект готов к скачиванию.",
+        _ => "Подготовка не завершилась. Проверьте, что копия ещё доступна в заданном хранилище, агент работает и размер комплекта не превышает 512 МБ."
+    };
+}

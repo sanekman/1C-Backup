@@ -3,7 +3,7 @@ using Npgsql;
 namespace SPBackup.Server;
 
 public sealed record OperatorAccount(Guid Id, string Name, bool Enabled, Guid Stamp);
-public sealed record OperatorGrant(Guid AgentId, Guid JobId);
+public sealed record OperatorGrant(Guid AgentId, Guid JobId, bool Download = false);
 public sealed record OperatorChoice(OperatorGrant Grant, string AgentName, string? JobName);
 public sealed record OperatorJob(Guid AgentId, Guid? JobId, string AgentName, string JobName, DateTimeOffset? SeenUtc,
     DateTimeOffset? ObservedUtc, string? Status, DateTimeOffset? FinishedUtc);
@@ -51,10 +51,10 @@ public sealed partial class ServerStore
     public async Task<IReadOnlyList<OperatorGrant>> OperatorGrantsAsync(Guid id, CancellationToken token)
     {
         await using var db = await source.OpenConnectionAsync(token);
-        await using var command = Command(db, null, "SELECT agent_id,job_id FROM server_operator_grants WHERE user_id=@id", ("id", id));
+        await using var command = Command(db, null, "SELECT agent_id,job_id,allow_download FROM server_operator_grants WHERE user_id=@id", ("id", id));
         await using var reader = await command.ExecuteReaderAsync(token);
         var result = new List<OperatorGrant>();
-        while (await reader.ReadAsync(token)) result.Add(new(reader.GetGuid(0), reader.GetGuid(1)));
+        while (await reader.ReadAsync(token)) result.Add(new(reader.GetGuid(0), reader.GetGuid(1), reader.GetBoolean(2)));
         return result;
     }
 
@@ -91,16 +91,17 @@ public sealed partial class ServerStore
         }
         await using (var clear = Command(db, tx, "DELETE FROM server_operator_grants WHERE user_id=@id", ("id", userId)))
             await clear.ExecuteNonQueryAsync(token);
-        var distinct = grants.Distinct().ToArray();
+        var distinct = grants.GroupBy(grant => (grant.AgentId, grant.JobId))
+            .Select(group => new OperatorGrant(group.Key.AgentId, group.Key.JobId, group.Any(grant => grant.Download))).ToArray();
         await using (var insert = Command(db, tx, """
-            INSERT INTO server_operator_grants(user_id,agent_id,job_id)
-            SELECT @id,g.agent,g.job FROM unnest(@agents::uuid[],@jobs::uuid[]) AS g(agent,job)
+            INSERT INTO server_operator_grants(user_id,agent_id,job_id,allow_download)
+            SELECT @id,g.agent,g.job,g.download FROM unnest(@agents::uuid[],@jobs::uuid[],@downloads::boolean[]) AS g(agent,job,download)
             JOIN server_agents a ON a.id=g.agent AND NOT a.revoked LEFT JOIN server_monitoring m ON m.agent_id=a.id
             WHERE g.job='00000000-0000-0000-0000-000000000000'
                 OR EXISTS (SELECT 1 FROM jsonb_array_elements(m.document->'jobs') j WHERE (j->>'jobId')::uuid=g.job)
                 OR EXISTS (SELECT 1 FROM server_runs r WHERE r.agent_id=g.agent AND r.job_id=g.job)
             """, ("id", userId), ("agents", distinct.Select(grant => grant.AgentId).ToArray()),
-            ("jobs", distinct.Select(grant => grant.JobId).ToArray())))
+            ("jobs", distinct.Select(grant => grant.JobId).ToArray()), ("downloads", distinct.Select(grant => grant.Download).ToArray())))
             if (await insert.ExecuteNonQueryAsync(token) != distinct.Length) throw new ServerRequestException(409, "operator_scope_changed");
         await AuditAsync(db, tx, administrator, null, create ? "OperatorCreated" : "OperatorUpdated", token);
         await tx.CommitAsync(token);
@@ -217,5 +218,32 @@ public sealed partial class ServerStore
             if (!reader.IsDBNull(2)) runs.Add(System.Text.Json.JsonSerializer.Deserialize<Monitoring.MonitoredRun>(reader.GetString(2), MonitoringJson)!);
         } while (await reader.ReadAsync(token));
         return new(agentName, jobName, runs);
+    }
+
+    internal async Task<byte[]?> DownloadAuthorityAsync(Guid user, Guid stamp, Guid agent, Guid job, Guid run, int destination,
+        CancellationToken token)
+    {
+        await using var db = await source.OpenConnectionAsync(token);
+        await using var command = Command(db, null, $$"""
+            SELECT a.token_hash FROM server_agents a JOIN server_runs r ON r.agent_id=a.id
+            JOIN server_users u ON u.id=@user AND u.enabled AND u.security_stamp=@stamp
+            JOIN server_monitoring m ON m.agent_id=a.id AND m.document->>'recoveryKitExportAvailable'='true'
+            WHERE a.id=@agent AND NOT a.revoked AND r.job_id=@job AND r.run_id=@run
+                AND r.document->>'evidence' IS NULL AND r.document->>'copyKind' IN ('Full','Incremental')
+                AND EXISTS (SELECT 1 FROM jsonb_array_elements(r.document->'destinations') d
+                    WHERE d->>'succeeded'='true' AND (d->>'index')::integer=@destination)
+                AND (u.role='Administrator' OR (u.role='Operator' AND EXISTS (
+                    SELECT 1 FROM server_operator_grants g WHERE g.user_id=u.id AND g.allow_download
+                        AND g.agent_id=a.id AND (g.job_id={{AllJobs}} OR g.job_id=@job))))
+            """, ("user", user), ("stamp", stamp), ("agent", agent), ("job", job), ("run", run), ("destination", destination));
+        return await command.ExecuteScalarAsync(token) as byte[];
+    }
+
+    internal async Task RecordDownloadAsync(Guid user, Guid agent, string action, CancellationToken token)
+    {
+        await using var db = await source.OpenConnectionAsync(token);
+        await using var tx = await db.BeginTransactionAsync(token);
+        await AuditAsync(db, tx, user, agent, action, token);
+        await tx.CommitAsync(token);
     }
 }
