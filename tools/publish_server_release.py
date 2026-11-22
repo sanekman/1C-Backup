@@ -16,6 +16,7 @@ BASE = 'https://api.github.com/repos/' + REPOSITORY + '/'
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--artifacts', type=Path, required=True)
+    parser.add_argument('--create-tag', action='store_true', help='Create an absent tag for an accepted branch build')
     args = parser.parse_args()
     tag = os.environ['GITHUB_REF_NAME']
     source = os.environ['GITHUB_SHA']
@@ -39,9 +40,12 @@ def main():
             raise
         raise FileExistsError('Refusing to overwrite existing GitHub object: ' + path)
 
-    reference = api('git/ref/tags/' + tag)
-    if reference['object']['sha'] != source:
-        raise RuntimeError('Tag does not point to the tested source commit.')
+    if args.create_tag:
+        require_absent('git/ref/tags/' + tag)
+    else:
+        reference = api('git/ref/tags/' + tag)
+        if reference['object']['sha'] != source:
+            raise RuntimeError('Tag does not point to the tested source commit.')
     require_absent('releases/tags/' + tag)
     branch = 'distribution/server-' + version
     require_absent('git/ref/heads/' + urllib.parse.quote(branch, safe=''))
@@ -77,6 +81,8 @@ def main():
     notes = notes.replace('(docs/', '(https://github.com/' + REPOSITORY + '/blob/' + source + '/docs/')
     notes += f'\n\n[Полные заметки и история выпусков](https://github.com/{REPOSITORY}/blob/{source}/docs/release-notes-server.md).'
     notes += '\n\nИсходный коммит: `' + source + '`. Контрольные суммы находятся рядом с файлами и в server-release.json.'
+    if args.create_tag:
+        api('git/refs', {'ref': 'refs/tags/' + tag, 'sha': source})
     # Each distribution branch is created once, containing the commit/checksum manifest.
     # Large offline installers stay in release assets (not Git blobs).
     tree = api('git/trees', {'tree': [{'path': 'server-release.json', 'mode': '100644', 'type': 'blob', 'content': content}]})

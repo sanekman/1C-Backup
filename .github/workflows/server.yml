@@ -45,7 +45,7 @@ on:
         description: 'Publish-accepted: immutable existing server tag'
         type: string
       candidate_version:
-        description: 'Full scope on the working branch: build an unpublished preview, e.g. 0.1.0-preview.18'
+        description: 'Exact branch candidate version for full, clone-lab or publish-accepted'
         type: string
 permissions:
   contents: read
@@ -598,6 +598,7 @@ jobs:
           RELEASE_RUN: ${{ inputs.release_run }}
           NATIVE_RUN: ${{ inputs.native_run }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
         run: python tools/verify_server_publication_sources.py
       - uses: actions/download-artifact@v4
         with:
@@ -611,7 +612,55 @@ jobs:
           name: server-proxmox-installer-verification
           path: artifacts/accepted-native
           github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate_version != '' && inputs.release_run || inputs.native_run }}
+      - if: inputs.candidate_version != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: server-candidate-manifest-and-clone-kit
+          path: artifacts/accepted-candidate
+          github-token: ${{ github.token }}
           run-id: ${{ inputs.native_run }}
+      - if: inputs.candidate_version != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: isolated-lxc-recovery-result
+          path: artifacts/accepted-candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.native_run }}
+      - if: inputs.candidate_version != ''
+        name: Match the packages to the tested candidate manifest and rollback report
+        env:
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          ACCEPTED_SOURCE: ${{ steps.accepted.outputs.source }}
+          RELEASE_RUN: ${{ inputs.release_run }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          root = Path('artifacts/accepted-candidate')
+          manifest = json.loads((root / 'server-release.json').read_text())
+          version = os.environ['CANDIDATE_VERSION']
+          assert manifest['sourceCommit'] == os.environ['ACCEPTED_SOURCE']
+          assert manifest['version'] == version and manifest['candidateRun'] == int(os.environ['RELEASE_RUN'])
+          assert manifest['published'] is False
+          report = json.loads((root / 'lxc-recovery-result.json').read_text())
+          assert report['updatedVersion'] == version and report['updatedSchema'] == manifest['schema']
+          assert report['initialVersion'] == report['restoredVersion'] and report['startingSchema'] == report['restoredSchema']
+          assert all(report[name] is True for name in ('success', 'realLxc', 'realSystemd', 'rowsPreserved', 'certificatePreserved', 'preRollbackStatePreserved'))
+          package = Path('artifacts/accepted-release')
+          expected = {
+              f'SP-Backup-Server-{version}-windows-x64-setup.exe',
+              'SP-Backup-server-win-x64.zip', 'SP-Backup-server-linux-x64.tar.gz',
+          }
+          assert len(manifest['assets']) == len(expected) and {item['name'] for item in manifest['assets']} == expected
+          for item in manifest['assets']:
+              path, = package.rglob(item['name'])
+              with path.open('rb') as content:
+                  assert hashlib.file_digest(content, 'sha256').hexdigest() == item['sha256']
+              assert path.stat().st_size == item['bytes']
+          PY
       - name: Validate retained reports
         env:
           GH_TOKEN: ${{ github.token }}
@@ -630,8 +679,10 @@ jobs:
       - name: Publish checked artifacts without rebuilding or replacing a release
         run: |
           env GITHUB_REF_NAME="$RELEASE_TAG" GITHUB_SHA="$ACCEPTED_SOURCE" python - <<'PYCODE'
-          import runpy, sys, urllib.error
+          import os, runpy, sys, urllib.error
           sys.argv=['tools/publish_server_release.py','--artifacts','artifacts/accepted-release']
+          if os.environ.get('CANDIDATE_VERSION'):
+              sys.argv.append('--create-tag')
           try:
               runpy.run_path(sys.argv[0],run_name='__main__')
           except urllib.error.HTTPError as error:
@@ -642,3 +693,4 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           ACCEPTED_SOURCE: ${{ steps.accepted.outputs.source }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
