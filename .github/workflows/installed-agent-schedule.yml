@@ -1,0 +1,65 @@
+name: Verify scheduling on the installed Windows agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful CI run containing the Windows agent installer
+        required: true
+        type: string
+      installer_sha256:
+        description: Expected SHA-256 of the installer
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  missed-schedule:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-distribution
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/candidate
+      - name: Install the pinned candidate and exercise real service restarts
+        shell: pwsh
+        env:
+          INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
+          ONECBACKUP_NATIVE_SERVICE_TEST: '1'
+        run: |
+          $candidate = @(Get-ChildItem artifacts/candidate -Recurse -File -Filter '*-windows-x64-setup.exe')
+          if ($candidate.Count -ne 1 -or $env:INSTALLER_SHA256 -notmatch '^[a-fA-F0-9]{64}$' -or
+              (Get-FileHash $candidate[0]).Hash -ne $env:INSTALLER_SHA256) {
+            throw 'The fixture requires exactly one installer with the pinned SHA-256.'
+          }
+          $profile = Join-Path $env:LOCALAPPDATA 'OneCBackup'
+          $installation = Join-Path $env:ProgramFiles 'SP Backup'
+          if ((Test-Path $profile) -or (Test-Path $installation) -or (Get-Service OneCBackupAgent -ErrorAction SilentlyContinue)) {
+            throw 'The fixture requires a clean Windows installation.'
+          }
+          $process = Start-Process $candidate[0].FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="' + $installation + '"')) -PassThru
+          if (!$process.WaitForExit(180000)) { Stop-Process -Id $process.Id -Force; throw 'Installer timed out.' }
+          if ($process.ExitCode -ne 0) { throw 'Candidate installation failed.' }
+          $agent = Join-Path $installation 'OneCBackup.Agent.exe'
+          $version = (Get-Item -LiteralPath $agent).VersionInfo.ProductVersion
+          Write-Output ("Installed agent: " + $version)
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- $agent (Join-Path $PWD 'artifacts/missed-schedule') --verify-missed-schedule
+          if ($LASTEXITCODE -ne 0) { throw 'Installed agent scheduling verification failed.' }
+          Get-Content artifacts/missed-schedule/missed-schedule-result.json
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-agent-missed-schedule
+          path: artifacts/missed-schedule/missed-schedule-result.json
+          retention-days: 14
+          if-no-files-found: ignore
