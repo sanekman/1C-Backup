@@ -111,6 +111,10 @@ public sealed class OperatorTests(ServerFixture fixture) : IClassFixture<ServerF
         page = WebUtility.HtmlDecode(await user.GetStringAsync("operator"));
         Assert.Contains(otherJob.Name, page);
         Assert.DoesNotContain(visibleJob.Name, page);
+        var future = Job("Future files");
+        await fixture.Store.SaveMonitoringAsync(hidden.AgentId, new(DateTimeOffset.UtcNow, "fixture", [otherJob, future], null, 0), default);
+        Assert.Contains(future.Name, await user.GetStringAsync("operator"));
+        Assert.DoesNotContain(future.Name, await second.GetStringAsync("operator"));
     }
 
     private static MonitoredRun Run(MonitoredJob job, int bytes)

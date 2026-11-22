@@ -66,6 +66,9 @@ public sealed class OperatorDownloadTests(ServerFixture fixture) : IClassFixture
             };
             using (var denied = await observer.PostAsync("management/recovery-downloads", new FormUrlEncodedContent(deniedForm), stop.Token))
                 Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+            var invalidPoint = new Dictionary<string, string>(fields) { ["destination"] = "999" };
+            using (var denied = await reader.PostAsync("management/recovery-downloads", new FormUrlEncodedContent(invalidPoint), stop.Token))
+                Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
             using var begin = await reader.PostAsync("management/recovery-downloads", new FormUrlEncodedContent(fields), stop.Token);
             Assert.Equal(HttpStatusCode.Redirect, begin.StatusCode);
             var statusPath = begin.Headers.Location!.OriginalString.TrimStart('/');
@@ -121,7 +124,9 @@ public sealed class OperatorDownloadTests(ServerFixture fixture) : IClassFixture
             await Assert.ThrowsAsync<ServerRequestException>(() => transfer);
             Assert.Equal(1024L * 1024, body.Length);
             await fixture.SignInAsync(reader, password: secret, name: "kit-reader");
-            using var retry = await reader.GetAsync(filePath, stop.Token);
+            using var resume = new HttpRequestMessage(HttpMethod.Get, filePath);
+            resume.Headers.Range = new RangeHeaderValue(1024 * 1024, null);
+            using var retry = await reader.SendAsync(resume, stop.Token);
             Assert.Equal(HttpStatusCode.NotFound, retry.StatusCode);
         }
         finally
