@@ -12,9 +12,9 @@ using ICSharpCode.SharpZipLib.Zip;
 internal static partial class Program
 {
     private static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
-    private static async Task Wait(Func<Task<bool>> condition, string message)
+    private static async Task Wait(Func<Task<bool>> condition, string message, int timeoutSeconds = 60)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(60);
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(timeoutSeconds);
         while (!await condition())
         {
             if (DateTimeOffset.UtcNow > deadline) throw new TimeoutException(message);
@@ -135,6 +135,7 @@ internal static partial class Program
         if (args.Length == 3 && args[2] == "--verify-volumes") return await VerifyVolumesAsync(args[1]);
         if (args.Length == 3 && args[2] == "--verify-service-switch") return await VerifyServiceSwitchAsync(args[0], args[1]);
         if (args.Length == 3 && args[2] == "--verify-missed-schedule") return await VerifyMissedScheduleAsync(args[0], args[1]);
+        if (args.Length == 3 && args[2] == "--verify-reporting-outage") return await VerifyReportingOutageAsync(args[0], args[1]);
         if (args.Length == 3 && args[2] == "--prepare-user-startup") return await PrepareUserStartupAsync(args[0], args[1]);
         if (args.Length == 3 && args[2] == "--verify-user-startup") return await VerifyUserStartupAsync(args[0], args[1]);
         if (args.Length == 3 && args[2] == "--verify-reboot") return await VerifyRebootAsync(args[0], args[1]);
