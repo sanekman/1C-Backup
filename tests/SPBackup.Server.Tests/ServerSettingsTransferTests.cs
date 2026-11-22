@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
@@ -30,6 +31,12 @@ public sealed class ServerSettingsTransferTests(ServerFixture original) : IClass
             new Dictionary<string, string> { ["timeZoneId"] = "Asia/Vladivostok" }));
         Assert.Equal(HttpStatusCode.Redirect, zone.StatusCode);
 
+        // Simulate an existing schema-8 database while keeping the registered fleet and plan.
+        await original.ExecuteAsync("""
+            DROP TABLE server_imported_plans, server_portable_panel_settings;
+            DELETE FROM server_schema WHERE version=9;
+            """);
+        await original.Store.MigrateAsync();
         using var exported = await original.Administrator.GetAsync("management/settings-transfer/export");
         Assert.Equal(HttpStatusCode.OK, exported.StatusCode);
         Assert.Equal("SP-Backup-server-settings.json", exported.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
@@ -51,7 +58,9 @@ public sealed class ServerSettingsTransferTests(ServerFixture original) : IClass
             malformed["panel"]!["connectionString"] = "not portable";
             await ImportAsync(target, malformed, "invalid");
             Assert.Empty(await target.Store.FoldersAsync());
-            await ImportAsync(target, document, "imported");
+            if (Environment.GetEnvironmentVariable("ONECBACKUP_SETTINGS_TRANSFER_BROWSER_OUTPUT") is { } output)
+                await ImportInBrowserAsync(target, document, output);
+            else await ImportAsync(target, document, "imported");
             await ImportAsync(target, document, "occupied");
             Assert.Equal("Organisation / Department", Assert.Single(await target.Store.FoldersAsync(), item => item.Id == child).Path);
 
@@ -89,6 +98,28 @@ public sealed class ServerSettingsTransferTests(ServerFixture original) : IClass
             Assert.Equal("Europe/Moscow", refreshed["panel"]!["timeZoneId"]!.GetValue<string>());
         }
         finally { await target.DisposeAsync(); }
+    }
+
+    private static async Task ImportInBrowserAsync(ServerFixture target, JsonObject document, string output)
+    {
+        var repository = new DirectoryInfo(AppContext.BaseDirectory);
+        while (!File.Exists(Path.Combine(repository.FullName, "tests/server/settings_transfer_browser.py")))
+            repository = repository.Parent ?? throw new InvalidOperationException("Repository not found.");
+        var settings = Path.Combine(target.Root, "portable.json");
+        var credentials = Path.Combine(target.Root, "browser-password.txt");
+        await File.WriteAllTextAsync(settings, document.ToJsonString());
+        await File.WriteAllTextAsync(credentials, target.Password);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(credentials, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        Directory.CreateDirectory(output);
+        var start = new ProcessStartInfo("python3") { WorkingDirectory = repository.FullName, UseShellExecute = false,
+            RedirectStandardError = true, RedirectStandardOutput = true };
+        foreach (var argument in new[] { "tests/server/settings_transfer_browser.py", target.Address.ToString(), credentials, settings,
+            Path.Combine(output, "server-settings-transfer-900.png") }) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        var stderr = process.StandardError.ReadToEndAsync();
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, await stderr + await stdout);
     }
 
     private static async Task ImportAsync(ServerFixture target, JsonObject settings, string expected)
