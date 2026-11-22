@@ -8,9 +8,12 @@ namespace SPBackup.Desktop;
 
 internal static partial class DesktopSmoke
 {
-    private static async Task VerifySqlCertificateWarningAsync(Window owner)
+    private static Task VerifySqlCertificateWarningAsync(Window owner) =>
+        VerifySqlProtectionWarningAsync(owner, "SqlTrustServerCertificate", "MS SQL: отключение проверки сертификата");
+
+    private static async Task VerifySqlProtectionWarningAsync(Window owner, string checkboxName, string dialogTitle)
     {
-        var checkbox = (CheckBox)owner.FindName("SqlTrustServerCertificate");
+        var checkbox = (CheckBox)owner.FindName(checkboxName);
         var ownerHandle = new WindowInteropHelper(owner).Handle;
         var thread = CertificateGetWindowThreadProcessId(ownerHandle, out _);
         foreach (var accept in new[] { false, true })
@@ -26,7 +29,7 @@ internal static partial class DesktopSmoke
                         var title = new StringBuilder(256);
                         CertificateGetWindowText(handle, title, title.Capacity);
                         if (CertificateGetWindow(handle, 4) == ownerHandle
-                            && title.ToString() == "MS SQL: отключение проверки сертификата") dialog = handle;
+                            && title.ToString() == dialogTitle) dialog = handle;
                         return true;
                     }, 0);
                     if (dialog != 0)

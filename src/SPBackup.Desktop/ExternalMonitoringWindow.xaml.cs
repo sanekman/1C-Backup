@@ -219,7 +219,8 @@ public partial class ExternalMonitoringWindow : Window
             ApplyReportFilter();
             WorkspaceTabs.SelectedItem = HistoryTab;
             Status.Text = monitor.Kind == ExternalBackupSourceKind.SqlServerHistory
-                ? "Задание сохранено. Проверка сертификата MS SQL " + (monitor.TrustServerCertificate ? "выключена." : "включена.")
+                ? "Задание сохранено. Проверка сертификата MS SQL " + (monitor.TrustServerCertificate ? "выключена. " : "включена. ")
+                    + (monitor.AllowUnencryptedConnection ? "Шифрование по требованию сервера." : "Шифрование обязательно.")
                 : "Задание наблюдения сохранено. Проверка использует сохранённые настройки.";
         }
         catch (Exception ex) { Status.Text = "Не удалось сохранить: " + ex.Message; }

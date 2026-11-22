@@ -138,16 +138,20 @@ internal static partial class DesktopSmoke
             TrustServerCertificate = false, AllowUnencryptedConnection = false
         };
         await store.SaveAsync(original.Append(monitor).ToArray());
-        var editor = new ExternalMonitoringWindow(settings, monitor.Id) { Owner = owner };
+        var editor = new ExternalMonitoringWindow(settings, monitor.Id) { Owner = owner, Width = 900, Height = 580 };
         editor.Show();
         try
         {
             await WaitUntil(() => editor.SmokeReady, "Сохранённое наблюдение всех баз не открылось.");
+            var protection = (Expander)editor.FindName("SqlCertificateSettings");
+            protection.IsExpanded = true;
+            ((CheckBox)editor.FindName("SqlTrustServerCertificate")).BringIntoView();
             await VerifySqlCertificateWarningAsync(editor);
+            await VerifySqlProtectionWarningAsync(editor, "SqlAllowUnencrypted", "MS SQL · шифрование по требованию сервера");
             ((Button)editor.FindName("SaveMonitorButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitUntil(() => editor.SmokeReady, "Параметры сертификата прежнего задания не сохранились.");
             var saved = (await store.LoadAsync()).Single(value => value.Id == monitor.Id);
-            if (saved != (monitor with { TrustServerCertificate = true }))
+            if (saved != (monitor with { TrustServerCertificate = true, AllowUnencryptedConnection = true }))
                 throw new InvalidOperationException("Редактор не сохранил параметры сертификата прежнего наблюдения всех баз.");
         }
         finally { editor.Close(); }
@@ -157,8 +161,15 @@ internal static partial class DesktopSmoke
         try
         {
             await WaitUntil(() => reopened.SmokeReady, "Прежнее задание не открылось после сохранения.");
-            if (((CheckBox)reopened.FindName("SqlTrustServerCertificate")).IsChecked != true)
-                throw new InvalidOperationException("Прежнее задание не восстановило сохранённый выбор сертификата.");
+            var trust = (CheckBox)reopened.FindName("SqlTrustServerCertificate");
+            var allowUnencrypted = (CheckBox)reopened.FindName("SqlAllowUnencrypted");
+            if (trust.IsChecked != true || allowUnencrypted.IsChecked != true)
+                throw new InvalidOperationException("Прежнее задание не восстановило оба сохранённых параметра подключения.");
+            trust.IsChecked = allowUnencrypted.IsChecked = false;
+            ((Button)reopened.FindName("SaveMonitorButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitUntil(() => reopened.SmokeReady, "Исходные параметры подключения не сохранились.");
+            if ((await store.LoadAsync()).Single(value => value.Id == monitor.Id) != monitor)
+                throw new InvalidOperationException("Возврат исходных параметров изменил другие настройки наблюдения.");
         }
         finally { reopened.Close(); }
     }
