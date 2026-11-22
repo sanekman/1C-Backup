@@ -43,42 +43,45 @@ internal static class DashboardScale
                 CROSS JOIN LATERAL (SELECT gen_random_uuid() run_id, now()-make_interval(hours=>i) finished_at
                     FROM generate_series(1,5) i) r;
                 """, ("folder", folders[2]), ("count", count));
-            var elapsed = new List<double>();
-            var queryDuration = new List<double>();
-            var measuring = false;
-            using var listener = new ActivityListener
+            foreach (var (view, query) in new[] { ("classic", "?branch=all"), ("compact", "?view=compact&branch=all") })
             {
-                ShouldListenTo = source => source.Name == "Npgsql",
-                Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-                ActivityStopped = activity => { if (measuring && activity.Kind == ActivityKind.Client) lock (queryDuration) queryDuration.Add(activity.Duration.TotalMilliseconds); }
-            };
-            ActivitySource.AddActivityListener(listener);
-            var htmlBytes = 0;
-            for (var run = 0; run < 9; run++)
-            {
-                var started = Stopwatch.GetTimestamp();
-                measuring = run != 0;
-                using var response = await fixture.Administrator.GetAsync("?branch=all");
-                response.EnsureSuccessStatusCode();
-                htmlBytes = (await response.Content.ReadAsByteArrayAsync()).Length;
-                measuring = false;
-                if (run != 0) elapsed.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                var elapsed = new List<double>();
+                var queryDuration = new List<double>();
+                var measuring = false;
+                using var listener = new ActivityListener
+                {
+                    ShouldListenTo = source => source.Name == "Npgsql",
+                    Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+                    ActivityStopped = activity => { if (measuring && activity.Kind == ActivityKind.Client) lock (queryDuration) queryDuration.Add(activity.Duration.TotalMilliseconds); }
+                };
+                ActivitySource.AddActivityListener(listener);
+                var htmlBytes = 0;
+                for (var run = 0; run < 9; run++)
+                {
+                    var started = Stopwatch.GetTimestamp();
+                    measuring = run != 0;
+                    using var response = await fixture.Administrator.GetAsync(query);
+                    response.EnsureSuccessStatusCode();
+                    htmlBytes = (await response.Content.ReadAsByteArrayAsync()).Length;
+                    measuring = false;
+                    if (run != 0) elapsed.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                }
+                elapsed.Sort();
+                timings.Add(new { agents = count, view, treeDepth = 3, seededJobsPerAgent = 1, seededRunsPerAgent = 5, htmlBytes,
+                    responseMedianMs = Median(elapsed), responseP95Ms = elapsed[^1], sampledSqlCommands = queryDuration.Count,
+                    sqlCommandsPerRequest = queryDuration.Count / (double)elapsed.Count,
+                    sqlTotalMs = Math.Round(queryDuration.Sum(), 2) });
+                var start = new ProcessStartInfo("python3") { WorkingDirectory = repository, UseShellExecute = false,
+                    RedirectStandardError = true, RedirectStandardOutput = true };
+                foreach (var argument in new[] { "tests/server/dashboard_scale.py", fixture.Address.ToString(), passwordFile,
+                    Path.Combine(output, $"browser-{count}-{view}.json"), count.ToString(System.Globalization.CultureInfo.InvariantCulture), view })
+                    start.ArgumentList.Add(argument);
+                using var browser = Process.Start(start)!;
+                var error = browser.StandardError.ReadToEndAsync();
+                var standard = browser.StandardOutput.ReadToEndAsync();
+                await browser.WaitForExitAsync();
+                Assert.True(browser.ExitCode == 0, await error + await standard);
             }
-            elapsed.Sort();
-            timings.Add(new { agents = count, treeDepth = 3, seededJobsPerAgent = 1, seededRunsPerAgent = 5, htmlBytes,
-                responseMedianMs = Median(elapsed), responseP95Ms = elapsed[^1], sampledSqlCommands = queryDuration.Count,
-                sqlCommandsPerRequest = queryDuration.Count / (double)elapsed.Count,
-                sqlTotalMs = Math.Round(queryDuration.Sum(), 2) });
-            var start = new ProcessStartInfo("python3") { WorkingDirectory = repository, UseShellExecute = false,
-                RedirectStandardError = true, RedirectStandardOutput = true };
-            foreach (var argument in new[] { "tests/server/dashboard_scale.py", fixture.Address.ToString(), passwordFile,
-                Path.Combine(output, $"browser-{count}.json"), count.ToString(System.Globalization.CultureInfo.InvariantCulture) })
-                start.ArgumentList.Add(argument);
-            using var browser = Process.Start(start)!;
-            var error = browser.StandardError.ReadToEndAsync();
-            var standard = browser.StandardOutput.ReadToEndAsync();
-            await browser.WaitForExitAsync();
-            Assert.True(browser.ExitCode == 0, await error + await standard);
         }
         await File.WriteAllTextAsync(Path.Combine(output, "server.json"), JsonSerializer.Serialize(timings, new JsonSerializerOptions { WriteIndented = true }));
     }

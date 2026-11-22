@@ -2,7 +2,7 @@
     <details data-branch-key="@Branch.Key"
              open="@((BranchKey != "all" && Branch.ContainsBranch(BranchKey)) || (SelectedId is { } id && Branch.Contains(id)))">
         <summary class="dashboard-folder">
-            <a href="@($"?branch={Branch.Key}")" data-folder-key="@Branch.Key" data-folder-id="@Branch.FolderId"
+            <a href="@AgentDirectory.FolderLink(Branch.Key, Compact)" data-folder-key="@Branch.Key" data-folder-id="@Branch.FolderId"
                data-folder-path="@Branch.Path" data-folder-name="@Branch.Label" data-folder-parent="@Branch.Parent"
                aria-current="@(BranchKey == Branch.Key ? "true" : null)">
                 @Branch.Label <span class="muted">(@Branch.Count)</span>
@@ -13,7 +13,7 @@
             {
                 <AgentDirectoryBranch Branch="child" SelectedId="SelectedId" BranchKey="@BranchKey" />
             }
-            @foreach (var row in Branch.Agents)
+            @foreach (var row in Compact ? [] : Branch.Agents)
             {
                 <li class="dashboard-leaf" data-agent-leaf data-agent-id="@row.Entry.Id" data-folder-id="@row.Entry.FolderId"
                     data-agent-name="@row.Entry.Name" data-folder-path="@Branch.Path" draggable="true">
@@ -29,6 +29,7 @@
 
 @code {
     [Parameter, EditorRequired] public AgentDirectory.BranchNode Branch { get; set; } = default!;
+    [Parameter] public bool Compact { get; set; }
     [Parameter] public Guid? SelectedId { get; set; }
     [Parameter, EditorRequired] public string BranchKey { get; set; } = "all";
 }

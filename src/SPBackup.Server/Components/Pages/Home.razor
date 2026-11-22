@@ -10,6 +10,10 @@
     <h1>Агенты</h1>
     <div class="actions">
         <a href="@(ListView ? "?view=tree&remember=true" : "?view=list&remember=true")">@(ListView ? "Вид: дерево" : "Вид: список")</a>
+        @if (!ListView)
+        {
+            <a href="@(Compact ? "?view=tree" : "?view=compact")">@(Compact ? "Обычное дерево" : "Компактное дерево")</a>
+        }
         <a class="button" href="@ConnectLink">Подключить агент</a>
     </div>
 </div>
@@ -97,7 +101,8 @@
 else
 {
     @if (ChangeError is not null) { <p class="error" role="alert">@ChangeError</p> }
-    <AgentDirectory Folders="Folders" AgentId="AgentId" BranchKey="@(BranchKey ?? "all")" />
+    <AgentDirectory Folders="Folders" AgentId="AgentId" BranchKey="@(BranchKey ?? "all")"
+                    Compact="Compact" Query="@Query" Attention="Attention" RowsPage="RowsPage" />
 <dialog id="dashboard-action" class="dashboard-dialog" aria-labelledby="dashboard-action-title">
     <form method="post" @formname="dashboard-organize" @onsubmit="Organize">
         <AntiforgeryToken />
@@ -173,11 +178,15 @@ else
                 default:
                     throw new ServerRequestException(400, "folder_not_found");
             }
-            Navigation.NavigateTo($"?branch={destination}");
+            Navigation.NavigateTo(AgentDirectory.FolderLink(destination, Compact));
         }
         catch (ServerRequestException error) { ChangeError = OrganizationText.Error(error); }
     }
 
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+    [SupplyParameterFromQuery(Name = "attention")] public bool Attention { get; set; }
+    [SupplyParameterFromQuery(Name = "rows")] public int RowsPage { get; set; }
+    private bool Compact => View == "compact";
     private bool PreferList;
     private bool ListView => View == "list" || Folder is not null || Page != 0
         || View is null && AgentId is null && BranchKey is null && PreferList;

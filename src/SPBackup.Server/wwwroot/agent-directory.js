@@ -3,6 +3,15 @@
     const dialog = document.querySelector('#dashboard-action');
     if (!dashboard || !dialog) return;
 
+    const compact = dashboard.dataset.dashboardCompact === 'true';
+    const agentIndex = dashboard.querySelector('[data-agent-index]');
+    const agentsByFolder = new Map();
+    if (agentIndex) for (const agent of JSON.parse(agentIndex.textContent)) {
+        const key = agent.folder || 'root';
+        if (!agentsByFolder.has(key)) agentsByFolder.set(key, []);
+        agentsByFolder.get(key).push(agent);
+    }
+
     const search = dashboard.querySelector('[data-agent-search]');
     const attention = dashboard.querySelector('[data-agent-attention]');
     const reset = dashboard.querySelector('[data-agent-reset]');
@@ -10,11 +19,11 @@
     const folders = new Map(paths.map(link => [link.dataset.folderKey, link]));
     const branches = [...dashboard.querySelectorAll('[data-agent-branch]')].reverse();
     const tableRows = [...dashboard.querySelectorAll('[data-dashboard-row]')];
-    const leaves = [...dashboard.querySelectorAll('[data-agent-leaf]')];
+    const leaves = dashboard.querySelectorAll('[data-agent-leaf]');
     const refreshLink = dashboard.querySelector('[data-dashboard-refresh]');
     const refreshStatus = dashboard.querySelector('[data-dashboard-refresh-status]');
     const matches = new Set();
-    const storageKey = 'sp-backup-dashboard:' + new URL(document.baseURI).pathname;
+    const storageKey = 'sp-backup-dashboard:' + new URL(document.baseURI).pathname + (compact ? ':compact' : '');
     let saved = {};
     try { saved = JSON.parse(sessionStorage.getItem(storageKey) ?? '{}') ?? {}; } catch { /* Optional state. */ }
 
@@ -23,10 +32,13 @@
     let selected = folders.get(requestedBranch) ?? folders.get('all');
     let dragged = null;
     let refreshing = false;
-    search.value = typeof saved.query === 'string' ? saved.query : '';
-    attention.checked = saved.attention === true;
+    if (!compact) {
+        search.value = typeof saved.query === 'string' ? saved.query : '';
+        attention.checked = saved.attention === true;
+    }
 
-    const filtered = () => search.value.trim() !== '' || attention.checked;
+    const appliedFilter = search.value.trim() !== '' || attention.checked;
+    const filtered = () => compact ? appliedFilter : search.value.trim() !== '' || attention.checked;
     const save = () => {
         try {
             sessionStorage.setItem(storageKey, JSON.stringify({
@@ -34,7 +46,7 @@
             }));
         } catch { /* State is optional. */ }
     };
-    if (!filtered()) for (const branch of branches) {
+    if (compact || !filtered()) for (const branch of branches) {
         if (branch.firstElementChild.open) expanded.add(branch.firstElementChild.dataset.branchKey);
     }
 
@@ -46,7 +58,16 @@
         return false;
     }
 
+    function updateFolderActions() {
+        dashboard.querySelectorAll('[data-folder-op]:not([data-folder-op="create"])')
+            .forEach(button => { button.hidden = button.disabled = !selected.dataset.folderId; });
+    }
+
     function render() {
+        if (compact) {
+            updateFolderActions();
+            return;
+        }
         const query = search.value.trim().normalize().toLocaleLowerCase('ru');
         const filtering = filtered();
         const key = selected.dataset.folderKey;
@@ -81,8 +102,7 @@
         if (count.textContent !== countText) count.textContent = countText;
         dashboard.querySelector('[data-agent-no-match]').hidden = shown !== 0;
         reset.disabled = !filtering;
-        dashboard.querySelectorAll('[data-folder-op]:not([data-folder-op="create"])')
-            .forEach(button => { button.hidden = button.disabled = !selected.dataset.folderId; });
+        updateFolderActions();
         save();
     }
 
@@ -135,8 +155,65 @@
         else dialog.querySelector('[data-dialog-cancel]').focus();
     }
 
+    function bindCompactBranch(details) {
+        const key = details.dataset.branchKey;
+        const folder = folders.get(key);
+        const list = details.querySelector(':scope > ul');
+        const agents = (agentsByFolder.get(key) ?? []).filter(agent => !appliedFilter || agent.matches);
+        let offset = 0;
+        const more = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'dashboard-text-button';
+        button.textContent = 'Показать ещё агентов';
+        more.append(button);
+        function appendAgents() {
+            const page = agents.slice(offset, offset + 50);
+            let firstLink;
+            for (const agent of page) {
+                const leaf = document.createElement('li');
+                leaf.className = 'dashboard-leaf';
+                leaf.dataset.agentLeaf = '';
+                leaf.dataset.agentId = agent.id;
+                leaf.dataset.folderId = agent.folder || '';
+                leaf.dataset.folderPath = folder.dataset.folderPath;
+                leaf.dataset.agentName = agent.name;
+                leaf.draggable = true;
+                const link = document.createElement('a');
+                const url = new URL(location.href);
+                url.searchParams.set('agent', agent.id);
+                url.hash = 'agent-summary';
+                link.href = url;
+                link.textContent = agent.name;
+                if (agent.id === new URL(location.href).searchParams.get('agent')) link.setAttribute('aria-current', 'page');
+                leaf.append(link);
+                list.insertBefore(leaf, more.parentElement ? more : null);
+                firstLink ??= link;
+            }
+            offset += page.length;
+            if (offset < agents.length) list.append(more);
+            else more.remove();
+            return firstLink;
+        }
+        button.addEventListener('click', () => appendAgents()?.focus());
+        const open = () => {
+            if (details.open) {
+                expanded.add(key);
+                if (offset === 0) appendAgents();
+            } else expanded.delete(key);
+            save();
+        };
+        details.open = expanded.has(key);
+        if (details.open) open();
+        details.addEventListener('toggle', open);
+    }
+
     for (const branch of branches) {
         const details = branch.firstElementChild;
+        if (compact) {
+            bindCompactBranch(details);
+            continue;
+        }
         details.firstElementChild.addEventListener('click', event => {
             if (event.defaultPrevented || filtered()) return;
             if (details.open) expanded.delete(details.dataset.branchKey);
@@ -145,7 +222,7 @@
         });
     }
     for (const link of paths) {
-        link.addEventListener('click', event => choose(link, event));
+        if (!compact) link.addEventListener('click', event => choose(link, event));
         if (link.dataset.folderKey === 'all') continue;
         const details = link.closest('details');
         let opening;
@@ -173,19 +250,19 @@
             dragged = null;
         });
     }
-    for (const row of [...leaves, ...tableRows]) {
-        row.addEventListener('dragstart', event => {
-            dragged = row;
-            event.dataTransfer.setData('text/plain', row.dataset.agentId);
-            event.dataTransfer.effectAllowed = 'move';
-            for (const branch of branches) branch.hidden = false;
-        });
-        row.addEventListener('dragend', () => {
-            dragged = null;
-            for (const link of paths) link.classList.remove('dashboard-drop');
-            render();
-        });
-    }
+    dashboard.addEventListener('dragstart', event => {
+        const row = event.target.closest('[data-agent-leaf], [data-dashboard-row]');
+        if (!row) return;
+        dragged = row;
+        event.dataTransfer.setData('text/plain', row.dataset.agentId);
+        event.dataTransfer.effectAllowed = 'move';
+        for (const branch of branches) branch.hidden = false;
+    });
+    dashboard.addEventListener('dragend', () => {
+        dragged = null;
+        for (const link of paths) link.classList.remove('dashboard-drop');
+        render();
+    });
     dashboard.addEventListener('click', event => {
         const folderAction = event.target.closest('[data-folder-op]');
         if (folderAction) open(folderAction.dataset.folderOp);
@@ -226,7 +303,8 @@
             if (!next) throw new Error('Dashboard missing');
             const nextRows = new Map([...next.querySelectorAll('[data-dashboard-row]')].map(row => [row.dataset.agentId, row]));
             const nextFolders = new Map([...next.querySelectorAll('[data-folder-key]')].map(link => [link.dataset.folderKey, link]));
-            const structureChanged = nextRows.size !== tableRows.length || nextFolders.size !== folders.size
+            const structureChanged = (compact && agentIndex.textContent !== next.querySelector('[data-agent-index]')?.textContent)
+                || nextRows.size !== tableRows.length || nextFolders.size !== folders.size
                 || tableRows.some(row => {
                     const other = nextRows.get(row.dataset.agentId);
                     return !other || ['folderId', 'agentName', 'computerName'].some(key => row.dataset[key] !== other.dataset[key]);
@@ -250,7 +328,10 @@
             for (const selector of ['[data-dashboard-active]', '[data-dashboard-totals]', '#agent-summary'])
                 replaceContent(document.querySelector(selector), incoming.querySelector(selector));
             render();
-            showRefreshStatus(structureChanged ? 'Состав дерева изменился. Нажмите «Обновить».' : '');
+            if (compact) replaceContent(dashboard.querySelector('[data-dashboard-count]'), next.querySelector('[data-dashboard-count]'));
+            showRefreshStatus(structureChanged
+                ? compact ? 'Список агентов изменился. Нажмите «Обновить».' : 'Состав дерева изменился. Нажмите «Обновить».'
+                : '');
         } catch {
             showRefreshStatus('Не удалось обновить данные.');
         } finally {
@@ -264,9 +345,11 @@
     });
     setInterval(refresh, 15000);
     dialog.querySelector('[data-dialog-cancel]').addEventListener('click', () => dialog.close());
-    search.addEventListener('input', render);
-    attention.addEventListener('change', render);
-    reset.addEventListener('click', () => {
+    if (!compact) {
+        search.addEventListener('input', render);
+        attention.addEventListener('change', render);
+    }
+    reset?.addEventListener('click', () => {
         search.value = '';
         attention.checked = false;
         render();

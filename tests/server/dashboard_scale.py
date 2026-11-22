@@ -1,4 +1,4 @@
-"""Measure the Dashboard in the isolated PostgreSQL fixture."""
+"""Compare Dashboard views against the same isolated PostgreSQL fixture."""
 import json
 import math
 import re
@@ -10,8 +10,18 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright, expect
 
-url, credentials, output, count = sys.argv[1:]
+url, credentials, output, count, view = sys.argv[1:]
+count = int(count)
+compact = view == 'compact'
+suffix = '?view=compact&branch=all' if compact else '?branch=all'
 assert urlsplit(url).hostname in ('127.0.0.1', 'localhost')
+
+
+def statistics_for(values):
+    return {'median': round(statistics.median(values), 2),
+            'p95': round(sorted(values)[math.ceil(len(values) * .95) - 1], 2)}
+
+
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(executable_path='/usr/bin/chromium', args=['--no-sandbox'])
     page = browser.new_page(ignore_https_errors=True, viewport={'width': 1366, 'height': 900})
@@ -21,20 +31,55 @@ with sync_playwright() as playwright:
     page.get_by_role('button', name='Войти', exact=True).click()
     samples = []
     for attempt in range(9):
+        page.evaluate('sessionStorage.clear()')
         started = perf_counter()
-        page.goto(url + '?branch=all')
+        page.goto(url + suffix)
         rows = page.locator('[data-dashboard-row]')
-        expect(rows).to_have_count(int(count))
+        expect(rows).to_have_count(min(50, count) if compact else count)
+        expect(page.locator('[data-dashboard-count]')).to_have_text(f'{count} из {count}')
         ready = perf_counter()
+        dom_nodes = page.locator('[data-agent-directory] *').count()
         rows.filter(has_text='Scale agent').first.get_by_role('link', name=re.compile(r'^Scale agent ')).click()
         expect(page.locator('#agent-summary')).to_be_visible()
         selected = perf_counter()
+
+        page.evaluate('sessionStorage.clear()')
+        page.goto(url + suffix)
+        for name in ['Нагрузка', 'Филиал']:
+            page.locator(f'summary:has(> [data-folder-name="{name}"])').focus()
+            page.keyboard.press('Space')
+        leaf_summary = page.locator('summary:has(> [data-folder-name="Отдел"])')
+        leaf_summary.focus()
+        opening = perf_counter()
+        page.keyboard.press('Space')
+        expect(page.locator('[data-agent-leaf]').filter(has_text='Scale agent').first).to_be_visible()
+        opened = perf_counter()
+        if compact:
+            expect(page.locator('[data-agent-leaf]')).to_have_count(50)
+
+        target = page.locator('[data-agent-leaf]').filter(has_text='Scale agent').last.inner_text()
+        search = page.get_by_role('searchbox', name='Найти агента')
+        searching = perf_counter()
+        search.fill(target)
+        if compact:
+            search.press('Enter')
+        expect(rows.filter(visible=True)).to_have_count(1)
+        expect(rows.filter(visible=True)).to_contain_text(target)
+        found = perf_counter()
         if attempt:
-            samples.append((1000 * (ready - started), 1000 * (selected - started)))
-    def statistics_for(values):
-        return {'median': round(statistics.median(values), 2), 'p95': round(sorted(values)[math.ceil(len(values) * .95) - 1], 2)}
-    result = {'agents': int(count), 'dashboardDomNodes': page.locator('[data-agent-directory] *').count(),
-              'rowsReadyMs': statistics_for([ready for ready, _ in samples]),
-              'firstAgentSelectedMs': statistics_for([selected for _, selected in samples])}
-    Path(output).write_text(json.dumps(result, indent=2))
+            samples.append(tuple(1000 * duration for duration in (ready-started, selected-started, opened-opening, found-searching)))
+
+    result = {'agents': count, 'view': view, 'dashboardDomNodes': dom_nodes}
+    for key, values in zip(('rowsReadyMs', 'firstAgentSelectedMs', 'folderOpenedMs', 'globalSearchMs'), zip(*samples)):
+        result[key] = statistics_for(values)
+    output = Path(output)
+    output.write_text(json.dumps(result, indent=2))
+
+    if count == 1000:
+        page.set_viewport_size({'width': 900, 'height': 580})
+        for theme in ['dark', 'light']:
+            page.evaluate('sessionStorage.clear()')
+            page.goto(url + suffix)
+            page.evaluate('(theme) => document.documentElement.dataset.theme = theme', theme)
+            page.screenshot(path=output.with_name(f'{view}-{theme}-900.png'))
     browser.close()

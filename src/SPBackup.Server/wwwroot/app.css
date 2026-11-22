@@ -88,3 +88,6 @@ details[open]>.dashboard-folder::before{content:"−"}
   .dashboard-table{min-width:530px}
   .dashboard-search{flex-wrap:wrap}
 }
+
+.dashboard-search-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.dashboard-search-form .dashboard-search{flex:1 1 200px}

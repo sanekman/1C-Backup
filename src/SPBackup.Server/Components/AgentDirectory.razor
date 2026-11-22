@@ -3,13 +3,31 @@
 @inject ServerOptions Settings
 @inject IHttpContextAccessor Http
 
-<div class="agent-directory dashboard" data-agent-directory data-initial-branch="@BranchKey">
+<div class="agent-directory dashboard" data-agent-directory data-initial-branch="@BranchKey" data-dashboard-compact="@(Compact ? "true" : null)">
+    @if (Compact)
+    {
+        <script type="application/json" data-agent-index>@((MarkupString)AgentIndex)</script>
+    }
     <div class="dashboard-tools">
+        @if (Compact)
+        {
+            <form method="get" class="agent-directory-filter dashboard-search-form">
+                <input type="hidden" name="view" value="compact" />
+                <input type="hidden" name="branch" value="@BranchKey" />
+                <label class="dashboard-search">Найти агента<input type="search" maxlength="128" name="q" value="@SearchQuery" data-agent-search /></label>
+                <label class="agent-attention-filter"><input type="checkbox" name="attention" value="true" checked="@Attention" data-agent-attention /> Требуют внимания</label>
+                <button type="submit" class="secondary">Найти</button>
+                @if (Filtering) { <a href="@FolderLink(BranchKey, true)">Сбросить</a> }
+            </form>
+        }
+        else
+        {
         <div class="agent-directory-filter" data-agent-filter hidden>
             <label class="dashboard-search">Найти агента<input type="search" maxlength="128" data-agent-search /></label>
             <label class="agent-attention-filter"><input type="checkbox" data-agent-attention /> Требуют внимания</label>
             <button type="button" class="secondary" data-agent-reset>Сбросить</button>
         </div>
+        }
         <span data-dashboard-active>Сейчас работают: @Rows.Count(row => row.Current is { Stale: false })</span>
         <a href="" data-dashboard-refresh>Обновить</a>
         <span class="muted" data-dashboard-refresh-status role="status" hidden></span>
@@ -23,27 +41,27 @@
                 <button type="button" class="secondary" data-folder-op="delete" disabled>Удалить</button>
             </div>
             <ul class="dashboard-nodes">
-                <li><a href="?branch=all" data-folder-key="all" data-folder-path="Все агенты" aria-current="@(BranchKey == "all" ? "true" : null)">Все агенты (@Rows.Count)</a></li>
+                <li><a href="@FolderLink("all", Compact)" data-folder-key="all" data-folder-path="Все агенты" aria-current="@(BranchKey == "all" ? "true" : null)">Все агенты (@Rows.Count)</a></li>
                 @foreach (var folder in Branches)
                 {
-                    <AgentDirectoryBranch Branch="folder" SelectedId="AgentId" BranchKey="@BranchKey" />
+                    <AgentDirectoryBranch Branch="folder" SelectedId="AgentId" BranchKey="@BranchKey" Compact="Compact" />
                 }
             </ul>
         </aside>
         <section class="dashboard-results" aria-label="Состояние агентов">
-            <div class="dashboard-results-title"><strong data-dashboard-title>Все агенты</strong><span class="muted" data-dashboard-count aria-live="polite"></span></div>
+            <div class="dashboard-results-title"><strong data-dashboard-title>@(Compact ? ResultsTitle : "Все агенты")</strong><span class="muted" data-dashboard-count aria-live="polite">@(Compact ? $"{MatchingCount} из {Rows.Count}" : "")</span></div>
             <div class="dashboard-table-scroll">
                 <table class="dashboard-table">
                     <colgroup><col class="dashboard-col-agent" /><col class="dashboard-col-state" /><col class="dashboard-col-active" /><col /><col class="dashboard-col-actions" /></colgroup>
                     <thead><tr><th>Агент</th><th>Связь</th><th>Сейчас</th><th>Последний запуск</th><th aria-label="Действия"></th></tr></thead>
                     <tbody>
-                    @foreach (var row in Rows)
+                    @foreach (var row in VisibleRows)
                     {
                         <tr data-dashboard-row data-agent-id="@row.Entry.Id" data-folder-id="@row.Entry.FolderId"
                             data-folder-path="@FolderPath(row)" data-agent-name="@row.Entry.Name" data-computer-name="@row.Entry.ComputerName"
                             data-attention="@(row.NeedsAttention ? "yes" : "no")" draggable="true"
                             class="@(row.Entry.Id == AgentId ? "dashboard-selected" : null)">
-                            <td><a href="@($"?agent={row.Entry.Id}#agent-summary")">@row.Entry.Name</a></td>
+                            <td><a href="@AgentLink(row.Entry.Id, "agent-summary")">@row.Entry.Name</a></td>
                             <td data-dashboard-live><strong class="@row.ConnectionColor">@row.Connection</strong>
                                 @if (row.PrimaryReason is { } reason) { <small class="@ProblemColor(reason.Code)">@ProblemText.Filters[reason.Code]</small> }
                                 else if (row.Reasons.Any(reason => reason.Code != "Offline" && !row.ShowsPlanReason(reason.Code)))
@@ -52,7 +70,7 @@
                                 @if (row.Plan is { NeedsAttention: true } plan)
                                 {
                                     <small data-managed-plan>
-                                        <a href="@($"?agent={row.Entry.Id}#agent-plan")" class="@(plan.Rejected ? "dashboard-error" : plan.RevisionDiffers ? "dashboard-warn" : null)">@plan.PlanLabel</a>
+                                        <a href="@AgentLink(row.Entry.Id, "agent-plan")" class="@(plan.Rejected ? "dashboard-error" : plan.RevisionDiffers ? "dashboard-warn" : null)">@plan.PlanLabel</a>
                                         @if (plan.Rejected) { <span class="dashboard-error"> · отклонён</span> }
                                         @if (plan.AcceptedRevision is { } accepted && plan.ReportedRevision is { } reported && accepted != reported)
                                         { <span class="dashboard-warn" title="@Clock.Time(plan.ReportedUtc)"> · по отчёту @reported</span> }
@@ -83,8 +101,16 @@
                     }
                     </tbody>
                 </table>
-                <p data-agent-no-match hidden role="status">В этом разделе нет подходящих агентов.</p>
+                <p data-agent-no-match hidden="@(!Compact || MatchingCount != 0)" role="status">В этом разделе нет подходящих агентов.</p>
             </div>
+            @if (Compact && PageCount > 1)
+            {
+                <nav class="pagination" aria-label="Страницы агентов">
+                    @if (CurrentPage > 0) { <a href="@ResultsLink(CurrentPage - 1)">← Назад</a> }
+                    <span>Страница @(CurrentPage + 1) из @PageCount</span>
+                    @if (CurrentPage + 1 < PageCount) { <a href="@ResultsLink(CurrentPage + 1)">Далее →</a> }
+                </nav>
+            }
         </section>
     </div>
     @if (AgentId is not null) {
@@ -166,6 +192,21 @@
     [Parameter] public Guid? AgentId { get; set; }
     [Parameter] public string BranchKey { get; set; } = "all";
 
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public string? Query { get; set; }
+    [Parameter] public bool Attention { get; set; }
+    [Parameter] public int RowsPage { get; set; }
+
+    private const int RowsPerPage = 50;
+    private IReadOnlyList<AgentRow> VisibleRows = [];
+    private string SearchQuery = "";
+    private bool Filtering => SearchQuery.Length != 0 || Attention;
+    private int CurrentPage;
+    private int PageCount;
+    private int MatchingCount;
+    private string ResultsTitle = "Все агенты";
+    private string AgentIndex = "";
+    private Dictionary<Guid, AgentFolderOption> FolderLookup = [];
     private IReadOnlyList<BranchNode> Branches = [];
     private IReadOnlyList<AgentRow> Rows = [];
     private IReadOnlyList<MonitoredRun> Recent = [];
@@ -214,7 +255,7 @@
         var cutoff = DateTimeOffset.UtcNow.AddSeconds(-Settings.OfflineAfterSeconds);
         Cutoff = cutoff;
         var plans = await Store.ManagedPlansAsync(null, cutoff, token);
-        var folderIds = Folders.Select(folder => folder.Id).ToHashSet();
+        FolderLookup = Folders.ToDictionary(folder => folder.Id);
         var rows = entries.Select(entry =>
         {
             var reasons = problems.GetValueOrDefault(entry.Id)?.Reasons.OrderBy(reason => ProblemText.Priority(reason.Code))
@@ -227,7 +268,7 @@
                 ? MonitoringProgressDisplay.Create(entry.Progress, entry.ProgressObservedUtc, received, entry.Revoked, entry.ProgressCompleted, cutoff)
                 : null;
             return new AgentRow(entry, connection, color, reasons) { Current = current, Plan = plans.GetValueOrDefault(entry.Id) };
-        }).ToLookup(row => row.Entry.FolderId is { } id && folderIds.Contains(id) ? id : Guid.Empty);
+        }).ToLookup(row => row.Entry.FolderId is { } id && FolderLookup.ContainsKey(id) ? id : Guid.Empty);
         var children = Folders.ToLookup(folder => folder.ParentId ?? Guid.Empty);
         BranchNode Build(AgentFolderOption folder) => new(folder.Id.ToString(), folder.Name, folder.Id,
             children[folder.Id].Select(Build).ToArray(), rows[folder.Id].ToArray(), folder.Path, folder.ParentId?.ToString() ?? "all");
@@ -236,13 +277,56 @@
         Rows = rows.SelectMany(group => group).OrderByDescending(row => row.Current is { Stale: false })
             .ThenByDescending(row => row.NeedsAttention).ThenBy(row => row.Entry.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
         Selected = AgentId is { } selected ? Rows.FirstOrDefault(row => row.Entry.Id == selected) : null;
+        VisibleRows = Rows;
+        if (Compact) PrepareCompactRows();
         Latest = Selected?.Entry.LatestRun;
         if (Selected is { } item) Recent = (await Store.RunsAsync(item.Entry.Id, 0, token, agentCopiesOnly: true)).Runs.Take(8).ToArray();
         SelectedMonitoring = Selected is { } current ? await Store.MonitoringAsync(current.Entry.Id, token) : null;
         HasCurrentJob = Latest is { } run && SelectedMonitoring?.Snapshot.Jobs.Any(job => job.JobId == run.JobId) == true;
     }
 
-    private string FolderPath(AgentRow row) => Folders.FirstOrDefault(folder => folder.Id == row.Entry.FolderId)?.Path ?? "Без папки";
+    private void PrepareCompactRows()
+    {
+        SearchQuery = (Query ?? "").Trim();
+        if (SearchQuery.Length > 128) SearchQuery = SearchQuery[..128];
+        var folder = Guid.TryParse(BranchKey, out var id) ? FolderLookup.GetValueOrDefault(id) : null;
+        ResultsTitle = Filtering ? "Результаты по всем папкам" : folder?.Path ?? (BranchKey == "root" ? "Без папки" : "Все агенты");
+        var query = SearchQuery.Normalize();
+        var matching = Rows.Where(row => Filtering
+            ? (!Attention || row.NeedsAttention) && $"{row.Entry.Name} {row.Entry.ComputerName}".Normalize().Contains(query, StringComparison.OrdinalIgnoreCase)
+            : FolderMatches(row, folder)).ToArray();
+        MatchingCount = matching.Length;
+        PageCount = (MatchingCount + RowsPerPage - 1) / RowsPerPage;
+        CurrentPage = Math.Clamp(RowsPage, 0, Math.Max(0, PageCount - 1));
+        VisibleRows = matching.Skip(CurrentPage * RowsPerPage).Take(RowsPerPage).ToArray();
+        // Default JSON escaping keeps user-supplied names inert inside the script data element.
+        var matchIds = Filtering ? matching.Select(row => row.Entry.Id).ToHashSet() : null;
+        AgentIndex = System.Text.Json.JsonSerializer.Serialize(Rows.OrderBy(row => row.Entry.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(row => row.Entry.Id).Select(row => new
+            {
+                id = row.Entry.Id,
+                name = row.Entry.Name,
+                folder = row.Entry.FolderId,
+                matches = matchIds?.Contains(row.Entry.Id) == true
+            }));
+    }
+
+    private bool FolderMatches(AgentRow row, AgentFolderOption? folder)
+    {
+        if (BranchKey == "root") return row.Entry.FolderId is null;
+        if (folder is null) return true;
+        for (var id = row.Entry.FolderId; id is { } current; id = FolderLookup.GetValueOrDefault(current)?.ParentId)
+            if (current == folder.Id) return true;
+        return false;
+    }
+
+    public static string FolderLink(string key, bool compact) =>
+        $"?{(compact ? "view=compact&" : "")}branch={Uri.EscapeDataString(key)}";
+
+    private string ResultsLink(int page) => FolderLink(BranchKey, true)
+        + $"&rows={page}&q={Uri.EscapeDataString(SearchQuery)}&attention={Attention.ToString().ToLowerInvariant()}";
+    private string AgentLink(Guid agent, string target) => (Compact ? ResultsLink(CurrentPage) + "&" : "?") + $"agent={agent}#{target}";
+    private string FolderPath(AgentRow row) => row.Entry.FolderId is { } id ? FolderLookup.GetValueOrDefault(id)?.Path ?? "Без папки" : "Без папки";
 
     private static string ProblemColor(string code) => code switch
     {
