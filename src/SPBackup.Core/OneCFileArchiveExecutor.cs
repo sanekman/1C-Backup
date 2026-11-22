@@ -3,7 +3,9 @@ namespace SPBackup.Core;
 /// <summary>Archives a file database; shared reading requires an explicit job opt-in.</summary>
 public sealed class OneCFileArchiveExecutor(IArchivePasswordStore? passwords = null) : IBackupExecutor
 {
-    public const string OpenDatabaseComment = "Разрешено копирование открытой базы. Если 1С изменяет данные во время архивации, копия может оказаться повреждённой. Проверка ZIP не проверяет целостность базы. Для надёжной копии закройте базу у всех пользователей.";
+    private const string OpenDatabaseRisk = "Если 1С изменяет данные во время архивации, копия может оказаться повреждённой. Проверка ZIP не проверяет целостность базы. Для надёжной копии закройте базу у всех пользователей.";
+    public const string OpenDatabaseWarning = "Разрешено копирование открытой базы. " + OpenDatabaseRisk;
+    public const string OpenDatabaseComment = "Копирование выполнялось при открытой базе 1С. " + OpenDatabaseRisk;
 
     public async Task<string> CreateAsync(BackupJob job, string workDirectory, CancellationToken cancellationToken)
     {
