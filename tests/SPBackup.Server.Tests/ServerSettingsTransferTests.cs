@@ -47,7 +47,7 @@ public sealed class ServerSettingsTransferTests(ServerFixture original) : IClass
         var document = JsonNode.Parse(json)!.AsObject();
         Assert.Equal("Asia/Vladivostok", document["panel"]!["timeZoneId"]!.GetValue<string>());
         Assert.Equal(2, document["folders"]!.AsArray().Count);
-        Assert.Equal(1, document["plans"]!.AsArray().Count);
+        Assert.Single(document["plans"]!.AsArray());
         document["panel"]!["displayName"] = "Transferred server";
 
         var target = new ServerFixture();

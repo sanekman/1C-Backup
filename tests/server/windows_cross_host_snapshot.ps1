@@ -119,8 +119,9 @@ function Assert-Run([string]$runId) {
 }
 Assert-Run $meta.runId
 $agentRoute='api/v1/agents/'+$agentId
-$agentHeader=@{Authorization=('Bearer '+$meta.agentToken)}
-$null=Invoke-RestMethod ($address+$agentRoute+'/configuration') -Headers $agentHeader
+$agentHeader=@{Authorization=('Bearer '+$meta.agentToken);'SP-Backup-Capabilities'='configuration-v1,strict-configuration-v1,managed-execution-v1'}
+$agentPlan=Invoke-RestMethod ($address+$agentRoute+'/configuration') -Headers $agentHeader
+if ($agentPlan.revision -ne 2 -or $agentPlan.jobs[0].id -ne $meta.jobId) { throw 'Agent did not receive its restored plan.' }
 $null=Server-Json ($agentRoute+'/heartbeat') 'Post' @{agentId=$agentId;sentUtc=[DateTime]::UtcNow.ToString('o');agentVersion='after-recovery';configurationRevision=2} $agentHeader
 $newRun=[Guid]::NewGuid()
 Write-Run $newRun $meta.jobId $agentRoute $agentHeader

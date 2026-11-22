@@ -27,6 +27,9 @@ def guest(directory):
     subprocess.run(['sha256sum', '--check', 'SHA256SUMS'], cwd=directory, check=True)
     target = json.loads((directory / 'server-release.json').read_text())
     module.package_asset(target, VERSION)
+    candidate_schema = target.get('schema', SCHEMA)
+    if type(candidate_schema) is not int or not 1 <= candidate_schema <= 100:
+        raise ValueError('Некорректная схема тестового пакета.')
     initial = (module.APPLICATION / 'current').resolve().name
     if not re.fullmatch(r'0\.1\.0-preview\.[1-9][0-9]*', initial) or int(initial.rsplit('.', 1)[1]) >= 900001:
         raise ValueError('Исходная версия не подходит для тестового обновления.')
@@ -87,7 +90,7 @@ def guest(directory):
     before_rollback = set(root.iterdir())
     try:
         health()
-        if active() != VERSION or int(sql('SELECT max(version) FROM server_schema')) != SCHEMA:
+        if active() != VERSION or int(sql('SELECT max(version) FROM server_schema')) != candidate_schema:
             raise RuntimeError('Версия и схема после обновления отличаются от ожидаемых.')
         if rows(migration=True) != comparable or certificate() != fingerprint:
             raise RuntimeError('Содержимое БД или HTTPS-сертификат изменились при обновлении.')
@@ -106,7 +109,7 @@ def guest(directory):
     if not marked or marker not in catalog:
         raise RuntimeError('Комплект перед возвратом не сохранил тестовое изменение.')
     print(json.dumps(dict(success=True, initialVersion=initial, updatedVersion=VERSION, restoredVersion=active(),
-                          startingSchema=schema, updatedSchema=SCHEMA, restoredSchema=schema, realSystemd=True,
+                          startingSchema=schema, updatedSchema=candidate_schema, restoredSchema=schema, realSystemd=True,
                           certificatePreserved=True, rowsPreserved=True, testMarkerRemoved=True,
                           preRollbackStatePreserved=True, updateBackup=saved.name, rollbackBackup=preserved.name),
                      ensure_ascii=False, indent=2), flush=True)
