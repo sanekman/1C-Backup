@@ -54,6 +54,8 @@ public static partial class ServerHost
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(keys, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         builder.Services.AddSingleton(settings);
         builder.Services.AddSingleton<ServerTimeZone>();
+        builder.Services.AddSingleton<ServerSettingsTransfer>();
+        builder.Services.AddHostedService(services => services.GetRequiredService<ServerSettingsTransfer>());
         builder.Services.AddScoped<ServerClock>(services => services.GetRequiredService<ServerTimeZone>().Snapshot());
         builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(database.ConnectionString));
         builder.Services.AddSingleton<ServerStore>(); builder.Services.AddSingleton<ServerLog>();
@@ -115,7 +117,7 @@ public static partial class ServerHost
         app.MapGet("/health/live", () => Results.Text("live"));
         app.MapGet("/health/ready", async (ServerStore store, CancellationToken token) => await store.ReadyAsync(token) ? Results.Text("ready") : Results.StatusCode(503));
         app.MapOpenApi().RequireAuthorization(ServerAuthentication.Administrator);
-        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app); MapRemoteRuns(app); MapServerUpdates(app); MapOperators(app); MapRecoveryDownloads(app);
+        MapSessions(app); MapApi(app); MapAdministration(app); MapConfiguration(app); MapFolders(app); MapRemoteRuns(app); MapServerUpdates(app); MapOperators(app); MapRecoveryDownloads(app); MapSettingsTransfer(app);
         app.MapRazorComponents<App>();
         return app;
     }

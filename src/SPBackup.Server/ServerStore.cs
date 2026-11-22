@@ -9,7 +9,7 @@ namespace SPBackup.Server;
 /// <summary>Parameterized PostgreSQL operations. Invitation consumption, registration and audit commit together.</summary>
 public sealed partial class ServerStore(NpgsqlDataSource source)
 {
-    public const int SchemaVersion = 8;
+    public const int SchemaVersion = 9;
     private readonly PasswordHasher<ServerUser> passwords = new();
     private static NpgsqlCommand Command(NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql,
         params (string Name, object? Value)[] values)
@@ -80,6 +80,13 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
         if (version < 8)
         {
             using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("SPBackup.Server.Migrations.008-operator-downloads.sql")!;
+            using var reader = new StreamReader(script);
+            await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
+            await migration.ExecuteNonQueryAsync(token);
+        }
+        if (version < 9)
+        {
+            using var script = typeof(ServerStore).Assembly.GetManifestResourceStream("SPBackup.Server.Migrations.009-portable-settings.sql")!;
             using var reader = new StreamReader(script);
             await using var migration = Command(connection, transaction, await reader.ReadToEndAsync(token));
             await migration.ExecuteNonQueryAsync(token);
@@ -171,6 +178,14 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
             invitationId = reader.GetGuid(0); replaceRevoked = !reader.IsDBNull(1) && reader.GetGuid(1) == request.AgentId;
             if (!reader.IsDBNull(1) && reader.GetGuid(1) != request.AgentId) throw new ServerRequestException(403, "invitation_agent_mismatch");
         }
+        var imported = await ReadImportedPlanAsync(connection, transaction, request.AgentId, token);
+        if (imported is not null && !replaceRevoked)
+            throw new ServerRequestException(403, "imported_plan_requires_targeted_invitation");
+        if (imported is not null)
+        {
+            displayName ??= imported.AgentName;
+            if (!organization) folderId = imported.FolderId;
+        }
         var bearer = ServerTokens.Create();
         try
         {
@@ -180,9 +195,14 @@ public sealed partial class ServerStore(NpgsqlDataSource source)
             if (await insert.ExecuteNonQueryAsync(token)!=1) throw new ServerRequestException(409,"agent_already_registered");
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation) { throw new ServerRequestException(409, "agent_already_registered"); }
-        var document = JsonSerializer.Serialize(new { agentId = request.AgentId, revision = 1, jobs = Array.Empty<object>(), protocolVersion = 1 });
+        var document = JsonSerializer.Serialize(new ManagedFileConfiguration(request.AgentId, 1, imported?.Jobs ?? []), FileConfigurationContract.Json);
         await using (var config = Command(connection, transaction, "INSERT INTO server_configurations(agent_id,revision,document) VALUES(@id,1,@doc::jsonb) ON CONFLICT(agent_id) DO NOTHING", ("id", request.AgentId), ("doc", document))) await config.ExecuteNonQueryAsync(token);
         await using (var history = Command(connection, transaction, "INSERT INTO server_configuration_history(agent_id,revision,document,saved_utc) SELECT agent_id,revision,document,created_utc FROM server_configurations WHERE agent_id=@id ON CONFLICT DO NOTHING", ("id", request.AgentId))) await history.ExecuteNonQueryAsync(token);
+        if (imported is not null)
+        {
+            await using var consumePlan = Command(connection, transaction, "DELETE FROM server_imported_plans WHERE agent_id=@id", ("id", request.AgentId));
+            await consumePlan.ExecuteNonQueryAsync(token);
+        }
         await using (var consume = Command(connection, transaction, "UPDATE server_invitations SET consumed_utc=now() WHERE id=@id", ("id", invitationId))) await consume.ExecuteNonQueryAsync(token);
         await AuditAsync(connection, transaction, null, request.AgentId, "AgentEnrolled", token);
         await transaction.CommitAsync(token);

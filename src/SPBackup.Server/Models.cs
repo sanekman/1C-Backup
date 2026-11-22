@@ -45,7 +45,10 @@ public static class ServerTokens
 
 public sealed class ServerOptions
 {
-    public string DisplayName { get; init; } = "SP Backup Server";
+    private string displayName = "SP Backup Server";
+    private string? importedDisplayName;
+    public string DisplayName { get => Volatile.Read(ref importedDisplayName) ?? displayName; init => displayName = value; }
+    internal void ApplyImportedDisplayName(string name) => Volatile.Write(ref importedDisplayName, name);
     public string? PublicAddress { get; init; }
     public bool HasValidIdentity() => !string.IsNullOrWhiteSpace(DisplayName) && DisplayName.Length <= 128
         && !DisplayName.Any(char.IsControl) && (PublicAddress is null || ValidPublicAddress(PublicAddress));

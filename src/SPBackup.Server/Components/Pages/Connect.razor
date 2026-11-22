@@ -82,7 +82,10 @@
         if (initialize)
         {
             var agent = AgentId is { } id ? await Store.AgentAsync(id, Http.HttpContext.RequestAborted) : null;
-            Model = new() { AgentId = AgentId?.ToString(), Name = agent?.Name ?? "", FolderId = (agent?.FolderId ?? FolderId)?.ToString() };
+            var imported = agent is null && AgentId is not null
+                ? (await Store.ImportedAgentsAsync(Http.HttpContext!.RequestAborted)).FirstOrDefault(plan => plan.AgentId == AgentId) : null;
+            Model = new() { AgentId = AgentId?.ToString(), Name = agent?.Name ?? imported?.AgentName ?? "",
+                FolderId = (agent?.FolderId ?? imported?.FolderId ?? FolderId)?.ToString() };
         }
     }
     private async Task Create()

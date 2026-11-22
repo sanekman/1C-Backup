@@ -82,6 +82,11 @@ public sealed class ServerTimeZone
         }
         return common.Concat(ids.OrderBy(id => id, StringComparer.Ordinal).Select(id => new ServerTimeZoneOption(id, Label(id)))).ToArray();
     }
+    internal void ApplyImported(string id)
+    {
+        var resolved = Resolve(id);
+        Volatile.Write(ref state, new State(resolved.Id, resolved.Zone, false));
+    }
     public async Task SaveAsync(string id, CancellationToken token = default)
     {
         var next = Resolve(id);

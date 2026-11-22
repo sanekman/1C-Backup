@@ -52,7 +52,7 @@
 </details>
 <h2>Обслуживание</h2>
 @if (OperatingSystem.IsWindows()) { <p>Проверка служб, места и HTTPS даже при недоступной панели: <strong>Пуск → SP Backup Server → Проверить сервер</strong>. Проверка ничего не изменяет. Копия, подготовка обновления и восстановление штатной установки: меню <strong>Пуск → SP Backup Server</strong>. Копия содержит секреты; храните её отдельно. Копия данных возвращается с тем же комплектом программы. Для возврата после обновления заранее подготовьте полный комплект программы и данных. Поддерживается тот же компьютер.</p> }
-<p><a class="button" href="account">Сменить пароль администратора</a> <a class="button" href="operators">Операторы</a> <a class="button" href="audit">Журнал действий</a></p>
+<p><a class="button" href="account">Сменить пароль администратора</a> <a class="button" href="settings-transfer">Перенос настроек</a> <a class="button" href="operators">Операторы</a> <a class="button" href="audit">Журнал действий</a></p>
 <h2>Помощь при проблеме</h2>
 <p>Скачайте ZIP диагностики и передайте поддержке вместе с временем и описанием проблемы.</p>
 <form action="api/v1/management/diagnostics" method="post"><AntiforgeryToken /><button type="submit">Скачать диагностику сервера</button></form>

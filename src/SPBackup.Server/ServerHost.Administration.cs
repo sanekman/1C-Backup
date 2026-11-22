@@ -30,7 +30,7 @@ public static partial class ServerHost
             return Results.Redirect(context.Request.PathBase + "/account?error=" + code);
         }).RequireAuthorization(ServerAuthentication.PanelUser).RequireRateLimiting("maintenance");
 
-        app.MapPost("/management/time-zone", async (HttpContext context, IAntiforgery anti, ServerTimeZone zones, ServerLog log) =>
+        app.MapPost("/management/time-zone", async (HttpContext context, IAntiforgery anti, ServerSettingsTransfer transfer, ServerLog log) =>
         {
             await anti.ValidateRequestAsync(context);
             if (!context.Request.HasFormContentType) return Results.StatusCode(415);
@@ -38,7 +38,7 @@ public static partial class ServerHost
             if (form["timeZoneId"].Count != 1) return Results.Redirect(context.Request.PathBase + "/system?timeZone=invalid");
             try
             {
-                await zones.SaveAsync(form["timeZoneId"].ToString(), context.RequestAborted);
+                await transfer.SaveZoneAsync(form["timeZoneId"].ToString(), context.RequestAborted);
                 log.Write(ServerEvent.TimeZoneChanged);
                 return Results.Redirect(context.Request.PathBase + "/system?timeZone=saved");
             }
