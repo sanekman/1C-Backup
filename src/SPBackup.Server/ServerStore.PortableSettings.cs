@@ -62,10 +62,15 @@ public sealed partial class ServerStore
             """);
         await using var reader = await cmd.ExecuteReaderAsync(token);
         var plans = new List<PortableAgentPlan>();
+        var planBytes = 0;
         while (await reader.ReadAsync(token))
         {
             var agent = reader.GetGuid(0);
-            var jobs = reader.IsDBNull(3) ? DeserializeJobs(reader.GetString(4)) : Editable(agent, reader.GetInt64(3), reader.GetString(4)).Jobs;
+            var json = reader.GetString(4);
+            planBytes += Encoding.UTF8.GetByteCount(json);
+            if (planBytes > ServerSettingsTransfer.MaximumBytes)
+                throw new ServerRequestException(413, "portable_settings_too_large");
+            var jobs = reader.IsDBNull(3) ? DeserializeJobs(json) : Editable(agent, reader.GetInt64(3), json).Jobs;
             plans.Add(new(agent, reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetGuid(2), jobs));
         }
         if (plans.Count > 1000) throw new ServerRequestException(413, "portable_settings_too_large");
