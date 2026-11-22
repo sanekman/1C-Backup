@@ -279,6 +279,8 @@ jobs:
           "CROSS_HOST_INSTALLER=$($installer[0].FullName)" >> $env:GITHUB_ENV
           $work = Join-Path $env:RUNNER_TEMP 'spbackup-cross-host'
           New-Item -ItemType Directory -Path $work | Out-Null
+          $null = & icacls.exe $work '/inheritance:r' '/grant:r' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '/setowner' '*S-1-5-32-544'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not restrict the transfer directory.' }
           "CROSS_HOST_WORK=$work" >> $env:GITHUB_ENV
       - if: matrix.role == 'destination'
         run: python tests/server/windows_transfer_envelope.py key $env:CROSS_HOST_WORK
