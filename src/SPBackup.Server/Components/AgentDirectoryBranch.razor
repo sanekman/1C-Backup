@@ -11,7 +11,7 @@
         <ul>
             @foreach (var child in Branch.Children)
             {
-                <AgentDirectoryBranch Branch="child" SelectedId="SelectedId" BranchKey="@BranchKey" />
+                <AgentDirectoryBranch Branch="child" SelectedId="SelectedId" BranchKey="@BranchKey" Compact="Compact" />
             }
             @foreach (var row in Compact ? [] : Branch.Agents)
             {
