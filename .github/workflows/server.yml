@@ -28,7 +28,7 @@ on:
         description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
         default: full
-        options: [full, compose, maintenance, snapshot, installed, proxmox, reports, integration, publish-accepted]
+        options: [full, compose, maintenance, snapshot, cross-host, installed, proxmox, reports, integration, publish-accepted]
       report_source_run:
         description: 'Reports scope only: existing server.yml run to validate without rerunning checks'
         type: string
@@ -48,7 +48,7 @@ permissions:
   contents: read
 jobs:
   server:
-    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'proxmox' && inputs.scope != 'reports' && inputs.scope != 'publish-accepted')
+    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'cross-host' && inputs.scope != 'proxmox' && inputs.scope != 'reports' && inputs.scope != 'publish-accepted')
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -141,7 +141,7 @@ jobs:
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
 
   proxmox-installer:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'reports' && inputs.scope != 'integration' && inputs.scope != 'publish-accepted')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'cross-host' && inputs.scope != 'reports' && inputs.scope != 'integration' && inputs.scope != 'publish-accepted')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -197,6 +197,96 @@ jobs:
       - run: python tools/publish_server_release.py --artifacts artifacts/server-release
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+  windows-cross-host:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'cross-host'
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [destination, source]
+    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
+      ROLE: ${{ matrix.role }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install "cryptography==46.0.7"
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-win-x64-verification
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/candidate
+      - name: Verify the shared candidate
+        run: |
+          $installer = @(Get-ChildItem artifacts/candidate/server/SP-Backup-Server-*-windows-x64-setup.exe)
+          if ($installer.Count -ne 1 -or $env:CANDIDATE_INSTALLER_SHA256 -notmatch '^[a-fA-F0-9]{64}$'
+              -or (Get-FileHash $installer[0].FullName).Hash -ne $env:CANDIDATE_INSTALLER_SHA256) {
+            throw 'Fixture installer checksum differs.'
+          }
+          "CROSS_HOST_INSTALLER=$($installer[0].FullName)" >> $env:GITHUB_ENV
+          $work = Join-Path $env:RUNNER_TEMP 'spbackup-cross-host'
+          New-Item -ItemType Directory -Path $work | Out-Null
+          "CROSS_HOST_WORK=$work" >> $env:GITHUB_ENV
+      - if: matrix.role == 'destination'
+        run: python tests/server/windows_transfer_envelope.py key $env:CROSS_HOST_WORK
+      - if: matrix.role == 'destination'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-host-public-key-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/spbackup-cross-host/public.pem
+          if-no-files-found: error
+          retention-days: 1
+      - if: matrix.role == 'source'
+        run: ./tests/server/windows_cross_host_snapshot.ps1 -Role source -Installer $env:CROSS_HOST_INSTALLER -Work $env:CROSS_HOST_WORK
+      - name: Receive the other host’s handoff
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $name = if ($env:ROLE -eq 'source') { 'cross-host-public-key' } else { 'cross-host-sealed-fixture' }
+          $deadline = [DateTime]::UtcNow.AddMinutes(12)
+          do {
+            gh run download $env:GITHUB_RUN_ID -R $env:GITHUB_REPOSITORY -n "$name-$env:GITHUB_RUN_ATTEMPT" -D $env:CROSS_HOST_WORK *> $null
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Start-Sleep -Seconds 10
+          } while ([DateTime]::UtcNow -lt $deadline)
+          throw 'The other host did not provide its handoff.'
+      - if: matrix.role == 'source'
+        run: python tests/server/windows_transfer_envelope.py seal $env:CROSS_HOST_WORK
+      - if: matrix.role == 'source'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-host-sealed-fixture-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/spbackup-cross-host/fixture.enc
+          if-no-files-found: error
+          retention-days: 1
+      - if: matrix.role == 'destination'
+        run: |
+          python tests/server/windows_transfer_envelope.py open $env:CROSS_HOST_WORK
+          if ($LASTEXITCODE -ne 0) { throw 'Encrypted fixture could not be opened.' }
+          ./tests/server/windows_cross_host_snapshot.ps1 -Role destination -Installer $env:CROSS_HOST_INSTALLER -Work $env:CROSS_HOST_WORK
+      - if: success() && matrix.role == 'destination'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cross-host-verification-${{ github.run_attempt }}
+          path: artifacts/server-tests/windows-cross-host-result.json
+          if-no-files-found: error
+          retention-days: 14
+      - if: always()
+        run: |
+          if ($env:CROSS_HOST_WORK -and (Test-Path -LiteralPath $env:CROSS_HOST_WORK)) {
+            Remove-Item -LiteralPath $env:CROSS_HOST_WORK -Recurse -Force
+          }
 
   existing-installer:
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'installed'
