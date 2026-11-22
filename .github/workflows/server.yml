@@ -276,8 +276,10 @@ jobs:
           sudo cp -a artifacts/baseline artifacts/lxc-clone "$root/"
           sudo cp tests/server/lxc_recovery_seed.py "$root/"
           sudo lxc-attach -n "$CLONE" -- env DEBIAN_FRONTEND=noninteractive bash -ec '
-            sed -i "s#http://deb.debian.org#https://deb.debian.org#g" /etc/apt/sources.list.d/debian.sources
-            apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update
+            for entry in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+              if test -f "$entry"; then sed -i "s#http://deb.debian.org#https://deb.debian.org#g" "$entry"; fi
+            done
+            apt-get -o APT::Update::Error-Mode=any -o Acquire::Retries=1 -o Acquire::https::Timeout=20 update
             apt-get install -y --no-install-recommends ca-certificates python3
             printf "%s\n" "{\"version\":\"0.1.0-preview.17\",\"address\":\"https://192.0.2.120:8443/\",\"name\":\"Recovery fixture\",\"port\":8443}" >/root/request.json
             python3 /root/lxc-clone/create-proxmox-lxc.py --inside-container --request /root/request.json --package-directory /root/baseline
