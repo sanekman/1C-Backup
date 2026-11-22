@@ -28,7 +28,7 @@ on:
         description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
         default: full
-        options: [full, compose, maintenance, snapshot, cross-host, installed, proxmox, reports, integration, publish-accepted]
+        options: [full, compose, maintenance, snapshot, cross-host, clone-candidate, installed, proxmox, reports, integration, publish-accepted]
       report_source_run:
         description: 'Reports scope only: existing server.yml run to validate without rerunning checks'
         type: string
@@ -48,7 +48,7 @@ permissions:
   contents: read
 jobs:
   server:
-    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'cross-host' && inputs.scope != 'proxmox' && inputs.scope != 'reports' && inputs.scope != 'publish-accepted')
+    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'cross-host' && inputs.scope != 'clone-candidate' && inputs.scope != 'proxmox' && inputs.scope != 'reports' && inputs.scope != 'publish-accepted')
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -141,7 +141,7 @@ jobs:
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
 
   proxmox-installer:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'cross-host' && inputs.scope != 'reports' && inputs.scope != 'integration' && inputs.scope != 'publish-accepted')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'cross-host' && inputs.scope != 'clone-candidate' && inputs.scope != 'reports' && inputs.scope != 'integration' && inputs.scope != 'publish-accepted')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -197,6 +197,46 @@ jobs:
       - run: python tools/publish_server_release.py --artifacts artifacts/server-release
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+  lxc-clone-candidate:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'clone-candidate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - name: Prepare an unpublished package for the isolated clone
+        run: |
+          env GITHUB_REF_TYPE=tag GITHUB_REF_NAME=server-v0.1.0-preview.900001 \
+            python3 tools/build_server_distribution.py --runtime linux-x64
+          mkdir -p artifacts/lxc-clone
+          cp artifacts/server/SP-Backup-server-linux-x64.tar.gz deploy/server/create-proxmox-lxc.py \
+            tests/server/lxc_recovery_acceptance.py artifacts/lxc-clone/
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          folder = Path('artifacts/lxc-clone')
+          archive = folder / 'SP-Backup-server-linux-x64.tar.gz'
+          version = '0.1.0-preview.900001'
+          def digest(path):
+              with path.open('rb') as stream:
+                  return hashlib.file_digest(stream, 'sha256').hexdigest()
+          asset = dict(name=archive.name, bytes=archive.stat().st_size, sha256=digest(archive),
+              url=f'https://github.com/sanekman/1C-Backup/releases/download/server-v{version}/{archive.name}')
+          manifest = dict(version=version, runtime='10.0.13', sourceCommit=os.environ['GITHUB_SHA'], assets=[asset])
+          (folder / 'server-release.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          checksums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(folder.iterdir()))
+          (folder / 'SHA256SUMS').write_text(checksums)
+          print(checksums)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lxc-recovery-clone-only
+          path: artifacts/lxc-clone/
+          if-no-files-found: error
+          retention-days: 14
 
   windows-cross-host:
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'cross-host'
