@@ -96,4 +96,9 @@ with sync_playwright() as playwright:
             expect(page.locator('html')).to_have_attribute('data-theme', theme)
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.screenshot(path=output.with_name(f'{view}-{theme}-900.png'))
+            page.locator('[data-dashboard-row] td:first-child a').first.evaluate(
+                "(link) => link.textContent = 'ДлинноеИмяКомпьютера'.repeat(6)")
+            page.locator('[data-folder-name="Нагрузка"]').evaluate(
+                "(link) => link.firstChild.textContent = 'ДлинноеНазваниеПапки'.repeat(6)")
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     browser.close()
