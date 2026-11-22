@@ -74,7 +74,7 @@ if ($Role -eq 'source') {
         jobs=@(@{jobId=$jobId;name=$jobName;sourceKind='FilesAndFolders';enabled=$true;schedule='Weekly';destinationCount=1})} $agentHeader
     Write-Run $runId $jobId $agentRoute $agentHeader
     $snapshot=Join-Path $fixture 'snapshot'
-    & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tool -Action Backup -BackupDirectory $snapshot | Out-Null
+    & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tool -DataDirectory $root -InstallDirectory $install -Action Backup -BackupDirectory $snapshot | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Source cold snapshot failed.' }
     $manifest=Get-Content (Join-Path $snapshot 'snapshot.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($manifest.Format -ne 2 -or $manifest.Machine -ne $identity) { throw 'Unexpected source snapshot identity.' }
@@ -97,7 +97,7 @@ if ($identity -eq $meta.machine -or $manifest.Machine -ne $meta.machine -or $man
 $sourceCert=Join-Path $fixture 'source.cer'
 if ((Get-FileHash $sourceCert).Hash -ne $meta.certificateSha256) { throw 'The source public certificate does not match the sealed fixture.' }
 Import-Certificate -FilePath $sourceCert -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
-& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tool -Action RestoreOnNewComputer -ConfirmNewComputer -BackupDirectory $snapshot | Out-Null
+& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tool -DataDirectory $root -InstallDirectory $install -Action RestoreOnNewComputer -ConfirmNewComputer -BackupDirectory $snapshot | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Recovery on the destination failed.' }
 if ((Invoke-WebRequest ($address+'health/ready') -TimeoutSec 10).StatusCode -ne 200) { throw 'Restored HTTPS readiness failed.' }
 $old=New-Object Microsoft.PowerShell.Commands.WebRequestSession
