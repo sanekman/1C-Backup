@@ -102,7 +102,7 @@ jobs:
       - if: inputs.scope != 'recovery'
         run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=FtpIntegration&Category!=NativeSqlIntegration&Category!=NativeSmbIntegration&Category!=Performance&FullyQualifiedName!~ProfileSnapshotConcurrencyTests'
       - if: inputs.scope == 'recovery'
-        run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'FullyQualifiedName~FileFolderBackupTests|FullyQualifiedName~ResilientFileBackupTests|FullyQualifiedName~LatestBackupAuditTests|FullyQualifiedName~BackupVerificationStateTests'
+        run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'FullyQualifiedName~FileFolderBackupTests|FullyQualifiedName~ResilientFileBackupTests|FullyQualifiedName~LatestBackupAuditTests|FullyQualifiedName~BackupVerificationStateTests|FullyQualifiedName~OneCFileArchiveTests|FullyQualifiedName~SourceReadinessCheckerTests'
       - if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
