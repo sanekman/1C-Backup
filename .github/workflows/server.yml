@@ -28,7 +28,7 @@ on:
         description: 'Full acceptance, Compose only, or Windows maintenance after unchanged integration passed'
         type: choice
         default: full
-        options: [full, compose, maintenance, snapshot, cross-host, clone-candidate, installed, proxmox, reports, integration, publish-accepted]
+        options: [full, compose, maintenance, snapshot, cross-host, clone-candidate, clone-lab, installed, proxmox, reports, integration, publish-accepted]
       report_source_run:
         description: 'Reports scope only: existing server.yml run to validate without rerunning checks'
         type: string
@@ -48,7 +48,7 @@ permissions:
   contents: read
 jobs:
   server:
-    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'cross-host' && inputs.scope != 'clone-candidate' && inputs.scope != 'proxmox' && inputs.scope != 'reports' && inputs.scope != 'publish-accepted')
+    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'compose' && inputs.scope != 'installed' && inputs.scope != 'cross-host' && inputs.scope != 'clone-candidate' && inputs.scope != 'clone-lab' && inputs.scope != 'proxmox' && inputs.scope != 'reports' && inputs.scope != 'publish-accepted')
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -141,7 +141,7 @@ jobs:
         run: python3 tools/dev_server_db.py stop --state-dir /tmp/onec-server-ci --name onec-server-ci
 
   proxmox-installer:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'cross-host' && inputs.scope != 'clone-candidate' && inputs.scope != 'reports' && inputs.scope != 'integration' && inputs.scope != 'publish-accepted')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'windows' && inputs.scope != 'compose' && inputs.scope != 'maintenance' && inputs.scope != 'installed' && inputs.scope != 'cross-host' && inputs.scope != 'clone-candidate' && inputs.scope != 'clone-lab' && inputs.scope != 'reports' && inputs.scope != 'integration' && inputs.scope != 'publish-accepted')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -237,6 +237,72 @@ jobs:
           path: artifacts/lxc-clone/
           if-no-files-found: error
           retention-days: 14
+
+  lxc-clone-lab:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'clone-lab'
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CLONE: spbackup-recovery-fixture
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lxc-recovery-clone-only
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/lxc-clone
+      - name: Prepare Debian 13 with native LXC and systemd
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -yq install lxc lxc-templates uidmap dnsmasq-base
+          sudo systemctl start lxc-net
+          sudo lxc-create -n "$CLONE" -t download -- -d debian -r trixie -a amd64
+          sudo lxc-start -n "$CLONE"
+          sudo lxc-wait -n "$CLONE" -s RUNNING -t 90
+          sudo lxc-attach -n "$CLONE" -- systemd-detect-virt --container
+      - name: Install the published baseline and add isolated fixture data
+        run: |
+          mkdir -p artifacts/baseline artifacts/server-tests
+          gh release download server-v0.1.0-preview.17 --pattern server-release.json --pattern SP-Backup-server-linux-x64.tar.gz --dir artifacts/baseline
+          root="/var/lib/lxc/$CLONE/rootfs/root"
+          sudo cp -a artifacts/baseline artifacts/lxc-clone "$root/"
+          sudo cp tests/server/lxc_recovery_seed.py "$root/"
+          sudo lxc-attach -n "$CLONE" -- env DEBIAN_FRONTEND=noninteractive bash -ec '
+            apt-get update
+            apt-get install -y --no-install-recommends ca-certificates python3
+            printf "%s\n" "{\"version\":\"0.1.0-preview.17\",\"address\":\"https://192.0.2.120:8443/\",\"name\":\"Recovery fixture\",\"port\":8443}" >/root/request.json
+            python3 /root/lxc-clone/create-proxmox-lxc.py --inside-container --request /root/request.json --package-directory /root/baseline
+            python3 /root/lxc_recovery_seed.py
+          '
+      - name: Verify update and rollback on the isolated LXC
+        run: |
+          sudo lxc-attach -n "$CLONE" -- python3 -u /root/lxc-clone/lxc_recovery_acceptance.py --clone 108 --inside-test-lxc | tee artifacts/server-tests/lxc-recovery.log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('artifacts/server-tests')
+          raw = (root / 'lxc-recovery.log').read_text()
+          report = json.loads(raw[raw.rindex('{\n'):])
+          assert report['success'] and report['realSystemd'] and report['preRollbackStatePreserved']
+          report['realLxc'] = True
+          report['realProxmox'] = False
+          (root / 'lxc-recovery-result.json').write_text(json.dumps(report, indent=2) + '\n')
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-lxc-recovery-result
+          path: artifacts/server-tests/lxc-recovery-result.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - if: always()
+        run: |
+          if sudo lxc-info -n "$CLONE" >/dev/null 2>&1; then sudo lxc-destroy -f -n "$CLONE"; fi
 
   windows-cross-host:
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'cross-host'
