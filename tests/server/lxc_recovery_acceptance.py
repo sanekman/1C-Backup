@@ -68,7 +68,19 @@ def guest(directory):
         for item in set(root.iterdir()) - before:
             if not module.BACKUP_NAME.fullmatch(item.name):
                 continue
-            state = module.update_backup_state(item, verify_hashes=True)
+            if status == 'updated':
+                state = module.update_backup_state(item, verify_hashes=True)
+            else:
+                state = json.loads((item / 'state.json').read_text())
+                if state.get('format') != 1 or set(state.get('files', {})) != set(module.BACKUP_FILES):
+                    raise RuntimeError('Неполное описание комплекта перед возвратом.')
+                for name, digest in state['files'].items():
+                    path = item / name
+                    if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_mode & 0o022:
+                        raise RuntimeError('Неверные права файла комплекта перед возвратом.')
+                    with path.open('rb') as stream:
+                        if hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
+                            raise RuntimeError('Файл комплекта перед возвратом повреждён.')
             if (state['from'], state['to'], state['status']) == (source, destination, status):
                 matches.append(item)
         if len(matches) != 1:

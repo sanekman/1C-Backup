@@ -293,6 +293,7 @@ jobs:
           '
       - name: Verify update and rollback on the isolated LXC
         run: |
+          set -o pipefail
           sudo lxc-attach -n "$CLONE" -- python3 -u /root/lxc-clone/lxc_recovery_acceptance.py --clone 108 --inside-test-lxc | tee artifacts/server-tests/lxc-recovery.log
           python3 - <<'PY'
           import json
