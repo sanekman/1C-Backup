@@ -17,7 +17,7 @@ TABLES = {
 }
 
 
-def guest(directory):
+def guest(directory, version):
     updater = directory / 'create-proxmox-lxc.py'
     spec = importlib.util.spec_from_file_location('clone_updater', updater)
     module = importlib.util.module_from_spec(spec)
@@ -26,12 +26,12 @@ def guest(directory):
         raise ValueError('Нужен отдельный тестовый LXC.')
     subprocess.run(['sha256sum', '--check', 'SHA256SUMS'], cwd=directory, check=True)
     target = json.loads((directory / 'server-release.json').read_text())
-    module.package_asset(target, VERSION)
+    module.package_asset(target, version)
     candidate_schema = target.get('schema', SCHEMA)
     if type(candidate_schema) is not int or not 1 <= candidate_schema <= 100:
         raise ValueError('Некорректная схема тестового пакета.')
     initial = (module.APPLICATION / 'current').resolve().name
-    if not re.fullmatch(r'0\.1\.0-preview\.[1-9][0-9]*', initial) or int(initial.rsplit('.', 1)[1]) >= 900001:
+    if not re.fullmatch(r'0\.1\.0-preview\.[1-9][0-9]*', initial) or int(initial.rsplit('.', 1)[1]) >= int(version.rsplit('.', 1)[1]):
         raise ValueError('Исходная версия не подходит для тестового обновления.')
     config = json.loads((module.CONFIG / 'server.json').read_text())['Server']
     host, port, database = module.update_database_target(config['ConnectionString'])
@@ -96,13 +96,13 @@ def guest(directory):
     schema = int(sql('SELECT max(version) FROM server_schema'))
     fingerprint = certificate()
     before = set(root.iterdir())
-    update('--version', VERSION, '--package-directory', str(directory))
-    saved = new_backup(before, initial, VERSION, 'updated')
+    update('--version', version, '--package-directory', str(directory))
+    saved = new_backup(before, initial, version, 'updated')
     marked = False
     before_rollback = set(root.iterdir())
     try:
         health()
-        if active() != VERSION or int(sql('SELECT max(version) FROM server_schema')) != candidate_schema:
+        if active() != version or int(sql('SELECT max(version) FROM server_schema')) != candidate_schema:
             raise RuntimeError('Версия и схема после обновления отличаются от ожидаемых.')
         if rows(migration=True) != comparable or certificate() != fingerprint:
             raise RuntimeError('Содержимое БД или HTTPS-сертификат изменились при обновлении.')
@@ -111,7 +111,7 @@ def guest(directory):
     finally:
         print(f'Проверенный комплект для возврата клона: {saved}', flush=True)
         update('--version', initial, '--rollback-from', str(saved))
-    preserved = new_backup(before_rollback, VERSION, initial, 'manually-restored')
+    preserved = new_backup(before_rollback, version, initial, 'manually-restored')
     health()
     if active() != initial or int(sql('SELECT max(version) FROM server_schema')) != schema:
         raise RuntimeError('После возврата версия или схема не совпала с исходной.')
@@ -120,7 +120,7 @@ def guest(directory):
     catalog = subprocess.check_output(['pg_restore', '-l', str(preserved / 'database.dump')], text=True)
     if not marked or marker not in catalog:
         raise RuntimeError('Комплект перед возвратом не сохранил тестовое изменение.')
-    print(json.dumps(dict(success=True, initialVersion=initial, updatedVersion=VERSION, restoredVersion=active(),
+    print(json.dumps(dict(success=True, initialVersion=initial, updatedVersion=version, restoredVersion=active(),
                           startingSchema=schema, updatedSchema=candidate_schema, restoredSchema=schema, realSystemd=True,
                           certificatePreserved=True, rowsPreserved=True, testMarkerRemoved=True,
                           preRollbackStatePreserved=True, updateBackup=saved.name, rollbackBackup=preserved.name),
@@ -130,13 +130,16 @@ def guest(directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--clone', required=True, type=int)
+    parser.add_argument('--version', default=VERSION, help='Expected version of the test package')
     parser.add_argument('--inside-test-lxc', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.clone < 100 or args.clone == 107:
         parser.error('Укажите ID тестового клона. CT 107 защищён от запуска.')
+    if not re.fullmatch(r'0\.1\.0-preview\.[1-9][0-9]*', args.version):
+        parser.error('Укажите точную версию тестового пакета.')
     directory = Path(__file__).resolve().parent
     if args.inside_test_lxc:
-        guest(directory)
+        guest(directory, args.version)
         return
     subprocess.run(['sha256sum', '--check', 'SHA256SUMS'], cwd=directory, check=True)
     identity = str(args.clone)
@@ -149,7 +152,8 @@ def main():
     for name in ['SHA256SUMS', 'server-release.json', 'SP-Backup-server-linux-x64.tar.gz',
                  'create-proxmox-lxc.py', Path(__file__).name]:
         subprocess.run(['pct', 'push', identity, str(directory / name), f'{location}/{name}', '--perms', '0600'], check=True)
-    subprocess.run([*command, 'python3', '-u', f'{location}/{Path(__file__).name}', '--clone', identity, '--inside-test-lxc'], check=True)
+    subprocess.run([*command, 'python3', '-u', f'{location}/{Path(__file__).name}', '--clone', identity,
+                    '--version', args.version, '--inside-test-lxc'], check=True)
 
 
 if __name__ == '__main__':

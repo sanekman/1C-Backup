@@ -270,14 +270,36 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       CLONE: spbackup-recovery-fixture
+      CANDIDATE_VERSION: ${{ inputs.candidate_version || '0.1.0-preview.900001' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - if: inputs.candidate_version == ''
+        uses: actions/download-artifact@v4
         with:
           name: lxc-recovery-clone-only
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
           path: artifacts/lxc-clone
+      - if: inputs.candidate_version != ''
+        name: Verify the exact Windows and Linux candidate packages
+        env:
+          SOURCE_RUN: ${{ inputs.candidate_run_id }}
+          SOURCE_COMMIT: ${{ inputs.report_source_commit }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ && "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          source=$(gh run view "$SOURCE_RUN" --json conclusion,event,headSha,workflowName)
+          jq -e --arg commit "$SOURCE_COMMIT" '
+            .conclusion == "success" and .event == "workflow_dispatch" and .headSha == $commit
+            and .workflowName == "Build and verify management server"
+          ' <<<"$source"
+          for platform in windows linux; do
+            runtime=linux-x64
+            if [[ "$platform" == windows ]]; then runtime=win-x64; fi
+            gh run download "$SOURCE_RUN" -n "server-$runtime-verification" -D "artifacts/candidate/$platform"
+            python3 tests/server/verify_results.py --runtime "$runtime" --results-dir "artifacts/candidate/$platform/server-tests"
+          done
+          python3 tools/prepare_server_candidate.py --version "$CANDIDATE_VERSION" --artifacts artifacts/candidate \
+            --source "$SOURCE_COMMIT" --run "$SOURCE_RUN" --output artifacts/lxc-clone
       - name: Prepare Debian 13 with native LXC and systemd
         run: |
           sudo apt-get -qq update
@@ -315,7 +337,7 @@ jobs:
       - name: Verify update and rollback on the isolated LXC
         run: |
           set -o pipefail
-          sudo lxc-attach -n "$CLONE" -- python3 -u /root/lxc-clone/lxc_recovery_acceptance.py --clone 108 --inside-test-lxc | tee artifacts/server-tests/lxc-recovery.log
+          sudo lxc-attach -n "$CLONE" -- python3 -u /root/lxc-clone/lxc_recovery_acceptance.py --clone 108 --version "$CANDIDATE_VERSION" --inside-test-lxc | tee artifacts/server-tests/lxc-recovery.log
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -333,6 +355,13 @@ jobs:
           name: isolated-lxc-recovery-result
           path: artifacts/server-tests/lxc-recovery-result.json
           if-no-files-found: ignore
+          retention-days: 14
+      - if: success() && inputs.candidate_version != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-candidate-manifest-and-clone-kit
+          path: artifacts/lxc-clone
+          if-no-files-found: error
           retention-days: 14
       - if: always()
         run: |
