@@ -33,6 +33,20 @@ function Server-Json([string]$path,[string]$method,$body,[hashtable]$headers) {
     Invoke-RestMethod ($address+$path) -Method $method -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ($body | ConvertTo-Json -Depth 12 -Compress)
 }
 
+function Database-Schema {
+    $previous = $env:PGPASSWORD
+    try {
+        $raw = [IO.File]::ReadAllText((Join-Path $root 'connection-string.txt')).Trim()
+        $prefix = 'Host=127.0.0.1;Port=15433;Database=postgres;Username=onecbackup;Password='
+        if (!$raw.StartsWith($prefix)) { throw 'Unexpected Windows fixture database layout.' }
+        $env:PGPASSWORD = $raw.Substring($prefix.Length)
+        $value = & (Join-Path $install 'postgresql/bin/psql.exe') '-X' '-w' '-h' '127.0.0.1' '-p' '15433' '-U' 'onecbackup' '-d' 'postgres' '-At' '-c' 'SELECT max(version) FROM server_schema'
+        if ($LASTEXITCODE -ne 0 -or $value -notmatch '^[1-9][0-9]*$') { throw 'Fixture database schema unavailable.' }
+        return [int]$value
+    }
+    finally { $env:PGPASSWORD = $previous }
+}
+
 function Write-Run([Guid]$runId,[Guid]$jobId,[string]$agentRoute,[hashtable]$headers) {
     $now=[DateTime]::UtcNow
     $null=Server-Json ($agentRoute+'/runs') 'Post' @{
@@ -84,7 +98,7 @@ if ($Role -eq 'source') {
     })
     if (!$cookies.Count) { throw 'Expected an authenticated source cookie.' }
     $metadata=@{machine=$identity;adminPassword=$installPassword;agentToken=$agent.token;agentId=$agentId;
-        jobId=$jobId;runId=$runId;folderId=$folder.id;cookies=$cookies;certificateSha256=(Get-FileHash (Join-Path $fixture 'source.cer')).Hash}
+        jobId=$jobId;runId=$runId;folderId=$folder.id;cookies=$cookies;schema=(Database-Schema);certificateSha256=(Get-FileHash (Join-Path $fixture 'source.cer')).Hash}
     $metadata | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $fixture 'fixture.json') -Encoding utf8
     $null=Invoke-RestMethod ($address+'api/v1/management/folders') -Method Post -WebSession $session -Headers $header -ContentType 'application/json' -Body (@{name='Created after cold snapshot'} | ConvertTo-Json)
     return
@@ -131,11 +145,8 @@ if (!(Get-ChildItem ($root+'.before-restore-*') -Directory)) { throw 'Pre-restor
 $oldKeys=@(Get-ChildItem (Join-Path $snapshot 'data\data\keys') -File | ForEach-Object Name)
 $newKeys=@(Get-ChildItem (Join-Path $root 'data\keys') -File | ForEach-Object Name)
 if (!$oldKeys.Count -or !$newKeys.Count -or @($newKeys | Where-Object { $oldKeys -contains $_ }).Count) { throw 'Destination key rotation was not confirmed.' }
-$schemaSource=Get-Content 'src/SPBackup.Server/ServerStore.cs' -Raw
-if ($schemaSource -notmatch 'const int SchemaVersion[ ]*=[ ]*([0-9]+)') { throw 'Unknown expected schema.' }
-$schema=[int]$Matches[1]
-$system=(Invoke-WebRequest ($address+'system') -WebSession $restored).Content
-if ($system -notmatch ('Версия схемы</dt><dd>'+ $schema +'</dd>')) { throw 'Target schema is not ready.' }
+$schema=Database-Schema
+if ($schema -ne $meta.schema) { throw 'Restored schema differs from the source.' }
 @{success=$true; independentWindowsHosts=$true; schema=$schema; run=$env:GITHUB_RUN_ID; source=$env:GITHUB_SHA;
     installerSha256=(Get-FileHash $Installer -Algorithm SHA256).Hash; https=$true; oldSessionRejected=$true;
     administratorLogin=$true; previousAndNewReport=$true; planPreserved=$true; enrolledAgentTokenPreserved=$true;
