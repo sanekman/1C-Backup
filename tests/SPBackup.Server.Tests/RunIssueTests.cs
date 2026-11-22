@@ -35,6 +35,30 @@ public sealed class RunIssueTests : IClassFixture<ServerFixture>
     }
 
     [ServerFact]
+    public async Task SuccessfulOpenOneCFileCopyShowsCommentInAgentHistory()
+    {
+        var agent = await server.EnrollAsync();
+        using var client = server.Client();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", agent.Token);
+        var now = DateTimeOffset.UtcNow;
+        var run = new M.MonitoredRun(Guid.NewGuid(), Guid.NewGuid(), "Файловая 1С", now.AddMinutes(-1),
+            now, "Succeeded", 0, false, null, [new(0, true, 256, false)]) { OpenOneCDatabase = true };
+        using var response = await client.PostAsync($"api/v1/agents/{agent.AgentId}/runs", ServerFixture.Json(run));
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        await server.Store.SaveMonitoringAsync(agent.AgentId,
+            new(now, "test", [new(run.JobId, run.JobName, "OneCFile", true, "Daily", null, 1)], null, 0), default);
+        var saved = Assert.Single((await server.Store.RunsAsync(agent.AgentId, 0, default)).Runs);
+        Assert.Equal("Succeeded", saved.Status);
+        Assert.Equal(0, saved.WarningCount);
+        Assert.True(saved.OpenOneCDatabase);
+        using var page = await server.Administrator.GetAsync($"agents/{agent.AgentId}");
+        page.EnsureSuccessStatusCode();
+        var html = WebUtility.HtmlDecode(await page.Content.ReadAsStringAsync());
+        Assert.Contains("Комментарий: копирование выполнялось при открытой базе 1С", html);
+        Assert.DoesNotContain("Причины и что делать", html);
+    }
+
+    [ServerFact]
     public async Task LegacyReportsRemainReadableWithoutInventedReasons()
     {
         var agent = await server.EnrollAsync(); var report = Report() with { Issues = null };

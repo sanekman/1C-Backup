@@ -16,7 +16,7 @@ public static class MonitoredIssueCodes
         or "RetentionIncompletePreserved" or "RetentionSkippedIncomplete" or "RetentionFailed"
         or "SnapshotIndexNotSaved" or "WorkCleanupFailed" or "Cancelled" or "Interrupted" or "AdditionalWarnings";
     public static bool Valid(MonitoredIssue? issue) => issue is not null && Known(issue.Code)
-        && issue.Severity is "Warning" or "Error"
+        && (issue.Severity is "Warning" or "Error" || issue is { Code: "OneCOpenDatabase", Severity: "Info", Stage: "Source" })
         && issue.Stage is "Source" or "Storage" or "Retention" or "WorkDirectory" or "SnapshotIndex" or "Backup"
         && issue.DestinationIndex is null or >= 0 and < 100 && issue.NativeCode is null or >= 0 and <= 65535;
 }
@@ -45,6 +45,8 @@ public sealed record MonitoredRun(Guid RunId, Guid JobId, string JobName, DateTi
     public DateTimeOffset DisplayFinishedUtc => Timing?.ObservedFinishedUtc ?? FinishedUtc;
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public long? ConfigurationRevision { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool OpenOneCDatabase { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? BackupScope { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]

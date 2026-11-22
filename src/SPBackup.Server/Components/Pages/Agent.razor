@@ -77,6 +77,8 @@
             { <small class="error">@MonitoredPollErrors.Describe(poll.PollErrorCode) Последний результат копии сохранён.</small> }
             @if (matchingHistory && last is not null && (last.WarningCount > 0 || last.Incomplete || last.Status != "Succeeded" || last.Issues is { Count: > 0 }))
             { <details><summary>Причины и что делать</summary><RunIssueDetails Run="last" /></details> }
+            else if (matchingHistory && last is { OpenOneCDatabase: true })
+            { <RunIssueDetails Run="last" /> }
             </td>
             <td>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LastSuccessfulUtc : Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.DisplayFinishedUtc)</td>
             <td>@(job.NextRunUtc is null ? observation ? job.Enabled ? "Автоматический опрос" : "Опрос выключен" : "По событию / вручную" : Clock.Time(job.NextRunUtc))</td></tr>

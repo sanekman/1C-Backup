@@ -250,7 +250,10 @@ public sealed class ServerMonitoringDispatcher(string directory, IFtpCredentialS
             snapshot?.IsIncomplete == true,snapshot is null ? null : snapshot.IsFull ? "Full" : "Incremental",r.Destinations?.Select((d,i)=>new MonitoredDestination(i,d.Record is not null,d.Record?.Backup.Length ?? 0,d.Record?.Backup.FileSnapshot?.IsIncomplete == true)).ToArray()
                 ?? (r.Backup is { } backup ? [new(0,true,backup.Length,backup.FileSnapshot?.IsIncomplete == true)] : []))
         {
-            ConfigurationRevision = r.Configuration?.Revision, BackupScope = r.Configuration?.JobScope, Issues = r.Issues,
+            ConfigurationRevision = r.Configuration?.Revision, BackupScope = r.Configuration?.JobScope,
+            // Older servers accept the optional field and still validate the original issue severities.
+            OpenOneCDatabase = r.Comment is not null,
+            Issues = r.Comment is null ? r.Issues : r.Issues!.Where(issue => issue.Severity != "Info").ToArray(),
             Timing = r.DurationMilliseconds is not null || clockMovedBack
                 ? new(r.DurationMilliseconds, clockMovedBack ? finished : null) : null
         };

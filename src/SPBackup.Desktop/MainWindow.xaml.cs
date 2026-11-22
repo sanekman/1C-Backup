@@ -989,6 +989,7 @@ public partial class MainWindow : Window
             $"Задание: {run.JobName}\nРезультат: {run.StatusDescription}\n"
             + (run.Error is null ? "" : "Ошибка: " + run.Error + "\n")
             + (run.Warnings?.Count > 0 ? "Предупреждения:\n" + string.Join("\n", run.Warnings) + "\n" : "")
+            + (run.Comment is { } comment ? "Комментарий: " + comment + "\n" : "")
             + (run.Destinations is not { Count: > 0 } ? "" : "Доставка по хранилищам:\n"
                 + string.Join("\n", run.Destinations.Select(JobRunOverview.DestinationDetails)) + "\n")
             + (run.Backup is null ? "" : (run.Destinations is { Count: > 0 } ? "" : $"Копия: {run.Backup.Location}\n")

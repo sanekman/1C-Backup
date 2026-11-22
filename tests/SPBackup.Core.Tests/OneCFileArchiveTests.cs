@@ -71,7 +71,7 @@ public sealed class OneCFileArchiveTests : IDisposable
     }
 
     [Fact]
-    public async Task ExplicitOptInCopiesWhileWritableSessionIsOpenAndPersistsWarning()
+    public async Task ExplicitOptInCopiesWhileWritableSessionIsOpenAndPersistsComment()
     {
         var before = await File.ReadAllBytesAsync(SourceFile);
         await using var activeSession = new FileStream(SourceFile, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
@@ -83,7 +83,9 @@ public sealed class OneCFileArchiveTests : IDisposable
         }
         var result = await Runner.RunAsync(Job with { AllowOpenOneCDatabase = true });
         Assert.Equal(BackupRunStatus.Succeeded, result.Status);
-        if (OperatingSystem.IsWindows()) Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, result.Warnings!);
+        Assert.Empty(result.Warnings!);
+        Assert.Equal("Успешно", result.StatusDescription);
+        if (OperatingSystem.IsWindows()) Assert.Equal(OneCFileArchiveExecutor.OpenDatabaseComment, result.Comment);
         using var zip = ZipFile.OpenRead(result.Backup!.Location);
         using var output = new MemoryStream();
         await Assert.Single(zip.Entries).Open().CopyToAsync(output);
@@ -92,8 +94,12 @@ public sealed class OneCFileArchiveTests : IDisposable
         var saved = Assert.Single(await new BackupRunHistory(Path.Combine(root, "history.json")).ReadAsync(), run => run.RunId == result.RunId);
         if (OperatingSystem.IsWindows())
         {
-            Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, saved.Warnings!);
-            Assert.Contains(saved.Issues!, i => i.Code == "OneCOpenDatabase" && i.Stage == "Source");
+            Assert.Empty(saved.Warnings!);
+            Assert.Equal(OneCFileArchiveExecutor.OpenDatabaseComment, saved.Comment);
+            var report = ServerMonitoringDispatcher.ToReport(saved);
+            Assert.True(report.OpenOneCDatabase);
+            Assert.Equal(0, report.WarningCount);
+            Assert.Empty(report.Issues!);
         }
     }
 
@@ -122,18 +128,19 @@ public sealed class OneCFileArchiveTests : IDisposable
     }
 
     [Fact]
-    public async Task ClosedRunDoesNotInheritPreviousSharedRunWarning()
+    public async Task ClosedRunDoesNotInheritPreviousSharedRunComment()
     {
         var runner = Runner;
         await using (var held = new FileStream(SourceFile, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
         {
             var shared = await runner.RunAsync(Job with { AllowOpenOneCDatabase = true });
             Assert.Equal(BackupRunStatus.Succeeded, shared.Status);
-            if (OperatingSystem.IsWindows()) Assert.Contains(OneCFileArchiveExecutor.OpenDatabaseWarning, shared.Warnings!);
+            if (OperatingSystem.IsWindows()) Assert.NotNull(shared.Comment);
         }
         var closed = await runner.RunAsync(Job with { AllowOpenOneCDatabase = true });
         Assert.Equal(BackupRunStatus.Succeeded, closed.Status);
         Assert.Empty(closed.Warnings!);
+        Assert.Null(closed.Comment);
     }
 
     [Fact]

@@ -22,7 +22,10 @@ public sealed record BackupRun(Guid RunId, Guid JobId, string JobName, DateTimeO
         BackupRunStatus.PartiallySucceeded => "Частично", _ => "Ошибка"
     };
     [System.Text.Json.Serialization.JsonIgnore]
-    public string Details => Error ?? (Warnings?.Count > 0 ? string.Join(" ", Warnings) : Backup?.Location ?? "");
+    public string? Comment => Issues?.Any(issue => issue is { Code: "OneCOpenDatabase", Severity: "Info" }) == true
+        ? OneCFileArchiveExecutor.OpenDatabaseComment : null;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string Details => Error ?? (Warnings?.Count > 0 ? string.Join(" ", Warnings) : Comment ?? Backup?.Location ?? "");
 }
 
 /// <summary>One history instance and one executor host per local data directory.</summary>
