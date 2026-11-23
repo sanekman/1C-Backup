@@ -10,7 +10,7 @@ import sys
 import tempfile
 import time
 
-from pywinauto import Application, keyboard
+from pywinauto import Application, Desktop, keyboard
 
 LEGACY_INSTALLER = "SP-Backup-0.2.0-alpha.40-windows-x64-setup.exe"
 LEGACY_SHA = "17d11e78170eeef95f5f92cd98b6420d77730a5c28d459ed655ea496c5e140b4"
@@ -47,7 +47,16 @@ def assert_flags(job, value):
 def verify_windows(executable, profile, expected, original_history, checks):
     path = profile / "external-monitors.json"
     ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
-    desktop = Application(backend="uia")
+    native = Desktop(backend="win32")
+
+    def modal(app, title):
+        try:
+            handle = wait_for(lambda: next((window.handle for window in native.windows(process=app.process)
+                                            if window.window_text() == title), None), 12)
+        except RuntimeError as error:
+            titles = [window.window_text() for window in native.windows(process=app.process)]
+            raise RuntimeError(f"Expected the dialog {title!r}; found {titles!r}.") from error
+        return app.window(handle=handle)
     def open_editor(app):
         main = app.window(title_re=r"^SP Backup.*")
         control(main, "JobsNavigation", "exists visible enabled").invoke()
@@ -55,7 +64,7 @@ def verify_windows(executable, profile, expected, original_history, checks):
         row = grid.child_window(control_type="DataItem").wait("exists visible", timeout=25)
         row.select()
         control(main, "EditJobButton", "exists visible enabled").invoke()
-        editor = app.window(title="Задание наблюдения SQL")
+        editor = modal(app, "Задание наблюдения SQL")
         hwnd = editor.wait("exists visible enabled", timeout=25).handle
         assert ctypes.windll.user32.SetWindowPos(hwnd, 0, 20, 20, 900, 580, 0x0004)
         control(editor, "SourceSettings").select()
@@ -84,7 +93,7 @@ def verify_windows(executable, profile, expected, original_history, checks):
     for phase in ("edit", "restart-and-restore"):
         process = subprocess.Popen([str(executable)])
         try:
-            app = desktop.connect(process=process.pid, timeout=20)
+            app = Application(backend="uia").connect(process=process.pid, timeout=20)
             editor, hwnd = open_editor(app)
             box = editor.rectangle()
             assert (box.width(), box.height()) == (900, 580)
@@ -97,13 +106,11 @@ def verify_windows(executable, profile, expected, original_history, checks):
                 password_action = control(editor, "SqlCredentialsButton", "exists visible enabled")
                 wait_for(password_action.has_keyboard_focus, 5)
                 password_action.invoke()
-                password_dialog = app.window(title="Логин и пароль MS SQL").wait("exists visible", timeout=15)
-                password_dialog.close()
+                modal(app, "Логин и пароль MS SQL").close()
                 checks.append("sql-credentials-reachable-with-tab-at-900x580-and-cancelled")
                 for name, caption in zip(FLAG_IDS, WARNINGS):
                     toggle(editor, name)
-                    warning = app.window(title=caption)
-                    warning.wait("exists visible", timeout=10)
+                    warning = modal(app, caption)
                     warning.child_window(auto_id="6", control_type="Button").wait("exists enabled", timeout=10).invoke()
                 save(editor, True)
                 checks.append("old-all-databases-source-kept-identity-and-credential-reference")
