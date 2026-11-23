@@ -65,7 +65,7 @@ internal static class HistoricalUncProbe
         var writeProbe = Path.Combine(fixture.PreviousDestination, "read-only-proof-" + Guid.NewGuid().ToString("N"));
         try
         {
-            using var handle = new FileStream(writeProbe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.DeleteOnClose);
+            using var handle = new FileStream(writeProbe, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             throw new InvalidOperationException("The test share unexpectedly allows this user to write.");
         }
         catch (UnauthorizedAccessException) { }

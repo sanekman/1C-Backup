@@ -27,22 +27,22 @@ function Remove-OwnedShare {
 }
 
 function Invoke-Probe([string]$Phase) {
+    $errors = Join-Path $lab "$Phase.stderr"
     $values = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{
-        probe=$exe; installation=$Installation; report=$report; lab=$lab; phase=$Phase
+        probe=$exe; installation=$Installation; report=$report; lab=$lab; phase=$Phase; errors=$errors
     } | ConvertTo-Json -Compress)))
     $script = '$v = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(''' + $values + ''')) | ConvertFrom-Json' + [Environment]::NewLine + @'
 $env:GITHUB_ACTIONS = 'true'
-& $v.probe $v.installation $v.report $v.phase $v.lab
+& $v.probe $v.installation $v.report $v.phase $v.lab 2> $v.errors
 exit $LASTEXITCODE
 '@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
-    $errors = Join-Path $lab "$Phase.stderr"
     $shell = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
     $arguments = @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded)
-    $process = Start-Process $shell -Credential $credential -LoadUserProfile -WorkingDirectory $lab -ArgumentList $arguments -RedirectStandardError $errors -PassThru
+    $process = Start-Process $shell -Credential $credential -LoadUserProfile -WorkingDirectory $lab -ArgumentList $arguments -PassThru
     if (!$process.WaitForExit(120000)) { Stop-Process -Id $process.Id -Force; throw "UNC probe timed out in $Phase." }
     if ($process.ExitCode -ne 0) {
-        Get-Content -LiteralPath $errors
+        if (Test-Path -LiteralPath $errors) { Get-Content -LiteralPath $errors }
         throw "UNC probe failed in $Phase."
     }
 }
@@ -50,6 +50,10 @@ exit $LASTEXITCODE
 try {
     if (Get-SmbShare -Name $share -ErrorAction SilentlyContinue) { throw 'Refusing to replace a pre-existing share.' }
     $user = New-LocalUser -Name $name -Password $secret -Description 'Disposable SP Backup UNC acceptance'
+    $users = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+    if (!((Get-LocalGroupMember -SID $users).SID.Value -contains $user.SID.Value)) {
+        Add-LocalGroupMember -SID $users -Member $account
+    }
     $credential = [PSCredential]::new($account, $secret)
     & icacls.exe $lab /grant ("*" + $user.SID.Value + ":(OI)(CI)M") /T /Q
     if ($LASTEXITCODE -ne 0) { throw 'Could not grant access to the owned fixture directory.' }
