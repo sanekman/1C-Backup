@@ -73,6 +73,7 @@ internal static class HistoricalUncProbe
         Require(restored.Files == 1 && await File.ReadAllTextAsync(Path.Combine(restored.Directory, "original.txt")) == Content
             && await HashAsync(selected.Backup.Location) == prepared.Sha256 && !Directory.Exists(job.DestinationDirectory),
             "The former archive or current destination changed, or the restored contents differ.");
+        Directory.Delete(restored.Directory, recursive: true);
         await File.WriteAllTextAsync(Path.Combine(output, "historical-unc-result.json"), JsonSerializer.Serialize(new
         {
             success = true, version, runId = prepared.RunId, restoredFiles = restored.Files,
