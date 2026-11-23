@@ -20,11 +20,12 @@ public partial class RecoveryKitWindow : Window
 
     internal string? RestoreParent { get; private set; }
     internal string? ArchivePassword { get; private set; }
+    internal Func<OpenFolderDialog, bool>? PickFolderOverride { get; set; }
 
     private void Choose_Click(object sender, RoutedEventArgs e)
     {
         var picker = new OpenFolderDialog { Title = "Выберите папку для восстановления" };
-        if (picker.ShowDialog(this) != true) return;
+        if (!(PickFolderOverride?.Invoke(picker) ?? picker.ShowDialog(this) == true)) return;
         RestoreParent = Destination.Text = picker.FolderName;
         Restore.IsEnabled = true;
     }

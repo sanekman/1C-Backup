@@ -5,7 +5,7 @@
  <StackPanel Margin="18">
   <TextBlock x:Name="PointInfo" TextWrapping="Wrap" FontWeight="SemiBold"/>
   <DockPanel Margin="0,12,0,8">
-   <Button DockPanel.Dock="Right" Content="Выбрать папку…" Margin="8,0,0,0" Click="Choose_Click"/>
+   <Button x:Name="PickFolder" DockPanel.Dock="Right" Content="Выбрать папку…" Margin="8,0,0,0" Click="Choose_Click"/>
    <TextBox x:Name="Destination" IsReadOnly="True" Text="Папка восстановления не выбрана"
     AutomationProperties.Name="Папка восстановления"/>
   </DockPanel>

@@ -320,6 +320,8 @@ internal static partial class DesktopSmoke
         screenshot("files-partial-restored-compact");
         if (Environment.GetEnvironmentVariable("SPBACKUP_TEST_FORMER_UNC") is { Length: > 0 } formerUnc)
             await VerifyFormerUncAsync(window, job, catalog, formerUnc, screenshot, screenshotDialog);
+        if (Environment.GetEnvironmentVariable("SPBACKUP_TEST_CREATE_RECOVERY") is { Length: > 0 } recoveryFixture)
+            await VerifySplitRestoreAndExportAsync(window, catalog, recoveryFixture, screenshotDialog);
         window.Width = 1100; window.Height = 740;
     }
 }

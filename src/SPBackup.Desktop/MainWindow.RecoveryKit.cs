@@ -10,6 +10,10 @@ namespace SPBackup.Desktop;
 public partial class MainWindow
 {
     private const string RestoreViewPreference = "desktop-restore-view.txt";
+    internal Func<OpenFolderDialog, bool>? RecoveryKitExportFolderOverride { get; set; }
+    internal Func<OpenFileDialog, bool>? RecoveryKitOpenFileOverride { get; set; }
+    internal Action<ContextMenu>? RecoveryKitMenuOpened { get; set; }
+    internal Action<RecoveryKitWindow>? RecoveryKitDialogOpened { get; set; }
 
     private static bool ReadClassicRestoreView(string directory)
     {
@@ -49,6 +53,7 @@ public partial class MainWindow
         create.Click += ExportRecoveryKit_Click;
         menu.Items.Add(open);
         menu.Items.Add(create);
+        RecoveryKitMenuOpened?.Invoke(menu);
         menu.IsOpen = true;
     }
 
@@ -66,7 +71,7 @@ public partial class MainWindow
         var chain = copyRestoreChain;
         var records = copyRows.Select(copy => copy.Record).ToArray();
         var picker = new OpenFolderDialog { Title = "Выберите папку для комплекта восстановления" };
-        if (picker.ShowDialog(this) != true) return;
+        if (!(RecoveryKitExportFolderOverride?.Invoke(picker) ?? picker.ShowDialog(this) == true)) return;
         using var lease = AcquireEngineOrReport();
         if (lease is null) return;
         using var cancellation = new CancellationTokenSource();
@@ -110,7 +115,7 @@ public partial class MainWindow
         if (!RecoveryKitsButton.IsEnabled) return;
         var picker = new OpenFileDialog { Title = "Откройте описание комплекта восстановления",
             Filter = "Описание комплекта SP Backup|recovery.json", CheckFileExists = true };
-        if (picker.ShowDialog(this) != true) return;
+        if (!(RecoveryKitOpenFileOverride?.Invoke(picker) ?? picker.ShowDialog(this) == true)) return;
         var folder = Path.GetDirectoryName(picker.FileName);
         if (folder is null || !string.Equals(Path.GetFileName(picker.FileName), FileRecoveryKit.ManifestName, StringComparison.OrdinalIgnoreCase))
         {
@@ -127,6 +132,7 @@ public partial class MainWindow
             var summary = await Task.Run(() => FileRecoveryKit.InspectAsync(folder, cancellation.Token));
             cancellation.Token.ThrowIfCancellationRequested();
             var dialog = new RecoveryKitWindow(summary) { Owner = this };
+            RecoveryKitDialogOpened?.Invoke(dialog);
             if (dialog.ShowDialog() != true || dialog.RestoreParent is not { } parent) return;
             var progress = BeginFileRestoreProgress();
             var workRoot = EffectiveWorkDirectory;

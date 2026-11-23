@@ -91,6 +91,7 @@ jobs:
           New-Item -ItemType Directory -Force artifacts/ui | Out-Null
           $share = $null
           $backing = $null
+          $kitLab = $null
           try {
             if ($env:ACCEPTANCE_SCENARIO -eq 'recovery') {
               if ((Get-Service LanmanServer).Status -ne 'Running') { throw 'SMB must be available on the disposable Windows runner.' }
@@ -100,17 +101,32 @@ jobs:
               New-Item -ItemType Directory -Path $backing | Out-Null
               $share = New-SmbShare -Name $name -Path $backing -Description $name -FullAccess ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -CachingMode None
               $env:SPBACKUP_TEST_FORMER_UNC = '\\' + $env:COMPUTERNAME + '\' + $name
+              $kitLab = Join-Path $env:RUNNER_TEMP "SPBackupKitUi_$id"
+              New-Item -ItemType Directory -Path $kitLab | Out-Null
+              $env:SPBACKUP_TEST_CREATE_RECOVERY = $kitLab
             }
             $fixtureProcess = Start-Process -FilePath dotnet -ArgumentList @('src/SPBackup.Desktop/bin/Debug/net10.0-windows/SPBackup.Desktop.dll', '--smoke-ui', 'artifacts/ui') -PassThru
-            if (-not $fixtureProcess.WaitForExit(180000)) {
+            $timeout = if ($kitLab) { 210000 } else { 180000 }
+            if (-not $fixtureProcess.WaitForExit($timeout)) {
               $fixtureProcess.Kill()
               throw 'WPF smoke test timed out'
             }
             Get-Content artifacts/ui/smoke-result.json
             if ($fixtureProcess.ExitCode -ne 0) { throw 'WPF smoke test failed' }
+            if ($kitLab) {
+              $env:SPBACKUP_TEST_OPEN_RECOVERY = $kitLab
+              $portable = Start-Process -FilePath dotnet -ArgumentList @('src/SPBackup.Desktop/bin/Debug/net10.0-windows/SPBackup.Desktop.dll', '--smoke-ui', 'artifacts/ui-portable') -PassThru
+              if (-not $portable.WaitForExit(90000)) {
+                $portable.Kill()
+                throw 'Portable recovery WPF test timed out'
+              }
+              Get-Content artifacts/ui-portable/smoke-result.json
+              if ($portable.ExitCode -ne 0) { throw 'Portable recovery WPF test failed' }
+            }
           } finally {
             if ($share) { Remove-SmbShare -InputObject $share -Force -Confirm:$false }
             if ($backing) { Remove-Item -LiteralPath $backing -Recurse -Force }
+            if ($kitLab) { Remove-Item -LiteralPath $kitLab -Recurse -Force }
           }
       - if: runner.os == 'Windows'
         run: |
@@ -124,7 +140,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-ui-verification
-          path: artifacts/ui/
+          path: |
+            artifacts/ui/
+            artifacts/ui-portable/smoke-result.json
           retention-days: 14
 
   history-performance:

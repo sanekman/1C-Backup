@@ -36,6 +36,12 @@ internal static partial class DesktopSmoke
         {
             await WaitUntil(() => Application.Current.MainWindow is MainWindow { SmokeReady: true }, "Окно не завершило загрузку.");
             var window = (MainWindow)Application.Current.MainWindow;
+            if (Environment.GetEnvironmentVariable("SPBACKUP_TEST_OPEN_RECOVERY") is { Length: > 0 } recoveryFixture)
+            {
+                await VerifyPortableKitInFreshProfileAsync(window, recoveryFixture);
+                Finish(output, true, "Комплект открыт в новом профиле. Восстановление, неверный пароль и недостающий архив проверены.");
+                return;
+            }
             // Existing scenarios explicitly abandon their temporary drafts.
             window.UnsavedJobDialogOpened = dialog => dialog.Loaded += (_, _) =>
                 ((Button)dialog.FindName("DiscardDraftButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
