@@ -28,22 +28,41 @@ function Remove-OwnedShare {
 
 function Invoke-Probe([string]$Phase) {
     $errors = Join-Path $lab "$Phase.stderr"
+    $completion = Join-Path $lab "$Phase.exit"
     $values = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{
-        probe=$exe; installation=$Installation; report=$report; lab=$lab; phase=$Phase; errors=$errors
+        probe=$exe; installation=$Installation; report=$report; lab=$lab; phase=$Phase; errors=$errors; completion=$completion
     } | ConvertTo-Json -Compress)))
     $script = '$v = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(''' + $values + ''')) | ConvertFrom-Json' + [Environment]::NewLine + @'
 $env:GITHUB_ACTIONS = 'true'
 & $v.probe $v.installation $v.report $v.phase $v.lab 2> $v.errors
-exit $LASTEXITCODE
+$code = $LASTEXITCODE
+[IO.File]::WriteAllText($v.completion, [string]$code)
+exit $code
 '@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
     $shell = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
-    $arguments = @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded)
-    $process = Start-Process $shell -Credential $credential -LoadUserProfile -WorkingDirectory $lab -ArgumentList $arguments -PassThru
-    if (!$process.WaitForExit(120000)) { Stop-Process -Id $process.Id -Force; throw "UNC probe timed out in $Phase." }
-    if ($process.ExitCode -ne 0) {
-        if (Test-Path -LiteralPath $errors) { Get-Content -LiteralPath $errors }
-        throw "UNC probe failed in $Phase."
+    $taskName = "SPBackup-UNC-$id-$Phase"
+    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw 'Refusing to replace a pre-existing task.' }
+    $action = New-ScheduledTaskAction -Execute $shell -Argument "-NoProfile -NonInteractive -EncodedCommand $encoded" -WorkingDirectory $lab
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+    Register-ScheduledTask -TaskName $taskName -Action $action -Settings $settings -User $account -Password (ConvertFrom-SecureString $secret -AsPlainText) -RunLevel Limited | Out-Null
+    try {
+        Start-ScheduledTask -TaskName $taskName
+        $deadline = [DateTime]::UtcNow.AddSeconds(120)
+        do {
+            $task = Get-ScheduledTask -TaskName $taskName
+            if ($task.State -eq 'Ready' -and (Test-Path -LiteralPath $completion)) { break }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTime]::UtcNow -lt $deadline)
+        $last = (Get-ScheduledTaskInfo -TaskName $taskName).LastTaskResult
+        if (!(Test-Path -LiteralPath $completion) -or (Get-Content -LiteralPath $completion -Raw) -ne '0' -or $last -ne 0) {
+            if (Test-Path -LiteralPath $errors) { Get-Content -LiteralPath $errors }
+            throw ("UNC probe failed in $Phase with task result 0x{0:X8}." -f $last)
+        }
+    }
+    finally {
+        if ((Get-ScheduledTask -TaskName $taskName).State -eq 'Running') { Stop-ScheduledTask -TaskName $taskName }
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     }
 }
 
@@ -54,7 +73,6 @@ try {
     if (!((Get-LocalGroupMember -SID $users).SID.Value -contains $user.SID.Value)) {
         Add-LocalGroupMember -SID $users -Member $account
     }
-    $credential = [PSCredential]::new($account, $secret)
     & icacls.exe $lab /grant ("*" + $user.SID.Value + ":(OI)(CI)M") /T /Q
     if ($LASTEXITCODE -ne 0) { throw 'Could not grant access to the owned fixture directory.' }
     @{WindowsSid=$user.SID.Value;PreviousDestination=$unc} | ConvertTo-Json |
