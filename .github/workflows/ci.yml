@@ -25,7 +25,7 @@ on:
         description: 'Full, management, recovery, performance, packaging, installed-agent acceptance, or verification of a published installer'
         type: choice
         default: full
-        options: [full, management, recovery, performance, packaging, published-installer, installed-schedule, installed-outage, installed-access, installed-recovery, installed-unc]
+        options: [full, management, recovery, performance, packaging, published-installer, installed-schedule, installed-outage, installed-access, installed-recovery, installed-unc, installed-sql]
       published_version:
         description: 'For published-installer: agent version without v (for example 0.2.0-alpha.39)'
         required: false
@@ -43,7 +43,7 @@ permissions:
 
 jobs:
   verify:
-    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'published-installer' && inputs.scope != 'installed-schedule' && inputs.scope != 'installed-outage' && inputs.scope != 'installed-access' && inputs.scope != 'installed-recovery' && inputs.scope != 'installed-unc' && inputs.scope != 'performance' && (inputs.scope != 'packaging' || inputs.platform != 'windows'))
+    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'published-installer' && inputs.scope != 'installed-schedule' && inputs.scope != 'installed-outage' && inputs.scope != 'installed-access' && inputs.scope != 'installed-recovery' && inputs.scope != 'installed-unc' && inputs.scope != 'installed-sql' && inputs.scope != 'performance' && (inputs.scope != 'packaging' || inputs.platform != 'windows'))
     strategy:
       fail-fast: false
       matrix:
@@ -210,7 +210,7 @@ jobs:
           retention-days: 14
 
   native-agent-service:
-    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'published-installer' && inputs.scope != 'installed-schedule' && inputs.scope != 'installed-outage' && inputs.scope != 'installed-access' && inputs.scope != 'installed-recovery' && inputs.scope != 'installed-unc' && inputs.scope != 'performance' && inputs.scope != 'recovery')
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'published-installer' && inputs.scope != 'installed-schedule' && inputs.scope != 'installed-outage' && inputs.scope != 'installed-access' && inputs.scope != 'installed-recovery' && inputs.scope != 'installed-unc' && inputs.scope != 'installed-sql' && inputs.scope != 'performance' && inputs.scope != 'recovery')
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
     timeout-minutes: 10
     env:
@@ -465,7 +465,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
 
   installed-agent-acceptance:
-    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'installed-schedule' || inputs.scope == 'installed-outage' || inputs.scope == 'installed-access' || inputs.scope == 'installed-recovery' || inputs.scope == 'installed-unc')
+    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'installed-schedule' || inputs.scope == 'installed-outage' || inputs.scope == 'installed-access' || inputs.scope == 'installed-recovery' || inputs.scope == 'installed-unc' || inputs.scope == 'installed-sql')
     permissions:
       contents: read
       actions: read
@@ -476,12 +476,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.402
-      - if: inputs.scope == 'installed-outage'
+      - if: inputs.scope == 'installed-outage' || inputs.scope == 'installed-sql'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - if: inputs.scope == 'installed-outage'
         run: python -m pip install -r tests/ftp/requirements.txt
+      - if: inputs.scope == 'installed-sql'
+        run: python -m pip install pywinauto==0.6.9
       - uses: actions/download-artifact@v4
         with:
           name: windows-x64-distribution
@@ -506,13 +508,19 @@ jobs:
           if ((Test-Path $profile) -or (Test-Path $installation) -or (Get-Service OneCBackupAgent -ErrorAction SilentlyContinue)) {
             throw 'The fixture requires a clean Windows installation.'
           }
+          $output = Join-Path $PWD 'artifacts/installed-agent'
+          if ($env:ACCEPTANCE_SCENARIO -eq 'installed-sql') {
+            python tests/distribution/observation_upgrade.py $candidate[0].FullName $output
+            if ($LASTEXITCODE -ne 0) { throw 'Installed SQL observation upgrade verification failed.' }
+            Get-Content (Join-Path $output 'observation-upgrade-result.json')
+            return
+          }
           $process = Start-Process $candidate[0].FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="' + $installation + '"')) -PassThru
           if (!$process.WaitForExit(180000)) { Stop-Process -Id $process.Id -Force; throw 'Installer timed out.' }
           if ($process.ExitCode -ne 0) { throw 'Candidate installation failed.' }
           $agent = Join-Path $installation 'OneCBackup.Agent.exe'
           $version = (Get-Item -LiteralPath $agent).VersionInfo.ProductVersion
           Write-Output ("Installed agent: " + $version)
-          $output = Join-Path $PWD 'artifacts/installed-agent'
           if ($env:ACCEPTANCE_SCENARIO -eq 'installed-outage') {
             & tests/WindowsAgentServiceSmoke/reporting_outage.ps1 -Agent $agent -Output $output
           } elseif ($env:ACCEPTANCE_SCENARIO -eq 'installed-unc') {
