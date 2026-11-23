@@ -4,7 +4,7 @@ using System.Text.Json;
 using ICSharpCode.SharpZipLib.Zip;
 using SPBackup.Core;
 
-if (args.Length != 2 || !OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true")
+if (args.Length is not (2 or 4) || !OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true")
     throw new InvalidOperationException("This probe requires an installed agent on a disposable Windows CI runner.");
 
 var installation = Path.GetFullPath(args[0]);
@@ -15,6 +15,11 @@ Require(File.Exists(agent) && await HashAsync(core) == await HashAsync(Path.Comb
 var version = FileVersionInfo.GetVersionInfo(core).ProductVersion;
 var report = Path.GetFullPath(args[1]);
 Directory.CreateDirectory(report);
+if (args.Length == 4)
+{
+    await HistoricalUncProbe.RunAsync(args[2], args[3], report, version, (profile, job) => RunAgentAsync(agent, profile, job));
+    return;
+}
 var root = Path.Combine(Path.GetTempPath(), "spbackup-installed-recovery-" + Guid.NewGuid().ToString("N"));
 var archiveStore = new WindowsArchivePasswordStore();
 string? key = null;
