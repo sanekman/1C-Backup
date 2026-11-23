@@ -15,6 +15,7 @@ $account = "$env:COMPUTERNAME\$name"
 $runner = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $secret = ConvertTo-SecureString ("Un!8a-" + [Guid]::NewGuid().ToString('N')) -AsPlainText -Force
 $user = $null
+$batchRightGranted = $false
 $report = Join-Path $lab 'report'
 $stage = 'prepare'
 New-Item -ItemType Directory -Path $backing,$report,$Output | Out-Null
@@ -44,14 +45,17 @@ exit $code
     $taskName = "SPBackup-UNC-$id-$Phase"
     if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw 'Refusing to replace a pre-existing task.' }
     $action = New-ScheduledTaskAction -Execute $shell -Argument "-NoProfile -NonInteractive -EncodedCommand $encoded" -WorkingDirectory $lab
-    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
     Register-ScheduledTask -TaskName $taskName -Action $action -Settings $settings -User $account -Password (ConvertFrom-SecureString $secret -AsPlainText) -RunLevel Limited | Out-Null
     try {
+        $started = Get-Date
         Start-ScheduledTask -TaskName $taskName
         $deadline = [DateTime]::UtcNow.AddSeconds(120)
         do {
             $task = Get-ScheduledTask -TaskName $taskName
             if ($task.State -eq 'Ready' -and (Test-Path -LiteralPath $completion)) { break }
+            $info = Get-ScheduledTaskInfo -TaskName $taskName
+            if ($task.State -eq 'Ready' -and $info.LastRunTime -ge $started.AddSeconds(-2)) { break }
             Start-Sleep -Milliseconds 250
         } while ([DateTime]::UtcNow -lt $deadline)
         $last = (Get-ScheduledTaskInfo -TaskName $taskName).LastTaskResult
@@ -73,6 +77,35 @@ try {
     if (!((Get-LocalGroupMember -SID $users).SID.Value -contains $user.SID.Value)) {
         Add-LocalGroupMember -SID $users -Member $account
     }
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class UncFixtureBatchLogon {
+    [StructLayout(LayoutKind.Sequential)] struct Attributes { public uint Length; public IntPtr Root,Name; public uint Flags; public IntPtr Descriptor,Quality; }
+    [StructLayout(LayoutKind.Sequential)] struct UnicodeString { public ushort Length,MaximumLength; public IntPtr Buffer; }
+    public static void Change(string value,bool remove) {
+        var sid=new SecurityIdentifier(value); var bytes=new byte[sid.BinaryLength];sid.GetBinaryForm(bytes,0);
+        var attributes=new Attributes{Length=(uint)Marshal.SizeOf<Attributes>()};
+        var status=LsaOpenPolicy(IntPtr.Zero,ref attributes,0x810,out var policy);
+        if(status!=0)throw new Win32Exception((int)LsaNtStatusToWinError(status));
+        const string name="SeBatchLogonRight";
+        var right=new UnicodeString{Length=(ushort)(name.Length*2),MaximumLength=(ushort)((name.Length+1)*2),Buffer=Marshal.StringToHGlobalUni(name)};
+        try {
+            status=remove?LsaRemoveAccountRights(policy,bytes,false,new[]{right},1):LsaAddAccountRights(policy,bytes,new[]{right},1);
+            if(status!=0 && !(remove && LsaNtStatusToWinError(status)==2))throw new Win32Exception((int)LsaNtStatusToWinError(status));
+        }finally{Marshal.FreeHGlobal(right.Buffer);LsaClose(policy);}
+    }
+    [DllImport("advapi32.dll")]static extern uint LsaOpenPolicy(IntPtr system,ref Attributes attributes,uint access,out IntPtr policy);
+    [DllImport("advapi32.dll")]static extern uint LsaAddAccountRights(IntPtr policy,byte[] sid,UnicodeString[] rights,uint count);
+    [DllImport("advapi32.dll")]static extern uint LsaRemoveAccountRights(IntPtr policy,byte[] sid,[MarshalAs(UnmanagedType.Bool)]bool all,UnicodeString[] rights,uint count);
+    [DllImport("advapi32.dll")]static extern uint LsaClose(IntPtr policy);
+    [DllImport("advapi32.dll")]static extern uint LsaNtStatusToWinError(uint status);
+}
+'@
+    [UncFixtureBatchLogon]::Change($user.SID.Value,$false)
+    $batchRightGranted = $true
     & icacls.exe $lab /grant ("*" + $user.SID.Value + ":(OI)(CI)M") /T /Q
     if ($LASTEXITCODE -ne 0) { throw 'Could not grant access to the owned fixture directory.' }
     @{WindowsSid=$user.SID.Value;PreviousDestination=$unc} | ConvertTo-Json |
@@ -104,6 +137,7 @@ catch {
 }
 finally {
     Remove-OwnedShare
+    if ($batchRightGranted) { [UncFixtureBatchLogon]::Change($user.SID.Value,$true) }
     if ($user) { Remove-LocalUser -SID $user.SID }
     Remove-Item -LiteralPath $lab -Recurse -Force
 }
