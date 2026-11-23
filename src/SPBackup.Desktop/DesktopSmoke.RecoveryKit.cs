@@ -62,6 +62,8 @@ internal static partial class DesktopSmoke
             await window.ReloadSmokeJobsAsync();
             Control<Button>("CopiesNavigation").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitUntil(() => window.SmokeReady, "Каталог разделённой цепочки не загрузился.");
+            Control<ComboBox>("CopyJobFilter").SelectedValue = job.Id;
+            Control<ComboBox>("CopyDateFilter").SelectedIndex = 0;
             var copies = Control<DataGrid>("Copies");
             copies.SelectedItem = copies.Items.OfType<BackupCopyRow>().Single(item => item.Record.Id == point.Id);
             var target = Folder("selected-restore");
@@ -94,7 +96,12 @@ internal static partial class DesktopSmoke
                     selectionApplied = true;
                     apply.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     dialog.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-                        () => restore.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+                        () =>
+                        {
+                            RequireRecovery(dialog.SelectedPaths is { Count: 2 } paths &&
+                                paths.Contains("change.txt") && paths.Contains("selected"), "Диалог не сохранил выбор файла и папки.");
+                            restore.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                        });
                 });
                 choose.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             });
