@@ -55,7 +55,7 @@ def verify_windows(executable, profile, expected, original_history, checks):
         row = grid.child_window(control_type="DataItem").wait("exists visible", timeout=25)
         row.select()
         control(main, "EditJobButton", "exists visible enabled").invoke()
-        editor = app.window(title="Мониторинг внешних копий SQL")
+        editor = app.window(title="Задание наблюдения SQL")
         hwnd = editor.wait("exists visible enabled", timeout=25).handle
         assert ctypes.windll.user32.SetWindowPos(hwnd, 0, 20, 20, 900, 580, 0x0004)
         control(editor, "SourceSettings").select()
