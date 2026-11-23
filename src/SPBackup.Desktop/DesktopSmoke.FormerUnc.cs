@@ -29,7 +29,7 @@ internal static partial class DesktopSmoke
         var storage = new FileBackupStorage();
         var run = await new LocalBackupRunner(new OneCFileArchiveExecutor(), new BackupCompletion(storage, catalog),
             new BackupRunHistory(Path.Combine(fixture, "runs.json")), Path.Combine(fixture, "work")).RunAsync(previous);
-        Require(run.Status == BackupRunStatus.Succeeded, "Не удалось создать архив на тестовом SMB-ресурсе.");
+        RequireFormerUnc(run.Status == BackupRunStatus.Succeeded, "Не удалось создать архив на тестовом SMB-ресурсе.");
         var point = (await catalog.ReadAsync()).Single(record => record.JobId == current.Id && record.Backup == run.Backup);
         var original = SHA256.HashData(await File.ReadAllBytesAsync(point.Backup.Location));
         var profilePath = Path.Combine(DesktopPaths.DataDirectory, "jobs.json");
@@ -52,7 +52,7 @@ internal static partial class DesktopSmoke
             var decline = AnswerFormerUncConfirmationAsync(owner, formerUnc, accept: false);
             restore.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await decline;
-            Require(!opened && !Directory.EnumerateFileSystemEntries(target).Any(),
+            RequireFormerUnc(!opened && !Directory.EnumerateFileSystemEntries(target).Any(),
                 "Отмена подтверждения открыла восстановление или создала файлы.");
 
             window.CopyRestoreDialogOpened = dialog => dialog.Dispatcher.BeginInvoke(() =>
@@ -61,7 +61,7 @@ internal static partial class DesktopSmoke
                 dialog.PickFolderOverride = picker => { picker.FolderName = target; return true; };
                 ((Button)dialog.FindName("PickFolderButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 var apply = (Button)dialog.FindName("RestoreButton");
-                Require(apply.IsEnabled, "Диалог не принял папку восстановления для прежнего хранилища.");
+                RequireFormerUnc(apply.IsEnabled, "Диалог не принял папку восстановления для прежнего хранилища.");
                 dialog.UpdateLayout();
                 screenshotDialog("files-former-unc-confirm-compact", dialog);
                 apply.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -73,7 +73,7 @@ internal static partial class DesktopSmoke
             await WaitUntil(() => opened && window.SmokeReady && status.Text.StartsWith("Восстановлено файлов"),
                 "Восстановление через окно прежнего хранилища не завершилось.");
             var destination = Directory.GetDirectories(target).Single();
-            Require(await File.ReadAllTextAsync(Path.Combine(destination, "stable.txt")) == "unchanged"
+            RequireFormerUnc(await File.ReadAllTextAsync(Path.Combine(destination, "stable.txt")) == "unchanged"
                 && SHA256.HashData(await File.ReadAllBytesAsync(point.Backup.Location)).SequenceEqual(original)
                 && (await File.ReadAllBytesAsync(profilePath)).SequenceEqual(saved),
                 "Восстановление изменило архив, профиль или содержимое файла.");
@@ -119,14 +119,19 @@ internal static partial class DesktopSmoke
                     var valid = message.Contains(path, StringComparison.Ordinal)
                         && message.Contains("текущего пользователя Windows", StringComparison.Ordinal);
                     var button = CertificateGetDlgItem(dialog, accept && valid ? 1 : 2);
-                    Require(button != 0 && CertificatePostMessage(button, 0x00F5, 0, 0), "Не удалось закрыть подтверждение прежнего UNC.");
-                    Require(valid, "Подтверждение не показывает прежний путь и пользователя Windows.");
+                    RequireFormerUnc(button != 0 && CertificatePostMessage(button, 0x00F5, 0, 0), "Не удалось закрыть подтверждение прежнего UNC.");
+                    RequireFormerUnc(valid, "Подтверждение не показывает прежний путь и пользователя Windows.");
                     return;
                 }
                 await Task.Delay(20);
             }
             throw new TimeoutException("Окно подтверждения прежнего UNC не открылось.");
         });
+    }
+
+    private static void RequireFormerUnc(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
     }
 
     [DllImport("user32.dll")]
