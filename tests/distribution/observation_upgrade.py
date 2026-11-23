@@ -33,7 +33,7 @@ def wait_for(check, seconds=30):
 
 
 def control(window, name, states="exists enabled"):
-    return window.child_window(auto_id=name).wait(states, timeout=20).wrapper_object()
+    return window.child_window(auto_id=name).wait(states, timeout=20)
 
 
 def read_json(path):
@@ -53,10 +53,10 @@ def verify_windows(executable, profile, expected, original_history, checks):
         control(main, "JobsNavigation", "exists visible enabled").invoke()
         grid = main.child_window(auto_id="Jobs")
         row = grid.child_window(control_type="DataItem").wait("exists visible", timeout=25)
-        row.wrapper_object().select()
+        row.select()
         control(main, "EditJobButton", "exists visible enabled").invoke()
-        editor = app.window(title="Мониторинг внешних копий SQL").wait("exists visible enabled", timeout=25)
-        hwnd = editor.wrapper_object().handle
+        editor = app.window(title="Мониторинг внешних копий SQL")
+        hwnd = editor.wait("exists visible enabled", timeout=25).handle
         assert ctypes.windll.user32.SetWindowPos(hwnd, 0, 20, 20, 900, 580, 0x0004)
         control(editor, "SourceSettings").select()
         control(editor, "SqlCertificateSettings").expand()
@@ -102,8 +102,9 @@ def verify_windows(executable, profile, expected, original_history, checks):
                 checks.append("sql-credentials-reachable-with-tab-at-900x580-and-cancelled")
                 for name, caption in zip(FLAG_IDS, WARNINGS):
                     toggle(editor, name)
-                    warning = app.window(title=caption).wait("exists visible", timeout=10)
-                    warning.child_window(auto_id="6", control_type="Button").wrapper_object().invoke()
+                    warning = app.window(title=caption)
+                    warning.wait("exists visible", timeout=10)
+                    warning.child_window(auto_id="6", control_type="Button").wait("exists enabled", timeout=10).invoke()
                 save(editor, True)
                 checks.append("old-all-databases-source-kept-identity-and-credential-reference")
             else:
