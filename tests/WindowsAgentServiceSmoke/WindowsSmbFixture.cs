@@ -13,6 +13,8 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
     private readonly string id = Guid.NewGuid().ToString("N");
     private readonly string account;
     private readonly string serviceSid;
+    private readonly string? additionalAccount;
+    private readonly SecurityIdentifier? additionalSid;
     private readonly string ownerAccount;
     private readonly SecurityIdentifier ownerSid;
     private readonly string name;
@@ -27,7 +29,7 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
     public string UncPath => @"\\" + Environment.MachineName + @"\" + name;
     public string DeniedUncPath => @"\\" + Environment.MachineName + @"\" + deniedName;
 
-    private WindowsSmbFixture(string account, string serviceSid, Snapshot? snapshot = null)
+    private WindowsSmbFixture(string account, string serviceSid, Snapshot? snapshot = null, string? additionalAccount = null)
     {
         if (snapshot is not null) id = snapshot.Id;
         using var identity = WindowsIdentity.GetCurrent();
@@ -38,6 +40,13 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
             throw new InvalidOperationException("The SMB fixture requires the actual distinct service user and matching SID.");
         this.account = account;
         this.serviceSid = selected.Value;
+        this.additionalAccount = additionalAccount;
+        if (additionalAccount is not null)
+        {
+            additionalSid = (SecurityIdentifier)new NTAccount(additionalAccount).Translate(typeof(SecurityIdentifier));
+            if (additionalSid.Equals(ownerSid) || additionalSid.Equals(selected))
+                throw new InvalidOperationException("The second SMB identity must be distinct.");
+        }
         name = "SPBackupServiceCI_" + id;
         deniedName = "SPBackupDeniedCI_" + id;
         marker = "Owned SP Backup service SMB fixture " + id;
@@ -54,12 +63,12 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
         return new(snapshot.Account, snapshot.ServiceSid, snapshot) { rootCreated = true };
     }
 
-    public static async Task<WindowsSmbFixture> CreateAsync(string account, string serviceSid)
+    public static async Task<WindowsSmbFixture> CreateAsync(string account, string serviceSid, string? additionalAccount = null)
     {
         if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("ONECBACKUP_NATIVE_SERVICE_TEST") != "1"
             || !new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
             throw new InvalidOperationException("The SMB fixture requires explicit isolated administrator Windows service CI opt-in.");
-        var fixture = new WindowsSmbFixture(account, serviceSid);
+        var fixture = new WindowsSmbFixture(account, serviceSid, additionalAccount: additionalAccount);
         try
         {
             fixture.CreateDirectories();
@@ -75,8 +84,10 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
                 }
                 foreach ($item in @($settings.shares)) {
                     if ($item.allow) {
+                        $accounts = @($settings.account)
+                        if ($settings.additionalAccount) { $accounts += $settings.additionalAccount }
                         New-SmbShare -Name $item.name -Path $item.backing -Description $item.marker `
-                            -FullAccess $settings.account -CachingMode None -ErrorAction Stop | Out-Null
+                            -FullAccess $accounts -CachingMode None -ErrorAction Stop | Out-Null
                     } else {
                         New-SmbShare -Name $item.name -Path $item.backing -Description $item.marker `
                             -FullAccess $settings.ownerAccount -NoAccess $settings.account -CachingMode None -ErrorAction Stop | Out-Null
@@ -106,12 +117,12 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
     {
         if (Directory.Exists(Root) || File.Exists(Root)) throw new IOException("Refusing to reuse an existing service SMB fixture directory.");
         var service = new SecurityIdentifier(serviceSid);
-        new DirectoryInfo(Root).Create(Permissions(service, FileSystemRights.ReadAndExecute));
+        new DirectoryInfo(Root).Create(Permissions(service, FileSystemRights.ReadAndExecute, allowAdditional: true));
         rootCreated = true;
         File.WriteAllText(Path.Combine(Root, "fixture-owner.txt"), marker);
         foreach (var path in new[] { BackingDirectory, DeniedBackingDirectory })
         {
-            new DirectoryInfo(path).Create(Permissions(service, FileSystemRights.Modify));
+            new DirectoryInfo(path).Create(Permissions(service, FileSystemRights.Modify, allowAdditional: path == BackingDirectory));
             var acl = new DirectoryInfo(path).GetAccessControl();
             var rules = acl.GetAccessRules(true, false, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()
                 .Where(rule => rule.IdentityReference.Equals(service)).ToArray();
@@ -121,7 +132,7 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
         }
     }
 
-    private DirectorySecurity Permissions(SecurityIdentifier service, FileSystemRights serviceRights)
+    private DirectorySecurity Permissions(SecurityIdentifier service, FileSystemRights serviceRights, bool allowAdditional)
     {
         var acl = new DirectorySecurity();
         acl.SetAccessRuleProtection(true, false); acl.SetOwner(ownerSid);
@@ -131,6 +142,9 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         acl.AddAccessRule(new FileSystemAccessRule(service, serviceRights,
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        if (allowAdditional && additionalSid is not null)
+            acl.AddAccessRule(new FileSystemAccessRule(additionalSid, serviceRights,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         return acl;
     }
 
@@ -148,7 +162,7 @@ internal sealed class WindowsSmbFixture : IAsyncDisposable
     {
         var parameters = Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
         {
-            account, serviceSid, ownerAccount,
+            account, serviceSid, ownerAccount, additionalAccount,
             shares = new[]
             {
                 new { name, backing = BackingDirectory, marker = marker + " allowed", allow = true },
