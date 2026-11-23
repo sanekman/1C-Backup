@@ -85,16 +85,33 @@ jobs:
           python tests/agent_smoke.py
       - if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          ACCEPTANCE_SCENARIO: ${{ inputs.scope }}
         run: |
           New-Item -ItemType Directory -Force artifacts/ui | Out-Null
-          $fixtureProcess = Start-Process -FilePath dotnet -ArgumentList @('src/SPBackup.Desktop/bin/Debug/net10.0-windows/SPBackup.Desktop.dll', '--smoke-ui', 'artifacts/ui') -PassThru
-          # Match the installed-build suite budget; individual UI assertions retain their deadlines.
-          if (-not $fixtureProcess.WaitForExit(180000)) {
-            $fixtureProcess.Kill()
-            throw 'WPF smoke test timed out'
+          $share = $null
+          $backing = $null
+          try {
+            if ($env:ACCEPTANCE_SCENARIO -eq 'recovery') {
+              if ((Get-Service LanmanServer).Status -ne 'Running') { throw 'SMB must be available on the disposable Windows runner.' }
+              $id = [Guid]::NewGuid().ToString('N')
+              $name = "SPBackupRestoreUi_$id"
+              $backing = Join-Path $env:RUNNER_TEMP $name
+              New-Item -ItemType Directory -Path $backing | Out-Null
+              $share = New-SmbShare -Name $name -Path $backing -Description $name -FullAccess ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -CachingMode None
+              $env:SPBACKUP_TEST_FORMER_UNC = '\\' + $env:COMPUTERNAME + '\' + $name
+            }
+            $fixtureProcess = Start-Process -FilePath dotnet -ArgumentList @('src/SPBackup.Desktop/bin/Debug/net10.0-windows/SPBackup.Desktop.dll', '--smoke-ui', 'artifacts/ui') -PassThru
+            if (-not $fixtureProcess.WaitForExit(180000)) {
+              $fixtureProcess.Kill()
+              throw 'WPF smoke test timed out'
+            }
+            Get-Content artifacts/ui/smoke-result.json
+            if ($fixtureProcess.ExitCode -ne 0) { throw 'WPF smoke test failed' }
+          } finally {
+            if ($share) { Remove-SmbShare -InputObject $share -Force -Confirm:$false }
+            if ($backing) { Remove-Item -LiteralPath $backing -Recurse -Force }
           }
-          Get-Content artifacts/ui/smoke-result.json
-          if ($fixtureProcess.ExitCode -ne 0) { throw 'WPF smoke test failed' }
       - if: runner.os == 'Windows'
         run: |
           python -m pip install -r tests/encryption/requirements.txt

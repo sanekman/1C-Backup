@@ -318,6 +318,8 @@ internal static partial class DesktopSmoke
             || !Control<TextBlock>("CopyVerificationStatus").Text.Contains("исходная копия неполная"))
             throw new InvalidOperationException("Восстановление неполной копии потеряло доступные файлы или предупреждение о пропусках.");
         screenshot("files-partial-restored-compact");
+        if (Environment.GetEnvironmentVariable("SPBACKUP_TEST_FORMER_UNC") is { Length: > 0 } formerUnc)
+            await VerifyFormerUncAsync(window, job, catalog, formerUnc, screenshot, screenshotDialog);
         window.Width = 1100; window.Height = 740;
     }
 }
