@@ -50,7 +50,11 @@ def verify_windows(executable, profile, expected, original_history, checks):
     desktop = Application(backend="uia")
     def open_editor(app):
         main = app.window(title_re=r"^SP Backup.*")
-        control(main, "ExternalMonitoringButton", "exists visible enabled").invoke()
+        control(main, "JobsNavigation", "exists visible enabled").invoke()
+        grid = main.child_window(auto_id="Jobs")
+        row = grid.child_window(control_type="DataItem").wait("exists visible", timeout=25)
+        row.wrapper_object().select()
+        control(main, "EditJobButton", "exists visible enabled").invoke()
         editor = app.window(title="Мониторинг внешних копий SQL").wait("exists visible enabled", timeout=25)
         hwnd = editor.wrapper_object().handle
         assert ctypes.windll.user32.SetWindowPos(hwnd, 0, 20, 20, 900, 580, 0x0004)
@@ -83,6 +87,7 @@ def verify_windows(executable, profile, expected, original_history, checks):
             app = desktop.connect(process=process.pid, timeout=20)
             editor, hwnd = open_editor(app)
             box = editor.rectangle()
+            assert (box.width(), box.height()) == (900, 580)
             measurements = {"width": box.width(), "height": box.height(), "dpi": ctypes.windll.user32.GetDpiForWindow(hwnd)}
             state(editor, phase != "edit")
             if phase == "edit":
@@ -90,7 +95,7 @@ def verify_windows(executable, profile, expected, original_history, checks):
                 control(editor, "SqlAuthentication").set_focus()
                 keyboard.send_keys("{TAB}")
                 password_action = control(editor, "SqlCredentialsButton", "exists visible enabled")
-                assert password_action.has_keyboard_focus()
+                wait_for(password_action.has_keyboard_focus, 5)
                 password_action.invoke()
                 password_dialog = app.window(title="Логин и пароль MS SQL").wait("exists visible", timeout=15)
                 password_dialog.close()
