@@ -49,7 +49,8 @@ internal static class HistoricalUncProbe
         var historical = HistoricalFileCopy.CreateReadJob(selected, job);
         Require(prepared.JobId == job.Id && historical is { StorageKind: StorageKind.NetworkShare, NetworkShare: null }
             && historical.DestinationDirectory == fixture.PreviousDestination, "The registered copy no longer resolves to its previous UNC path.");
-        var restorer = new FileBackupRestorer(new FileBackupStorage(), catalog, Path.Combine(lab, "restore-work"));
+        var work = Directory.CreateDirectory(Path.Combine(lab, "restore-work")).FullName;
+        var restorer = new FileBackupRestorer(new FileBackupStorage(), catalog, work);
         var target = Directory.CreateDirectory(Path.Combine(lab, phase)).FullName;
         if (phase == "deny-unc")
         {
@@ -57,6 +58,7 @@ internal static class HistoricalUncProbe
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
             {
                 Require(!Directory.EnumerateFileSystemEntries(target).Any(), "Denied restoration left an incomplete result.");
+                Directory.Delete(work);
                 return;
             }
             throw new InvalidOperationException("Restore unexpectedly read the UNC archive without share permission.");
@@ -74,6 +76,7 @@ internal static class HistoricalUncProbe
             && await HashAsync(selected.Backup.Location) == prepared.Sha256 && !Directory.Exists(job.DestinationDirectory),
             "The former archive or current destination changed, or the restored contents differ.");
         Directory.Delete(restored.Directory, recursive: true);
+        Directory.Delete(work);
         await File.WriteAllTextAsync(Path.Combine(output, "historical-unc-result.json"), JsonSerializer.Serialize(new
         {
             success = true, version, runId = prepared.RunId, restoredFiles = restored.Files,
