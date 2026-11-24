@@ -1,0 +1,35 @@
+<li data-agent-branch>
+    <details data-branch-key="@Branch.Key"
+             open="@((BranchKey != "all" && Branch.ContainsBranch(BranchKey)) || (SelectedId is { } id && Branch.Contains(id)))">
+        <summary class="dashboard-folder">
+            <a href="@AgentDirectory.FolderLink(Branch.Key, Compact)" data-folder-key="@Branch.Key" data-folder-id="@Branch.FolderId"
+               data-folder-path="@Branch.Path" data-folder-name="@Branch.Label" data-folder-parent="@Branch.Parent"
+               aria-current="@(BranchKey == Branch.Key ? "true" : null)">
+                @Branch.Label <span class="muted">(@Branch.Count)</span>
+            </a>
+        </summary>
+        <ul>
+            @foreach (var child in Branch.Children)
+            {
+                <AgentDirectoryBranch Branch="child" SelectedId="SelectedId" BranchKey="@BranchKey" Compact="Compact" />
+            }
+            @foreach (var row in Compact ? [] : Branch.Agents)
+            {
+                <li class="dashboard-leaf" data-agent-leaf data-agent-id="@row.Entry.Id" data-folder-id="@row.Entry.FolderId"
+                    data-agent-name="@row.Entry.Name" data-folder-path="@Branch.Path" draggable="true">
+                    <a href="@($"?agent={row.Entry.Id}#agent-summary")"
+                       aria-current="@(row.Entry.Id == SelectedId ? "page" : null)">@row.Entry.Name</a>
+                </li>
+            }
+            @if (Branch.Count == 0 && Branch.Children.Count == 0)
+            { <li class="muted dashboard-leaf">Папка пуста</li> }
+        </ul>
+    </details>
+</li>
+
+@code {
+    [Parameter, EditorRequired] public AgentDirectory.BranchNode Branch { get; set; } = default!;
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public Guid? SelectedId { get; set; }
+    [Parameter, EditorRequired] public string BranchKey { get; set; } = "all";
+}

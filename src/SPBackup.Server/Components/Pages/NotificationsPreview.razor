@@ -1,0 +1,120 @@
+@page "/notifications-preview"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject ServerOptions Settings
+@inject IHttpContextAccessor Http
+
+<PageTitle>Предпросмотр оповещений — @Settings.DisplayName</PageTitle>
+<div class="heading">
+    <div>
+        <h1>Предпросмотр оповещений</h1>
+        <p class="muted">Совпадения по текущим данным. Предпросмотр доступен только для чтения.</p>
+    </div>
+    <div class="actions"><a href="settings">Настройки сервера</a></div>
+</div>
+<section class="card">
+    @if (SelectedAgent is { } selected)
+    {
+        <p>Агент: @selected.Name · <a href="@Link(clearAgent: true)">Снять фильтр по агенту</a></p>
+    }
+    <form method="get" action="notifications-preview" class="actions">
+        @if (SelectedAgent is not null) { <input type="hidden" name="agent" value="@SelectedAgent.AgentId" /> }
+        <label>Папка
+            <select name="folder">
+                <option value="">Все папки и агенты</option>
+                <option value="root" selected="@(Folder == "root")">Без папки</option>
+                @foreach (var folder in Folders)
+                {
+                    <option value="@folder.Id" selected="@(Folder == folder.Id.ToString())">@folder.Path</option>
+                }
+            </select>
+        </label>
+        <label>Причина
+            <select name="kind">
+                <option value="all">Все поддерживаемые причины</option>
+                @foreach (var reason in ProblemText.NotificationReasons)
+                {
+                    <option value="@reason" selected="@(Kind == reason)">@ProblemText.Filters[reason]</option>
+                }
+            </select>
+        </label>
+        <label>Агент или задание<input name="search" value="@Search" maxlength="128" /></label>
+        <button type="submit">Показать совпадения</button>
+    </form>
+    <p class="muted">Папка включает подпапки. Для причин, связанных с заданиями и планом, нужен свежий отчёт агента.</p>
+    @if (Data is { } data)
+    {
+        <p role="status">Совпадений: @data.Total · Агентов: @data.AffectedAgents</p>
+        @if (data.Items.Count > 0)
+        {
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>Агент</th><th>Объект</th><th>Причина</th><th>Последняя связь</th></tr></thead>
+                    <tbody>
+                        @foreach (var item in data.Items)
+                        {
+                            <tr>
+                                <td>
+                                    @if (SelectedAgent is null) { <a href="@Link(agent: item.AgentId)">@item.AgentName</a> }
+                                    else { @item.AgentName }
+                                </td>
+                                <td>@ScopeTitle(item.Scope)@if (item.JobName is { } name) { <small>@name</small> }</td>
+                                <td>@ProblemText.Title(item)</td>
+                                <td>@Clock.Time(item.LastSeenUtc)<small>Отчёт @Clock.Time(item.ObservedUtc)</small></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+            <p>@(data.Total == 0 ? "По выбранным условиям совпадений нет." : "На этой странице совпадений нет.")</p>
+        }
+        <div class="pagination">
+            @if (Page > 0) { <a href="@Link(Page - 1)">← Назад</a> }
+            @if ((Page + 1L) * data.PageSize < data.Total) { <a href="@Link(Page + 1)">Далее →</a> }
+        </div>
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery] public int Page { get; set; }
+    [SupplyParameterFromQuery] public string? Folder { get; set; }
+    [SupplyParameterFromQuery] public string? Kind { get; set; }
+    [SupplyParameterFromQuery] public string? Search { get; set; }
+    [SupplyParameterFromQuery] public string? Agent { get; set; }
+    private AgentRecord? SelectedAgent;
+    private IReadOnlyList<AgentFolderOption> Folders = [];
+    private AgentProblemPage? Data;
+
+    private string Link(int page = 0, Guid? agent = null, bool clearAgent = false)
+    {
+        var id = clearAgent ? null : agent ?? SelectedAgent?.AgentId;
+        return $"notifications-preview?page={page}&folder={Uri.EscapeDataString(Folder ?? "")}&kind={Uri.EscapeDataString(Kind ?? "all")}&search={Uri.EscapeDataString(Search ?? "")}"
+            + (id is null ? "" : $"&agent={id}");
+    }
+
+    private static string ScopeTitle(AgentProblemScope scope) => scope switch
+    {
+        AgentProblemScope.Backup => "Задание SP Backup",
+        AgentProblemScope.Observation => "Внешнее наблюдение",
+        _ => "Агент"
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var token = Http.HttpContext!.RequestAborted;
+        var folder = string.IsNullOrEmpty(Folder) || Folder == "root" ? (Guid?)null : OrganizationText.FolderId(Folder);
+        SelectedAgent = null;
+        if (!string.IsNullOrEmpty(Agent))
+        {
+            if (!Guid.TryParse(Agent, out var id) || id == Guid.Empty)
+                throw new ServerRequestException(400, "invalid_problem_filter");
+            SelectedAgent = await Store.AgentAsync(id, token) ?? throw new ServerRequestException(404, "agent_not_found");
+        }
+        Folders = await Store.FoldersAsync(token);
+        Data = await Store.PreviewNotificationProblemsAsync(Page, Kind, Search, folder, Folder == "root",
+            Settings.OfflineAfterSeconds, token, SelectedAgent?.AgentId);
+    }
+}

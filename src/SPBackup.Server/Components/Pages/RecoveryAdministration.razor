@@ -1,0 +1,32 @@
+@page "/recovery-downloads"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject RecoveryDownloads Downloads
+<PageTitle>Заявки на скачивание</PageTitle>
+<div class="heading"><h1>Заявки на скачивание</h1><a href="operators">Операторы</a></div>
+@if (Pending.Count == 0)
+{
+    <p>Нет заявок на скачивание.</p>
+}
+else
+{
+    <div class="table-scroll">
+    <table>
+        <thead><tr><th>Агент</th><th>Состояние</th><th>Доступен до</th><th>Действие</th></tr></thead>
+        <tbody>
+        @foreach (var (agent, item) in Pending)
+        {
+            <tr><td><a href="@($"agents/{agent:D}")">Карточка агента</a></td>
+                <td>@OperatorDownload.Status(item.Status)</td><td>@Clock.Time(item.ExpiresUtc)</td>
+                <td><form method="post" action="@($"management/recovery-downloads/{item.Id:D}/admin-cancel")">
+                    <AntiforgeryToken /><button type="submit" class="secondary">Отменить и удалить</button>
+                </form></td></tr>
+        }
+        </tbody>
+    </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<(Guid Agent, RecoveryDownloadStatus Status)> Pending = [];
+    protected override void OnParametersSet() => Pending = Downloads.PendingForAdministration();
+}

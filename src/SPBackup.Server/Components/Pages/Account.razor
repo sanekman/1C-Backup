@@ -1,0 +1,34 @@
+@page "/account"
+@attribute [Authorize(Policy = ServerAuthentication.PanelUser)]
+@inject ServerOptions Settings
+@inject IHttpContextAccessor Http
+<PageTitle>@Heading — @Settings.DisplayName</PageTitle>
+<a href="@Back">← @(IsOperator ? "Назначенные задания" : "Состояние сервера")</a>
+<h1>@Heading</h1>
+<section class="card narrow">
+<p>Здесь меняется пароль входа в эту веб-панель. Пароли Windows, базы PostgreSQL и агентов остаются прежними.</p>
+@if (Error is not null) { <p class="error" role="alert">@ErrorText</p> }
+<form action="management/password" method="post">
+    <AntiforgeryToken />
+    <label>Текущий пароль<input type="password" name="currentPassword" autocomplete="current-password" maxlength="256" required /></label>
+    <label>Новый пароль<input type="password" name="newPassword" autocomplete="new-password" minlength="12" maxlength="256" required /></label>
+    <p class="hint">От 12 до 256 символов. Выберите пароль, отличающийся от текущего.</p>
+    <label>Повторите новый пароль<input type="password" name="confirmation" autocomplete="new-password" minlength="12" maxlength="256" required /></label>
+    <p>После смены пароля все открытые сеансы панели завершатся. Войдите заново с новым паролем. Агенты продолжат копирование и отправку результатов.</p>
+    <button type="submit">Изменить пароль</button> <a href="@Back">Отмена</a>
+</form>
+</section>
+@code {
+    [SupplyParameterFromQuery(Name = "error")] public string? Error { get; set; }
+    private bool IsOperator => Http.HttpContext?.User.IsInRole(ServerAuthentication.Operator) == true;
+    private string Back => IsOperator ? "operator" : "system";
+    private string Heading => IsOperator ? "Пароль оператора" : "Пароль администратора";
+    private string ErrorText => Error switch
+    {
+        "current" => "Текущий пароль не подошёл. Проверьте пароль именно этой панели и заполните поля заново.",
+        "mismatch" => "Новые пароли не совпали. Заполните поля заново.",
+        "same" => "Новый пароль должен отличаться от текущего.",
+        "weak" => "Новый пароль должен содержать от 12 до 256 символов без переводов строк и управляющих символов.",
+        _ => "Не удалось принять форму. Заполните поля заново."
+    };
+}

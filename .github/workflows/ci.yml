@@ -1,0 +1,599 @@
+name: Build and verify
+
+on:
+  push:
+    branches: [main, 'feature/**']
+    tags: ['v*-preview.*', 'v*-alpha.*', 'v*-beta.*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Acceptance platform (Windows first, then Linux)'
+        type: choice
+        default: all
+        options: [all, windows, linux]
+      windows_runner:
+        description: 'Windows OS for native acceptance (latest is Server 2025)'
+        type: choice
+        default: windows-latest
+        options: [windows-latest, windows-2022]
+      verified_run_id:
+        description: 'Earlier accepted run for packaging or installed-agent acceptance'
+        required: false
+        default: ''
+      scope:
+        description: 'Full, management, recovery, performance, packaging, installed-agent acceptance, or verification of a published installer'
+        type: choice
+        default: full
+        options: [full, management, recovery, performance, packaging, published-installer, installed-schedule, installed-outage, installed-access, installed-recovery, installed-unc, installed-sql, notifications]
+      published_version:
+        description: 'For published-installer: agent version without v (for example 0.2.0-alpha.39)'
+        required: false
+      installer_sha256:
+        description: 'For published-installer and installed-agent acceptance: expected installer SHA-256'
+        required: false
+      published_check:
+        description: 'For published-installer: run installation/upgrade, service, or both on isolated runners'
+        type: choice
+        default: all
+        options: [all, installer, service]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.event_name != 'workflow_dispatch' || (inputs.scope != 'published-installer' && inputs.scope != 'installed-schedule' && inputs.scope != 'installed-outage' && inputs.scope != 'installed-access' && inputs.scope != 'installed-recovery' && inputs.scope != 'installed-unc' && inputs.scope != 'installed-sql' && inputs.scope != 'notifications' && inputs.scope != 'performance' && (inputs.scope != 'packaging' || inputs.platform != 'windows'))
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.platform == 'windows' && format('["{0}"]', inputs.windows_runner || 'windows-latest') || github.event_name == 'workflow_dispatch' && inputs.platform == 'linux' && '["ubuntu-latest"]' || '["windows-latest","ubuntu-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: dotnet restore SPBackup.slnx
+      - run: dotnet build SPBackup.slnx --no-restore -m:1 -nr:false
+      - run: python -m unittest discover -s tests/postgresql -v
+      - run: python -m unittest discover -s tests/distribution -v
+      - name: Parse isolated Windows lab controllers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($file in Get-ChildItem tools/*windows_lab*.ps1) {
+            $errors = $null; $tokens = $null
+            $null = [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors) { throw ($errors | Out-String) }
+          }
+          $parseErrors = $null; $tokens = $null
+          $null = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'tools/test_windows_onec.ps1'), [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors) { throw ($parseErrors | Out-String) }
+          ./tests/windows_lab/controller_tests.ps1
+          ./tests/windows_onec/controller_tests.ps1
+      - name: Verify concurrent profile snapshots before long backup tests
+        run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'FullyQualifiedName~ProfileSnapshotConcurrencyTests'
+      - if: runner.os == 'Linux'
+        run: |
+          python -m pip install -r tests/ftp/requirements.txt
+          python tests/ftp/run_integration.py
+          python tests/agent_smoke.py
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ACCEPTANCE_SCENARIO: ${{ inputs.scope }}
+        run: |
+          New-Item -ItemType Directory -Force artifacts/ui | Out-Null
+          $share = $null
+          $backing = $null
+          $kitLab = $null
+          try {
+            if ($env:ACCEPTANCE_SCENARIO -eq 'recovery') {
+              if ((Get-Service LanmanServer).Status -ne 'Running') { throw 'SMB must be available on the disposable Windows runner.' }
+              $id = [Guid]::NewGuid().ToString('N')
+              $name = "SPBackupRestoreUi_$id"
+              $backing = Join-Path $env:RUNNER_TEMP $name
+              New-Item -ItemType Directory -Path $backing | Out-Null
+              $share = New-SmbShare -Name $name -Path $backing -Description $name -FullAccess ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -CachingMode None
+              $env:SPBACKUP_TEST_FORMER_UNC = '\\' + $env:COMPUTERNAME + '\' + $name
+              $kitLab = Join-Path $env:RUNNER_TEMP "SPBackupKitUi_$id"
+              New-Item -ItemType Directory -Path $kitLab | Out-Null
+              $env:SPBACKUP_TEST_CREATE_RECOVERY = $kitLab
+            }
+            $fixtureProcess = Start-Process -FilePath dotnet -ArgumentList @('src/SPBackup.Desktop/bin/Debug/net10.0-windows/SPBackup.Desktop.dll', '--smoke-ui', 'artifacts/ui') -PassThru
+            $timeout = if ($kitLab) { 210000 } else { 180000 }
+            if (-not $fixtureProcess.WaitForExit($timeout)) {
+              $fixtureProcess.Kill()
+              throw 'WPF smoke test timed out'
+            }
+            Get-Content artifacts/ui/smoke-result.json
+            if ($fixtureProcess.ExitCode -ne 0) { throw 'WPF smoke test failed' }
+            if ($kitLab) {
+              $env:SPBACKUP_TEST_OPEN_RECOVERY = $kitLab
+              $portable = Start-Process -FilePath dotnet -ArgumentList @('src/SPBackup.Desktop/bin/Debug/net10.0-windows/SPBackup.Desktop.dll', '--smoke-ui', 'artifacts/ui-portable') -PassThru
+              if (-not $portable.WaitForExit(90000)) {
+                $portable.Kill()
+                throw 'Portable recovery WPF test timed out'
+              }
+              Get-Content artifacts/ui-portable/smoke-result.json
+              if ($portable.ExitCode -ne 0) { throw 'Portable recovery WPF test failed' }
+            }
+          } finally {
+            if ($share) { Remove-SmbShare -InputObject $share -Force -Confirm:$false }
+            if ($backing) { Remove-Item -LiteralPath $backing -Recurse -Force }
+            if ($kitLab) { Remove-Item -LiteralPath $kitLab -Recurse -Force }
+          }
+      - if: runner.os == 'Windows'
+        run: |
+          python -m pip install -r tests/encryption/requirements.txt
+          python tests/encryption/verify_zip.py artifacts/ui/encrypted-fixture.zip
+      - if: inputs.scope != 'recovery'
+        run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category!=FtpIntegration&Category!=NativeSqlIntegration&Category!=NativeSmbIntegration&Category!=Performance&FullyQualifiedName!~ProfileSnapshotConcurrencyTests'
+      - if: inputs.scope == 'recovery'
+        run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'FullyQualifiedName~FileFolderBackupTests|FullyQualifiedName~ResilientFileBackupTests|FullyQualifiedName~LatestBackupAuditTests|FullyQualifiedName~BackupVerificationStateTests|FullyQualifiedName~OneCFileArchiveTests|FullyQualifiedName~SourceReadinessCheckerTests'
+      - if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ui-verification
+          path: |
+            artifacts/ui/
+            artifacts/ui-portable/smoke-result.json
+          retention-days: 14
+
+  history-performance:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'performance'
+    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - run: dotnet test tests/SPBackup.Core.Tests -m:1 -nr:false --filter 'Category=Performance' --logger 'console;verbosity=detailed'
+
+  native-sql:
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope == 'full')
+    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+    timeout-minutes: 20
+    env:
+      ONECBACKUP_NATIVE_SQL: '1'
+      ONECBACKUP_TEST_REPOSITORY: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - shell: pwsh
+        run: |
+          $localDb = Get-ChildItem 'C:\Program Files\Microsoft SQL Server\*\Tools\Binn\SqlLocalDB.exe' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $localDb) { throw 'SQL Server LocalDB is required for native backup and restore verification' }
+          if (-not (Test-Path (Join-Path $env:PGBIN 'pg_dump.exe'))) { throw 'PostgreSQL tools are required for native backup and restore verification' }
+          "ONECBACKUP_TEST_LOCALDB_EXE=$($localDb.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - run: dotnet restore tests/SPBackup.Core.Tests
+      - run: dotnet build tests/SPBackup.Core.Tests --no-restore -m:1 -nr:false
+      - run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category=NativeSqlIntegration' --logger 'trx;LogFileName=native-sql.trx' --results-directory artifacts/native-sql
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-sql-verification
+          path: artifacts/native-sql/*.trx
+          retention-days: 14
+
+  native-smb:
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope == 'full')
+    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+    timeout-minutes: 10
+    env:
+      ONECBACKUP_NATIVE_SMB: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - run: dotnet restore tests/SPBackup.Core.Tests
+      - run: dotnet build tests/SPBackup.Core.Tests --no-restore -m:1 -nr:false
+      - name: Interrupt an owned SMB share during a real flushed transfer
+        run: dotnet test tests/SPBackup.Core.Tests --no-build --no-restore -m:1 -nr:false --filter 'Category=NativeSmbIntegration' --logger 'trx;LogFileName=native-smb.trx' --results-directory artifacts/native-smb
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-smb-verification
+          path: artifacts/native-smb/*.trx
+          retention-days: 14
+
+  notifications:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'notifications'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - run: dotnet test tests/SPBackup.Core.Tests --filter FullyQualifiedName~BackupNotificationTests
+      - run: dotnet build src/SPBackup.Desktop
+      - name: Verify the compact notification window in both themes
+        shell: pwsh
+        env:
+          SPBACKUP_TEST_NOTIFICATIONS: '1'
+        run: |
+          $fixture = Start-Process dotnet -ArgumentList @('src/SPBackup.Desktop/bin/Debug/net10.0-windows/SPBackup.Desktop.dll', '--smoke-ui', 'artifacts/notifications') -PassThru
+          if (!$fixture.WaitForExit(90000)) { $fixture.Kill(); throw 'Notification UI verification timed out.' }
+          Get-Content artifacts/notifications/smoke-result.json
+          if ($fixture.ExitCode -ne 0) { throw 'Notification UI verification failed.' }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-notifications-verification
+          path: |
+            artifacts/notifications/smoke-result.json
+            artifacts/notifications/notifications-*.png
+          retention-days: 14
+
+  notification-service:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'notifications'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    env:
+      ONECBACKUP_NATIVE_SERVICE_TEST: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - run: dotnet publish src/SPBackup.Agent -c Release -r win-x64 --self-contained true -o artifacts/notification-service/bin
+      - name: Verify notification test with the real Windows service
+        shell: pwsh
+        run: |
+          $agent = Join-Path $PWD 'artifacts/notification-service/bin/SPBackup.Agent.exe'
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- $agent (Join-Path $PWD 'artifacts/notification-service') --verify-notifications
+          $result = $LASTEXITCODE
+          Get-Content artifacts/notification-service/notification-service-result.json
+          if ($result -ne 0) { throw 'Notification service verification failed.' }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-notification-service-verification
+          path: artifacts/notification-service/notification-service-result.json
+          retention-days: 14
+
+  native-agent-service:
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'published-installer' && inputs.scope != 'installed-schedule' && inputs.scope != 'installed-outage' && inputs.scope != 'installed-access' && inputs.scope != 'installed-recovery' && inputs.scope != 'installed-unc' && inputs.scope != 'installed-sql' && inputs.scope != 'notifications' && inputs.scope != 'performance' && inputs.scope != 'recovery')
+    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+    timeout-minutes: 10
+    env:
+      ONECBACKUP_NATIVE_SERVICE_TEST: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - run: dotnet publish src/SPBackup.Agent -c Release -r win-x64 --self-contained true -o artifacts/native-agent/service-bin -m:1 -nr:false
+      - shell: pwsh
+        run: |
+          # Existing SCM registrations keep the pre-rename application-host path.
+          Copy-Item artifacts/native-agent/service-bin/SPBackup.Agent.exe artifacts/native-agent/service-bin/OneCBackup.Agent.exe
+          $agent = Join-Path $PWD 'artifacts/native-agent/service-bin/OneCBackup.Agent.exe'
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- $agent (Join-Path $PWD 'artifacts/native-agent')
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows agent service verification failed' }
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release --no-build -- $agent (Join-Path $PWD 'artifacts/native-agent') --verify-service-switch
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows service account switch verification failed' }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-agent-service-verification
+          path: |
+            artifacts/native-agent/service-result.json
+            artifacts/native-agent/service-switch-result.json
+            artifacts/native-agent/failure-context.json
+          retention-days: 14
+
+  native-volume:
+    if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope == 'full')
+    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+    timeout-minutes: 10
+    env:
+      ONECBACKUP_NATIVE_SERVICE_TEST: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - name: Verify real NTFS quota and a full owned VHD without affecting the system volume
+        shell: pwsh
+        run: |
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- --verify-volumes (Join-Path $PWD 'artifacts/native-volumes')
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows volume verification failed' }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-volume-verification
+          path: artifacts/native-volumes/volume-result.json
+          retention-days: 14
+
+  published-installer:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'published-installer'
+    strategy:
+      fail-fast: false
+      matrix:
+        check: ${{ fromJSON(inputs.published_check == 'installer' && '["installer"]' || inputs.published_check == 'service' && '["service"]' || '["installer","service"]') }}
+    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - uses: actions/setup-python@v5
+        if: matrix.check == 'installer'
+        with:
+          python-version: '3.12'
+      - name: Download and verify exact release files
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISHED_VERSION: ${{ inputs.published_version }}
+          EXPECTED_INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
+        run: |
+          $version = $env:PUBLISHED_VERSION
+          if ($version -cnotmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$' -or $env:EXPECTED_INSTALLER_SHA256 -notmatch '^[0-9a-f]{64}$') {
+            throw 'Published installer verification requires a version and the expected EXE SHA-256.'
+          }
+          $tag = "v$version"
+          $revision = gh api "repos/$env:GITHUB_REPOSITORY/commits/$tag" --jq .sha
+          if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-f]{40}$') { throw 'Cannot resolve the version tag.' }
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or !$release -or $release.draft) { throw 'Cannot read the published release.' }
+          $base = "SP-Backup-$version-windows-x64"
+          $installer = "$base-setup.exe"
+          $zip = "$base.zip"
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern $installer --pattern $zip --dir artifacts
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download the published package.' }
+          foreach ($name in @($installer, $zip)) {
+            $digest = @($release.assets | Where-Object name -ceq $name).digest
+            $hash = (Get-FileHash "artifacts/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($digest -cne "sha256:$hash") { throw "Published SHA-256 mismatch for $name." }
+            if ($name -eq $installer -and $hash -ne $env:EXPECTED_INSTALLER_SHA256) { throw 'Expected EXE SHA-256 mismatch.' }
+          }
+          Set-Content artifacts/distribution-version.txt -Value $version -Encoding ascii
+          Add-Content $env:GITHUB_ENV "SPBACKUP_TEST_PACKAGE_REVISION=$revision"
+          $os = Get-CimInstance Win32_OperatingSystem
+          [ordered]@{ os = $os.Caption; build = $os.BuildNumber; version = $version; revision = $revision; installerSha256 = $env:EXPECTED_INSTALLER_SHA256 } |
+            ConvertTo-Json | Set-Content artifacts/windows-target.json
+      - name: Verify the installed release and upgrade from published alpha.25
+        if: matrix.check == 'installer'
+        shell: pwsh
+        env:
+          SPBACKUP_UPGRADE_SMOKE: '1'
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The installed WPF smoke reads the tag and revision from its process environment.
+          $env:GITHUB_REF_TYPE = 'tag'
+          $env:GITHUB_REF_NAME = 'v' + (Get-Content artifacts/distribution-version.txt).Trim()
+          $env:GITHUB_SHA = $env:SPBACKUP_TEST_PACKAGE_REVISION
+          python tests/distribution/installer_smoke.py
+          if ($LASTEXITCODE -ne 0) { throw 'Published installer verification failed.' }
+          python tests/distribution/legacy_upgrade_smoke.py
+          if ($LASTEXITCODE -ne 0) { throw 'Published installer upgrade verification failed.' }
+      - name: Verify the agent service from the published package against Windows SCM
+        if: matrix.check == 'service'
+        shell: pwsh
+        env:
+          ONECBACKUP_NATIVE_SERVICE_TEST: '1'
+        run: |
+          $version = (Get-Content artifacts/distribution-version.txt).Trim()
+          Expand-Archive "artifacts/SP-Backup-$version-windows-x64.zip" artifacts/published-package
+          $agent = Join-Path $PWD 'artifacts/published-package/SP-Backup/OneCBackup.Agent.exe'
+          $report = Join-Path $PWD 'artifacts/native-agent'
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- $agent $report
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows agent service verification failed' }
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release --no-build -- $agent $report --verify-service-switch
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows service account switch verification failed' }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-windows-${{ matrix.check }}-verification
+          path: |
+            artifacts/windows-target.json
+            artifacts/installer-result.json
+            artifacts/installed-ui/smoke-result.json
+            artifacts/windows-upgrade-result.json
+            artifacts/windows-upgrade-failure.json
+            artifacts/native-agent/service-result.json
+            artifacts/native-agent/service-switch-result.json
+            artifacts/native-agent/failure-context.json
+          retention-days: 14
+
+  package:
+    if: ${{ !cancelled() && (needs.verify.result == 'success' || (inputs.scope == 'packaging' && inputs.platform == 'windows')) && needs.native-agent-service.result == 'success' && (inputs.scope == 'management' || inputs.scope == 'packaging' || (needs.native-sql.result == 'success' && needs.native-smb.result == 'success' && needs.native-volume.result == 'success')) }}
+    needs: [verify, native-sql, native-smb, native-agent-service, native-volume]
+    runs-on: ${{ inputs.windows_runner || 'windows-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate reused source and UI verification
+        if: inputs.scope == 'packaging'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_RUN_ID: ${{ inputs.verified_run_id }}
+          VERIFIED_WINDOWS_RUNNER: ${{ inputs.windows_runner || 'windows-latest' }}
+        run: |
+          if ($env:VERIFIED_RUN_ID -notmatch '^\d+$') { throw 'Packaging requires a verified run ID.' }
+          $prior = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:VERIFIED_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $prior.path -ne '.github/workflows/ci.yml') { throw 'Cannot read a matching earlier verification.' }
+          $jobName = 'verify ('+$env:VERIFIED_WINDOWS_RUNNER+')'
+          $deadline = (Get-Date).AddMinutes(10)
+          do {
+            $jobs = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:VERIFIED_RUN_ID/jobs" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot read earlier job results.' }
+            $verified = @($jobs.jobs | Where-Object name -eq $jobName)
+            if ($verified.Count -ne 1) { throw 'The prior verification does not match the target OS.' }
+            if ($verified[0].status -eq 'completed') { break }
+            if ((Get-Date) -gt $deadline) { throw 'The prior verification has not finished.' }
+            Start-Sleep -Seconds 10
+          } while ($true)
+          if ($verified[0].conclusion -ne 'success') { throw 'The earlier source/UI verification did not pass.' }
+          $comparison = gh api "repos/$env:GITHUB_REPOSITORY/compare/$($prior.head_sha)...$env:GITHUB_SHA" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $comparison.status -notin @('ahead','identical')) { throw 'Cannot establish source ancestry.' }
+          if ($comparison.files.Count -ge 300) { throw 'Diff is truncated: run full verification.' }
+          if (@($comparison.files | Where-Object { $_.filename -notmatch '^(tests/|docs/|\.github/workflows/|AGENTS\.md$|src/SPBackup\.Desktop/Help/user-guide\.html$)' }).Count) { throw 'Production sources changed: run full verification.' }
+          python tools/render_user_guide.py --check
+          if ($LASTEXITCODE -ne 0) { throw 'Generated help must match its Markdown source.' }
+          Write-Output ('Reused passed '+$jobName+' at '+$prior.head_sha+'; only tests/docs/workflows/generated help changed.')
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python tests/distribution/run_update_handoff.py
+      - run: python tools/build_windows_distribution.py
+      - shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Join-Path $PWD ('artifacts/SP-Backup-' + (Get-Content artifacts/distribution-version.txt).Trim() + '-windows-x64.zip')))
+          try {
+            $expectedVersion = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.Substring(1) } else { '0.1.0-dev' }
+            foreach ($project in @('SPBackup.Desktop', 'SPBackup.Agent', 'SPBackup.Core')) {
+              $entry = $zip.GetEntry("SP-Backup/$project.dll")
+              $path = Join-Path $PWD "artifacts/$project.version-check.dll"
+              [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $path, $true)
+              $actual = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($path).ProductVersion
+              if ($actual -ne "$expectedVersion+$env:GITHUB_SHA") { throw "Packaged $project has an unexpected version: $actual" }
+              Remove-Item $path
+            }
+          } finally { $zip.Dispose() }
+      - run: python tools/build_windows_installer.py
+      - run: python tests/distribution/installer_smoke.py
+      - name: Upgrade the published alpha.25 installation to SP Backup
+        run: python tests/distribution/legacy_upgrade_smoke.py
+        env:
+          SPBACKUP_UPGRADE_SMOKE: '1'
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-upgrade-verification
+          path: |
+            artifacts/windows-upgrade-result.json
+            artifacts/windows-upgrade-failure.json
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-distribution
+          path: |
+            artifacts/SP-Backup-*-windows-x64.zip
+            artifacts/SP-Backup-*-windows-x64.zip.sha256
+            artifacts/SP-Backup-*-windows-x64-setup.exe
+            artifacts/SP-Backup-*-windows-x64-setup.exe.sha256
+            artifacts/installer-result.json
+            artifacts/update-manifest.json
+          retention-days: 14
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-windows-ui-verification
+          path: artifacts/installed-ui/
+          retention-days: 14
+      - if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = if ($env:GITHUB_REF_NAME -like "*-alpha.*") { "docs/release-notes-alpha.md" } else { "docs/release-notes-preview.md" }
+          python tools/publish_windows_update.py --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw 'Update distribution publication failed' }
+          $version = (Get-Content artifacts/distribution-version.txt).Trim()
+          $files = Get-ChildItem "artifacts/SP-Backup-$version-windows-x64*" | ForEach-Object { $_.FullName }
+          gh release create "$env:GITHUB_REF_NAME" @files --verify-tag --prerelease --title "SP Backup $version — Windows x64" --notes-file artifacts/release-notes-with-updates.md
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
+
+  installed-agent-acceptance:
+    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'installed-schedule' || inputs.scope == 'installed-outage' || inputs.scope == 'installed-access' || inputs.scope == 'installed-recovery' || inputs.scope == 'installed-unc' || inputs.scope == 'installed-sql')
+    permissions:
+      contents: read
+      actions: read
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - if: inputs.scope == 'installed-outage' || inputs.scope == 'installed-sql'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - if: inputs.scope == 'installed-outage'
+        run: python -m pip install -r tests/ftp/requirements.txt
+      - if: inputs.scope == 'installed-sql'
+        run: python -m pip install pywinauto==0.6.9
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-distribution
+          run-id: ${{ inputs.verified_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/candidate
+      - name: Install the pinned candidate and run the selected native test
+        shell: pwsh
+        env:
+          INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
+          ONECBACKUP_NATIVE_SERVICE_TEST: '1'
+          ACCEPTANCE_SCENARIO: ${{ inputs.scope }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $candidate = @(Get-ChildItem artifacts/candidate -Recurse -File -Filter '*-windows-x64-setup.exe')
+          if ($candidate.Count -ne 1 -or $env:INSTALLER_SHA256 -notmatch '^[a-fA-F0-9]{64}$' -or
+              (Get-FileHash -LiteralPath $candidate[0].FullName).Hash -ne $env:INSTALLER_SHA256) {
+            throw 'The fixture requires exactly one installer with the pinned SHA-256.'
+          }
+          $profile = Join-Path $env:LOCALAPPDATA 'OneCBackup'
+          $installation = Join-Path $env:ProgramFiles 'SP Backup'
+          if ((Test-Path $profile) -or (Test-Path $installation) -or (Get-Service OneCBackupAgent -ErrorAction SilentlyContinue)) {
+            throw 'The fixture requires a clean Windows installation.'
+          }
+          $output = Join-Path $PWD 'artifacts/installed-agent'
+          if ($env:ACCEPTANCE_SCENARIO -eq 'installed-sql') {
+            python tests/distribution/observation_upgrade.py $candidate[0].FullName $output
+            if ($LASTEXITCODE -ne 0) { throw 'Installed SQL observation upgrade verification failed.' }
+            Get-Content (Join-Path $output 'observation-upgrade-result.json')
+            return
+          }
+          $process = Start-Process $candidate[0].FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="' + $installation + '"')) -PassThru
+          if (!$process.WaitForExit(180000)) { Stop-Process -Id $process.Id -Force; throw 'Installer timed out.' }
+          if ($process.ExitCode -ne 0) { throw 'Candidate installation failed.' }
+          $agent = Join-Path $installation 'OneCBackup.Agent.exe'
+          $version = (Get-Item -LiteralPath $agent).VersionInfo.ProductVersion
+          Write-Output ("Installed agent: " + $version)
+          if ($env:ACCEPTANCE_SCENARIO -eq 'installed-outage') {
+            & tests/WindowsAgentServiceSmoke/reporting_outage.ps1 -Agent $agent -Output $output
+          } elseif ($env:ACCEPTANCE_SCENARIO -eq 'installed-unc') {
+            & tests/WindowsInstalledRecoveryProbe/historical_unc.ps1 -Installation $installation -Output $output
+          } elseif ($env:ACCEPTANCE_SCENARIO -eq 'installed-recovery') {
+            dotnet run --project tests/WindowsInstalledRecoveryProbe -c Release "-p:InstalledAgentDirectory=$installation" -- $installation $output
+            if ($LASTEXITCODE -ne 0) { throw 'Installed agent recovery verification failed.' }
+          } else {
+            $mode = if ($env:ACCEPTANCE_SCENARIO -eq 'installed-access') { '--verify-live-access' } else { '--verify-missed-schedule' }
+            dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- $agent $output $mode
+            if ($LASTEXITCODE -ne 0) { throw 'Installed agent verification failed.' }
+          }
+          Get-Content (Join-Path $output '*-result.json')
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-agent-${{ inputs.scope }}
+          path: artifacts/installed-agent/*-result.json
+          retention-days: 14
+          if-no-files-found: ignore

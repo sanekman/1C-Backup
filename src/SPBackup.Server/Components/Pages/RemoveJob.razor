@@ -1,0 +1,67 @@
+@page "/agents/{Id:guid}/jobs/{JobId:guid}/remove"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@using System.Security.Claims
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+@inject ServerOptions Settings
+<PageTitle>Удалить задание — @Settings.DisplayName</PageTitle>
+<a href="@($"agents/{Id}/jobs")">← Задания агента</a>
+<h1>Удаление задания</h1>
+<section class="card narrow">
+    @if (Removed is { } revision)
+    { <h2>Задание удалено из серверного плана</h2><p>Ревизия @revision ожидает получения агентом. Сохранённые копии и история не удалены.</p><a href="@($"agents/{Id}")">Проверить принятие настроек</a> }
+    else if (Job is { } job)
+    {
+        @if (Error is not null) { <p class="error" role="alert">@Error</p> }
+        <h2>@job.Name</h2><p class="path">@job.Source</p>
+        <p>Сохранённые архивы и история останутся. Уже начатое копирование продолжится. Будущие запуски прекратятся после получения нового плана агентом.</p>
+        <form method="post" @formname="remove-job" @onsubmit="Remove">
+            <AntiforgeryToken /><input type="hidden" name="Revision" value="@Revision" />
+            @if (Error is null) { <button type="submit" class="danger">Удалить задание из плана</button> }
+            <a href="@($"agents/{Id}/jobs")">Отмена</a>
+        </form>
+    }
+    else
+    {
+        <p class="error" role="alert">@(Error ?? "Задание не найдено.")</p>
+        @if (Http.HttpContext!.Request.Method == "POST")
+        { <form method="post" @formname="remove-job" @onsubmit="Remove" hidden><AntiforgeryToken /></form> }
+    }
+</section>
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [Parameter] public Guid JobId { get; set; }
+    [SupplyParameterFromForm] public string? Revision { get; set; }
+    private ManagedFileConfiguration? Configuration;
+    private ManagedFileJob? Job;
+    private string? Error;
+    private long? Removed;
+    protected override async Task OnParametersSetAsync()
+    {
+        var context = Http.HttpContext!;
+        var agent = await Store.AgentAsync(Id, context.RequestAborted);
+        if (agent is null) { context.Response.StatusCode = 404; return; }
+        if (agent.Revoked) { Error = "Доступ агента отозван. Изменение плана запрещено."; return; }
+        try { Configuration = await Store.ReadFileConfigurationAsync(Id, context.RequestAborted); }
+        catch (ServerRequestException) { Error = "Формат этого плана не поддерживается мастером. План не изменён."; return; }
+        Job = Configuration.Jobs.FirstOrDefault(j => j.Id == JobId);
+        if (Job is null) { context.Response.StatusCode = 404; return; }
+        if (context.Request.Method == "GET") Revision ??= Configuration.Revision.ToString(CultureInfo.InvariantCulture);
+    }
+    private async Task Remove()
+    {
+        if (Configuration is null || Job is null || Error is not null) return;
+        var context = Http.HttpContext!;
+        if (!long.TryParse(Revision, out var expected) || expected < 1) { Error = "Откройте подтверждение удаления заново."; return; }
+        if (!Guid.TryParse(context.User.FindFirstValue("stamp"), out var stamp)) { Error = "Войдите в панель заново."; return; }
+        try
+        {
+            var result = await Store.PublishFileConfigurationAsync(ServerAuthentication.UserId(context.User), stamp, Id, expected,
+                new(Id, 1, Configuration.Jobs.Where(j => j.Id != JobId).ToArray()), context.RequestAborted);
+            Removed = result.Revision;
+        }
+        catch (ServerRequestException e) when (e.Status == 412)
+        { Error = "План изменён другим администратором. Задание не удалено. Вернитесь в список и проверьте изменения."; context.Response.StatusCode = 412; }
+        catch (ServerRequestException) { Error = "Удаление не выполнено. Проверьте сеанс панели и доступ к агенту."; }
+    }
+}

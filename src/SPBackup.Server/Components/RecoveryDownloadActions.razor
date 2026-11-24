@@ -1,0 +1,35 @@
+@using SPBackup.Server.Monitoring
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+@if (Available)
+{
+    <form method="post" action="management/recovery-downloads" class="recovery-download-form">
+        <AntiforgeryToken />
+        <input type="hidden" name="agent" value="@AgentId.ToString("D")" />
+        <input type="hidden" name="job" value="@Run.JobId.ToString("D")" />
+        <input type="hidden" name="run" value="@Run.RunId.ToString("D")" />
+        <label>Хранилище<select name="destination">
+            @foreach (var destination in Run.Destinations.Where(value => value.Succeeded))
+            {
+                <option value="@destination.Index">Хранилище @(destination.Index + 1)</option>
+            }
+        </select></label>
+        <button type="submit">Подготовить комплект</button>
+    </form>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid AgentId { get; set; }
+    [Parameter, EditorRequired] public MonitoredRun Run { get; set; } = null!;
+    private bool Available;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Available = false;
+        if (Run is not { Evidence: null, CopyKind: "Full" or "Incremental" }
+            || Run.Destinations.FirstOrDefault(destination => destination.Succeeded) is not { } destination) return;
+        var context = Http.HttpContext!;
+        Available = await Store.DownloadAuthorityAsync(ServerAuthentication.UserId(context.User), ServerHost.DownloadStamp(context.User),
+            AgentId, Run.JobId, Run.RunId, destination.Index, context.RequestAborted) is not null;
+    }
+}

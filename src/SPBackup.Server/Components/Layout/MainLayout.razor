@@ -1,0 +1,26 @@
+@inherits LayoutComponentBase
+@inject ServerOptions Settings
+<header>
+    <AuthorizeView Roles="@ServerAuthentication.Operator">
+        <Authorized><a class="brand" href="operator">@Settings.DisplayName <span>SP Backup · мониторинг</span></a></Authorized>
+        <NotAuthorized><a class="brand" href="./">@Settings.DisplayName <span>SP Backup · мониторинг</span></a></NotAuthorized>
+    </AuthorizeView>
+    <div class="header-actions">
+    <button type="button" class="quiet theme-toggle" data-theme-toggle hidden></button>
+    <AuthorizeView>
+        <Authorized Context="session"><nav>
+            @if (session.User.IsInRole(ServerAuthentication.Administrator))
+            { <a href="problems">Проблемы</a><a href="./">Агенты</a><a href="connect">Подключить агент</a><a href="settings">Настройки</a> }
+            else { <a href="operator">Задания</a> }
+            <form action="session/logout" method="post"><AntiforgeryToken /><button class="quiet" type="submit">Выйти</button></form></nav></Authorized>
+    </AuthorizeView>
+    </div>
+</header>
+<main>@Body</main>
+<footer>Связь с агентом и результат резервного копирования — отдельные состояния. Время показано в поясе: @Clock.ZoneLabel. Смещение относительно UTC указано рядом с датой.
+    @if (Clock.LoadWarning) { <p class="error">Настройку часового пояса прочитать не удалось. Временно используется UTC; сохраните нужный пояс в настройках сервера.</p> }
+    <small>Сборка: @Build</small></footer>
+@code {
+    private static string Build => typeof(ServerHost).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+        .Cast<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown";
+}

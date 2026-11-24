@@ -1,0 +1,133 @@
+name: Build and verify storage gateway
+on:
+  push:
+    branches: [main, 'feature/**']
+    tags: ['storage-v*-alpha.*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      prepare_release:
+        description: Prepare a new immutable distribution and draft release after verification
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve storage version
+        id: version
+        shell: bash
+        run: |
+          version=$(cat deploy/storage/VERSION)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            [[ "$GITHUB_REF_NAME" == "storage-v$version" ]]
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-dotnet@v4
+        with: {dotnet-version: 10.0.402}
+      - run: python3 -m unittest discover -s tests/storage -p 'test_*.py' -v
+      - run: dotnet test tests/SPBackup.Core.Tests --filter 'FullyQualifiedName~RemoteGatewayTests|FullyQualifiedName~RemoteProtocolSafetyTests'
+      - run: docker build -f deploy/storage/Dockerfile --build-arg VERSION="$STORAGE_VERSION" -t onec-storage-bridge:ci .
+        env:
+          STORAGE_VERSION: ${{ steps.version.outputs.version }}
+      - run: python3 tests/storage/container_smoke.py
+        env:
+          STORAGE_TEST_IMAGE: onec-storage-bridge:ci
+      - run: python3 tools/build_storage_distribution.py --version "$STORAGE_VERSION"
+        env:
+          STORAGE_VERSION: ${{ steps.version.outputs.version }}
+      - run: python3 tests/storage/lxc_installer_smoke.py --version "$STORAGE_VERSION"
+        env:
+          STORAGE_VERSION: ${{ steps.version.outputs.version }}
+      - name: Verify upgrade, rollback and preservation of the first release
+        shell: bash
+        env:
+          STORAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git clone --depth 1 --single-branch --no-tags --branch distribution/storage-linux-x64-0.1.0-alpha.1 \
+            https://github.com/sanekman/1C-Backup.git artifacts/storage-previous
+          git clone --depth 1 --single-branch --no-tags --branch storage-v0.1.0-alpha.1 \
+            https://github.com/sanekman/1C-Backup.git artifacts/storage-previous-source
+          python3 tests/storage/upgrade_smoke.py \
+            --previous-archive artifacts/storage-previous/storage/OneCBackup-Storage-0.1.0-alpha.1-linux-x64.tar.gz \
+            --previous-installer artifacts/storage-previous-source/deploy/storage/install-lxc.sh \
+            --archive "artifacts/SPBackup-Storage-$STORAGE_VERSION-linux-x64.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: storage-linux-x64
+          path: artifacts/SPBackup-Storage-*.tar.gz*
+  image:
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/storage-v')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: storage-image-${{ github.ref_name }}
+      cancel-in-progress: false
+    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse to replace an existing image
+        run: python3 tools/check_storage_image_tag.py "$STORAGE_VERSION"
+        env:
+          STORAGE_VERSION: ${{ needs.verify.outputs.version }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/storage/Dockerfile
+          build-args: VERSION=${{ needs.verify.outputs.version }}
+          push: true
+          tags: ghcr.io/sanekman/1c-backup-storage:${{ needs.verify.outputs.version }}
+  prepare-release:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && inputs.prepare_release
+    runs-on: ubuntu-latest
+    permissions: {contents: write}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      STORAGE_VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: storage-linux-x64
+          path: artifacts
+      - name: Refuse to replace an existing release or tag
+        shell: bash
+        run: |
+          existing_tag=$(git ls-remote --tags origin "refs/tags/storage-v$STORAGE_VERSION")
+          [[ -z "$existing_tag" ]] || { echo 'Storage tag already exists; no overwrite permitted'; exit 1; }
+          existing_release=$(gh api --paginate repos/sanekman/1C-Backup/releases --jq ".[] | select(.tag_name == \"storage-v$STORAGE_VERSION\") | .id")
+          [[ -z "$existing_release" ]] || { echo 'Storage release already exists; no overwrite permitted'; exit 1; }
+      - name: Prepare immutable distribution and draft
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 tools/publish_storage_distribution.py --version "$STORAGE_VERSION"
+          package="artifacts/SPBackup-Storage-$STORAGE_VERSION-linux-x64.tar.gz"
+          gh release create "storage-v$STORAGE_VERSION" "$package" "$package.sha256" artifacts/storage-manifest.json \
+            --draft --prerelease --target "$GITHUB_SHA" \
+            --title "SP Backup Storage $STORAGE_VERSION — Linux x64 / .NET 10.0.13" \
+            --notes-file artifacts/storage-release-notes.md
+          gh release view "storage-v$STORAGE_VERSION" --json url,isDraft,tagName > artifacts/storage-draft-release.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: storage-release-preparation
+          path: |
+            artifacts/storage-manifest.json
+            artifacts/storage-release-notes.md
+            artifacts/storage-draft-release.json

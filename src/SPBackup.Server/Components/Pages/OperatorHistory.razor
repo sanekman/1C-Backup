@@ -1,0 +1,90 @@
+@page "/operator/agents/{AgentId:guid}/jobs/{JobId:guid}"
+@attribute [Authorize(Policy = ServerAuthentication.Operator)]
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+<PageTitle>История задания</PageTitle>
+<div class="heading"><h1>История задания</h1><a href="operator">Назначенные задания</a></div>
+@if (History is { } history)
+{
+    <h2 class="path">@history.JobName</h2>
+    <p class="path">@history.AgentName</p>
+    @if (Run is not null) { <p><a href="@HistoryLink()">Все запуски задания</a></p> }
+    @if (history.Runs.Count == 0)
+    {
+        <p>Отчётов о запусках пока нет.</p>
+    }
+    else
+    {
+        <div class="table-scroll">
+            <table>
+                <thead><tr><th>Начало</th><th>Окончание</th><th>Результат</th><th>Доставка</th></tr></thead>
+                <tbody>
+                @foreach (var item in history.Runs.Take(50))
+                {
+                    var status = item.Status == "Succeeded" && item.Incomplete ? "Incomplete"
+                        : item.Status == "Succeeded" && item.WarningCount > 0 ? "Warning" : item.Status;
+                    <tr>
+                        <td>@Clock.Time(item.StartedUtc)</td>
+                        <td>@Clock.Time(item.DisplayFinishedUtc)</td>
+                        <td>
+                            <span class="@OperatorDashboard.Color(status)">@OperatorDashboard.Status(status)</span>
+                            @if (Run is null) { <small><a href="@($"{HistoryLink()}?run={item.RunId:D}")">Подробности запуска</a></small> }
+                        </td>
+                        <td>@if (item.Destinations.Count > 0)
+                            { <span>@item.Destinations.Count(destination => destination.Succeeded) из @item.Destinations.Count</span> }
+                            else { <span>—</span> }
+                        </td>
+                    </tr>
+                    @if (Run is not null)
+                    {
+                        <tr><td colspan="4">
+                            @if (item.Destinations.Count > 0)
+                            {
+                                <ul>
+                                @foreach (var destination in item.Destinations.OrderBy(value => value.Index))
+                                {
+                                    <li>Хранилище @(destination.Index + 1) · @(destination.Succeeded
+                                        ? destination.Incomplete ? "доставлено с пропусками" : "доставлено"
+                                        : "доставка не подтверждена")</li>
+                                }
+                                </ul>
+                            }
+                            <RunIssueDetails Run="item" />
+                            <RecoveryDownloadActions AgentId="AgentId" Run="item" />
+                        </td></tr>
+                    }
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+    @if (Run is null)
+    {
+        <nav class="pagination" aria-label="Страницы истории">
+            @if (Page > 0) { <a href="@($"{HistoryLink()}?page={Page - 1}")">Назад</a> }
+            @if (history.Runs.Count > 50) { <a href="@($"{HistoryLink()}?page={Page + 1}")">Далее</a> }
+        </nav>
+    }
+}
+else
+{
+    <p>Задание или запуск недоступны.</p>
+}
+
+@code {
+    [Parameter] public Guid AgentId { get; set; }
+    [Parameter] public Guid JobId { get; set; }
+    [SupplyParameterFromQuery] public Guid? Run { get; set; }
+    [SupplyParameterFromQuery] public int Page { get; set; }
+    private OperatorJobHistory? History;
+
+    private string HistoryLink() => $"operator/agents/{AgentId:D}/jobs/{JobId:D}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var context = Http.HttpContext!;
+        context.Response.Headers.CacheControl = "no-store";
+        History = await Store.OperatorHistoryAsync(ServerAuthentication.UserId(context.User), AgentId, JobId, Run, Page, context.RequestAborted);
+        if (History is null) context.Response.StatusCode = StatusCodes.Status404NotFound;
+    }
+}

@@ -1,0 +1,56 @@
+@page "/settings-transfer"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+
+<PageTitle>Перенос настроек сервера</PageTitle>
+<div class="heading"><h1>Перенос настроек сервера</h1><a href="settings">Настройки сервера</a></div>
+<section class="card narrow">
+    <h2>Экспорт</h2>
+    <p>Файл JSON содержит имя и часовой пояс панели, папки и серверные задания. В заданиях сохраняются пути к источникам и назначениям.</p>
+    <p>Для полного восстановления пользователей, истории, сертификатов и подключений используйте резервную копию сервера.</p>
+    <a class="button" href="management/settings-transfer/export">Скачать настройки</a>
+</section>
+<section class="card narrow">
+    <h2>Импорт</h2>
+    <p>Загрузите файл в новую установку, где ещё нет папок, агентов и приглашений. Для перенесённых заданий затем подключите агенты заново.</p>
+    @if (Result == "imported") { <p role="status">Настройки импортированы.</p> }
+    @if (Result == "occupied") { <p class="error" role="alert">Импорт доступен в пустую установку. Текущие настройки сохранены.</p> }
+    @if (Result == "invalid") { <p class="error" role="alert">Проверьте формат файла, его размер до 4 МиБ и подтверждение импорта.</p> }
+    <form method="post" enctype="multipart/form-data" action="management/settings-transfer/import">
+        <AntiforgeryToken />
+        <label>Файл настроек<input type="file" name="settings" accept=".json,application/json" required /></label>
+        <label class="check"><input type="checkbox" name="confirm" value="true" required /> Применить настройки к этой установке</label>
+        <button type="submit">Импортировать настройки</button>
+    </form>
+</section>
+@if (Pending.Count > 0)
+{
+    <section class="card">
+        <h2>Агенты для повторного подключения</h2>
+        <div class="table-scroll"><table>
+            <thead><tr><th>Агент</th><th>Папка</th><th>Задания</th><th>Подключение</th></tr></thead>
+            <tbody>
+            @foreach (var plan in Pending)
+            {
+                <tr><td>@plan.AgentName</td>
+                    <td>@(plan.FolderId is { } id ? Paths.GetValueOrDefault(id) ?? "Без папки" : "Без папки")</td>
+                    <td>@plan.JobCount</td><td><a href="@($"connect?agentId={plan.AgentId:D}")">Создать приглашение</a></td></tr>
+            }
+            </tbody>
+        </table></div>
+    </section>
+}
+
+@code {
+    [SupplyParameterFromQuery] public string? Result { get; set; }
+    private IReadOnlyList<ImportedAgent> Pending = [];
+    private Dictionary<Guid, string> Paths = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var token = Http.HttpContext!.RequestAborted;
+        Pending = await Store.ImportedAgentsAsync(token);
+        if (Pending.Count > 0) Paths = (await Store.FoldersAsync(token)).ToDictionary(folder => folder.Id, folder => folder.Path);
+    }
+}

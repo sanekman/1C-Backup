@@ -1,0 +1,27 @@
+@using SPBackup.Server.Monitoring
+
+<ul class="dashboard-history">
+    @foreach (var check in Checks.OrderBy(check => check.Index))
+    {
+        <li>
+            <strong>Хранилище @(check.Index + 1)</strong> ·
+            @if (check.SnapshotId is { } snapshot)
+            {
+                <span title="@($"Снимок {snapshot:D}")">копия @Clock.Time(check.CreatedUtc, "dd.MM.yyyy HH:mm")</span>
+                <small>Размер и SHA-256 проверены @Clock.Time(check.CheckedUtc)</small>
+                @if (check.OlderThanLatest) { <small class="dashboard-warn">Проверена предыдущая версия</small> }
+                @if (check.Incomplete) { <small class="dashboard-warn">Копия с пропусками</small> }
+            }
+            else
+            {
+                <span>Нет подтверждённой проверки для текущего источника</span>
+            }
+            @if (check.LatestCheck == "Failed") { <small class="dashboard-error">Проверка последней копии завершилась ошибкой</small> }
+            @if (check.LatestCheck == "Cancelled") { <small class="dashboard-warn">Проверка последней копии отменена</small> }
+        </li>
+    }
+</ul>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<MonitoredFileCopyCheck> Checks { get; set; } = [];
+}

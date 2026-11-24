@@ -1,0 +1,71 @@
+@page "/operators"
+@attribute [Authorize(Policy = ServerAuthentication.Administrator)]
+@inject ServerStore Store
+@inject IHttpContextAccessor Http
+<PageTitle>Операторы</PageTitle>
+<div class="heading"><h1>Операторы</h1><div class="actions"><a href="recovery-downloads">Заявки на скачивание</a><a href="settings">Настройки сервера</a></div></div>
+<section class="card narrow">
+    <h2>Учётные записи</h2>
+    <ul>
+        @foreach (var account in Accounts)
+        {
+            <li><a href="@($"operators?edit={account.Id}")">@account.Name</a> · @(account.Enabled ? "Доступ разрешён" : "Заблокирован")</li>
+        }
+    </ul>
+    @if (Edit is not null) { <p><a class="button quiet" href="operators">Добавить оператора</a></p> }
+</section>
+<section class="card narrow">
+    <h2>@(Selected is { } current ? current.Name : "Новый оператор")</h2>
+    <form action="management/operators" method="post">
+        <AntiforgeryToken />
+        @if (Selected is { } edited)
+        {
+            <input type="hidden" name="id" value="@edited.Id" />
+            <input type="hidden" name="stamp" value="@edited.Stamp" />
+        }
+        else
+        {
+            <label>Логин<input name="name" required maxlength="80" autocomplete="off" /></label>
+        }
+        <label>@(Selected is null ? "Пароль" : "Новый пароль при сбросе")<input type="password" name="password"
+            required="@(Selected is null)" minlength="12" maxlength="256" autocomplete="new-password" /></label>
+        <label><input type="checkbox" name="enabled" value="true" checked="@(Selected?.Enabled ?? true)" /> Доступ разрешён</label>
+        <fieldset>
+            <legend>Назначенные агенты и задания</legend>
+            @foreach (var agent in Choices.GroupBy(choice => (choice.Grant.AgentId, choice.AgentName)))
+            {
+                <details open="@agent.Any(choice => Grants.ContainsKey(choice.Grant))">
+                    <summary>@agent.Key.AgentName</summary>
+                    @foreach (var choice in agent)
+                    {
+                        var key = $"{choice.Grant.AgentId:D}:{choice.Grant.JobId:D}";
+                        <div class="operator-grant">
+                            <span>@(choice.JobName ?? "Все задания компьютера, включая будущие")</span>
+                            <label><input type="checkbox" name="grant" value="@key" checked="@Grants.ContainsKey(choice.Grant)" /> Мониторинг</label>
+                            <label><input type="checkbox" name="download" value="@key" checked="@Grants.GetValueOrDefault(choice.Grant)" /> Скачивание</label>
+                        </div>
+                    }
+                </details>
+            }
+        </fieldset>
+        <button type="submit">Сохранить</button>
+    </form>
+</section>
+
+@code {
+    [SupplyParameterFromQuery] public Guid? Edit { get; set; }
+    private IReadOnlyList<OperatorAccount> Accounts = [];
+    private IReadOnlyList<OperatorChoice> Choices = [];
+    private Dictionary<OperatorGrant, bool> Grants = [];
+    private OperatorAccount? Selected;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var context = Http.HttpContext!;
+        Accounts = await Store.OperatorsAsync(context.RequestAborted);
+        Choices = await Store.OperatorChoicesAsync(context.RequestAborted);
+        Selected = Accounts.FirstOrDefault(account => account.Id == Edit);
+        if (Edit is not null && Selected is null) context.Response.StatusCode = StatusCodes.Status404NotFound;
+        Grants = Selected is null ? [] : (await Store.OperatorGrantsAsync(Selected.Id, context.RequestAborted)).ToDictionary(grant => grant with { Download = false }, grant => grant.Download);
+    }
+}

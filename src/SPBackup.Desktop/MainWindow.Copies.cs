@@ -1,0 +1,148 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.IO;
+using SPBackup.Core;
+
+namespace SPBackup.Desktop;
+
+public partial class MainWindow
+{
+    private BackupCatalog? managedViewCatalog;
+    private string? managedViewCatalogPath;
+    private BackupCatalog EffectiveCatalog
+    {
+        get
+        {
+            if (agentSettings?.Mode != AgentMode.Managed) return catalog;
+            var path = new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings).CatalogPath;
+            if (managedViewCatalogPath != path) { managedViewCatalogPath = path; managedViewCatalog = new(path); }
+            return managedViewCatalog!;
+        }
+    }
+    private string EffectiveWorkDirectory => agentSettings?.Mode == AgentMode.Managed
+        ? new ManagedAgentProfile(DesktopPaths.DataDirectory, agentSettings).WorkDirectory : Path.Combine(DesktopPaths.DataDirectory, "work");
+    private sealed record CopyJobChoice(Guid? Id, string Label);
+    private List<BackupCopyRow> copyRows = [];
+    private bool updatingCopyFilters;
+    private string? copyCheckReadError;
+
+    private void CopiesView_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (CopyDetailsScroll is not null) CopyDetailsScroll.MaxHeight = ActualHeight < 650 ? 60 : 150;
+    }
+
+    private void UpdateCopyFilterChoices()
+    {
+        var selectedId = (CopyJobFilter.SelectedItem as CopyJobChoice)?.Id;
+        var names = jobs.Select(job => new CopyJobChoice(job.Id, job.Name))
+            .Concat(copyRows.Select(row => new CopyJobChoice(row.Record.JobId, row.JobName)))
+            .DistinctBy(choice => choice.Id).ToList();
+        var duplicates = names.GroupBy(choice => choice.Label, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1).Select(group => group.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var choices = new[] { new CopyJobChoice(null, "Все задания") }.Concat(names
+            .OrderBy(choice => choice.Label, StringComparer.CurrentCultureIgnoreCase)
+            .Select(choice => duplicates.Contains(choice.Label)
+                ? choice with { Label = choice.Label + " · " + choice.Id!.Value.ToString("N")[..8] } : choice)).ToList();
+        var selectedDate = CopyDateFilter.SelectedValue as DateTime?;
+        var dates = new[] { new KeyValuePair<DateTime?, string>(null, "Все даты") }
+            .Concat(copyRows.Select(row => row.CompletedUtc.ToLocalTime().Date).Distinct().OrderDescending()
+                .Select(date => new KeyValuePair<DateTime?, string>(date, date.ToString("dd.MM.yyyy")))).ToArray();
+        updatingCopyFilters = true;
+        try
+        {
+            CopyJobFilter.ItemsSource = choices;
+            CopyJobFilter.SelectedItem = choices.FirstOrDefault(choice => choice.Id == selectedId) ?? choices[0];
+            CopyDateFilter.ItemsSource = dates;
+            CopyDateFilter.SelectedItem = dates.FirstOrDefault(choice => choice.Key == selectedDate, dates[0]);
+        }
+        finally { updatingCopyFilters = false; }
+    }
+
+    private void CopyFilter_Changed(object sender, RoutedEventArgs e) => ApplyCopyFilter();
+
+    private void ApplyCopyFilter()
+    {
+        if (updatingCopyFilters || Copies is null || CopySearch is null || CopyJobFilter is null
+            || CopyStorageFilter is null || CopyDateFilter is null || CopiesSummary is null || Copies.ItemsSource is null) return;
+        var jobId = (CopyJobFilter.SelectedItem as CopyJobChoice)?.Id;
+        var storage = (CopyStorageFilter.SelectedItem as ComboBoxItem)?.Tag as string;
+        var query = CopySearch.Text.Trim();
+        var date = CopyDateFilter.SelectedValue as DateTime?;
+        bool Matches(BackupCopyRow row) => (jobId is null || row.Record.JobId == jobId)
+            && (date is null || row.CompletedUtc.ToLocalTime().Date == date.Value.Date)
+            && (string.IsNullOrEmpty(storage) || row.StorageCategory == storage)
+            && (query.Length == 0 || row.JobName.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || row.DisplayLocation.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || row.Location.Contains(query, StringComparison.OrdinalIgnoreCase));
+        if (Copies.SelectedItem is BackupCopyRow selected && !Matches(selected)) Copies.SelectedItem = null;
+        var view = CollectionViewSource.GetDefaultView(Copies.ItemsSource);
+        view.Filter = item => item is BackupCopyRow row && Matches(row);
+        var count = Copies.Items.Count;
+        CopiesSummary.Text = copyRows.Count == 0 ? "Копий пока нет. Создайте первую копию в разделе «Задания»."
+            : count == 0 ? $"Копий по выбранным условиям нет · Всего: {copyRows.Count}"
+            : $"Показано копий: {count} из {copyRows.Count}";
+        if (copyCheckReadError is not null) CopiesSummary.Text += " · Результаты проверок недоступны";
+        CopiesSummary.ToolTip = copyCheckReadError;
+        UpdateRunControls();
+    }
+
+    private async void ConfirmEmptySourceCleanup_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ConfirmEmptySourceCleanupButton.IsEnabled || Copies.SelectedItem is not BackupCopyRow row
+            || jobs.FirstOrDefault(job => job.Id == row.Record.JobId) is not { } job) return;
+        using var lease = AcquireEngineOrReport();
+        if (lease is null) return;
+        using var cancellation = new CancellationTokenSource();
+        copyVerification = cancellation;
+        UpdateRunControls();
+        try
+        {
+            var retention = new BackupRetention(EffectiveCatalog, backupStorage);
+            var point = await retention.PreviewEmptySourceCleanupAsync(job, row.Record, cancellation.Token);
+            if (point is null)
+            {
+                CopyVerificationStatus.Text = "Нет защищённой точки, которую можно удалить по текущему лимиту. Основы используемых цепочек сохраняются.";
+                return;
+            }
+            var message = $"В этом хранилище последняя копия источника содержит 0 файлов.{Environment.NewLine}{Environment.NewLine}" +
+                $"Защищённая точка от {point.CompletedUtc.ToLocalTime():dd.MM.yyyy HH:mm}{Environment.NewLine}{point.Backup.Location}{Environment.NewLine}{Environment.NewLine}" +
+                "Применить обычный лимит хранения в этом назначении? Защищённая точка и другие архивы сверх лимита могут быть удалены безвозвратно.";
+            if (MessageBox.Show(this, message, "Подтвердить очистку копий", MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+
+            var result = await Task.Run(() => retention.ConfirmEmptySourceCleanupAsync(job, row.Record, point, cancellation.Token));
+            await RefreshCopiesAsync();
+            CopyVerificationStatus.Text = Status.Text = $"Удалено архивов: {result.Deleted.Count}." +
+                (result.Failures.Count == 0 ? "" : " Ошибки очистки: " + string.Join(" · ", result.Failures.Select(item => item.Error.Message)));
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            await RefreshCopiesAsync();
+            CopyVerificationStatus.Text = Status.Text = "Очистка остановлена. Проверьте оставшиеся копии.";
+        }
+        catch (Exception error)
+        {
+            DiagnosticLog.Current.Write(DiagnosticEvent.DesktopError, DiagnosticLevel.Error, error);
+            CopyVerificationStatus.Text = Status.Text = error.Message;
+        }
+        finally { copyVerification = null; UpdateRunControls(); }
+    }
+
+    private void ResetCopyFilters_Click(object sender, RoutedEventArgs e)
+    {
+        CopyJobFilter.SelectedIndex = 0;
+        CopyStorageFilter.SelectedIndex = 0;
+        CopyDateFilter.SelectedIndex = 0;
+        CopySearch.Clear();
+    }
+
+    private void SelectCopiesForJob(Guid jobId)
+    {
+        CopyStorageFilter.SelectedIndex = 0;
+        CopyDateFilter.SelectedIndex = 0;
+        CopySearch.Clear();
+        CopyJobFilter.SelectedItem = CopyJobFilter.Items.OfType<CopyJobChoice>().FirstOrDefault(choice => choice.Id == jobId);
+        ApplyCopyFilter();
+    }
+}
