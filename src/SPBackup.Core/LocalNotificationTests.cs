@@ -86,6 +86,8 @@ public sealed class LocalNotificationTests(string directory)
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
             catch (NotificationSendException error)
             { result = result with { Outcome = LocalNotificationTestOutcome.Failed, Failure = error.Failure }; }
+            catch (InvalidDataException)
+            { result = result with { Outcome = LocalNotificationTestOutcome.Failed, Failure = NotificationFailure.InvalidToken }; }
             catch (Exception)
             { result = result with { Outcome = LocalNotificationTestOutcome.Failed, Failure = NotificationFailure.OutcomeUnknown }; }
         }

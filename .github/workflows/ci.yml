@@ -236,6 +236,33 @@ jobs:
           path: artifacts/notifications/
           retention-days: 14
 
+  notification-service:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'notifications'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    env:
+      ONECBACKUP_NATIVE_SERVICE_TEST: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - run: dotnet publish src/SPBackup.Agent -c Release -r win-x64 --self-contained true -o artifacts/notification-service/bin
+      - name: Verify notification test with the real Windows service
+        shell: pwsh
+        run: |
+          $agent = Join-Path $PWD 'artifacts/notification-service/bin/SPBackup.Agent.exe'
+          dotnet run --project tests/WindowsAgentServiceSmoke -c Release -- $agent (Join-Path $PWD 'artifacts/notification-service') --verify-notifications
+          $result = $LASTEXITCODE
+          Get-Content artifacts/notification-service/notification-service-result.json
+          if ($result -ne 0) { throw 'Notification service verification failed.' }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-notification-service-verification
+          path: artifacts/notification-service/notification-service-result.json
+          retention-days: 14
+
   native-agent-service:
     if: github.event_name != 'workflow_dispatch' || (inputs.platform != 'linux' && inputs.scope != 'published-installer' && inputs.scope != 'installed-schedule' && inputs.scope != 'installed-outage' && inputs.scope != 'installed-access' && inputs.scope != 'installed-recovery' && inputs.scope != 'installed-unc' && inputs.scope != 'installed-sql' && inputs.scope != 'notifications' && inputs.scope != 'performance' && inputs.scope != 'recovery')
     runs-on: ${{ inputs.windows_runner || 'windows-latest' }}

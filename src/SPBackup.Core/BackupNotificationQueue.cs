@@ -254,7 +254,7 @@ public sealed class BackupNotificationQueue(string directory)
 
         item.Failure = failure?.Failure ?? NotificationFailure.OutcomeUnknown;
         var detail = new NotificationSendException(item.Failure.Value).Message;
-        if (item.Failure is NotificationFailure.Authorization or NotificationFailure.CredentialUnavailable or NotificationFailure.RecipientRejected)
+        if (item.Failure is NotificationFailure.Authorization or NotificationFailure.CredentialUnavailable or NotificationFailure.RecipientRejected or NotificationFailure.InvalidToken)
         {
             item.State = NotificationDeliveryState.Blocked;
             item.BlockedCredential = Hash(channel.CredentialKey);

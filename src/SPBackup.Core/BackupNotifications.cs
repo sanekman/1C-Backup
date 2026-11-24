@@ -57,13 +57,14 @@ public sealed record NotificationAcceptance(string MessageId);
 public enum NotificationFailure
 {
     CredentialUnavailable, Authorization, RecipientRejected, RateLimited, Temporary,
-    Dns, Tls, OutcomeUnknown, UnexpectedResponse
+    Dns, Tls, OutcomeUnknown, UnexpectedResponse, InvalidToken
 }
 
 public sealed class NotificationSendException(NotificationFailure failure, TimeSpan? retryAfter = null)
     : InvalidOperationException(failure switch
     {
         NotificationFailure.CredentialUnavailable => "Токен бота недоступен. Сохраните его заново и проверьте доступ исполнителя.",
+        NotificationFailure.InvalidToken => "Сохранённый токен бота имеет неверный формат.",
         NotificationFailure.Authorization => "Сервис отклонил авторизацию. Проверьте токен и права бота.",
         NotificationFailure.RecipientRejected => "Получатель отклонён. Проверьте ID и доступ бота к чату.",
         NotificationFailure.RateLimited => "Сервис ограничил частоту оповещений.",
@@ -282,7 +283,7 @@ public sealed class BackupNotificationDispatcher(string directory, IBackupNotifi
                     try { accepted = await sender.SendAsync(channel, item.Summary, token); }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                     catch (NotificationSendException error) { failure = error; }
-                    catch (InvalidDataException) { failure = new(NotificationFailure.CredentialUnavailable); }
+                    catch (InvalidDataException) { failure = new(NotificationFailure.InvalidToken); }
                     catch (Exception) { failure = new(NotificationFailure.OutcomeUnknown); }
                     var result = await queue.CompleteAsync(channel, item, accepted, failure, UtcNow);
                     DiagnosticLog.Current.Write(accepted is not null ? DiagnosticEvent.NotificationSent : DiagnosticEvent.NotificationFailed,

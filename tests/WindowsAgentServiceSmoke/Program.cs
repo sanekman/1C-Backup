@@ -133,6 +133,7 @@ internal static partial class Program
             throw new InvalidOperationException("Explicit isolated Windows CI opt-in, agent path and output folder are required.");
         if (args.Length == 2 && args[0] == "--verify-volumes") return await VerifyVolumesAsync(args[1]);
         if (args.Length == 3 && args[2] == "--verify-volumes") return await VerifyVolumesAsync(args[1]);
+        if (args.Length == 3 && args[2] == "--verify-notifications") return await VerifyNotificationServiceAsync(args[0], args[1]);
         if (args.Length == 3 && args[2] == "--verify-service-switch") return await VerifyServiceSwitchAsync(args[0], args[1]);
         if (args.Length == 3 && args[2] == "--verify-missed-schedule") return await VerifyMissedScheduleAsync(args[0], args[1]);
         if (args.Length == 3 && args[2] == "--verify-reporting-outage") return await VerifyReportingOutageAsync(args[0], args[1]);

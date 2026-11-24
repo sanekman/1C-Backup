@@ -11,7 +11,9 @@
     <CheckBox x:Name="TelegramEnabled" Content="Отправлять в Telegram"/>
     <TextBlock Text="Создайте бота через @BotFather и отправьте ему /start. Для группы добавьте бота в группу. Укажите числовой chat_id." TextWrapping="Wrap" Margin="0,6,0,6"/>
     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-     <StackPanel Margin="0,0,10,0"><TextBlock Text="Токен бота"/><PasswordBox x:Name="TelegramToken" Margin="0,4,0,0" ToolTip="Оставьте пустым, чтобы сохранить текущий токен."/></StackPanel>
+     <StackPanel Margin="0,0,10,0"><TextBlock Text="Токен бота"/><PasswordBox x:Name="TelegramToken" Margin="0,4,0,0" ToolTip="Оставьте пустым, чтобы сохранить текущий токен."/>
+      <CheckBox x:Name="TelegramNewBot" Content="Токен от другого бота" Margin="0,6,0,0" ToolTip="Начнёт новую очередь. Ожидающие доставки прежнего бота будут отменены."/>
+     </StackPanel>
      <StackPanel Grid.Column="1"><TextBlock Text="ID чата (chat_id)"/><TextBox x:Name="TelegramRecipient" Margin="0,4,0,0"/></StackPanel>
     </Grid>
     <WrapPanel Margin="0,8,0,0"><Button Content="Тест из приложения" Tag="Telegram" Click="Test_Click"/><Button Content="Тест через агент" Margin="8,0,0,0" Tag="Telegram" Click="TestInAgent_Click" ToolTip="Использует сохранённый канал и данные входа фонового процесса."/><Button Content="Как подключить" Margin="8,0,0,0" Tag="Telegram" Click="Help_Click"/></WrapPanel>
@@ -20,7 +22,9 @@
     <CheckBox x:Name="MaxEnabled" Content="Отправлять в MAX"/>
     <TextBlock Text="Создайте бота на платформе MAX для партнёров. Получатель должен разрешить боту отправку сообщений. Укажите ID пользователя или чата." TextWrapping="Wrap" Margin="0,6,0,6"/>
     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-     <StackPanel Margin="0,0,10,0"><TextBlock Text="Токен бота"/><PasswordBox x:Name="MaxToken" Margin="0,4,0,0" ToolTip="Оставьте пустым, чтобы сохранить текущий токен."/></StackPanel>
+     <StackPanel Margin="0,0,10,0"><TextBlock Text="Токен бота"/><PasswordBox x:Name="MaxToken" Margin="0,4,0,0" ToolTip="Оставьте пустым, чтобы сохранить текущий токен."/>
+      <CheckBox x:Name="MaxNewBot" Content="Токен от другого бота" Margin="0,6,0,0" ToolTip="Начнёт новую очередь. Ожидающие доставки прежнего бота будут отменены."/>
+     </StackPanel>
      <StackPanel Grid.Column="1"><TextBlock Text="Получатель"/><ComboBox x:Name="MaxTarget" SelectedIndex="0" Margin="0,4,0,4"><ComboBoxItem Content="Чат или канал (chat_id)"/><ComboBoxItem Content="Пользователь (user_id)"/></ComboBox><TextBox x:Name="MaxRecipient"/></StackPanel>
     </Grid>
     <WrapPanel Margin="0,8,0,0"><Button Content="Тест из приложения" Tag="Max" Click="Test_Click"/><Button Content="Тест через агент" Margin="8,0,0,0" Tag="Max" Click="TestInAgent_Click" ToolTip="Использует сохранённый канал и данные входа фонового процесса."/><Button Content="Как подключить" Margin="8,0,0,0" Tag="Max" Click="Help_Click"/></WrapPanel>

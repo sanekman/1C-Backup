@@ -45,7 +45,8 @@ public partial class NotificationsWindow : Window
         var token = telegram ? TelegramToken.Password : MaxToken.Password;
         var enabled = test || (telegram ? TelegramEnabled.IsChecked : MaxEnabled.IsChecked) == true;
         var maxUser = !telegram && MaxTarget.SelectedIndex == 1;
-        var changed = recipient != old.Recipient || maxUser != old.MaxUser || enabled && !old.Enabled;
+        var newBot = token.Length > 0 && (telegram ? TelegramNewBot.IsChecked : MaxNewBot.IsChecked) == true;
+        var changed = recipient != old.Recipient || maxUser != old.MaxUser || newBot || enabled && !old.Enabled;
         return old with { Enabled = enabled, Recipient = recipient, MaxUser = maxUser,
             Id = changed ? Guid.NewGuid() : old.Id, EnabledSinceUtc = changed ? DateTimeOffset.UtcNow : old.EnabledSinceUtc,
             CredentialKey = token.Length > 0 ? "bot-" + Guid.NewGuid().ToString("N") : old.CredentialKey };
@@ -60,6 +61,9 @@ public partial class NotificationsWindow : Window
         if (busy || !loaded) return; busy = true; Save.IsEnabled = false;
         try
         {
+            if (TelegramNewBot.IsChecked == true && TelegramToken.Password.Length == 0 ||
+                MaxNewBot.IsChecked == true && MaxToken.Password.Length == 0)
+                throw new InvalidDataException("Введите токен другого бота или снимите отметку о замене.");
             var updated = new NotificationSettings { Errors = Errors.IsChecked == true, Warnings = Warnings.IsChecked == true,
                 Success = Success.IsChecked == true, Cancelled = Cancelled.IsChecked == true,
                 Channels = [Read(NotificationProvider.Telegram), Read(NotificationProvider.Max)] };
@@ -67,6 +71,7 @@ public partial class NotificationsWindow : Window
                 updated = updated with { Channels = updated.Channels.Select(c => c with { Id = Guid.NewGuid(), EnabledSinceUtc = DateTimeOffset.UtcNow }).ToArray() };
             updated.Validate(); foreach (var channel in updated.Channels) SaveToken(channel);
             await store.SaveAsync(updated); settings = updated; TelegramToken.Clear(); MaxToken.Clear();
+            TelegramNewBot.IsChecked = MaxNewBot.IsChecked = false;
             Result.Text = "Сохранено. Программа и агент применят настройки автоматически.";
         }
         catch (Exception error) { Result.Text = error is InvalidDataException ? error.Message : "Не удалось сохранить настройки или токен. Проверьте доступ к профилю Windows."; DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning, error); }
