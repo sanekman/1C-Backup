@@ -233,7 +233,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-notifications-verification
-          path: artifacts/notifications/
+          path: |
+            artifacts/notifications/smoke-result.json
+            artifacts/notifications/notifications-*.png
           retention-days: 14
 
   notification-service:

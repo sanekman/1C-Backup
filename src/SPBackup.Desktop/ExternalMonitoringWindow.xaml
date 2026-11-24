@@ -19,29 +19,7 @@
   <TabControl x:Name="WorkspaceTabs" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
               HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
    <TabControl.Resources>
-    <Style TargetType="TabItem">
-     <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
-     <Setter Property="Padding" Value="12,6" />
-     <Setter Property="Template">
-      <Setter.Value>
-       <ControlTemplate TargetType="TabItem">
-        <Border x:Name="TabBorder" Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}"
-                BorderThickness="1,1,1,0" Padding="{TemplateBinding Padding}" Margin="0,0,3,0">
-         <ContentPresenter x:Name="TabHeader" ContentSource="Header" RecognizesAccessKey="True" />
-        </Border>
-        <ControlTemplate.Triggers>
-         <Trigger Property="IsSelected" Value="True">
-          <Setter TargetName="TabBorder" Property="Background" Value="{DynamicResource SelectionBrush}" />
-          <Setter TargetName="TabHeader" Property="TextElement.Foreground" Value="{DynamicResource SelectionTextBrush}" />
-         </Trigger>
-         <Trigger Property="IsKeyboardFocused" Value="True">
-          <Setter TargetName="TabBorder" Property="BorderBrush" Value="{DynamicResource LinkBrush}" />
-         </Trigger>
-        </ControlTemplate.Triggers>
-       </ControlTemplate>
-      </Setter.Value>
-     </Setter>
-    </Style>
+    <Style TargetType="TabItem" BasedOn="{StaticResource WorkspaceTabItemStyle}" />
    </TabControl.Resources>
    <TabItem x:Name="HistoryTab" Header="История">
     <DockPanel Margin="8">

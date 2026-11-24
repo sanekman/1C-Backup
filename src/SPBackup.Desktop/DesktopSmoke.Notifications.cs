@@ -48,13 +48,15 @@ internal static partial class DesktopSmoke
             foreach (var theme in new[] { DesktopThemePreference.Light, DesktopThemePreference.Dark })
             {
                 DesktopTheme.Select(theme);
+                grid.SelectedIndex = 0;
                 dialog.UpdateLayout();
                 var settingsButton = Control<Button>("Save");
                 var actionBottom = cancel.TranslatePoint(new Point(0, cancel.ActualHeight), dialog).Y;
                 if (dialog.ActualWidth != 900 || dialog.ActualHeight != 580 || grid.ActualHeight < 200
                     || !cancel.IsVisible || actionBottom >= dialog.ActualHeight || settingsButton.IsVisible)
                     throw new InvalidOperationException("Очередь и действия не помещаются в окно 900×580.");
-                grid.SelectedIndex = 0;
+                if (((SolidColorBrush)tabs.Background).Color != ((SolidColorBrush)dialog.FindResource("SurfaceBrush")).Color)
+                    throw new InvalidOperationException("Фон вкладки не соответствует выбранной теме.");
                 if (!retry.IsEnabled || !cancel.IsEnabled || !Control<TextBlock>("QueueDetail").Text.Contains("авторизацию"))
                     throw new InvalidOperationException("Заблокированная доставка потеряла доступные действия или причину.");
                 var image = new RenderTargetBitmap(900, 580, 96, 96, PixelFormats.Pbgra32);
