@@ -15,6 +15,13 @@
 </section>
 }
 <ServerUpdatePanel />
+@if (Ready)
+{
+    <section class="card narrow">
+        <h2>Оповещения</h2>
+        <a href="notifications-preview">Предпросмотр правил оповещений</a>
+    </section>
+}
 <section class="card narrow">
 <h2>Часовой пояс панели</h2>
 <p>Выберите, в каком часовом поясе показывать время всем пользователям этого сервера.</p>

@@ -5,6 +5,7 @@
 @inject IHttpContextAccessor Http
 <PageTitle>Проблемы копирования — @Settings.DisplayName</PageTitle>
 <div class="heading"><div><h1>Что требует внимания</h1><p class="muted">Связь, задания, копии и применение плана.</p></div><div class="actions"><a href="@Link(Page)">Обновить</a>
+<a href="@PreviewLink">Предпросмотр оповещений</a>
 <a href="@Link(0, previousView: !PreviousView)">@(PreviousView ? "Группировать по заданиям" : "Показать список причин")</a></div></div>
 <section class="card">
 @if (SelectedAgent is { } selected)
@@ -96,6 +97,9 @@ else
     private AgentRecord? SelectedAgent;
     private IReadOnlyList<AgentFolderOption> Folders = [];
     private AgentProblemPage? Data;
+    private string PreviewLink => $"notifications-preview?folder={Uri.EscapeDataString(Folder ?? "")}&search={Uri.EscapeDataString(Search ?? "")}"
+        + (Agent is null ? "" : $"&agent={Uri.EscapeDataString(Agent)}")
+        + (Kind is not null && ProblemText.NotificationReasons.Contains(Kind) ? $"&kind={Uri.EscapeDataString(Kind)}" : "");
     private string FilterResetLink => $"problems?folder={Uri.EscapeDataString(Folder ?? "")}"
         + (Agent is null ? "" : $"&agent={Uri.EscapeDataString(Agent)}") + ViewParameter(PreviousView);
     private static string TaskLink(AgentProblem problem) => problem.Scope == AgentProblemScope.Observation

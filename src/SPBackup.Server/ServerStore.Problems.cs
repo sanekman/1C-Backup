@@ -69,10 +69,19 @@ public sealed partial class ServerStore
             )
             """;
 
-    public async Task<AgentProblemPage> ProblemsAsync(int page, string? kind, string? search, Guid? folder, bool root,
-        int offlineSeconds, CancellationToken token, Guid? agentId = null, bool groupByJob = false)
+    public Task<AgentProblemPage> ProblemsAsync(int page, string? kind, string? search, Guid? folder, bool root,
+        int offlineSeconds, CancellationToken token, Guid? agentId = null, bool groupByJob = false) =>
+        ReadProblemsAsync(page, kind, search, folder, root, offlineSeconds, token, agentId, groupByJob, notificationPreview: false);
+
+    public Task<AgentProblemPage> PreviewNotificationProblemsAsync(int page, string? kind, string? search, Guid? folder,
+        bool root, int offlineSeconds, CancellationToken token, Guid? agentId) =>
+        ReadProblemsAsync(page, kind, search, folder, root, offlineSeconds, token, agentId, groupByJob: false, notificationPreview: true);
+
+    private async Task<AgentProblemPage> ReadProblemsAsync(int page, string? kind, string? search, Guid? folder, bool root,
+        int offlineSeconds, CancellationToken token, Guid? agentId, bool groupByJob, bool notificationPreview)
     {
         if (agentId == Guid.Empty || page is < 0 or > 100000 || offlineSeconds < 1 || !ProblemText.Filters.ContainsKey(kind ?? "all")
+            || notificationPreview && kind is not (null or "all") && !ProblemText.NotificationReasons.Contains(kind)
             || search is { Length: > 128 } || search?.Any(char.IsControl) == true)
             throw new ServerRequestException(400, "invalid_problem_filter");
         if (folder is { } id && !(await FoldersAsync(token)).Any(f => f.Id == id)) throw new ServerRequestException(404, "folder_not_found");
@@ -80,6 +89,8 @@ public sealed partial class ServerStore
         await using var query = Command(db, null, ProblemRowsSql + "\n" + """
             , filtered AS (
                 SELECT * FROM problems WHERE (@kind='all' OR code=@kind)
+                    AND (NOT @preview OR (code=ANY(@notification_codes::text[])
+                        AND (code='Offline' OR observed>=now()-make_interval(secs=>@seconds))))
                     AND (@search='' OR strpos(lower(translate(name,'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')),lower(translate(@search,'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')))>0 OR strpos(lower(translate(coalesce(job_name,''),'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')),lower(translate(@search,'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')))>0)
             )
             , prioritized AS (
@@ -109,7 +120,8 @@ public sealed partial class ServerStore
                 AND p.scope='Backup' AND p.code IN ('Failed','Cancelled','Interrupted','Partial','Incomplete','Warning')
             ORDER BY CASE WHEN @grouped THEN p.group_index ELSE p.row_index END,p.priority,p.code
             """, ("agent_ids", agentId is { } agent ? new[] { agent } : null), ("folder", folder), ("root", root), ("seconds", offlineSeconds),
-            ("kind", kind ?? "all"), ("search", search?.Trim() ?? ""), ("offset", page * 50), ("grouped", groupByJob));
+            ("kind", kind ?? "all"), ("search", search?.Trim() ?? ""), ("offset", page * 50), ("grouped", groupByJob),
+            ("preview", notificationPreview), ("notification_codes", ProblemText.NotificationReasons.ToArray()));
         await using var reader = await query.ExecuteReaderAsync(token);
         var rows = new List<AgentProblem>();
         long total = 0, pageItems = 0, affectedAgents = 0, affectedJobs = 0;

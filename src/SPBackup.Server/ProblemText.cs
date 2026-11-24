@@ -1,6 +1,7 @@
 namespace SPBackup.Server;
 public static class ProblemText
 {
+    internal static IReadOnlyList<string> NotificationReasons { get; } = ["Offline", "Overdue", "PlanRejected", "AccessRequired"];
     public static int Priority(string code) => code switch { "Offline" => 0, "Failed" or "Interrupted" => 1, "Partial" => 2, "Incomplete" => 3, _ => 4 };
     public static IReadOnlyDictionary<string,string> Filters { get; } = new Dictionary<string,string> {
         ["all"] = "Все проблемы", ["Offline"] = "Нет связи", ["Unreported"] = "Нет отчётов", ["Failed"] = "Ошибки копирования",

@@ -10,7 +10,9 @@
 {
     <h1>@agent.Name</h1>
     <p>Компьютер: @(agent.ComputerName ?? agent.Name) · Папка: @(Folders.FirstOrDefault(f => f.Id == agent.FolderId)?.Path ?? "Без папки")</p>
-    <p><a href="@($"agents/{Id}/edit")">Изменить имя и папку</a></p>
+    <p><a href="@($"agents/{Id}/edit")">Изменить имя и папку</a>
+       @if (!agent.Revoked) { <span> · </span><a href="@($"notifications-preview?agent={Id}")">Предпросмотр оповещений</a> }
+    </p>
     <p><a class="button" href="@($"agents/{Id}/jobs")">Настроить задания на сервере</a></p>
     <section class="card">
     <h2>Резервное копирование</h2>
