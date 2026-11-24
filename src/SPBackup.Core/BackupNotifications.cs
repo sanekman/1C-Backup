@@ -52,9 +52,35 @@ public sealed class NotificationSettingsStore(string directory)
     public Task SaveAsync(NotificationSettings settings, CancellationToken token = default)
     { settings.Validate(); return file.WriteAsync(settings, token); }
 }
+public sealed record NotificationAcceptance(string MessageId);
+
+public enum NotificationFailure
+{
+    CredentialUnavailable, Authorization, RecipientRejected, RateLimited, Temporary,
+    Dns, Tls, OutcomeUnknown, UnexpectedResponse
+}
+
+public sealed class NotificationSendException(NotificationFailure failure, TimeSpan? retryAfter = null)
+    : InvalidOperationException(failure switch
+    {
+        NotificationFailure.CredentialUnavailable => "Токен бота недоступен. Сохраните его заново и проверьте доступ исполнителя.",
+        NotificationFailure.Authorization => "Сервис отклонил авторизацию. Проверьте токен и права бота.",
+        NotificationFailure.RecipientRejected => "Получатель отклонён. Проверьте ID и доступ бота к чату.",
+        NotificationFailure.RateLimited => "Сервис ограничил частоту оповещений.",
+        NotificationFailure.Temporary => "Сервис оповещений временно недоступен.",
+        NotificationFailure.Dns => "Не удалось определить адрес сервиса оповещений. Проверьте сеть и DNS.",
+        NotificationFailure.Tls => "Не удалось установить защищённое соединение с сервисом оповещений. Проверьте доверие к сертификатам.",
+        NotificationFailure.OutcomeUnknown => "Подтверждение от сервиса не получено. Сообщение могло быть принято.",
+        _ => "Сервис вернул неожиданный ответ. Отправка не подтверждена."
+    })
+{
+    public NotificationFailure Failure { get; } = failure;
+    public TimeSpan? RetryAfter { get; } = retryAfter;
+}
+
 public interface IBackupNotificationSender
 {
-    Task SendAsync(NotificationChannel channel, string text, CancellationToken token = default);
+    Task<NotificationAcceptance> SendAsync(NotificationChannel channel, string text, CancellationToken token = default);
 }
 /// <summary>Fixed HTTPS hosts, no redirects and no untrusted API error text in diagnostics or the UI.</summary>
 public sealed class BotNotificationSender(HttpClient client, IFtpCredentialStore credentials) : IBackupNotificationSender
@@ -66,11 +92,14 @@ public sealed class BotNotificationSender(HttpClient client, IFtpCredentialStore
             || provider == NotificationProvider.Telegram && !Regex.IsMatch(secret, @"^[0-9]+:[A-Za-z0-9_-]+$"))
             throw new InvalidDataException("Некорректный токен бота.");
     }
-    public async Task SendAsync(NotificationChannel channel, string text, CancellationToken token = default)
+    public async Task<NotificationAcceptance> SendAsync(NotificationChannel channel, string text, CancellationToken token = default)
     {
         if (!NotificationSettings.ValidRecipient(channel) || !Enum.IsDefined(channel.Provider)) throw new InvalidDataException("Некорректный получатель оповещений.");
         if (text.Length is 0 or > 3900) throw new ArgumentException("Сообщение должно содержать до 3900 символов.");
-        var secret = (await credentials.GetAsync(channel.CredentialKey, token)).Password;
+        string secret;
+        try { secret = (await credentials.GetAsync(channel.CredentialKey, token)).Password; }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw new OperationCanceledException(token); }
+        catch (Exception) { throw new NotificationSendException(NotificationFailure.CredentialUnavailable); }
         ValidateToken(channel.Provider, secret);
         var uri = channel.Provider == NotificationProvider.Telegram
             ? "https://api.telegram.org/bot" + secret + "/sendMessage"
@@ -84,25 +113,128 @@ public sealed class BotNotificationSender(HttpClient client, IFtpCredentialStore
         try
         {
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
-            if (!response.IsSuccessStatusCode) throw new HttpRequestException("Сервис оповещений вернул HTTP " + (int)response.StatusCode + ".", null, response.StatusCode);
-            await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
-            using var body = new MemoryStream(); var buffer = new byte[4096]; int count;
-            while ((count = await stream.ReadAsync(buffer, deadline.Token)) > 0)
-            { if (body.Length + count > 65536) throw new InvalidDataException("Ответ сервиса оповещений слишком большой."); body.Write(buffer, 0, count); }
-            using var json = JsonDocument.Parse(body.ToArray());
+            if (!response.IsSuccessStatusCode)
+                throw await RejectResponseAsync(response, channel.Provider, deadline.Token, token);
+
+            using var json = await ReadResponseAsync(response.Content, deadline.Token);
             var root = json.RootElement;
-            var accepted = channel.Provider == NotificationProvider.Telegram
-                ? root.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True
-                    && root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Object
-                    && result.TryGetProperty("message_id", out var messageId) && messageId.TryGetInt64(out _)
-                : root.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.Object
-                    && message.TryGetProperty("body", out var messageBody) && messageBody.ValueKind == JsonValueKind.Object
-                    && messageBody.TryGetProperty("mid", out var mid) && mid.ValueKind == JsonValueKind.String && mid.GetString()?.Length > 0;
-            if (!accepted) throw new InvalidDataException("Сервис не подтвердил отправку сообщения.");
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (channel.Provider == NotificationProvider.Telegram && root.TryGetProperty("ok", out var ok))
+                {
+                    if (ok.ValueKind == JsonValueKind.True && ObjectProperty(root, "result", out var result)
+                        && IntegerProperty(result, "message_id", out var messageId) && messageId > 0)
+                        return new(messageId.ToString(CultureInfo.InvariantCulture));
+                    if (ok.ValueKind == JsonValueKind.False && IntegerProperty(root, "error_code", out var telegramStatus)
+                        && telegramStatus is >= 400 and <= 599)
+                        throw TelegramRejection((int)telegramStatus, root, RetryAfter(response));
+                }
+                if (channel.Provider == NotificationProvider.Max && ObjectProperty(root, "message", out var message)
+                    && ObjectProperty(message, "body", out var body) && body.TryGetProperty("mid", out var mid)
+                    && mid.ValueKind == JsonValueKind.String && mid.GetString() is { Length: > 0 and <= 256 } id
+                    && !string.IsNullOrWhiteSpace(id) && !id.Any(char.IsControl))
+                    return new(id);
+            }
+            throw new NotificationSendException(NotificationFailure.UnexpectedResponse);
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-        catch (Exception error) { throw new InvalidOperationException("Не удалось отправить оповещение. Проверьте сеть, токен бота и ID получателя.", error); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw new OperationCanceledException(token); }
+        catch (NotificationSendException) { throw; }
+        catch (JsonException) { throw new NotificationSendException(NotificationFailure.UnexpectedResponse); }
+        catch (HttpRequestException error)
+        {
+            // The Telegram URI contains the token. Never retain the exception or the response body.
+            throw new NotificationSendException(error.HttpRequestError switch
+            {
+                HttpRequestError.NameResolutionError => NotificationFailure.Dns,
+                HttpRequestError.SecureConnectionError => NotificationFailure.Tls,
+                _ => NotificationFailure.OutcomeUnknown
+            });
+        }
+        catch (Exception) { throw new NotificationSendException(NotificationFailure.OutcomeUnknown); }
     }
+
+    private static async Task<NotificationSendException> RejectResponseAsync(HttpResponseMessage response,
+        NotificationProvider provider, CancellationToken deadline, CancellationToken callerToken)
+    {
+        var status = (int)response.StatusCode;
+        var retry = status == 429 ? RetryAfter(response) : null;
+        if (provider == NotificationProvider.Telegram ? status is 400 or 429 : status is 400 or 403 or 404)
+        {
+            try
+            {
+                using var json = await ReadResponseAsync(response.Content, deadline);
+                var root = json.RootElement;
+                if (root.ValueKind == JsonValueKind.Object)
+                {
+                    if (provider == NotificationProvider.Telegram) return TelegramRejection(status, root, retry);
+                    if (StringPropertyIs(root, "code", "chat.denied")) return new(NotificationFailure.RecipientRejected);
+                }
+            }
+            catch (Exception) when (!callerToken.IsCancellationRequested)
+            { /* Keep the HTTP classification if the optional error body cannot be read. */ }
+        }
+        callerToken.ThrowIfCancellationRequested();
+        return Rejected(status, retry);
+    }
+
+    private static NotificationSendException TelegramRejection(int status, JsonElement root, TimeSpan? retry)
+    {
+        if (status == 400 && StringPropertyIs(root, "description", "Bad Request: chat not found"))
+            return new(NotificationFailure.RecipientRejected);
+        if (status == 429 && TelegramRetryAfter(root) is { } delay && (retry is null || delay > retry))
+            retry = delay;
+        return Rejected(status, retry);
+    }
+
+    private static bool StringPropertyIs(JsonElement root, string name, string expected) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.ValueEquals(expected);
+
+    private static NotificationSendException Rejected(int status, TimeSpan? retry = null) => status switch
+    {
+        401 or 403 => new(NotificationFailure.Authorization),
+        429 => new(NotificationFailure.RateLimited, retry),
+        408 => new(NotificationFailure.OutcomeUnknown),
+        >= 500 and <= 599 => new(NotificationFailure.Temporary),
+        _ => new(NotificationFailure.UnexpectedResponse)
+    };
+
+    private static TimeSpan? RetryAfter(HttpResponseMessage response)
+    {
+        var header = response.Headers.RetryAfter;
+        var delay = header?.Delta ?? header?.Date - DateTimeOffset.UtcNow;
+        return delay > TimeSpan.Zero && delay <= TimeSpan.FromDays(365) ? delay : null;
+    }
+
+    private static TimeSpan? TelegramRetryAfter(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object && ObjectProperty(root, "parameters", out var parameters)
+        && IntegerProperty(parameters, "retry_after", out var seconds) && seconds is > 0 and <= 31_536_000
+            ? TimeSpan.FromSeconds(seconds) : null;
+
+    private static bool ObjectProperty(JsonElement root, string name, out JsonElement value) =>
+        root.TryGetProperty(name, out value) && value.ValueKind == JsonValueKind.Object;
+
+    private static bool IntegerProperty(JsonElement root, string name, out long value)
+    {
+        value = 0;
+        return root.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Number
+            && property.TryGetInt64(out value);
+    }
+
+    private static async Task<JsonDocument> ReadResponseAsync(HttpContent content, CancellationToken token)
+    {
+        await using var stream = await content.ReadAsStreamAsync(token);
+        using var body = new MemoryStream();
+        var buffer = new byte[4096];
+        int count;
+        while ((count = await stream.ReadAsync(buffer, token)) > 0)
+        {
+            if (body.Length + count > 65536) throw new NotificationSendException(NotificationFailure.UnexpectedResponse);
+            body.Write(buffer, 0, count);
+        }
+        body.Position = 0;
+        return await JsonDocument.ParseAsync(body, cancellationToken: token);
+    }
+
     public static string Format(BackupRun run)
     {
         // Do not send raw errors, source paths, connection strings or credentials to messenger servers.
@@ -154,9 +286,14 @@ public sealed class BackupNotificationDispatcher(string directory, IBackupNotifi
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                     catch (Exception error)
                     {
-                        retryAt[channel.Id] = now.AddMinutes(1);
-                        DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning, error, jobId: run.JobId, runId: run.RunId);
-                        notices.Add(name + ": оповещение не доставлено; повтор через минуту. Проверьте подключение и настройки."); break;
+                        var failure = error as NotificationSendException;
+                        var delay = failure?.RetryAfter is { } requested && requested > TimeSpan.FromMinutes(1)
+                            ? requested : TimeSpan.FromMinutes(1);
+                        retryAt[channel.Id] = (clock ?? TimeProvider.System).GetUtcNow().Add(delay);
+                        DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning, failure, jobId: run.JobId, runId: run.RunId);
+                        var reason = failure?.Message ?? "Отправка или запись подтверждения не завершилась.";
+                        notices.Add(name + ": " + reason + " Будет повторено автоматически.");
+                        break;
                     }
                 }
             }

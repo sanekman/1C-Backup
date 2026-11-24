@@ -78,9 +78,14 @@ public partial class NotificationsWindow : Window
             IFtpCredentialStore credentials = text.Length > 0 ? new TestCredential(text) : secrets;
             using var client = BotNotificationSender.CreateClient();
             await new BotNotificationSender(client, credentials).SendAsync(channel, "SP Backup: тестовое оповещение. Подключение настроено.");
-            Result.Text = "Тестовое сообщение отправлено. Нажмите «Сохранить», чтобы включить оповещения.";
+            Result.Text = "Сервис принял тестовое сообщение. Проверьте его в чате и сохраните настройки.";
         }
-        catch (Exception error) { Result.Text = "Не удалось отправить тест. Проверьте сеть, токен, ID получателя и доступ бота к чату."; DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning, error); }
+        catch (Exception error)
+        {
+            Result.Text = error is NotificationSendException or InvalidDataException ? error.Message
+                : "Не удалось выполнить тест. Проверьте настройки оповещений и доступ к профилю Windows.";
+            DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning, error as NotificationSendException);
+        }
         finally { busy = false; button.IsEnabled = true; }
     }
     private sealed class TestCredential(string value) : IFtpCredentialStore

@@ -48,7 +48,8 @@ public sealed class BackupNotificationTests : IDisposable
             Assert.DoesNotContain(secret, request.RequestUri.AbsoluteUri);
             return Json("{\"message\":{\"body\":{\"mid\":\"fixture\"}}}");
         }));
-        await new BotNotificationSender(client, new Secrets(secret)).SendAsync(channel, "Тест <база>");
+        var accepted = await new BotNotificationSender(client, new Secrets(secret)).SendAsync(channel, "Тест <база>");
+        Assert.Equal(provider == NotificationProvider.Telegram ? "1" : "fixture", accepted.MessageId);
     }
     [Theory]
     [InlineData(NotificationProvider.Telegram, "{\"ok\":false,\"description\":\"TOKEN_private\"}", 200)]
@@ -59,9 +60,62 @@ public sealed class BackupNotificationTests : IDisposable
     public async Task RejectedOrInvalidResponseIsNotSuccessAndDoesNotExposeApiText(NotificationProvider provider, string body, int status)
     {
         using var client = new HttpClient(new Api((_, _) => Task.FromResult(Json(body, (HttpStatusCode)status))));
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => new BotNotificationSender(client, new Secrets("123:fixture")).SendAsync(Channel(provider), "test"));
+        var error = await Assert.ThrowsAsync<NotificationSendException>(() => new BotNotificationSender(client, new Secrets("123:fixture")).SendAsync(Channel(provider), "test"));
         Assert.DoesNotContain("TOKEN_private", error.Message); Assert.DoesNotContain("123:fixture", error.Message);
     }
+    [Theory]
+    [InlineData(NotificationProvider.Telegram, 400, "{\"ok\":false,\"description\":\"Bad Request: chat not found\"}", NotificationFailure.RecipientRejected)]
+    [InlineData(NotificationProvider.Max, 403, "{\"code\":\"chat.denied\",\"message\":\"secret\"}", NotificationFailure.RecipientRejected)]
+    [InlineData(NotificationProvider.Max, 400, "{\"code\":\"proto.payload\"}", NotificationFailure.UnexpectedResponse)]
+    [InlineData(NotificationProvider.Telegram, 401, "secret", NotificationFailure.Authorization)]
+    [InlineData(NotificationProvider.Max, 503, "secret", NotificationFailure.Temporary)]
+    [InlineData(NotificationProvider.Telegram, 200, "{\"ok\": true, \"result\": {\"message_id\": \"1\"}}", NotificationFailure.UnexpectedResponse)]
+    [InlineData(NotificationProvider.Max, 200, "{\"message\": {\"body\": {\"mid\": \" \"}}}", NotificationFailure.UnexpectedResponse)]
+    public async Task ProviderFailureIsClassifiedWithoutApiDetails(NotificationProvider provider, int status, string body, NotificationFailure expected)
+    {
+        using var client = new HttpClient(new Api((_, _) => Task.FromResult(Json(body, (HttpStatusCode)status))));
+        var error = await Assert.ThrowsAsync<NotificationSendException>(() =>
+            new BotNotificationSender(client, new Secrets("123:fixture")).SendAsync(Channel(provider), "test"));
+        Assert.Equal(expected, error.Failure);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("secret", error.ToString());
+    }
+
+    [Theory]
+    [InlineData(NotificationProvider.Telegram, 429, "{\"parameters\":{\"retry_after\":180}}", 60, 180)]
+    [InlineData(NotificationProvider.Telegram, 200, "{\"ok\":false,\"error_code\":429,\"parameters\":{\"retry_after\":60}}", 100, 100)]
+    [InlineData(NotificationProvider.Telegram, 429, "invalid JSON", 90, 90)]
+    [InlineData(NotificationProvider.Max, 429, "invalid JSON", 90, 90)]
+    [InlineData(NotificationProvider.Max, 429, "invalid JSON", 0, null)]
+    public async Task RateLimitRespectsRetryAfter(NotificationProvider provider, int status, string body, int header, int? expected)
+    {
+        using var client = new HttpClient(new Api((_, _) =>
+        {
+            var response = Json(body, (HttpStatusCode)status);
+            if (header > 0) response.Headers.RetryAfter = new(TimeSpan.FromSeconds(header));
+            return Task.FromResult(response);
+        }));
+        var error = await Assert.ThrowsAsync<NotificationSendException>(() =>
+            new BotNotificationSender(client, new Secrets("123:fixture")).SendAsync(Channel(provider), "test"));
+        Assert.Equal(NotificationFailure.RateLimited, error.Failure);
+        Assert.Equal(expected.HasValue ? TimeSpan.FromSeconds(expected.Value) : (TimeSpan?)null, error.RetryAfter);
+    }
+
+    [Theory]
+    [InlineData(HttpRequestError.NameResolutionError, NotificationFailure.Dns)]
+    [InlineData(HttpRequestError.SecureConnectionError, NotificationFailure.Tls)]
+    [InlineData(HttpRequestError.ConnectionError, NotificationFailure.OutcomeUnknown)]
+    public async Task TransportExceptionDoesNotRetainTheRequestUri(HttpRequestError error, NotificationFailure expected)
+    {
+        using var client = new HttpClient(new Api((request, _) =>
+            throw new HttpRequestException(error, request.RequestUri!.AbsoluteUri)));
+        var failure = await Assert.ThrowsAsync<NotificationSendException>(() =>
+            new BotNotificationSender(client, new Secrets("123:fixture")).SendAsync(Channel(), "test"));
+        Assert.Equal(expected, failure.Failure);
+        Assert.Null(failure.InnerException);
+        Assert.DoesNotContain("123:fixture", failure.ToString());
+    }
+
     [Theory]
     [InlineData("123:abc/other")]
     [InlineData("123:abc?query=1")]
@@ -75,19 +129,26 @@ public sealed class BackupNotificationTests : IDisposable
     public async Task CancellationStopsNetworkRequest()
     {
         using var cancellation = new CancellationTokenSource();
-        using var client = new HttpClient(new Api(async (_, token) => { cancellation.Cancel(); await Task.Delay(Timeout.Infinite, token); return Json("{}"); }));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new BotNotificationSender(client, new Secrets("123:fixture")).SendAsync(Channel(), "test", cancellation.Token));
+        using var client = new HttpClient(new Api((request, token) =>
+        {
+            cancellation.Cancel();
+            throw new OperationCanceledException(request.RequestUri!.AbsoluteUri, token);
+        }));
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new BotNotificationSender(client, new Secrets("123:fixture")).SendAsync(Channel(), "test", cancellation.Token));
+        Assert.Equal(cancellation.Token, cancelled.CancellationToken);
+        Assert.DoesNotContain("123:fixture", cancelled.ToString());
     }
     private sealed class Sender : IBackupNotificationSender
     {
         public List<NotificationProvider> Sent { get; } = [];
-        public bool DenyTelegram;
+        public Exception? TelegramFailure;
         public Action? AfterSend;
-        public Task SendAsync(NotificationChannel channel, string text, CancellationToken token = default)
+        public Task<NotificationAcceptance> SendAsync(NotificationChannel channel, string text, CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
-            if (DenyTelegram && channel.Provider == NotificationProvider.Telegram) throw new HttpRequestException("fixture offline");
-            Sent.Add(channel.Provider); AfterSend?.Invoke(); return Task.CompletedTask;
+            if (channel.Provider == NotificationProvider.Telegram && TelegramFailure is { } failure) throw failure;
+            Sent.Add(channel.Provider); AfterSend?.Invoke(); return Task.FromResult(new NotificationAcceptance("fixture"));
         }
     }
     private sealed class Clock : TimeProvider
@@ -99,6 +160,11 @@ public sealed class BackupNotificationTests : IDisposable
         var history = new BackupRunHistory(Path.Combine(directory, "runs.json")); var failed = Run();
         await history.SaveAsync(failed); await history.SaveAsync(Run() with { FinishedUtc = Now.AddDays(-2), StartedUtc = Now.AddDays(-3) });
         await history.SaveAsync(Run() with { Status = BackupRunStatus.Running, FinishedUtc = null });
+        var oldRun = Run();
+        await history.SaveAsync(oldRun);
+        var deliveryFile = Path.Combine(directory, "notification-deliveries.json");
+        var channel = Assert.Single((await new NotificationSettingsStore(directory).LoadAsync()).Channels);
+        await File.WriteAllTextAsync(deliveryFile, $$"""[{"ChannelId":"{{channel.Id}}","RunId":"{{oldRun.RunId}}"}]""");
         var sender = new Sender();
         Assert.Null(await new BackupNotificationDispatcher(directory, sender).PollAsync());
         Assert.Single(sender.Sent);
@@ -111,12 +177,14 @@ public sealed class BackupNotificationTests : IDisposable
     {
         await new NotificationSettingsStore(directory).SaveAsync(new() { Channels = [Channel(), Channel(NotificationProvider.Max)] });
         await new BackupRunHistory(Path.Combine(directory, "runs.json")).SaveAsync(Run());
-        var sender = new Sender { DenyTelegram = true }; var clock = new Clock();
+        var sender = new Sender { TelegramFailure = new NotificationSendException(NotificationFailure.RateLimited, TimeSpan.FromMinutes(3)) }; var clock = new Clock();
         var dispatcher = new BackupNotificationDispatcher(directory, sender, clock);
         Assert.NotNull(await dispatcher.PollAsync()); Assert.Equal([NotificationProvider.Max], sender.Sent);
-        sender.DenyTelegram = false;
+        sender.TelegramFailure = null;
         Assert.NotNull(await dispatcher.PollAsync()); Assert.Single(sender.Sent);
         clock.Now = Now.AddMinutes(1);
+        Assert.NotNull(await dispatcher.PollAsync()); Assert.Single(sender.Sent);
+        clock.Now = Now.AddMinutes(3);
         Assert.Null(await dispatcher.PollAsync()); Assert.Equal([NotificationProvider.Max, NotificationProvider.Telegram], sender.Sent);
         Assert.Null(await dispatcher.PollAsync()); Assert.Equal(2, sender.Sent.Count);
     }
@@ -147,7 +215,7 @@ public sealed class BackupNotificationTests : IDisposable
     public async Task OversizedResponseIsRejectedWithoutReadingUnboundedContent()
     {
         using var client = new HttpClient(new Api((_, _) => Task.FromResult(Json(new string('x', 70000)))));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => new BotNotificationSender(client, new Secrets("123:fixture")).SendAsync(Channel(), "test"));
+        await Assert.ThrowsAsync<NotificationSendException>(() => new BotNotificationSender(client, new Secrets("123:fixture")).SendAsync(Channel(), "test"));
     }
     [Fact]
     public async Task ReceiptWriteFailureIsWarningAndDoesNotChangeBackupOutcome()
