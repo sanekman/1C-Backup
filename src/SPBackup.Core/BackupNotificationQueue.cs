@@ -11,6 +11,9 @@ internal sealed record NotificationDelivery(
 {
     public NotificationDeliveryState State { get; set; }
     public int Attempts { get; set; }
+    public DateTimeOffset? QueuedUtc { get; init; }
+    public DateTimeOffset? LastAttemptUtc { get; set; }
+    public DateTimeOffset? AcceptedUtc { get; set; }
     public DateTimeOffset? NextAttemptUtc { get; set; }
     public NotificationFailure? Failure { get; set; }
     public string? BlockedCredential { get; set; }
@@ -144,6 +147,7 @@ internal sealed class BackupNotificationQueue(string directory)
                 ? "Исход предыдущей попытки неизвестен. Повтор отложен." : "Повтор отложен.");
         item.State = NotificationDeliveryState.Sending;
         item.Attempts = Math.Min(item.Attempts + 1, int.MaxValue - 1);
+        item.LastAttemptUtc = now;
         item.NextAttemptUtc = null;
         item.Failure = null;
         item.BlockedCredential = null;
@@ -164,6 +168,7 @@ internal sealed class BackupNotificationQueue(string directory)
         {
             item.State = NotificationDeliveryState.Accepted;
             item.MessageId = accepted.MessageId;
+            item.AcceptedUtc = now;
             var mirrored = await TryMirrorAsync(null, [new(item.ChannelId, item.RunId)], token);
             await queue.WriteAsync(snapshot, token);
             return mirrored ? null : LegacyWarning;
@@ -205,7 +210,8 @@ internal sealed class BackupNotificationQueue(string directory)
                 var key = new Receipt(channel.Id, run.RunId);
                 if (run.FinishedUtc < channel.EnabledSinceUtc || receipts.Contains(key) || !known.Add(key)) continue;
                 if (remaining <= 0) return (added, true);
-                snapshot.Deliveries.Add(new(channel.Id, run.RunId, run.JobId, route, BotNotificationSender.Format(run), run.FinishedUtc!.Value));
+                snapshot.Deliveries.Add(new(channel.Id, run.RunId, run.JobId, route, BotNotificationSender.Format(run), run.FinishedUtc!.Value)
+                { QueuedUtc = now });
                 remaining--;
                 added = true;
             }

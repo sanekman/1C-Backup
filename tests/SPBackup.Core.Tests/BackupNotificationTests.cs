@@ -257,7 +257,12 @@ public sealed class BackupNotificationTests : IDisposable
         Assert.Null(await new BackupNotificationDispatcher(directory, sender).PollAsync());
         Assert.Single(sender.Sent);
         var json = await File.ReadAllTextAsync(Path.Combine(directory, "notification-queue.json"));
-        Assert.Contains("Accepted", json);
+        using var snapshot = JsonDocument.Parse(json);
+        var accepted = Assert.Single(snapshot.RootElement.GetProperty("Deliveries").EnumerateArray());
+        Assert.Equal("Accepted", accepted.GetProperty("State").GetString());
+        Assert.NotEqual(default, accepted.GetProperty("QueuedUtc").GetDateTimeOffset());
+        Assert.NotEqual(default, accepted.GetProperty("LastAttemptUtc").GetDateTimeOffset());
+        Assert.NotEqual(default, accepted.GetProperty("AcceptedUtc").GetDateTimeOffset());
         Assert.DoesNotContain("private", json);
         Assert.DoesNotContain("secret", json);
         Assert.DoesNotContain("-100123", json);
@@ -348,6 +353,18 @@ public sealed class BackupNotificationTests : IDisposable
             await Continue.Task.WaitAsync(token);
             return new NotificationAcceptance(Interlocked.Increment(ref Accepted).ToString());
         }
+    }
+
+    [Fact]
+    public async Task LegacyRunWithoutANameDoesNotBlockTheQueue()
+    {
+        await new NotificationSettingsStore(directory).SaveAsync(new() { Channels = [Channel()] });
+        var history = new BackupRunHistory(Path.Combine(directory, "runs.json"));
+        await history.SaveAsync(Run() with { JobName = null! });
+        await history.SaveAsync(Run());
+        var sender = new Sender();
+        Assert.Null(await new BackupNotificationDispatcher(directory, sender).PollAsync());
+        Assert.Equal(2, sender.Sent.Count);
     }
 
     [Fact]

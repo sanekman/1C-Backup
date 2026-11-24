@@ -238,7 +238,8 @@ public sealed class BotNotificationSender(HttpClient client, IFtpCredentialStore
     public static string Format(BackupRun run)
     {
         // Do not send raw errors, source paths, connection strings or credentials to messenger servers.
-        var name = new string(run.JobName.Where(c => !char.IsControl(c)).Take(500).ToArray());
+        var name = new string((run.JobName ?? "").Where(c => !char.IsControl(c)).Take(500).ToArray()).Trim();
+        if (name.Length == 0) name = "Без названия";
         var machine = new string(Environment.MachineName.Take(100).ToArray());
         return $"SP Backup · {machine}\nЗадание: {name}\nРезультат: {run.StatusDescription}\nНачало: {run.StartedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss zzz}\nОкончание: {run.FinishedUtc?.ToLocalTime():dd.MM.yyyy HH:mm:ss zzz}\nПредупреждений: {run.Warnings?.Count ?? 0}\nID: {run.RunId.ToString("N")[..8]}\nПодробности — в истории запусков программы.";
     }
