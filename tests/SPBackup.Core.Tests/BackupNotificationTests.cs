@@ -9,7 +9,7 @@ namespace SPBackup.Core.Tests;
 public sealed class BackupNotificationTests : IDisposable
 {
     private readonly string directory = Path.Combine(Path.GetTempPath(), "OneCBackup-notifications-" + Guid.NewGuid());
-    private static readonly DateTimeOffset Now = new(2026, 10, 14, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow.AddMinutes(-1);
     public BackupNotificationTests() => Directory.CreateDirectory(directory);
     public void Dispose() => Directory.Delete(directory, true);
     private static NotificationChannel Channel(NotificationProvider provider = NotificationProvider.Telegram) => new()
@@ -180,7 +180,9 @@ public sealed class BackupNotificationTests : IDisposable
         var sender = new Sender { TelegramFailure = new NotificationSendException(NotificationFailure.RateLimited, TimeSpan.FromMinutes(3)) }; var clock = new Clock();
         var dispatcher = new BackupNotificationDispatcher(directory, sender, clock);
         Assert.NotNull(await dispatcher.PollAsync()); Assert.Equal([NotificationProvider.Max], sender.Sent);
+        File.Delete(Path.Combine(directory, "runs.json"));
         sender.TelegramFailure = null;
+        dispatcher = new BackupNotificationDispatcher(directory, sender, clock);
         Assert.NotNull(await dispatcher.PollAsync()); Assert.Single(sender.Sent);
         clock.Now = Now.AddMinutes(1);
         Assert.NotNull(await dispatcher.PollAsync()); Assert.Single(sender.Sent);
@@ -195,8 +197,10 @@ public sealed class BackupNotificationTests : IDisposable
         Assert.True(settings.Includes(Run())); Assert.True(settings.Includes(Run(BackupRunStatus.Succeeded)));
         Assert.False(settings.Includes(Run(BackupRunStatus.Succeeded) with { Warnings = [] }));
         Assert.False(settings.Includes(Run(BackupRunStatus.Cancelled)));
-        var summary = BotNotificationSender.Format(Run());
+        var run = Run();
+        var summary = BotNotificationSender.Format(run);
         Assert.Contains("Тест <база>", summary); Assert.Contains("Ошибка", summary);
+        Assert.Contains(run.RunId.ToString("N")[..8], summary);
         Assert.DoesNotContain("secret", summary); Assert.DoesNotContain("private", summary);
     }
     [Fact]
@@ -228,5 +232,169 @@ public sealed class BackupNotificationTests : IDisposable
         var sender = new Sender { AfterSend = () => Directory.CreateDirectory(Path.Combine(directory, "notification-deliveries.json")) };
         Assert.NotNull(await new BackupNotificationDispatcher(directory, sender).PollAsync()); Assert.Single(sender.Sent);
         Assert.Equal(BackupRunStatus.Succeeded, Assert.Single(await history.ReadAsync()).Status);
+        sender.AfterSend = null;
+        Assert.NotNull(await new BackupNotificationDispatcher(directory, sender).PollAsync());
+        Assert.Single(sender.Sent);
+        Directory.Delete(Path.Combine(directory, "notification-deliveries.json"));
+        Assert.Null(await new BackupNotificationDispatcher(directory, sender).PollAsync());
+        Assert.Single(sender.Sent);
+        Assert.True(File.Exists(Path.Combine(directory, "notification-deliveries.json")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TerminalResultReachesTheQueueBeforeFirstPoll(bool interrupted)
+    {
+        await new NotificationSettingsStore(directory).SaveAsync(new() { Channels = [Channel()] });
+        var path = Path.Combine(directory, "runs.json");
+        var history = new BackupRunHistory(path);
+        var run = Run();
+        await history.SaveAsync(interrupted ? run with { FinishedUtc = null, Status = BackupRunStatus.Running } : run);
+        if (interrupted) await history.RecoverInterruptedAsync();
+        File.Delete(path);
+        var sender = new Sender();
+        Assert.Null(await new BackupNotificationDispatcher(directory, sender).PollAsync());
+        Assert.Single(sender.Sent);
+        var json = await File.ReadAllTextAsync(Path.Combine(directory, "notification-queue.json"));
+        Assert.Contains("Accepted", json);
+        Assert.DoesNotContain("private", json);
+        Assert.DoesNotContain("secret", json);
+        Assert.DoesNotContain("-100123", json);
+    }
+
+    [Fact]
+    public async Task HistoryRecoversDeliveryAfterQueueWriteFails()
+    {
+        await new NotificationSettingsStore(directory).SaveAsync(new() { Channels = [Channel()] });
+        var queue = Path.Combine(directory, "notification-queue.json");
+        Directory.CreateDirectory(queue);
+        var history = new BackupRunHistory(Path.Combine(directory, "runs.json"));
+        await history.SaveAsync(Run());
+        Assert.Single(await history.ReadAsync());
+        var sender = new Sender();
+        Assert.NotNull(await new BackupNotificationDispatcher(directory, sender).PollAsync());
+        Assert.Empty(sender.Sent);
+        Directory.Delete(queue);
+        Assert.Null(await new BackupNotificationDispatcher(directory, sender).PollAsync());
+        Assert.Single(sender.Sent);
+    }
+
+    [Fact]
+    public async Task InterruptedAttemptWaitsBeforeRetryAfterRestart()
+    {
+        await new NotificationSettingsStore(directory).SaveAsync(new() { Channels = [Channel()] });
+        await new BackupRunHistory(Path.Combine(directory, "runs.json")).SaveAsync(Run());
+        using var cancellation = new CancellationTokenSource();
+        var sender = new Sender { AfterSend = () => { cancellation.Cancel(); cancellation.Token.ThrowIfCancellationRequested(); } };
+        var clock = new Clock();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new BackupNotificationDispatcher(directory, sender, clock).PollAsync(cancellation.Token));
+        Assert.Single(sender.Sent);
+        sender.AfterSend = null;
+        var restarted = new BackupNotificationDispatcher(directory, sender, clock);
+        Assert.Contains("неизвестен", await restarted.PollAsync());
+        Assert.Single(sender.Sent);
+        clock.Now = Now.AddMinutes(1);
+        Assert.Null(await restarted.PollAsync());
+        Assert.Equal(2, sender.Sent.Count);
+    }
+
+    [Fact]
+    public async Task PendingDeliveryDoesNotFollowChangedRecipient()
+    {
+        var channel = Channel();
+        var store = new NotificationSettingsStore(directory);
+        await store.SaveAsync(new() { Channels = [channel] });
+        var history = new BackupRunHistory(Path.Combine(directory, "runs.json"));
+        await history.SaveAsync(Run());
+        await store.SaveAsync(new() { Channels = [channel with { Recipient = "-100456" }] });
+        var sender = new Sender();
+        Assert.Null(await new BackupNotificationDispatcher(directory, sender).PollAsync());
+        Assert.Empty(sender.Sent);
+        Assert.Contains("Cancelled", await File.ReadAllTextAsync(Path.Combine(directory, "notification-queue.json")));
+    }
+
+    [Fact]
+    public async Task BlockedRouteWaitsForNewCredentialsAndOtherProviderContinues()
+    {
+        var telegram = Channel();
+        var max = Channel(NotificationProvider.Max);
+        var store = new NotificationSettingsStore(directory);
+        await store.SaveAsync(new() { Channels = [telegram, max] });
+        await new BackupRunHistory(Path.Combine(directory, "runs.json")).SaveAsync(Run());
+        var clock = new Clock();
+        var sender = new Sender { TelegramFailure = new NotificationSendException(NotificationFailure.Authorization) };
+        Assert.NotNull(await new BackupNotificationDispatcher(directory, sender, clock).PollAsync());
+        Assert.Equal([NotificationProvider.Max], sender.Sent);
+        clock.Now += TimeSpan.FromHours(1);
+        sender.TelegramFailure = null;
+        Assert.NotNull(await new BackupNotificationDispatcher(directory, sender, clock).PollAsync());
+        Assert.Equal([NotificationProvider.Max], sender.Sent);
+        await store.SaveAsync(new() { Channels = [telegram with { CredentialKey = "updated" }, max] });
+        Assert.Null(await new BackupNotificationDispatcher(directory, sender, clock).PollAsync());
+        Assert.Equal([NotificationProvider.Max, NotificationProvider.Telegram], sender.Sent);
+    }
+
+    private sealed class WaitingSender : IBackupNotificationSender
+    {
+        internal readonly TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly TaskCompletionSource Continue = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int Accepted;
+
+        public async Task<NotificationAcceptance> SendAsync(NotificationChannel channel, string text, CancellationToken token = default)
+        {
+            Started.TrySetResult();
+            await Continue.Task.WaitAsync(token);
+            return new NotificationAcceptance(Interlocked.Increment(ref Accepted).ToString());
+        }
+    }
+
+    [Fact]
+    public async Task SlowMessengerDoesNotHoldQueueWriteLock()
+    {
+        await new NotificationSettingsStore(directory).SaveAsync(new() { Channels = [Channel()] });
+        var path = Path.Combine(directory, "runs.json");
+        var history = new BackupRunHistory(path);
+        await history.SaveAsync(Run());
+        var sender = new WaitingSender();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var poll = new BackupNotificationDispatcher(directory, sender).PollAsync(timeout.Token);
+        try
+        {
+            await sender.Started.Task.WaitAsync(timeout.Token);
+            await history.SaveAsync(Run(), timeout.Token);
+            File.Delete(path);
+            Assert.False(poll.IsCompleted);
+        }
+        finally { sender.Continue.TrySetResult(); }
+        Assert.Null(await poll);
+        Assert.Equal(2, sender.Accepted);
+    }
+
+    [Fact]
+    public async Task QueueLimitLeavesExcessRunsAvailableForLaterCapture()
+    {
+        var channel = Channel();
+        var settings = new NotificationSettings { Channels = [channel] };
+        var queue = new BackupNotificationQueue(directory);
+        var runs = Enumerable.Range(0, BackupNotificationQueue.PendingLimit + 1).Select(_ => Run()).ToArray();
+        Assert.Contains("заполнена", await queue.PrepareAsync(settings, runs, Now, CancellationToken.None));
+        var first = await queue.ClaimAsync(channel, Now, CancellationToken.None);
+        Assert.NotNull(first.Item);
+        Assert.Null(await queue.CompleteAsync(channel, first.Item, new("fixture"), null, Now));
+        Assert.Null(await queue.PrepareAsync(settings, runs, Now, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ExpiredDeliveryIsNotSent()
+    {
+        await new NotificationSettingsStore(directory).SaveAsync(new() { Channels = [Channel()] });
+        await new BackupRunHistory(Path.Combine(directory, "runs.json")).SaveAsync(Run());
+        var sender = new Sender();
+        var clock = new Clock { Now = Now + BackupNotificationQueue.Lifetime };
+        Assert.Null(await new BackupNotificationDispatcher(directory, sender, clock).PollAsync());
+        Assert.Empty(sender.Sent);
+        Assert.Contains("Expired", await File.ReadAllTextAsync(Path.Combine(directory, "notification-queue.json")));
     }
 }

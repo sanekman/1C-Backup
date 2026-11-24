@@ -240,70 +240,63 @@ public sealed class BotNotificationSender(HttpClient client, IFtpCredentialStore
         // Do not send raw errors, source paths, connection strings or credentials to messenger servers.
         var name = new string(run.JobName.Where(c => !char.IsControl(c)).Take(500).ToArray());
         var machine = new string(Environment.MachineName.Take(100).ToArray());
-        return $"SP Backup · {machine}\nЗадание: {name}\nРезультат: {run.StatusDescription}\nНачало: {run.StartedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss}\nОкончание: {run.FinishedUtc?.ToLocalTime():dd.MM.yyyy HH:mm:ss}\nПредупреждений: {run.Warnings?.Count ?? 0}\nПодробности — в истории запусков программы.";
+        return $"SP Backup · {machine}\nЗадание: {name}\nРезультат: {run.StatusDescription}\nНачало: {run.StartedUtc.ToLocalTime():dd.MM.yyyy HH:mm:ss zzz}\nОкончание: {run.FinishedUtc?.ToLocalTime():dd.MM.yyyy HH:mm:ss zzz}\nПредупреждений: {run.Warnings?.Count ?? 0}\nID: {run.RunId.ToString("N")[..8]}\nПодробности — в истории запусков программы.";
     }
 }
-/// <summary>Durable delivery receipts; terminal history is the queue. Shares a separate lease across UI/service processes.</summary>
+/// <summary>One sender across the desktop and service. The queue has a separate, short-lived write lock.</summary>
 public sealed class BackupNotificationDispatcher(string directory, IBackupNotificationSender sender, TimeProvider? clock = null)
 {
-    private sealed record Receipt(Guid ChannelId, Guid RunId);
-    private readonly AgentJsonFile<List<Receipt>> receipts = new(Path.Combine(directory, "notification-deliveries.json"));
-    private readonly Dictionary<Guid, DateTimeOffset> retryAt = [];
     private readonly SemaphoreSlim gate = new(1, 1);
+    private readonly BackupNotificationQueue queue = new(directory);
+    private DateTimeOffset UtcNow => (clock ?? TimeProvider.System).GetUtcNow();
+
     public async Task<string?> PollAsync(CancellationToken token = default)
     {
         if (!await gate.WaitAsync(0, token)) return null;
         try
         {
-            var settings = await new NotificationSettingsStore(directory).LoadAsync(token);
-            var channels = settings.Channels.Where(c => c.Enabled).ToArray();
-            if (channels.Length == 0) return null;
+            var settingsStore = new NotificationSettingsStore(directory);
+            var settings = await settingsStore.LoadAsync(token);
+            if (!settings.Channels.Any(c => c.Enabled) && !File.Exists(Path.Combine(directory, "notification-queue.json"))) return null;
             using var lease = new BackupEngineCoordinator(Path.Combine(directory, "notification-control")).Acquire();
-            var runs = await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync(token);
-            var sent = await receipts.ReadAsync(token) ?? [];
-            if (sent.Any(r => r is null || r.ChannelId == Guid.Empty || r.RunId == Guid.Empty)) throw new InvalidDataException("Некорректная история оповещений.");
-            var known = sent.ToHashSet(); var notices = new List<string>();
-            var now = (clock ?? TimeProvider.System).GetUtcNow();
-            foreach (var channel in channels)
+            var notices = new List<string>();
+            IReadOnlyList<BackupRun> runs = [];
+            try { runs = await new BackupRunHistory(Path.Combine(directory, "runs.json")).ReadAsync(token); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+            { notices.Add("История запусков недоступна. Уже сохранённая очередь продолжает работать."); }
+            if (await queue.PrepareAsync(settings, runs, UtcNow, token) is { } queueNotice) notices.Add(queueNotice);
+            foreach (var provider in settings.Channels.Where(c => c.Enabled).Select(c => c.Provider))
             {
-                var name = channel.Provider == NotificationProvider.Max ? "MAX" : "Telegram";
-                var pending = runs.Where(r => r.FinishedUtc >= channel.EnabledSinceUtc && settings.Includes(r)
-                    && !known.Contains(new(channel.Id, r.RunId))).OrderBy(r => r.FinishedUtc).Take(2);
-                if (retryAt.TryGetValue(channel.Id, out var next) && next > now)
-                { notices.Add(name + ": отправка отложена, будет повторена автоматически."); continue; }
-                foreach (var run in pending)
+                var name = provider == NotificationProvider.Max ? "MAX" : "Telegram";
+                for (var attempt = 0; attempt < 2; attempt++)
                 {
-                    try
-                    {
-                        await sender.SendAsync(channel, BotNotificationSender.Format(run), token);
-                        var receipt = new Receipt(channel.Id, run.RunId); known.Add(receipt);
-                        var currentIds = runs.Select(r => r.RunId).ToHashSet();
-                        sent = known.Where(r => currentIds.Contains(r.RunId) && channels.Any(c => c.Id == r.ChannelId)).ToList();
-                        await receipts.WriteAsync(sent, token);
-                        retryAt.Remove(channel.Id);
-                        DiagnosticLog.Current.Write(DiagnosticEvent.NotificationSent, jobId: run.JobId, runId: run.RunId);
-                    }
+                    var current = await settingsStore.LoadAsync(token);
+                    var channel = current.Channels.FirstOrDefault(c => c.Enabled && c.Provider == provider);
+                    if (channel is null) break;
+                    var (item, notice) = await queue.ClaimAsync(channel, UtcNow, token);
+                    if (notice is not null) notices.Add(name + ": " + notice);
+                    if (item is null) break;
+                    NotificationAcceptance? accepted = null;
+                    NotificationSendException? failure = null;
+                    try { accepted = await sender.SendAsync(channel, item.Summary, token); }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-                    catch (Exception error)
-                    {
-                        var failure = error as NotificationSendException;
-                        var delay = failure?.RetryAfter is { } requested && requested > TimeSpan.FromMinutes(1)
-                            ? requested : TimeSpan.FromMinutes(1);
-                        retryAt[channel.Id] = (clock ?? TimeProvider.System).GetUtcNow().Add(delay);
-                        DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning, failure, jobId: run.JobId, runId: run.RunId);
-                        var reason = failure?.Message ?? "Отправка или запись подтверждения не завершилась.";
-                        notices.Add(name + ": " + reason + " Будет повторено автоматически.");
-                        break;
-                    }
+                    catch (NotificationSendException error) { failure = error; }
+                    catch (InvalidDataException) { failure = new(NotificationFailure.CredentialUnavailable); }
+                    catch (Exception) { failure = new(NotificationFailure.OutcomeUnknown); }
+                    var result = await queue.CompleteAsync(channel, item, accepted, failure, UtcNow);
+                    DiagnosticLog.Current.Write(accepted is not null ? DiagnosticEvent.NotificationSent : DiagnosticEvent.NotificationFailed,
+                        accepted is not null ? DiagnosticLevel.Info : DiagnosticLevel.Warning, failure, jobId: item.JobId, runId: item.RunId);
+                    if (result is not null) notices.Add(name + ": " + result);
+                    if (accepted is null) break;
                 }
             }
             return notices.Count == 0 ? null : string.Join("\n", notices);
         }
         catch (BackupEngineBusyException) { return null; }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-        catch (Exception error)
+        catch (Exception)
         {
-            DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning, error);
+            DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning);
             return "Оповещения недоступны. Проверьте настройки и доступ к рабочему профилю; резервное копирование продолжается.";
         }
         finally { gate.Release(); }

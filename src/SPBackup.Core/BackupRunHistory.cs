@@ -70,6 +70,7 @@ public sealed class BackupRunHistory(string path)
             runs.Add(run);
             Validate(runs);
             await file.WriteAsync(runs, cancellationToken);
+            if (run.FinishedUtc.HasValue) await BackupNotificationQueue.CaptureAsync(path, [run], cancellationToken);
         }
         finally { gate.Release(); }
     }
@@ -115,6 +116,7 @@ public sealed class BackupRunHistory(string path)
         {
             var runs = await ReadCoreAsync(cancellationToken);
             if (!runs.Any(run => run.Status == BackupRunStatus.Running)) return;
+            var interrupted = new List<BackupRun>();
             for (var index = 0; index < runs.Count; index++)
             {
                 var run = runs[index];
@@ -131,8 +133,10 @@ public sealed class BackupRunHistory(string path)
                     Destinations = recovered.Count == 0 ? run.Destinations : recovered,
                     Backup = recovered.FirstOrDefault(item => item.Record is not null)?.Record?.Backup ?? run.Backup
                 };
+                interrupted.Add(runs[index]);
             }
             await file.WriteAsync(runs, cancellationToken);
+            await BackupNotificationQueue.CaptureAsync(path, interrupted, cancellationToken);
         }
         finally { gate.Release(); }
     }
