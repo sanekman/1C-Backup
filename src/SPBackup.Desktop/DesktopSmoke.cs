@@ -36,6 +36,12 @@ internal static partial class DesktopSmoke
         {
             await WaitUntil(() => Application.Current.MainWindow is MainWindow { SmokeReady: true }, "Окно не завершило загрузку.");
             var window = (MainWindow)Application.Current.MainWindow;
+            if (Environment.GetEnvironmentVariable("SPBACKUP_TEST_NOTIFICATIONS") == "1")
+            {
+                await VerifyNotificationWindowAsync(window, output);
+                Finish(output, true, "Очередь Telegram и MAX в обеих темах при 900×580, действия и сохранение изменений проверены.");
+                return;
+            }
             if (Environment.GetEnvironmentVariable("SPBACKUP_TEST_OPEN_RECOVERY") is { Length: > 0 } recoveryFixture)
             {
                 await VerifyPortableKitInFreshProfileAsync(window, recoveryFixture);

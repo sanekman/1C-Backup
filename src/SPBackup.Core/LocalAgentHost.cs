@@ -200,6 +200,22 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         }
         var executionTask = ExecuteLoop();
         var monitoringTask = manual is null ? MonitorLoop() : Task.CompletedTask;
+        async Task NotificationTestLoop()
+        {
+            using var client = BotNotificationSender.CreateClient();
+            IFtpCredentialStore secrets = OperatingSystem.IsWindows() ? new WindowsNotificationCredentialStore() : credentials;
+            var tests = new LocalNotificationTests(directory);
+            var sender = new BotNotificationSender(client, secrets);
+            lock (stateGate) Volatile.Write(ref state, state with { CanTestNotifications = true });
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            do
+            {
+                try { await tests.ProcessAsync(state.SessionId, sender, lifetime.Token); }
+                catch (Exception error) when (!lifetime.IsCancellationRequested && AgentRuntimeWarnings.Recoverable(error))
+                { DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning); }
+            } while (await timer.WaitForNextTickAsync(lifetime.Token));
+        }
+        var notificationTestTask = manual is null ? NotificationTestLoop() : Task.CompletedTask;
         async Task NotificationLoop()
         {
             using var client = BotNotificationSender.CreateClient();
@@ -380,7 +396,7 @@ public sealed class LocalAgentHost(string directory, IBackupExecutor executor, I
         finally
         {
             lifetime.Cancel();
-            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, hubTask, serverMonitoringTask, recoveryKitsTask, manualRequestsTask, storageChecksTask, sourceChecksTask, connectionTask, remoteCommandsTask); }
+            try { await Task.WhenAll(executionTask, controlTask, monitoringTask, notificationTask, notificationTestTask, hubTask, serverMonitoringTask, recoveryKitsTask, manualRequestsTask, storageChecksTask, sourceChecksTask, connectionTask, remoteCommandsTask); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) { failure ??= ex; }
             var error = failure?.Message ?? (manual is not null && (lastRun?.Status is BackupRunStatus.Failed or BackupRunStatus.PartiallySucceeded) ? lastRun.Error : null);

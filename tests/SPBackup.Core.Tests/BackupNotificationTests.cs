@@ -414,4 +414,98 @@ public sealed class BackupNotificationTests : IDisposable
         Assert.Empty(sender.Sent);
         Assert.Contains("Expired", await File.ReadAllTextAsync(Path.Combine(directory, "notification-queue.json")));
     }
+    [Fact]
+    public async Task ManualRetryPreservesSelectionAndCancelledDeliveryDoesNotReturn()
+    {
+        var channel = Channel();
+        await new NotificationSettingsStore(directory).SaveAsync(new() { Channels = [channel] });
+        var history = new BackupRunHistory(Path.Combine(directory, "runs.json"));
+        var failed = Run();
+        var cancelled = Run() with { FinishedUtc = Now.AddSeconds(20) };
+        await history.SaveAsync(failed);
+        await history.SaveAsync(cancelled);
+        var sender = new Sender { TelegramFailure = new NotificationSendException(NotificationFailure.Authorization) };
+        var dispatcher = new BackupNotificationDispatcher(directory, sender);
+        Assert.NotNull(await dispatcher.PollAsync());
+        var queue = new BackupNotificationQueue(directory);
+        var rows = await queue.ViewAsync();
+        Assert.Equal(2, rows.Outstanding);
+        Assert.True(Assert.Single(rows.Entries, entry => entry.RunId == failed.RunId).CanRetry);
+        await queue.CancelAsync(channel.Id, cancelled.RunId);
+        await queue.RetryAsync(channel.Id, failed.RunId);
+        sender.TelegramFailure = null;
+        Assert.Null(await new BackupNotificationDispatcher(directory, sender).PollAsync());
+        Assert.Single(sender.Sent);
+        var after = await queue.ViewAsync();
+        Assert.Equal(0, after.Outstanding);
+        Assert.Equal(NotificationDeliveryState.Accepted, Assert.Single(after.Entries, entry => entry.RunId == failed.RunId).State);
+        Assert.Equal(NotificationDeliveryState.Cancelled, Assert.Single(after.Entries, entry => entry.RunId == cancelled.RunId).State);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => queue.RetryAsync(channel.Id, failed.RunId));
+    }
+
+    [Fact]
+    public async Task ManualActionsRespectProviderCooldownAndInFlightAttempt()
+    {
+        var channel = Channel();
+        await new NotificationSettingsStore(directory).SaveAsync(new() { Channels = [channel] });
+        var history = new BackupRunHistory(Path.Combine(directory, "runs.json"));
+        var throttled = Run();
+        await history.SaveAsync(throttled);
+        var sender = new Sender { TelegramFailure = new NotificationSendException(NotificationFailure.RateLimited, TimeSpan.FromMinutes(5)) };
+        var dispatcher = new BackupNotificationDispatcher(directory, sender);
+        Assert.NotNull(await dispatcher.PollAsync());
+        var queue = new BackupNotificationQueue(directory);
+        Assert.False(Assert.Single((await queue.ViewAsync()).Entries).CanRetry);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => queue.RetryAsync(channel.Id, throttled.RunId));
+        await queue.CancelAsync(channel.Id, throttled.RunId);
+        var next = Run();
+        await history.SaveAsync(next);
+        Assert.NotNull(await dispatcher.PollAsync());
+        Assert.Empty(sender.Sent);
+        var waiting = new WaitingSender();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var future = new Clock { Now = DateTimeOffset.UtcNow.AddMinutes(6) };
+        var poll = new BackupNotificationDispatcher(directory, waiting, future).PollAsync(timeout.Token);
+        try
+        {
+            await waiting.Started.Task.WaitAsync(timeout.Token);
+            var entry = Assert.Single((await queue.ViewAsync()).Entries, entry => entry.RunId == next.RunId);
+            Assert.Equal(NotificationDeliveryState.Sending, entry.State);
+            Assert.False(entry.CanCancel);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => queue.CancelAsync(channel.Id, next.RunId));
+        }
+        finally { waiting.Continue.TrySetResult(); }
+        Assert.Null(await poll);
+    }
+
+    [Theory]
+    [InlineData(NotificationProvider.Telegram, false)]
+    [InlineData(NotificationProvider.Max, false)]
+    [InlineData(NotificationProvider.Telegram, true)]
+    public async Task SavedAgentTestIsSessionBoundAndUsesTheRequestedProvider(NotificationProvider provider, bool changeChannel)
+    {
+        var settings = new NotificationSettingsStore(directory);
+        var channel = Channel(provider);
+        await settings.SaveAsync(new() { Channels = [channel] });
+        var utc = DateTimeOffset.UtcNow;
+        var control = new LocalAgentControlStore(directory);
+        var session = new LocalAgentState(Guid.NewGuid(), Environment.ProcessId, utc, utc, LocalAgentPhase.Running) { CanTestNotifications = true };
+        await control.WriteAsync(session);
+        var transport = new LocalNotificationTests(directory);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var requestPath = Path.Combine(directory, "notification-test-request.json");
+        var sender = new Sender();
+        var pending = transport.TestAsync(provider, timeout.Token);
+        while (!File.Exists(requestPath)) await Task.Delay(20, timeout.Token);
+        Assert.DoesNotContain(channel.Recipient, await File.ReadAllTextAsync(requestPath, timeout.Token));
+        Assert.DoesNotContain(channel.CredentialKey, await File.ReadAllTextAsync(requestPath, timeout.Token));
+        if (changeChannel) await settings.SaveAsync(new() { Channels = [channel with { CredentialKey = "new-binding" }] });
+        await transport.ProcessAsync(session.SessionId, sender, timeout.Token);
+        var result = await pending;
+        Assert.Equal(changeChannel ? LocalNotificationTestOutcome.ChannelChanged : LocalNotificationTestOutcome.Accepted, result.Outcome);
+        Assert.Equal(changeChannel ? [] : [provider], sender.Sent);
+        await transport.ProcessAsync(session.SessionId, sender, timeout.Token);
+        Assert.Equal(changeChannel ? 0 : 1, sender.Sent.Count);
+    }
+
 }

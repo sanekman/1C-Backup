@@ -4,12 +4,20 @@ using System.Text.Json;
 
 namespace SPBackup.Core;
 
-internal enum NotificationDeliveryState { Pending, Sending, Retry, Unknown, Blocked, Accepted, Expired, Cancelled }
+public enum NotificationDeliveryState { Pending, Sending, Retry, Unknown, Blocked, Accepted, Expired, Cancelled }
+
+public sealed record NotificationQueueEntry(Guid ChannelId, Guid RunId, NotificationProvider? Provider,
+    NotificationDeliveryState State, DateTimeOffset FinishedUtc, int Attempts, DateTimeOffset? NextAttemptUtc,
+    DateTimeOffset? AcceptedUtc, NotificationFailure? Failure, bool CanRetry, bool CanCancel);
+
+public sealed record NotificationQueueView(int Outstanding, IReadOnlyList<NotificationQueueEntry> Entries);
 
 internal sealed record NotificationDelivery(
     Guid ChannelId, Guid RunId, Guid JobId, string Route, string Summary, DateTimeOffset FinishedUtc)
 {
     public NotificationDeliveryState State { get; set; }
+    public NotificationProvider? Provider { get; init; }
+    public bool ManualRetry { get; set; }
     public int Attempts { get; set; }
     public DateTimeOffset? QueuedUtc { get; init; }
     public DateTimeOffset? LastAttemptUtc { get; set; }
@@ -23,7 +31,7 @@ internal sealed record NotificationDelivery(
         NotificationDeliveryState.Retry or NotificationDeliveryState.Unknown or NotificationDeliveryState.Blocked;
 }
 
-internal sealed class BackupNotificationQueue(string directory)
+public sealed class BackupNotificationQueue(string directory)
 {
     internal const int PendingLimit = 10_000;
     internal static readonly TimeSpan Lifetime = TimeSpan.FromHours(72);
@@ -41,6 +49,76 @@ internal sealed class BackupNotificationQueue(string directory)
 
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     internal static string Route(NotificationChannel channel) => Hash($"{channel.Provider}/{channel.MaxUser}/{channel.Recipient}");
+
+    public async Task<NotificationQueueView> ViewAsync(CancellationToken token = default)
+    {
+        var snapshot = await ReadAsync(token);
+        var settings = await new NotificationSettingsStore(directory).LoadAsync(token);
+        var active = settings.Channels.Where(c => c.Enabled).ToDictionary(c => c.Id);
+        var now = DateTimeOffset.UtcNow;
+        var routes = active.Values.ToDictionary(channel => channel.Id, Route);
+        var pausedChannels = snapshot.Deliveries.Where(item => item.Failure == NotificationFailure.RateLimited && item.NextAttemptUtc > now
+            && active.TryGetValue(item.ChannelId, out var channel) && Matches(item, channel, routes[channel.Id]))
+            .Select(item => item.ChannelId).ToHashSet();
+        var entries = snapshot.Deliveries.OrderByDescending(item => item.IsOpen)
+            .ThenByDescending(item => item.FinishedUtc).ThenBy(item => item.RunId).Take(100)
+            .Select(item =>
+            {
+                active.TryGetValue(item.ChannelId, out var channel);
+                var actionable = channel is not null && Matches(item, channel, routes[channel.Id]) && now - item.FinishedUtc < Lifetime;
+                var rateLimited = pausedChannels.Contains(item.ChannelId);
+                return new NotificationQueueEntry(item.ChannelId, item.RunId, item.Provider ?? channel?.Provider, item.State,
+                    item.FinishedUtc, item.Attempts, item.NextAttemptUtc, item.AcceptedUtc, item.Failure,
+                    actionable && !rateLimited && CanRetry(item), actionable && item.IsOpen && item.State != NotificationDeliveryState.Sending);
+            }).ToArray();
+        return new(snapshot.Deliveries.Count(item => item.IsOpen), entries);
+    }
+
+    public Task RetryAsync(Guid channelId, Guid runId, CancellationToken token = default) =>
+        ChangeAsync(channelId, runId, retry: true, token);
+
+    public Task CancelAsync(Guid channelId, Guid runId, CancellationToken token = default) =>
+        ChangeAsync(channelId, runId, retry: false, token);
+
+    private async Task ChangeAsync(Guid channelId, Guid runId, bool retry, CancellationToken token)
+    {
+        using var lease = await AcquireAsync(token);
+        var snapshot = await ReadAsync(token);
+        var item = snapshot.Deliveries.SingleOrDefault(entry => entry.ChannelId == channelId && entry.RunId == runId);
+        var settings = await new NotificationSettingsStore(directory).LoadAsync(token);
+        var channel = settings.Channels.SingleOrDefault(c => c.Id == channelId && c.Enabled);
+        var now = DateTimeOffset.UtcNow;
+        if (item is null || channel is null || !Matches(item, channel, Route(channel)) || !item.IsOpen ||
+            item.State == NotificationDeliveryState.Sending || now - item.FinishedUtc >= Lifetime ||
+            (await ReadReceiptsAsync(token)).Contains(new(channelId, runId)))
+            throw new InvalidOperationException("Состояние доставки изменилось. Обновите очередь.");
+
+        if (retry)
+        {
+            var route = Route(channel);
+            if (!CanRetry(item) || snapshot.Deliveries.Any(entry => entry.Failure == NotificationFailure.RateLimited
+                && entry.NextAttemptUtc > now && Matches(entry, channel, route)))
+                throw new InvalidOperationException("Повтор пока недоступен. Дождитесь окончания паузы сервиса.");
+            item.State = NotificationDeliveryState.Pending;
+            item.ManualRetry = true;
+            item.NextAttemptUtc = null;
+            item.Failure = null;
+            item.BlockedCredential = null;
+        }
+        else
+        {
+            item.State = NotificationDeliveryState.Cancelled;
+            item.ManualRetry = false;
+            // Preserve a provider cooldown so another item does not bypass it.
+        }
+        await queue.WriteAsync(snapshot, token);
+    }
+
+    private static bool Matches(NotificationDelivery item, NotificationChannel channel, string route) =>
+        item.ChannelId == channel.Id && item.Route == route && item.FinishedUtc >= channel.EnabledSinceUtc;
+
+    private static bool CanRetry(NotificationDelivery item) => item.State is
+        NotificationDeliveryState.Retry or NotificationDeliveryState.Unknown or NotificationDeliveryState.Blocked;
 
     internal static async Task CaptureAsync(string historyPath, IReadOnlyList<BackupRun> runs, CancellationToken token)
     {
@@ -131,12 +209,11 @@ internal sealed class BackupNotificationQueue(string directory)
         using var lease = await AcquireAsync(token);
         var snapshot = await ReadAsync(token);
         var route = Route(channel);
-        var deliveries = snapshot.Deliveries.Where(item => item.ChannelId == channel.Id && item.Route == route
-            && item.FinishedUtc >= channel.EnabledSinceUtc);
+        var deliveries = snapshot.Deliveries.Where(item => Matches(item, channel, route));
         if (deliveries.Any(item => item.Failure == NotificationFailure.RateLimited && item.NextAttemptUtc > now))
             return (null, "Сервис ограничил частоту. Повтор отложен.");
         var item = deliveries.Where(item => item.IsOpen && now - item.FinishedUtc < Lifetime)
-            .OrderBy(item => item.FinishedUtc).ThenBy(item => item.RunId).FirstOrDefault();
+            .OrderByDescending(item => item.ManualRetry).ThenBy(item => item.FinishedUtc).ThenBy(item => item.RunId).FirstOrDefault();
         if (item is null) return (null, null);
         if (item.State == NotificationDeliveryState.Sending)
             return (null, "Исход предыдущей попытки неизвестен. Проверьте доступ к подтверждениям.");
@@ -146,6 +223,7 @@ internal sealed class BackupNotificationQueue(string directory)
             return (null, item.State == NotificationDeliveryState.Unknown
                 ? "Исход предыдущей попытки неизвестен. Повтор отложен." : "Повтор отложен.");
         item.State = NotificationDeliveryState.Sending;
+        item.ManualRetry = false;
         item.Attempts = Math.Min(item.Attempts + 1, int.MaxValue - 1);
         item.LastAttemptUtc = now;
         item.NextAttemptUtc = null;
@@ -211,7 +289,7 @@ internal sealed class BackupNotificationQueue(string directory)
                 if (run.FinishedUtc < channel.EnabledSinceUtc || receipts.Contains(key) || !known.Add(key)) continue;
                 if (remaining <= 0) return (added, true);
                 snapshot.Deliveries.Add(new(channel.Id, run.RunId, run.JobId, route, BotNotificationSender.Format(run), run.FinishedUtc!.Value)
-                { QueuedUtc = now });
+                { QueuedUtc = now, Provider = channel.Provider });
                 remaining--;
                 added = true;
             }
@@ -225,6 +303,7 @@ internal sealed class BackupNotificationQueue(string directory)
         if (snapshot is not { Version: 1, Deliveries: { } deliveries }
             || deliveries.Any(d => d is null || d.ChannelId == Guid.Empty || d.RunId == Guid.Empty || d.JobId == Guid.Empty
                 || d.FinishedUtc == default || d.Route is not { Length: 64 } || d.Summary is not { Length: > 0 and <= 3900 }
+                || d.Provider is { } provider && !Enum.IsDefined(provider)
                 || d.Attempts < 0 || d.Attempts == int.MaxValue || !Enum.IsDefined(d.State)
                 || d.MessageId is { Length: 0 or > 256 } || d.State == NotificationDeliveryState.Sending && d.Attempts == 0
                 || d.Failure is { } failure && !Enum.IsDefined(failure)

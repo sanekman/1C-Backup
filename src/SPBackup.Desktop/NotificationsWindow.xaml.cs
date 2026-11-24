@@ -8,12 +8,18 @@ namespace SPBackup.Desktop;
 
 public partial class NotificationsWindow : Window
 {
-    private readonly NotificationSettingsStore store = new(DesktopPaths.DataDirectory);
+    private readonly string directory;
+    private readonly NotificationSettingsStore store;
     private readonly WindowsNotificationCredentialStore secrets = new();
     private NotificationSettings settings = new();
     private bool busy, loaded;
-    public NotificationsWindow()
+    public NotificationsWindow() : this(DesktopPaths.DataDirectory) { }
+
+    internal NotificationsWindow(string directory)
     {
+        this.directory = directory;
+        store = new(directory);
+        queue = new(directory);
         InitializeComponent();
         Closing += (_, e) => e.Cancel = busy;
         Loaded += async (_, _) =>
@@ -64,7 +70,7 @@ public partial class NotificationsWindow : Window
             Result.Text = "Сохранено. Программа и агент применят настройки автоматически.";
         }
         catch (Exception error) { Result.Text = error is InvalidDataException ? error.Message : "Не удалось сохранить настройки или токен. Проверьте доступ к профилю Windows."; DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning, error); }
-        finally { busy = false; Save.IsEnabled = true; }
+        finally { busy = false; Save.IsEnabled = loaded; }
     }
     private async void Test_Click(object sender, RoutedEventArgs e)
     {
@@ -86,6 +92,35 @@ public partial class NotificationsWindow : Window
                 : "Не удалось выполнить тест. Проверьте настройки оповещений и доступ к профилю Windows.";
             DiagnosticLog.Current.Write(DiagnosticEvent.NotificationFailed, DiagnosticLevel.Warning, error as NotificationSendException);
         }
+        finally { busy = false; button.IsEnabled = true; }
+    }
+    private async void TestInAgent_Click(object sender, RoutedEventArgs e)
+    {
+        if (busy || !loaded) return;
+        var button = (Button)sender;
+        var provider = (string)button.Tag == "Telegram" ? NotificationProvider.Telegram : NotificationProvider.Max;
+        var saved = Channel(provider);
+        var draft = Read(provider);
+        if (!saved.Enabled || draft != saved)
+        {
+            Result.Text = "Включите канал и сохраните изменения перед тестом через агент.";
+            return;
+        }
+        busy = true;
+        button.IsEnabled = false;
+        Result.Text = "Ожидание ответа фонового агента…";
+        try
+        {
+            var result = await new LocalNotificationTests(directory).TestAsync(provider);
+            Result.Text = result.Outcome switch
+            {
+                LocalNotificationTestOutcome.Accepted => $"Сервис принял тест от фонового агента (PID {result.ProcessId}). Проверьте чат.",
+                LocalNotificationTestOutcome.ChannelChanged => "Канал изменился до теста. Сохраните настройки и повторите.",
+                _ => new NotificationSendException(result.Failure ?? NotificationFailure.OutcomeUnknown).Message
+            };
+        }
+        catch (InvalidOperationException error) { Result.Text = error.Message; }
+        catch (Exception) { Result.Text = "Не удалось получить результат фонового агента. Проверьте доступ к профилю."; }
         finally { busy = false; button.IsEnabled = true; }
     }
     private sealed class TestCredential(string value) : IFtpCredentialStore
