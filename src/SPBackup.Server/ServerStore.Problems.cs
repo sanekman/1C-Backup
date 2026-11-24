@@ -1,8 +1,14 @@
+using System.Text.Json.Serialization;
+
 namespace SPBackup.Server;
+
+[JsonConverter(typeof(JsonStringEnumConverter<AgentProblemScope>))]
+public enum AgentProblemScope { Agent, Backup, Observation }
 
 public sealed record AgentProblem(Guid AgentId, string AgentName, Guid? JobId, string? JobName, string Code,
     DateTimeOffset? LastSeenUtc, DateTimeOffset? ObservedUtc)
 {
+    public AgentProblemScope Scope { get; init; }
     public Guid? RunId { get; init; }
     public DateTimeOffset? RunFinishedUtc { get; init; }
 }
@@ -30,31 +36,32 @@ public sealed partial class ServerStore
             ), jobs AS (
                 SELECT a.*,j,latest.run,successful.finished
                 FROM agents a CROSS JOIN LATERAL jsonb_array_elements(a.document->'jobs') j
-                LEFT JOIN LATERAL (SELECT r.document run FROM server_runs r WHERE r.agent_id=a.id AND r.job_id=(j->>'jobId')::uuid ORDER BY r.finished_utc DESC,r.run_id LIMIT 1) latest ON true
+                LEFT JOIN LATERAL (SELECT r.document run FROM server_runs r WHERE r.agent_id=a.id AND r.job_id=(j->>'jobId')::uuid
+                    AND r.document->>'evidence' IS NULL ORDER BY r.finished_utc DESC,r.run_id LIMIT 1) latest ON true
                 LEFT JOIN LATERAL (SELECT r.finished_utc finished FROM server_runs r WHERE r.agent_id=a.id AND r.job_id=(j->>'jobId')::uuid
-                    AND r.document->>'status'='Succeeded' AND NOT (r.document->>'incomplete')::boolean
+                    AND r.document->>'evidence' IS NULL AND r.document->>'status'='Succeeded' AND NOT (r.document->>'incomplete')::boolean
                     AND (j->>'backupScope' IS NULL OR r.document->>'backupScope'=j->>'backupScope') ORDER BY r.finished_utc DESC,r.run_id LIMIT 1) successful ON true
                 WHERE coalesce(j->>'taskKind','Backup')='Backup'
             ), problems AS (
-                SELECT id,name,NULL::uuid job_id,NULL::text job_name,'Offline' code,seen,observed FROM agents
+                SELECT id,name,NULL::uuid job_id,NULL::text job_name,'Offline' code,seen,observed,'Agent' scope FROM agents
                     WHERE seen<now()-make_interval(secs=>@seconds)
-                UNION ALL SELECT id,name,NULL,NULL,'Unreported',seen,observed FROM agents WHERE document IS NULL
-                UNION ALL SELECT id,name,NULL,NULL,'ExecutorUnavailable',seen,observed FROM agents
+                UNION ALL SELECT id,name,NULL,NULL,'Unreported',seen,observed,'Agent' FROM agents WHERE document IS NULL
+                UNION ALL SELECT id,name,NULL,NULL,'ExecutorUnavailable',seen,observed,'Agent' FROM agents
                     WHERE document->>'executionMode'='Managed' AND (document->>'backupExecutionAvailable')::boolean=false
-                UNION ALL SELECT id,name,NULL,NULL,CASE WHEN decision='Rejected' THEN 'PlanRejected' ELSE 'PlanPending' END,seen,observed FROM agents
+                UNION ALL SELECT id,name,NULL,NULL,CASE WHEN decision='Rejected' THEN 'PlanRejected' ELSE 'PlanPending' END,seen,observed,'Agent' FROM agents
                     WHERE document->>'executionMode'='Managed' AND (decision='Rejected' OR coalesce((document->>'configurationRevision')::bigint,0)<>desired)
-                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name',run->>'status',seen,observed FROM jobs
+                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name',run->>'status',seen,observed,'Backup' FROM jobs
                     WHERE run->>'status' IN ('Failed','Cancelled','Interrupted')
-                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Partial',seen,observed FROM jobs
+                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Partial',seen,observed,'Backup' FROM jobs
                     WHERE run->>'status'='PartiallySucceeded'
-                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Incomplete',seen,observed FROM jobs WHERE (run->>'incomplete')::boolean
-                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Warning',seen,observed FROM jobs WHERE (run->>'warningCount')::int>0
-                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Overdue',seen,observed FROM jobs
+                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Incomplete',seen,observed,'Backup' FROM jobs WHERE (run->>'incomplete')::boolean
+                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Warning',seen,observed,'Backup' FROM jobs WHERE (run->>'warningCount')::int>0
+                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','Overdue',seen,observed,'Backup' FROM jobs
                     WHERE (j->>'enabled')::boolean AND (j->>'maximumBackupAgeHours')::int>0
                       AND (finished IS NULL OR finished<now()-make_interval(hours=>(j->>'maximumBackupAgeHours')::int))
-                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','AccessRequired',seen,observed FROM jobs WHERE (j->>'localAccessReady')::boolean=false
+                UNION ALL SELECT id,name,(j->>'jobId')::uuid,j->>'name','AccessRequired',seen,observed,'Backup' FROM jobs WHERE (j->>'localAccessReady')::boolean=false
                 UNION ALL SELECT a.id,a.name,(s->>'monitorId')::uuid,s->>'name',
-                    CASE WHEN (s->>'failed')::boolean THEN 'PollFailed' WHEN s->>'observationStatus'='BackupFailed' THEN 'Failed' ELSE 'Overdue' END,a.seen,a.observed
+                    CASE WHEN (s->>'failed')::boolean THEN 'PollFailed' WHEN s->>'observationStatus'='BackupFailed' THEN 'Failed' ELSE 'Overdue' END,a.seen,a.observed,'Observation'
                     FROM agents a CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(a.document->'sources')='array' THEN a.document->'sources' ELSE '[]'::jsonb END) s
                     WHERE (s->>'enabled')::boolean AND ((s->>'failed')::boolean OR s->>'observationStatus'='BackupFailed'
                         OR (s->>'freshnessWarning')::boolean OR (s->>'maximumBackupAgeHours')::int>0 AND
@@ -76,22 +83,22 @@ public sealed partial class ServerStore
                     AND (@search='' OR strpos(lower(translate(name,'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')),lower(translate(@search,'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')))>0 OR strpos(lower(translate(coalesce(job_name,''),'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')),lower(translate(@search,'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','абвгдеёжзийклмнопрстуфхцчшщъыьэюя')))>0)
             )
             , prioritized AS (
-                SELECT f.*, min(priority) OVER (PARTITION BY id,job_id) group_priority
+                SELECT f.*, min(priority) OVER (PARTITION BY id,scope,job_id) group_priority
                 FROM (SELECT *, CASE code WHEN 'Offline' THEN 0 WHEN 'Failed' THEN 1 WHEN 'Interrupted' THEN 1
                     WHEN 'Partial' THEN 2 WHEN 'Incomplete' THEN 3 ELSE 4 END priority FROM filtered) f
             ), ranked AS (
                 SELECT prioritized.*,
-                    row_number() OVER (ORDER BY priority,name,id,job_id,code) row_index,
-                    dense_rank() OVER (ORDER BY group_priority,name,id,job_id NULLS FIRST) group_index
+                    row_number() OVER (ORDER BY priority,name,id,job_id,scope,code) row_index,
+                    dense_rank() OVER (ORDER BY group_priority,name,id,job_id NULLS FIRST,scope) group_index
                 FROM prioritized
             ), counted AS (
                 SELECT count(*) total, count(DISTINCT id) agent_count,
-                    count(DISTINCT (id,job_id)) FILTER (WHERE job_id IS NOT NULL) job_count,
+                    count(DISTINCT (id,scope,job_id)) FILTER (WHERE job_id IS NOT NULL) job_count,
                     coalesce(max(group_index),0) group_count FROM ranked
             )
             SELECT p.id,p.name,p.job_id,p.job_name,p.code,p.seen,p.observed,t.total,
                 CASE WHEN @grouped THEN t.group_count ELSE t.total END page_items,t.agent_count,t.job_count,
-                (j.run->>'runId')::uuid, coalesce(j.run#>>'{timing,observedFinishedUtc}', j.run->>'finishedUtc')::timestamptz
+                (j.run->>'runId')::uuid, coalesce(j.run#>>'{timing,observedFinishedUtc}', j.run->>'finishedUtc')::timestamptz,p.scope
             FROM counted t
             LEFT JOIN LATERAL (
                 SELECT * FROM ranked
@@ -99,7 +106,7 @@ public sealed partial class ServerStore
                 ORDER BY CASE WHEN @grouped THEN group_index ELSE row_index END,priority,code
             ) p ON true
             LEFT JOIN jobs j ON j.id=p.id AND (j.j->>'jobId')::uuid=p.job_id
-                AND p.code IN ('Failed','Cancelled','Interrupted','Partial','Incomplete','Warning')
+                AND p.scope='Backup' AND p.code IN ('Failed','Cancelled','Interrupted','Partial','Incomplete','Warning')
             ORDER BY CASE WHEN @grouped THEN p.group_index ELSE p.row_index END,p.priority,p.code
             """, ("agent_ids", agentId is { } agent ? new[] { agent } : null), ("folder", folder), ("root", root), ("seconds", offlineSeconds),
             ("kind", kind ?? "all"), ("search", search?.Trim() ?? ""), ("offset", page * 50), ("grouped", groupByJob));
@@ -116,6 +123,7 @@ public sealed partial class ServerStore
                 reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
                 reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6))
             {
+                Scope = Enum.Parse<AgentProblemScope>(reader.GetString(13)),
                 RunId = reader.IsDBNull(11) ? null : reader.GetGuid(11),
                 RunFinishedUtc = reader.IsDBNull(12) ? null : reader.GetFieldValue<DateTimeOffset>(12)
             });

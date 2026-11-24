@@ -41,13 +41,16 @@
         @foreach (var job in Tasks(monitoring.Snapshot))
         {
             var observation = job.TaskKind == "Observation";
-            var poll = monitoring.Snapshot.Sources?.FirstOrDefault(source=>source.MonitorId==job.JobId);
+            var poll = observation ? monitoring.Snapshot.Sources?.FirstOrDefault(source => source.MonitorId == job.JobId) : null;
+            var keepLegacyAnchor = observation && !monitoring.Snapshot.Jobs.Any(task => task.TaskKind != "Observation" && task.JobId == job.JobId);
             var last = observation && poll?.ObservationStatus is not null
-                ? CurrentObservationRuns.FirstOrDefault(r=>r.JobId==job.JobId && r.RunId==poll.LatestReportId)
-                : Latest.FirstOrDefault(r=>r.JobId==job.JobId);
+                ? CurrentObservationRuns.FirstOrDefault(r => r.JobId == job.JobId && r.RunId == poll.LatestReportId && r.Evidence is not null)
+                : Latest.FirstOrDefault(r => r.JobId == job.JobId && (r.Evidence is not null) == observation);
             var matchingHistory = !observation || poll?.ObservationStatus is null ||
                 poll.LatestReportId is not null && last?.RunId == poll.LatestReportId;
-            <tr id="@($"job-{job.JobId}")"><td>@job.Name<small>@(observation ? "Наблюдение · " + Source(job.SourceKind) : Source(job.SourceKind) + " · хранилищ: " + job.DestinationCount)</small></td>
+            <tr id="@(observation ? $"observation-{job.JobId}" : $"job-{job.JobId}")"><td>@job.Name
+            @if (keepLegacyAnchor) { <span id="@($"job-{job.JobId}")"></span> }
+            <small>@(observation ? "Наблюдение · " + Source(job.SourceKind) : Source(job.SourceKind) + " · хранилищ: " + job.DestinationCount)</small></td>
             <td>@(job.Enabled ? job.Schedule : "Отключено")
                 @if (job.MaximumBackupAgeHours is { } jobMaximumAge) { <small>Допустимый возраст копии: @jobMaximumAge ч.</small> }
                 @if (job.LocalAccessReady == false) { <small class="error">Не задан локальный доступ. В Windows-программе: «Файл → Доступ серверного задания…».</small> }
@@ -80,7 +83,7 @@
             else if (matchingHistory && last is { OpenOneCDatabase: true })
             { <RunIssueDetails Run="last" /> }
             </td>
-            <td>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LastSuccessfulUtc : Successful.FirstOrDefault(r=>r.JobId==job.JobId)?.DisplayFinishedUtc)</td>
+            <td>@Clock.Time(observation && poll?.ObservationStatus is not null ? poll.LastSuccessfulUtc : Successful.FirstOrDefault(r => r.JobId == job.JobId && (r.Evidence is not null) == observation)?.DisplayFinishedUtc)</td>
             <td>@(job.NextRunUtc is null ? observation ? job.Enabled ? "Автоматический опрос" : "Опрос выключен" : "По событию / вручную" : Clock.Time(job.NextRunUtc))</td></tr>
         }
         </tbody></table></div>
@@ -169,7 +172,7 @@ else { <h1>Агент не найден</h1> }
     private IReadOnlyList<MonitoredRun> CurrentObservationRuns = [];
     private IReadOnlyList<MonitoredRun> Successful = [];
     private static IEnumerable<MonitoredJob> Tasks(MonitoringSnapshot snapshot) => snapshot.Jobs.Concat(
-        (snapshot.Sources ?? []).Where(source=>!snapshot.Jobs.Any(job=>job.JobId==source.MonitorId))
+        (snapshot.Sources ?? []).Where(source=>!snapshot.Jobs.Any(job => job.TaskKind == "Observation" && job.JobId == source.MonitorId))
             .Select(source=>new MonitoredJob(source.MonitorId,source.Name,source.Kind,source.Enabled,"Автоматический опрос",null,0)
                 { TaskKind = "Observation" }));
     private static string Source(string value) => value switch

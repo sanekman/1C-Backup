@@ -31,8 +31,8 @@
     @foreach (var item in data.Items)
     {
         <tr><td><a href="@($"agents/{item.AgentId}")">@item.AgentName</a>
-            @if (item.JobId is { } jobId) { <small><a href="@($"agents/{item.AgentId}#job-{jobId}")">@item.JobName</a></small> }
-        </td><td><strong>@ProblemText.Filters[item.Code]</strong><small>@ProblemText.Action(item.Code)</small></td>
+            @if (item.JobId is not null) { <small><a href="@TaskLink(item)">@item.JobName</a></small> }
+        </td><td><strong>@ProblemText.Title(item)</strong><small>@ProblemText.Action(item)</small></td>
         <td>@Clock.Time(item.LastSeenUtc)<small>Отчёт @Clock.Time(item.ObservedUtc)</small></td></tr>
     }
     </tbody></table></div>
@@ -45,28 +45,31 @@ else
     <section class="job-summary">
         <h2><a href="@($"agents/{agent.AgentId}")">@agent.AgentName</a></h2>
         <p class="muted">Последняя связь @Clock.Time(agent.LastSeenUtc) · Отчёт @Clock.Time(agent.ObservedUtc)</p>
-        @foreach (var jobGroup in agentGroup.GroupBy(item => item.JobId))
+        @foreach (var jobGroup in agentGroup.GroupBy(item => (item.Scope, item.JobId)))
         {
             var job = jobGroup.First();
             <details>
-                <summary>@(job.JobName is null ? "" : job.JobName + " · ")@ProblemText.Filters[job.Code]
+                <summary>@(job.JobName is null ? "" : job.JobName + " · ")@ProblemText.Title(job)
                     @if (jobGroup.Count() > 1) { <small> · Причин @jobGroup.Count()</small> }
                 </summary>
                 <ul>
                 @foreach (var reason in jobGroup)
                 {
                     <li>
-                        <strong>@ProblemText.Filters[reason.Code]</strong>
+                        <strong>@ProblemText.Title(reason)</strong>
                         @if (reason.RunId is { } run)
                         {
                             <span> · @Clock.Time(reason.RunFinishedUtc)</span>
                             <a href="@($"agents/{reason.AgentId}?runId={run}#run-history")">Результат запуска</a>
                         }
-                        <small>@ProblemText.Action(reason.Code)</small>
+                        <small>@ProblemText.Action(reason)</small>
                     </li>
                 }
                 </ul>
-                @if (job.JobId is { } id) { <p><a href="@($"agents/{job.AgentId}#job-{id}")">Открыть задание</a></p> }
+                @if (job.JobId is not null)
+                {
+                    <p><a href="@TaskLink(job)">@(job.Scope == AgentProblemScope.Observation ? "Открыть наблюдение" : "Открыть задание")</a></p>
+                }
             </details>
         }
     </section>
@@ -95,6 +98,8 @@ else
     private AgentProblemPage? Data;
     private string FilterResetLink => $"problems?folder={Uri.EscapeDataString(Folder ?? "")}"
         + (Agent is null ? "" : $"&agent={Uri.EscapeDataString(Agent)}") + ViewParameter(PreviousView);
+    private static string TaskLink(AgentProblem problem) => problem.Scope == AgentProblemScope.Observation
+        ? $"agents/{problem.AgentId}#observation-{problem.JobId}" : $"agents/{problem.AgentId}#job-{problem.JobId}";
     private static string ViewParameter(bool previousView) => previousView ? "&previousView=true" : "";
     private string Link(int page, bool clearAgent = false, bool? previousView = null) => $"problems?page={page}&folder={Uri.EscapeDataString(Folder ?? "")}&kind={Uri.EscapeDataString(Kind ?? "all")}&search={Uri.EscapeDataString(Search ?? "")}" + (clearAgent || Agent is null ? "" : $"&agent={Uri.EscapeDataString(Agent)}") + ViewParameter(previousView ?? PreviousView);
     protected override async Task OnParametersSetAsync()

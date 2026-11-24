@@ -144,6 +144,70 @@ public sealed class AgentProblemSummaryTests(ServerFixture fixture) : IClassFixt
     }
 
     [ServerFact]
+    public async Task BackupAndObservationWithSameIdentifierKeepDistinctCausesAndHistory()
+    {
+        var agent = await fixture.EnrollAsync();
+        var id = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var backup = new MonitoredJob(id, "Local backup", "FilesAndFolders", true, "Daily", null, 1) { MaximumBackupAgeHours = 24 };
+        var observation = new MonitoredSource(id, "External SQL observation", "SqlServerHistory", true, now, false)
+            { ObservationStatus = "BackupFailed", LastSuccessfulUtc = now.AddMinutes(-2) };
+        var failed = new MonitoredRun(Guid.NewGuid(), id, backup.Name, now.AddMinutes(-5), now.AddMinutes(-4),
+            "Failed", 0, false, null, []);
+        var observed = new MonitoredRun(Guid.NewGuid(), id, observation.Name, now.AddMinutes(-3), now.AddMinutes(-2),
+            "Succeeded", 0, false, null, [], "SqlServerMsdbHistory");
+        await fixture.Store.SaveMonitoringAsync(agent.AgentId, new(now, "scope-tests", [backup], null, 0,
+            [observation with { LatestReportId = failed.RunId }]), default);
+        await fixture.Store.SaveRunAsync(agent.AgentId, failed, default);
+        await fixture.Store.SaveRunAsync(agent.AgentId, observed, default);
+
+        var page = await fixture.Store.ProblemsAsync(0, null, null, null, false, 120, default, agent.AgentId, groupByJob: true);
+        Assert.Equal(3, page.Total);
+        Assert.Equal(2, page.PageItems);
+        Assert.Equal(2, page.AffectedJobs);
+        var localFailed = Assert.Single(page.Items, problem => problem.Scope == AgentProblemScope.Backup && problem.Code == "Failed");
+        Assert.Equal(failed.RunId, localFailed.RunId);
+        Assert.Contains(page.Items, problem => problem.Scope == AgentProblemScope.Backup && problem.Code == "Overdue");
+        var externalFailed = Assert.Single(page.Items, problem => problem.Scope == AgentProblemScope.Observation);
+        Assert.Equal("Failed", externalFailed.Code);
+        Assert.Null(externalFailed.RunId);
+        Assert.Equal(2, (await fixture.Store.LatestRunsAsync(agent.AgentId, default)).Count);
+        Assert.Equal(observed.RunId, Assert.Single(await fixture.Store.LastSuccessfulRunsAsync(agent.AgentId, default)).RunId);
+
+        var html = WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync($"problems?agent={agent.AgentId}"));
+        Assert.Contains("Ошибка внешней копии", html);
+        Assert.Contains($"?runId={failed.RunId}#run-history", html);
+        Assert.Contains($"agents/{agent.AgentId}#job-{id}", html);
+        Assert.Contains($"agents/{agent.AgentId}#observation-{id}", html);
+        var detail = WebUtility.HtmlDecode(await fixture.Administrator.GetStringAsync($"agents/{agent.AgentId}"));
+        Assert.Contains($"id=\"job-{id}\"", detail);
+        Assert.Contains($"id=\"observation-{id}\"", detail);
+        Assert.Contains("Подробный отчёт ещё не получен сервером.", detail);
+        using var api = JsonDocument.Parse(await fixture.Administrator.GetStringAsync($"api/v1/management/problems?agent={agent.AgentId}"));
+        var scopes = api.RootElement.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("scope").GetString()).ToArray();
+        Assert.Contains("Backup", scopes);
+        Assert.Contains("Observation", scopes);
+        if (Environment.GetEnvironmentVariable("ONECBACKUP_PROBLEM_SCOPES_BROWSER") == "1")
+        {
+            var repository = Environment.GetEnvironmentVariable("ONECBACKUP_TEST_REPOSITORY")
+                ?? throw new InvalidOperationException("Set ONECBACKUP_TEST_REPOSITORY for the browser check.");
+            var credentials = Path.Combine(fixture.Root, "problem-browser-password.txt");
+            await File.WriteAllTextAsync(credentials, fixture.Password);
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(credentials, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            var start = new ProcessStartInfo("python3") { UseShellExecute = false, RedirectStandardError = true, WorkingDirectory = repository };
+            foreach (var argument in new[] { "tests/server/problem_scopes_browser.py", "--url", fixture.Address.ToString(),
+                "--password-file", credentials, "--agent", agent.AgentId.ToString(), "--task", id.ToString() })
+                start.ArgumentList.Add(argument);
+            using var browser = Process.Start(start)!;
+            var error = browser.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            try { await browser.WaitForExitAsync(timeout.Token); }
+            finally { if (!browser.HasExited) browser.Kill(entireProcessTree: true); }
+            Assert.True(browser.ExitCode == 0, await error);
+        }
+    }
+
+    [ServerFact]
     public async Task AgentProblemFilterStillRequiresAdministratorAndRejectsInvalidIdentifiers()
     {
         var agent = await fixture.EnrollAsync();

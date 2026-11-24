@@ -8,6 +8,16 @@ public static class ProblemText
         ["Partial"] = "Частичная доставка", ["Incomplete"] = "Неполные копии", ["Overdue"] = "Нет свежей копии", ["Warning"] = "Предупреждения",
         ["PollFailed"] = "Ошибка опроса SQL", ["AccessRequired"] = "Не задан доступ", ["PlanRejected"] = "План отклонён",
         ["PlanPending"] = "План ожидает применения", ["ExecutorUnavailable"] = "Исполнитель недоступен" };
+    public static string Title(AgentProblem problem) => problem is { Scope: AgentProblemScope.Observation, Code: "Failed" }
+        ? "Ошибка внешней копии" : Filters[problem.Code];
+
+    public static string Action(AgentProblem problem) => problem switch
+    {
+        { Scope: AgentProblemScope.Observation, Code: "Failed" } => "Проверьте результат в программе, которая создаёт внешние копии.",
+        { Scope: AgentProblemScope.Observation, Code: "Overdue" } => "Проверьте расписание внешних копий и журнал источника.",
+        _ => Action(problem.Code)
+    };
+
     public static string Action(string code) => code switch {
         "Offline" => "Проверьте службу агента, сеть и HTTPS. Показанные результаты относятся к последнему полученному отчёту.",
         "Unreported" => "Дождитесь первого отчёта мониторинга; проверьте подключение Windows-агента.",
