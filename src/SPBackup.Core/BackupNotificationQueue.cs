@@ -60,8 +60,9 @@ public sealed class BackupNotificationQueue(string directory)
         var pausedChannels = snapshot.Deliveries.Where(item => item.Failure == NotificationFailure.RateLimited && item.NextAttemptUtc > now
             && active.TryGetValue(item.ChannelId, out var channel) && Matches(item, channel, routes[channel.Id]))
             .Select(item => item.ChannelId).ToHashSet();
-        var entries = snapshot.Deliveries.OrderByDescending(item => item.IsOpen)
-            .ThenByDescending(item => item.FinishedUtc).ThenBy(item => item.RunId).Take(100)
+        var entries = snapshot.Deliveries.Where(item => item.IsOpen).OrderBy(item => item.FinishedUtc).ThenBy(item => item.RunId)
+            .Concat(snapshot.Deliveries.Where(item => !item.IsOpen).OrderByDescending(item => item.FinishedUtc).ThenBy(item => item.RunId))
+            .Take(100)
             .Select(item =>
             {
                 active.TryGetValue(item.ChannelId, out var channel);

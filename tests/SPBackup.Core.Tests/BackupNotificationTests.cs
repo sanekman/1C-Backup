@@ -397,8 +397,11 @@ public sealed class BackupNotificationTests : IDisposable
         var queue = new BackupNotificationQueue(directory);
         var runs = Enumerable.Range(0, BackupNotificationQueue.PendingLimit + 1).Select(_ => Run()).ToArray();
         Assert.Contains("заполнена", await queue.PrepareAsync(settings, runs, Now, CancellationToken.None));
+        var view = await queue.ViewAsync();
+        Assert.Equal(100, view.Entries.Count);
         var first = await queue.ClaimAsync(channel, Now, CancellationToken.None);
         Assert.NotNull(first.Item);
+        Assert.Equal(first.Item.RunId, view.Entries[0].RunId);
         Assert.Null(await queue.CompleteAsync(channel, first.Item, new("fixture"), null, Now));
         Assert.Null(await queue.PrepareAsync(settings, runs, Now, CancellationToken.None));
     }
