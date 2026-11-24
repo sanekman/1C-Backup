@@ -347,6 +347,15 @@ Windows Vault администратора как неявное хранили�
 [Прогон Windows](https://github.com/sanekman/1C-Backup/actions/runs/45317306670) ·
 [Снимки окна](https://github.com/sanekman/1C-Backup/actions/runs/45317306670/artifacts/14886675587)
 
+Для приёмки подготовлен Windows-установщик `0.1.0-dev+cf14924`.
+На Windows Server 2022 прошли 1053 теста ядра, 6 проверок профилей,
+WPF, нативная служба, чистая установка и обновление с alpha.25
+с проверкой сохранённого профиля и восстановлением копий.
+SHA-256 файла `SP-Backup-0.1.0-dev-windows-x64-setup.exe` —
+`45e11e3b8a92fe9a9211b63784374f46f73bfa1a5d75e83d9b976388f26a063a`.
+[Тестовый установщик](https://github.com/sanekman/1C-Backup/actions/runs/45317803722/artifacts/14887485142) ·
+[Прогон кандидата](https://github.com/sanekman/1C-Backup/actions/runs/45317803722)
+
 Открыта фактическая проверка доставки обоими ботами в тестовых чатах.
 Для неё сохраните оба канала в приложении, отправьте тест из окна,
 запустите Windows-службу и повторите через агент. После перезапуска
