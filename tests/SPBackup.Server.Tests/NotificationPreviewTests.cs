@@ -75,7 +75,8 @@ public sealed class NotificationPreviewTests(ServerFixture fixture) : IClassFixt
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         using var anonymous = fixture.Client();
         using var denied = await anonymous.GetAsync(url);
-        Assert.NotEqual(HttpStatusCode.OK, denied.StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, denied.StatusCode);
+        Assert.Contains("/login", denied.Headers.Location!.OriginalString);
         var operatorPassword = Guid.NewGuid().ToString("N");
         using var created = await fixture.Administrator.PostAsync("management/operators", new FormUrlEncodedContent(new Dictionary<string, string>
         {
@@ -86,7 +87,7 @@ public sealed class NotificationPreviewTests(ServerFixture fixture) : IClassFixt
         using var operatorClient = fixture.Client();
         await fixture.SignInAsync(operatorClient, name: "preview-operator", password: operatorPassword);
         using var operatorDenied = await operatorClient.GetAsync(url);
-        Assert.NotEqual(HttpStatusCode.OK, operatorDenied.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, operatorDenied.StatusCode);
         if (Environment.GetEnvironmentVariable("ONECBACKUP_NOTIFICATION_PREVIEW_BROWSER") == "1")
             await VerifyBrowserAsync(root, fresh.AgentId);
     }
